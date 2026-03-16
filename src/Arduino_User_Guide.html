@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arduino Leonardo Setup Guide - Axiom</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --accent-color: #7c4dff;
+            --secondary-bg: #1e1e1e;
+            --code-bg: #2d2d2d;
+            --header-border: #333;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        header {
+            border-bottom: 1px solid var(--header-border);
+            padding-bottom: 20px;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+
+        h1 {
+            color: var(--accent-color);
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        h2 {
+            color: #fff;
+            border-left: 4px solid var(--accent-color);
+            padding-left: 15px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+        }
+
+        h3 {
+            color: #b0b0b0;
+            margin-top: 25px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: #ccc;
+        }
+
+        .step {
+            background-color: var(--secondary-bg);
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+
+        .step-number {
+            display: inline-block;
+            background-color: var(--accent-color);
+            color: white;
+            width: 30px;
+            height: 30px;
+            text-align: center;
+            line-height: 30px;
+            border-radius: 50%;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+
+        code {
+            background-color: var(--code-bg);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: #ff80ab;
+        }
+
+        pre {
+            background-color: var(--code-bg);
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid #444;
+        }
+
+        .note {
+            background-color: rgba(124, 77, 255, 0.1);
+            border-left: 4px solid var(--accent-color);
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .warning {
+            background-color: rgba(244, 67, 54, 0.1);
+            border-left: 4px solid #f44336;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        a {
+            color: #8c9eff;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        a:hover {
+            color: #c5cae9;
+            text-decoration: underline;
+        }
+
+        ul {
+            padding-left: 20px;
+        }
+
+        li {
+            margin-bottom: 10px;
+            color: #ccc;
+        }
+
+        footer {
+            margin-top: 60px;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            padding-top: 20px;
+            border-top: 1px solid var(--header-border);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Arduino Leonardo Setup Guide</h1>
+            <p>Hardware-level mouse control for Axiom</p>
+        </header>
+
+        <section class="intro">
+            <p>Using an Arduino Leonardo allows Axiom to simulate mouse movements at the hardware level. This makes the aim assistance extremely stealthy and indistinguishable from real mouse inputs to most software.</p>
+        </section>
+
+        <section id="requirements">
+            <h2>Requirements</h2>
+            <ul>
+                <li><strong>Hardware:</strong> Arduino Leonardo (ATmega32U4) or compatible clone.</li>
+                <li><strong>Cable:</strong> Micro USB Data Cable (ensure it supports data transfer, not just charging).</li>
+                <li><strong>Software:</strong> Arduino IDE (v1.8.x or v2.x).</li>
+            </ul>
+        </section>
+
+        <div class="step">
+            <h3><span class="step-number">1</span> Install Arduino IDE</h3>
+            <p>Download and install the Arduino IDE from the official website:</p>
+            <p><a href="https://www.arduino.cc/en/software" target="_blank">https://www.arduino.cc/en/software</a></p>
+        </div>
+
+        <div class="step">
+            <h3><span class="step-number">2</span> Upload the Sketch (win_utils/arduino_spoof.ino)</h3>
+            <p>1. Connect your Arduino Leonardo to your PC via USB.</p>
+            <p>2. Open the file <code>src/win_utils/arduino_spoof.ino</code> with Arduino IDE.</p>
+            <p>3. In Arduino IDE, go to <strong>Tools > Board</strong> and select <strong>"Arduino Leonardo"</strong>.</p>
+            <p>4. Go to <strong>Tools > Port</strong> and select the COM port labeled "Arduino Leonardo".</p>
+            <p>5. Click the <strong>Upload</strong> button (Arrow icon) in the top left.</p>
+            <p>6. Wait for the "Done uploading" message.</p>
+        </div>
+
+        <div class="step">
+            <h3><span class="step-number">3</span> Device Spoofing (Optional but Recommended)</h3>
+            <div class="note">
+                <strong>Why Spoof?</strong> By default, the device shows up as "Arduino Leonardo" in Device Manager. Anti-cheat systems may flag this. Spoofing changes the Vendor ID (VID) and Product ID (PID) to match a generic mouse (e.g., Logitech), making it look like a regular peripheral.
+            </div>
+            <p>1. Close Arduino IDE.</p>
+            <p>2. In the Axiom app, go to the <strong>Aim Assist</strong> tab.</p>
+            <p>3. Select "Arduino Leonardo" as the Mouse Move Method.</p>
+            <p>4. Click the purple <strong>"One-click Device Spoofing"</strong> button.</p>
+            <p>5. Confirm the prompt to modify your Arduino <code>boards.txt</code> file.</p>
+            <p>6. Once successful, <strong>Restart Arduino IDE</strong>.</p>
+            <p>7. <strong>Re-upload</strong> the sketch to your Arduino (Repeat Step 2). The Arduino acts as a new device now.</p>
+        </div>
+
+        <div class="step">
+            <h3><span class="step-number">4</span> Configure Axiom</h3>
+            <p>1. Open Axiom.</p>
+            <p>2. Go to the <strong>Aim Assist</strong> tab.</p>
+            <p>3. Set <strong>Mouse Move Method</strong> to <strong>"Arduino Leonardo"</strong>.</p>
+            <p>4. In the Arduino COM Port dropdown, select the port corresponding to your Arduino.</p>
+            <p>5. If connected successfully, you will see a green <span style="color: #4CAF50;">✓ Connected</span> status.</p>
+            <p>6. You can use the "Test Heart Move" button to verify it's working.</p>
+        </div>
+
+        <section id="troubleshooting">
+            <h2>Troubleshooting</h2>
+            
+            <h3>Connection Failed / No COM Port Found</h3>
+            <ul>
+                <li>Click the "Refresh" button next to the COM port dropdown.</li>
+                <li>Ensure the USB cable is a <strong>data cable</strong>, not just a charging cable.</li>
+                <li>Check Windows Device Manager under "Ports (COM & LPT)" to see if the device appears.</li>
+                <li>If you spoofed the device, it might show up as a "USB Input Device" or "Logitech Mouse" instead of Arduino, but the COM port should still be visible.</li>
+            </ul>
+
+            <h3>Mouse Moves Erratically</h3>
+            <ul>
+                <li>Ensure the baud rate in the Arduino sketch (<code>115200</code>) matches the Python script (default is correct).</li>
+                <li>Try a different USB port on your computer.</li>
+            </ul>
+
+            <div class="warning">
+                <strong>Important:</strong> If you use the "One-click Device Spoofing", remember that this modifies your local Arduino IDE installation files. If you update the Arduino IDE, you may need to run the spoofing tool again.
+            </div>
+        </section>
+
+        <footer>
+            <p>&copy; 2025 Axiom Project.</p>
+        </footer>
+    </div>
+</body>
+</html>

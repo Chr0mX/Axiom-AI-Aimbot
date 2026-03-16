@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="rotate(45 12 12)">
+    <!-- 子彈主體：加寬(寬8)且長度適中(長15)，位置靠上 -->
+    <path d="M12 1 Q 8 1 8 7 V 16 H 16 V 7 Q 16 1 12 1 z"/>
+    <!-- 彈頭分隔線 -->
+    <line x1="8" y1="7" x2="16" y2="7"/>
+    
+    <!-- 三條速度線：位於下方，等長，平行，適配較寬的子彈間距 -->
+    <!-- 中間線 -->
+    <line x1="12" y1="19" x2="12" y2="22"/>
+    <!-- 左側線 -->
+    <line x1="8.5" y1="19" x2="8.5" y2="22"/>
+    <!-- 右側線 -->
+    <line x1="15.5" y1="19" x2="15.5" y2="22"/>
+  </g>
+</svg>
