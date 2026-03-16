@@ -13,7 +13,9 @@
 ## <a href="https://github.com/iishong0w0/Axiom-AI-Aimbot/releases/latest"><strong>Download Latest Release</strong></a>
 ## <a href="https://discord.gg/h4dEh3b8Bt">Discord</a>
 
-<video src="guidemo.mp4" controls width="720"></video>
+<p>
+  <a href="./guidemo.mp4"><img alt="Watch Demo" src="https://img.shields.io/badge/%E2%96%B6-Watch%20Demo%20Video-red?style=for-the-badge"></a>
+</p>
 
 <p><strong>If this project helps you, please give us a ⭐ Star!</strong></p>
 
