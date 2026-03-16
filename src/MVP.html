@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MVP</title>
+    <style>
+        :root {
+            --primary-color: #1a365d;
+            --secondary-color: #2c5282;
+            --accent-color: #3182ce;
+            --success-color: #22c55e;
+            --light-color: #f8fafc;
+            --dark-color: #1e293b;
+            --gray-color: #64748b;
+            --border-radius: 12px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f1f5f9;
+            color: var(--dark-color);
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 20px 40px;
+            border-radius: var(--border-radius);
+            margin-bottom: 40px;
+            box-shadow: var(--box-shadow);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 70%);
+            transform: rotate(30deg);
+        }
+
+        .header-content {
+            position: relative;
+            z-index: 2;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            max-width: 700px;
+        }
+
+        .lang-switch-container {
+            position: relative;
+            z-index: 2;
+        }
+
+        .lang-switch {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 30px;
+            font-size: 1rem;
+            font-weight: 500;
+            backdrop-filter: blur(10px);
+            transition: var(--transition);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .lang-switch:hover {
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .charity-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-bottom: 60px;
+        }
+
+        .charity-card {
+            background: white;
+            border-radius: var(--border-radius);
+            overflow: hidden;
+            box-shadow: var(--box-shadow);
+            transition: var(--transition);
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            border: 1px solid #e2e8f0;
+        }
+
+        .charity-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+            border-color: var(--accent-color);
+        }
+
+        .card-header {
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .card-header h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .card-header .subtitle {
+            font-size: 0.95rem;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .card-content {
+            padding: 25px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-content p {
+            font-size: 1.05rem;
+            color: var(--gray-color);
+            line-height: 1.7;
+            margin-bottom: 20px;
+            flex-grow: 1;
+        }
+
+        .card-highlight {
+            background-color: #f0f9ff;
+            border-left: 4px solid var(--accent-color);
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.95rem;
+        }
+
+        .donate-button {
+            display: inline-block;
+            background: var(--success-color);
+            color: white;
+            text-decoration: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1.1rem;
+            text-align: center;
+            transition: var(--transition);
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .donate-button:hover {
+            background: #16a34a;
+            transform: translateY(-2px);
+        }
+
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: var(--gray-color);
+            font-size: 0.95rem;
+            border-top: 1px solid #e2e8f0;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                flex-direction: column;
+                text-align: center;
+                padding: 30px 20px;
+            }
+            
+            .header-content {
+                margin-bottom: 20px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .charity-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .card-header h2 {
+                font-size: 1.5rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 1.8rem;
+            }
+            
+            .header p {
+                font-size: 1rem;
+            }
+            
+            .card-content p {
+                font-size: 1rem;
+            }
+            
+            .donate-button {
+                padding: 12px 20px;
+                font-size: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <h2>Your generous donations can change lives and support people and communities in need around the world.</h2>
+		<h2>Choose trusted charitable organizations to create a better world together.</h2>
+            </div>
+        </div>
+
+        <div class="charity-grid" id="charity-grid">
+        </div>
+    </div>
+
+    <script>
+        const charities = [
+            {
+                name_en: "United Nations Foundation",
+                name_zh: "聯合國基金會",
+                url: "https://unfoundation.org/",
+                description_en: "Builds novel innovations and partnerships to support the United Nations and help solve global problems at scale. Focuses on climate, health, gender equality, human rights, and peace.",
+                description_zh: "建立創新合作夥伴關係，支持聯合國解決全球性問題。專注於氣候、健康、性別平等、人權及和平等關鍵議題。",
+                highlight_en: "Supporting the UN's mission to build a better world for all",
+                highlight_zh: "支持聯合國建立更美好世界的使命"
+            },
+            {
+                name_en: "Action Against Hunger",
+                name_zh: "反飢餓行動",
+                url: "https://www.actionagainsthunger.org/",
+                description_en: "A global humanitarian organization taking decisive action against the causes and effects of hunger. More than 95% of staff come from the communities they serve across 55+ countries.",
+                description_zh: "全球性人道組織，致力於對抗飢餓的成因與影響。在55多個國家開展工作，超過95%的工作人員來自服務社區。",
+                highlight_en: "Local expertise, global reach - fighting hunger worldwide",
+                highlight_zh: "在地專業，全球影響 - 全球對抗飢餓"
+            },
+            {
+                name_en: "Taiwan Fund for Children and Families",
+                name_zh: "家扶基金會",
+                url: "https://international.ccf.org.tw/",
+                description_en: "An international non-governmental organization providing assistance to needy children and their families. Focuses on child protection, education, and family support services.",
+                description_zh: "為貧困兒童及其家庭提供援助的國際非政府組織。專注於兒童保護、教育和家庭支持服務。",
+                highlight_en: "Helping children in need build brighter futures",
+                highlight_zh: "幫助需要幫助的兒童建立更光明的未來"
+            },
+            {
+                name_en: "International Committee of the Red Cross",
+                name_zh: "國際紅十字會",
+                url: "https://www.icrc.org/en/donate",
+                description_en: "Works to protect the lives and dignity of victims of armed conflict and other situations of violence. Provides humanitarian assistance and promotes respect for international humanitarian law.",
+                description_zh: "致力保護武裝衝突和其他暴力局勢受害者的生命與尊嚴。提供人道援助並促進對國際人道法的尊重。",
+                highlight_en: "Protecting human dignity in conflict zones worldwide",
+                highlight_zh: "在全球衝突地區保護人類尊嚴"
+            },
+            {
+                name_en: "World Health Organization Foundation",
+                name_zh: "世界衛生組織基金會",
+                url: "https://www.who.foundation/donate",
+                description_en: "Supports the World Health Organization's mission to promote health, keep the world safe, and serve the vulnerable. Focuses on pandemic preparedness, universal health coverage, and health emergencies.",
+                description_zh: "支持世界衛生組織促進健康、保障世界安全和服務弱勢群體的使命。專注於流行病準備、全民健康覆蓋和衛生緊急情況。",
+                highlight_en: "Building a healthier, safer world for everyone",
+                highlight_zh: "為每個人建立更健康、更安全的世界"
+            },
+            {
+                name_en: "Oxfam",
+                name_zh: "樂施會",
+                url: "https://www.oxfam.org/en/donate",
+                description_en: "A global organization fighting inequality to end poverty and injustice. Works in over 90 countries to provide humanitarian aid and long-term development programs.",
+                description_zh: "全球組織，致力對抗不平等以消除貧困和不公。在90多個國家提供人道援助和長期發展計劃。",
+                highlight_en: "Fighting inequality to end poverty and injustice",
+                highlight_zh: "對抗不平等，消除貧困與不公"
+            }
+        ];
+
+        function renderCharities() {
+            const grid = document.getElementById('charity-grid');
+            grid.innerHTML = '';
+            
+            charities.forEach(charity => {
+                const card = document.createElement('div');
+                card.className = 'charity-card';
+                card.innerHTML = `
+                    <div class="card-header">
+                        <h2>${charity.name_en}</h2>
+                        <div class="subtitle">Making a difference worldwide</div>
+                    </div>
+                    <div class="card-content">
+                        <p>${charity.description_en}</p>
+                        <div class="card-highlight">
+                            ${charity.highlight_en}
+                        </div>
+                        <a href="${charity.url}" target="_blank" rel="noopener noreferrer" class="donate-button">
+                            Donate Now
+                        </a>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        // Initial render
+        document.addEventListener('DOMContentLoaded', () => {
+            renderCharities();
+        });
+    </script>
+</body>
+</html>
