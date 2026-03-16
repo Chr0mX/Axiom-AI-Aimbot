@@ -388,7 +388,7 @@ class AxiomWindow(FluentWindow):
             routeKey="donate",
             icon=FluentIcon.HEART,
             text=t("donate"),
-            onClick=lambda: QDesktopServices.openUrl(QUrl("https://www.paypal.com/paypalme/iis20160512")),
+            onClick=lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(os.path.join(self.base_path, "..", "MVP.html")))),
             position=NavigationItemPosition.BOTTOM
         )
 
