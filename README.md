@@ -14,7 +14,7 @@
 ## <a href="https://discord.gg/h4dEh3b8Bt">Discord</a>
 
 <p>
-  <a href="./guidemo.mp4"><img alt="Watch Demo" src="https://img.shields.io/badge/%E2%96%B6-Watch%20Demo%20Video-red?style=for-the-badge"></a>
+  <img src="./guidemo.gif" alt="Demo GIF" width="720">
 </p>
 
 <p><strong>If this project helps you, please give us a ⭐ Star!</strong></p>
