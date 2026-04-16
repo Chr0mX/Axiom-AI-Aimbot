@@ -73,6 +73,19 @@ class AimPage(BasePage):
         self.modelCard.hBoxLayout.addWidget(self.modelCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.modelCard.hBoxLayout.addSpacing(16)
 
+        # Inference backend
+        self.inferenceBackendCombo = ComboBox()
+        self.inferenceBackendCombo.addItems(["Auto", "CUDA", "DirectML", "CPU"])
+        self.inferenceBackendCombo.setMinimumWidth(150)
+        self.inferenceBackendCard = SettingCard(
+            FluentIcon.COMMAND_PROMPT,
+            t("inference_backend"),
+            "",
+            self.modelGroup
+        )
+        self.inferenceBackendCard.hBoxLayout.addWidget(self.inferenceBackendCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.inferenceBackendCard.hBoxLayout.addSpacing(16)
+
         # Open Model Folder
         self.openModelFolderBtn = PrimaryPushButton(t("open_model_folder"))
         self.openModelFolderCard = SettingCard(
@@ -593,6 +606,7 @@ class AimPage(BasePage):
         """排版所有控制項"""
         # 模型設定
         self.modelGroup.addSettingCard(self.modelCard)
+        self.modelGroup.addSettingCard(self.inferenceBackendCard)
         self.modelGroup.addSettingCard(self.openModelFolderCard)
         self.addContent(self.modelGroup)
 
@@ -708,6 +722,7 @@ class AimPage(BasePage):
         """連接信號"""
         # 模型
         self.modelCombo.currentTextChanged.connect(self._onModelChanged)
+        self.inferenceBackendCombo.currentTextChanged.connect(self._onInferenceBackendChanged)
         self.openModelFolderBtn.clicked.connect(self._openModelFolder)
 
         # FOV 與偵測範圍 - 使用新組件的 valueChanged 信號
@@ -791,6 +806,18 @@ class AimPage(BasePage):
         if idx >= 0:
             self.modelCombo.setCurrentIndex(idx)
         self.modelCombo.blockSignals(False)
+
+        backend_map = {
+            "auto": "Auto",
+            "cuda": "CUDA",
+            "directml": "DirectML",
+            "cpu": "CPU",
+        }
+        self.inferenceBackendCombo.blockSignals(True)
+        backend_text = backend_map.get(getattr(self._config, "inference_backend", "auto").lower(), "Auto")
+        self.inferenceBackendCombo.setCurrentText(backend_text)
+        self.inferenceBackendCombo.blockSignals(False)
+        self._updateInferenceBackendSubtitle()
 
         # FOV 與偵測範圍 - 使用新組件的 setValue
         self.fovCard.setValue(self._config.fov_size)
@@ -917,6 +944,29 @@ class AimPage(BasePage):
     def _onModelChanged(self, text):
         if self._config and text:
             self._config.model_path = os.path.join("Model", text)
+
+    def _onInferenceBackendChanged(self, text):
+        if not self._config:
+            return
+
+        backend_map = {
+            "Auto": "auto",
+            "CUDA": "cuda",
+            "DirectML": "directml",
+            "CPU": "cpu",
+        }
+        selected_backend = backend_map.get(text, "auto")
+        if getattr(self._config, "inference_backend", "auto") != selected_backend:
+            self._config.inference_backend = selected_backend
+        self._updateInferenceBackendSubtitle()
+
+    def _updateInferenceBackendSubtitle(self):
+        if not hasattr(self, "inferenceBackendCard"):
+            return
+        provider = getattr(self._config, "current_provider", "Unknown") if self._config else "Unknown"
+        self.inferenceBackendCard.contentLabel.setText(
+            f"{t('inference_backend_desc')} ({t('inference_backend_current')}: {provider})"
+        )
 
     def _onFovChanged(self, value):
         """FOV 改變"""
@@ -1348,6 +1398,8 @@ class AimPage(BasePage):
 
         # 模型設定
         self.modelCard.titleLabel.setText(t("model"))
+        self.inferenceBackendCard.titleLabel.setText(t("inference_backend"))
+        self._updateInferenceBackendSubtitle()
         self.openModelFolderCard.titleLabel.setText(t("open_model_folder"))
         self.openModelFolderBtn.setText(t("open_model_folder"))
 

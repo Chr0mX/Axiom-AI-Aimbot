@@ -169,5 +169,8 @@
     "idle_detect_enabled": "비조준 시 감지 빈도 줄이기",
     "idle_detect_interval": "유휴 감지 간격 (ms)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
-    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)"
+    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
+    "inference_backend": "추론 백엔드:",
+    "inference_backend_desc": "선호 실행 프로바이더 선택 (자동 폴백)",
+    "inference_backend_current": "현재 프로바이더"
 }

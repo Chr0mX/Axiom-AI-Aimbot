@@ -31,11 +31,25 @@ if TYPE_CHECKING:
     from .config import Config
 
 
-def _try_hot_swap_model(config: Config, model: ort.InferenceSession, current_model_path: str):
-    """Try hot-swapping ONNX model when config.model_path changes."""
+def _try_hot_swap_model(
+    config: Config,
+    model: ort.InferenceSession,
+    current_model_path: str,
+    current_backend: str,
+    current_dml_fallback: bool,
+):
+    """Try hot-swapping ONNX model when model/provider related settings change."""
 
-    if config.model_path == current_model_path:
-        return model, current_model_path, model.get_inputs()[0].name
+    config_backend = str(getattr(config, "inference_backend", "auto")).lower()
+    config_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
+
+    should_reload = (
+        config.model_path != current_model_path
+        or config_backend != current_backend
+        or config_dml_fallback != current_dml_fallback
+    )
+    if not should_reload:
+        return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
 
     new_model_path = config.model_path
     if not os.path.isabs(new_model_path):
@@ -47,7 +61,7 @@ def _try_hot_swap_model(config: Config, model: ort.InferenceSession, current_mod
     if not (os.path.exists(abs_model_path) and abs_model_path.endswith('.onnx')):
         print(f"[模型熱切換] 路徑無效或檔案不存在: {abs_model_path}")
         config.model_path = current_model_path
-        return model, current_model_path, model.get_inputs()[0].name
+        return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
 
     try:
         import onnxruntime as _ort
@@ -65,12 +79,12 @@ def _try_hot_swap_model(config: Config, model: ort.InferenceSession, current_mod
         actual_providers = new_model.get_providers()
         if actual_providers:
             config.current_provider = actual_providers[0]
-        print(f"[模型熱切換] 已切換至: {os.path.basename(abs_model_path)}")
-        return new_model, new_model_path, input_name
+        print(f"[模型熱切換] 已切換至: {os.path.basename(abs_model_path)} / {config_backend}")
+        return new_model, new_model_path, input_name, config_backend, config_dml_fallback
     except Exception as e:
         print(f"[模型熱切換] 載入失敗: {e}，繼續使用原模型")
         config.model_path = current_model_path
-        return model, current_model_path, model.get_inputs()[0].name
+        return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
 
 
 def _sleep_precise(seconds: float) -> None:
@@ -136,6 +150,8 @@ def ai_logic_loop(
 
     state = LoopState(cached_mouse_move_method=config.mouse_move_method)
     current_model_path = config.model_path
+    current_backend = str(getattr(config, "inference_backend", "auto")).lower()
+    current_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
 
     ema_total = 0.0
     ema_capture = 0.0
@@ -234,7 +250,13 @@ def ai_logic_loop(
                 loop_start = time.perf_counter()
                 current_time = time.time()
 
-                model, current_model_path, input_name = _try_hot_swap_model(config, model, current_model_path)
+                model, current_model_path, input_name, current_backend, current_dml_fallback = _try_hot_swap_model(
+                    config,
+                    model,
+                    current_model_path,
+                    current_backend,
+                    current_dml_fallback,
+                )
 
                 if current_time - state.last_pid_update > state.pid_check_interval:
                     pid_x.Kp, pid_x.Ki, pid_x.Kd = config.pid_kp_x, config.pid_ki_x, config.pid_kd_x

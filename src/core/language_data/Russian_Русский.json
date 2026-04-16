@@ -169,5 +169,8 @@
     "idle_detect_enabled": "Снизить частоту обнаружения без прицеливания",
     "idle_detect_interval": "Интервал обнаружения в режиме ожидания (мс)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
-    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)"
+    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
+    "inference_backend": "Бэкенд инференса:",
+    "inference_backend_desc": "Выберите предпочтительный провайдер выполнения (с авто-резервом)",
+    "inference_backend_current": "Текущий провайдер"
 }

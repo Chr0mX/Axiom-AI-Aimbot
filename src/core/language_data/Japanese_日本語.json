@@ -169,5 +169,8 @@
     "idle_detect_enabled": "非エイム中の検出頻度を下げる",
     "idle_detect_interval": "アイドル検出間隔 (ms)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
-    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)"
+    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
+    "inference_backend": "推論バックエンド：",
+    "inference_backend_desc": "優先する実行プロバイダーを選択（自動フォールバック）",
+    "inference_backend_current": "現在のプロバイダー"
 }

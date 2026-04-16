@@ -169,5 +169,8 @@
     "idle_detect_enabled": "Erkennungsrate ohne Zielen reduzieren",
     "idle_detect_interval": "Leerlauf-Erkennungsintervall (ms)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
-    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)"
+    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
+    "inference_backend": "Inferenz-Backend:",
+    "inference_backend_desc": "Bevorzugten Ausführungsanbieter wählen (automatischer Fallback)",
+    "inference_backend_current": "Aktueller Anbieter"
 }

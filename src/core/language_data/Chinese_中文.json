@@ -219,5 +219,8 @@
     "idle_detect_enabled": "啟用未瞄準時降低偵測頻率",
     "idle_detect_interval": "閒置偵測間隔 (ms)",
     "aim_y_reduce_enable": "啟用 Y 軸速度歸零",
-    "aim_y_reduce_delay": "Y軸歸零延遲 (秒)"
+    "aim_y_reduce_delay": "Y軸歸零延遲 (秒)",
+    "inference_backend": "推理後端：",
+    "inference_backend_desc": "選擇偏好的執行提供者（會自動回退）",
+    "inference_backend_current": "目前提供者"
 }

@@ -160,5 +160,8 @@
     "idle_detect_enabled": "बिना निशाना लगाए पहचान दर घटाएं",
     "idle_detect_interval": "निष्क्रिय पहचान अंतराल (ms)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
-    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)"
+    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
+    "inference_backend": "इन्फरेंस बैकएंड:",
+    "inference_backend_desc": "पसंदीदा एग्ज़ीक्यूशन प्रोवाइडर चुनें (स्वचालित फॉलबैक)",
+    "inference_backend_current": "वर्तमान प्रोवाइडर"
 }

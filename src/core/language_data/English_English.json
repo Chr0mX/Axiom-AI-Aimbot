@@ -219,5 +219,8 @@
     "idle_detect_enabled": "Reduce Detection Rate When Not Aiming",
     "idle_detect_interval": "Idle Detection Interval (ms)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
-    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)"
+    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
+    "inference_backend": "Inference Backend:",
+    "inference_backend_desc": "Select execution provider preference (falls back automatically)",
+    "inference_backend_current": "Current Provider"
 }

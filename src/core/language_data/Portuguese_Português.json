@@ -160,5 +160,8 @@
     "idle_detect_enabled": "Reduzir taxa de detecção sem mirar",
     "idle_detect_interval": "Intervalo de detecção em repouso (ms)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
-    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)"
+    "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
+    "inference_backend": "Backend de inferência:",
+    "inference_backend_desc": "Selecione o provedor de execução preferido (fallback automático)",
+    "inference_backend_current": "Provedor atual"
 }
