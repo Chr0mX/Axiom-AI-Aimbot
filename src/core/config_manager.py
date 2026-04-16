@@ -146,6 +146,15 @@ class ConfigManager:
             'xbox_sensitivity': getattr(config_instance, 'xbox_sensitivity', 1.0),
             'xbox_deadzone': getattr(config_instance, 'xbox_deadzone', 0.05),
             'xbox_auto_connect': getattr(config_instance, 'xbox_auto_connect', True),
+            'screenshot_method': getattr(config_instance, 'screenshot_method', 'mss'),
+            'uvc_device_index': getattr(config_instance, 'uvc_device_index', 0),
+            'uvc_width': getattr(config_instance, 'uvc_width', getattr(config_instance, 'width', 1920)),
+            'uvc_height': getattr(config_instance, 'uvc_height', getattr(config_instance, 'height', 1080)),
+            'uvc_resolution': getattr(config_instance, 'uvc_resolution', ''),
+            'uvc_fps': getattr(config_instance, 'uvc_fps', 60),
+            'uvc_capture_method': getattr(config_instance, 'uvc_capture_method', 'dshow'),
+            'uvc_show_window': getattr(config_instance, 'uvc_show_window', True),
+            'uvc_preview_scale_mode': getattr(config_instance, 'uvc_preview_scale_mode', 'scale_to_fit'),
 
             # Y軸壓槍速度歸零
             'aim_y_reduce_enabled': getattr(config_instance, 'aim_y_reduce_enabled', False),

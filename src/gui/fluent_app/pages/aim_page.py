@@ -224,6 +224,30 @@ class AimPage(BasePage):
             description="",
             parent=self.generalGroup
         )
+        self.uvcWidthCard.setVisible(False)
+        self.uvcHeightCard.setVisible(False)
+
+        self.uvcResolutionCombo = ComboBox()
+        self.uvcResolutionCombo.setMinimumWidth(180)
+        self.uvcResolutionCard = SettingCard(
+            FluentIcon.FULL_SCREEN,
+            "UVC Resolution",
+            "Auto-detect supported resolutions",
+            self.generalGroup
+        )
+        self.uvcResolutionCard.hBoxLayout.addWidget(self.uvcResolutionCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcResolutionCard.hBoxLayout.addSpacing(16)
+
+        self.uvcRefreshResolutionBtn = PushButton(t("refresh"))
+        self.uvcRefreshResolutionBtn.setFixedWidth(80)
+        self.uvcRefreshResolutionCard = SettingCard(
+            FluentIcon.SYNC,
+            "Refresh UVC Resolution List",
+            "",
+            self.generalGroup
+        )
+        self.uvcRefreshResolutionCard.hBoxLayout.addWidget(self.uvcRefreshResolutionBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcRefreshResolutionCard.hBoxLayout.addSpacing(16)
 
         self.uvcFpsCard = SliderSpinCard(
             FluentIcon.SPEED_MEDIUM,
@@ -234,12 +258,36 @@ class AimPage(BasePage):
             parent=self.generalGroup
         )
 
+        self.uvcCaptureMethodCombo = ComboBox()
+        self.uvcCaptureMethodCombo.addItems(["dshow", "msmf", "auto", "any"])
+        self.uvcCaptureMethodCombo.setMinimumWidth(140)
+        self.uvcCaptureMethodCard = SettingCard(
+            FluentIcon.CAMERA,
+            "UVC Capture Method",
+            "Select OpenCV capture backend",
+            self.generalGroup
+        )
+        self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcCaptureMethodCard.hBoxLayout.addSpacing(16)
+
         self.uvcPreviewCard = SwitchSettingCard(
             FluentIcon.VIEW,
             "UVC Preview Window",
             "",
             parent=self.generalGroup
         )
+
+        self.uvcPreviewScaleCombo = ComboBox()
+        self.uvcPreviewScaleCombo.addItems(["scale_to_fit", "scale_to_canvas", "fit_to_screen"])
+        self.uvcPreviewScaleCombo.setMinimumWidth(170)
+        self.uvcPreviewScaleCard = SettingCard(
+            FluentIcon.FULL_SCREEN,
+            "UVC Preview Scale Mode",
+            "",
+            self.generalGroup
+        )
+        self.uvcPreviewScaleCard.hBoxLayout.addWidget(self.uvcPreviewScaleCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcPreviewScaleCard.hBoxLayout.addSpacing(16)
 
         # Always Aim (no need to press aim key)
         self.alwaysAimCard = SwitchSettingCard(
@@ -651,10 +699,14 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.aimPartCard)
         self.generalGroup.addSettingCard(self.mouseMoveCard)
         self.generalGroup.addSettingCard(self.uvcDeviceCard)
+        self.generalGroup.addSettingCard(self.uvcResolutionCard)
+        self.generalGroup.addSettingCard(self.uvcRefreshResolutionCard)
         self.generalGroup.addSettingCard(self.uvcWidthCard)
         self.generalGroup.addSettingCard(self.uvcHeightCard)
         self.generalGroup.addSettingCard(self.uvcFpsCard)
+        self.generalGroup.addSettingCard(self.uvcCaptureMethodCard)
         self.generalGroup.addSettingCard(self.uvcPreviewCard)
+        self.generalGroup.addSettingCard(self.uvcPreviewScaleCard)
         self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
@@ -768,10 +820,12 @@ class AimPage(BasePage):
         self.mouseMoveCombo.currentTextChanged.connect(self._onMouseMoveChanged)
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)
         self.uvcDeviceCard.valueChanged.connect(self._onUvcDeviceChanged)
-        self.uvcWidthCard.valueChanged.connect(self._onUvcWidthChanged)
-        self.uvcHeightCard.valueChanged.connect(self._onUvcHeightChanged)
+        self.uvcResolutionCombo.currentTextChanged.connect(self._onUvcResolutionChanged)
+        self.uvcRefreshResolutionBtn.clicked.connect(self._refreshUvcResolutions)
         self.uvcFpsCard.valueChanged.connect(self._onUvcFpsChanged)
+        self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
+        self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
         self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
@@ -878,10 +932,18 @@ class AimPage(BasePage):
         if screenshot_method in screenshot_methods:
             self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
         self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
-        self.uvcWidthCard.setValue(int(getattr(self._config, 'uvc_width', self._config.width)))
-        self.uvcHeightCard.setValue(int(getattr(self._config, 'uvc_height', self._config.height)))
+        self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'dshow')))
+        self._refreshUvcResolutions()
+        resolution_text = str(getattr(self._config, 'uvc_resolution', f"{getattr(self._config, 'uvc_width', self._config.width)}x{getattr(self._config, 'uvc_height', self._config.height)}"))
+        idx = self.uvcResolutionCombo.findText(resolution_text)
+        if idx < 0:
+            self.uvcResolutionCombo.addItem(resolution_text)
+            idx = self.uvcResolutionCombo.findText(resolution_text)
+        if idx >= 0:
+            self.uvcResolutionCombo.setCurrentIndex(idx)
         self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
         self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
+        self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
         self._updateUvcControlsVisibility(screenshot_method)
         self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
         self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
@@ -1061,30 +1123,74 @@ class AimPage(BasePage):
     def _onUvcDeviceChanged(self, value):
         if self._config:
             self._config.uvc_device_index = int(value)
+        self._refreshUvcResolutions()
 
-    def _onUvcWidthChanged(self, value):
+    def _onUvcResolutionChanged(self, value):
         if self._config:
-            self._config.uvc_width = int(value)
-
-    def _onUvcHeightChanged(self, value):
-        if self._config:
-            self._config.uvc_height = int(value)
+            text = str(value).strip().lower()
+            if 'x' not in text:
+                return
+            width_str, height_str = text.split('x', 1)
+            try:
+                self._config.uvc_width = int(width_str)
+                self._config.uvc_height = int(height_str)
+                self._config.uvc_resolution = f"{self._config.uvc_width}x{self._config.uvc_height}"
+            except ValueError:
+                return
 
     def _onUvcFpsChanged(self, value):
         if self._config:
             self._config.uvc_fps = int(value)
 
+    def _onUvcCaptureMethodChanged(self, text):
+        if self._config:
+            self._config.uvc_capture_method = str(text)
+        self._refreshUvcResolutions()
+
     def _onUvcPreviewChanged(self, checked):
         if self._config:
             self._config.uvc_show_window = bool(checked)
 
+    def _onUvcPreviewScaleModeChanged(self, text):
+        if self._config:
+            self._config.uvc_preview_scale_mode = str(text)
+
+    def _refreshUvcResolutions(self):
+        if not self._config:
+            return
+        try:
+            from core.screen_capture import list_supported_uvc_resolutions
+            resolutions = list_supported_uvc_resolutions(
+                int(getattr(self._config, 'uvc_device_index', 0)),
+                str(getattr(self._config, 'uvc_capture_method', 'dshow')),
+            )
+        except Exception:
+            resolutions = []
+
+        current_text = self.uvcResolutionCombo.currentText().strip()
+        self.uvcResolutionCombo.blockSignals(True)
+        self.uvcResolutionCombo.clear()
+        if resolutions:
+            for width, height in resolutions:
+                self.uvcResolutionCombo.addItem(f"{width}x{height}")
+        else:
+            fallback = f"{int(getattr(self._config, 'uvc_width', 1920))}x{int(getattr(self._config, 'uvc_height', 1080))}"
+            self.uvcResolutionCombo.addItem(fallback)
+        if current_text:
+            idx = self.uvcResolutionCombo.findText(current_text)
+            if idx >= 0:
+                self.uvcResolutionCombo.setCurrentIndex(idx)
+        self.uvcResolutionCombo.blockSignals(False)
+
     def _updateUvcControlsVisibility(self, screenshot_method):
         is_uvc = (screenshot_method == "uvc")
         self.uvcDeviceCard.setVisible(is_uvc)
-        self.uvcWidthCard.setVisible(is_uvc)
-        self.uvcHeightCard.setVisible(is_uvc)
+        self.uvcResolutionCard.setVisible(is_uvc)
+        self.uvcRefreshResolutionCard.setVisible(is_uvc)
         self.uvcFpsCard.setVisible(is_uvc)
+        self.uvcCaptureMethodCard.setVisible(is_uvc)
         self.uvcPreviewCard.setVisible(is_uvc)
+        self.uvcPreviewScaleCard.setVisible(is_uvc)
 
     def _onAlwaysAimChanged(self, checked):
         if self._config:
@@ -1470,6 +1576,14 @@ class AimPage(BasePage):
         self.aimPartCard.titleLabel.setText(t("aim_part"))
         self.mouseMoveCard.titleLabel.setText(t("mouse_move_method"))
         self.screenshotMethodCard.titleLabel.setText(t("screenshot_method"))
+        self.uvcDeviceCard.titleLabel.setText("UVC Device Index")
+        self.uvcResolutionCard.titleLabel.setText("UVC Resolution")
+        self.uvcRefreshResolutionCard.titleLabel.setText("Refresh UVC Resolution List")
+        self.uvcRefreshResolutionBtn.setText(t("refresh"))
+        self.uvcFpsCard.titleLabel.setText("UVC FPS")
+        self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
+        self.uvcPreviewCard.titleLabel.setText("UVC Preview Window")
+        self.uvcPreviewScaleCard.titleLabel.setText("UVC Preview Scale Mode")
         self.alwaysAimCard.titleLabel.setText(t("always_aim"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))

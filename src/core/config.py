@@ -48,8 +48,11 @@ class Config:
         self.uvc_width: int = self.width
         self.uvc_height: int = self.height
         self.uvc_fps: int = 60
+        self.uvc_capture_method: str = "dshow"
+        self.uvc_resolution: str = f"{self.uvc_width}x{self.uvc_height}"
         self.uvc_show_window: bool = True
         self.uvc_window_name: str = "Axiom UVC Preview"
+        self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
         self.region: Dict[str, int] = {
@@ -239,8 +242,11 @@ class Config:
             'uvc_width': self.uvc_width,
             'uvc_height': self.uvc_height,
             'uvc_fps': self.uvc_fps,
+            'uvc_capture_method': self.uvc_capture_method,
+            'uvc_resolution': self.uvc_resolution,
             'uvc_show_window': self.uvc_show_window,
             'uvc_window_name': self.uvc_window_name,
+            'uvc_preview_scale_mode': self.uvc_preview_scale_mode,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
             'fov_follow_mouse': self.fov_follow_mouse,
@@ -443,6 +449,12 @@ def _validate_screenshot_method(config: Config) -> None:
     valid_screenshot_methods = ('mss', 'dxcam', 'uvc')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
+    if getattr(config, 'uvc_capture_method', 'dshow') not in ('auto', 'dshow', 'msmf', 'any'):
+        config.uvc_capture_method = 'dshow'
+    if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (
+        'scale_to_fit', 'scale_to_canvas', 'fit_to_screen'
+    ):
+        config.uvc_preview_scale_mode = 'scale_to_fit'
 
 
 def _validate_detect_range_size(config: Config) -> None:

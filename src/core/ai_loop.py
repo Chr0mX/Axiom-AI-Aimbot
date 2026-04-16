@@ -19,6 +19,7 @@ from .ai_loop_utils import (
     clear_queues,
     filter_boxes_by_fov,
     find_closest_target,
+    get_capture_dimensions,
     update_crosshair_position,
     update_queues,
 )
@@ -269,7 +270,8 @@ def ai_logic_loop(
                         state.cached_mouse_move_method = new_method
                     state.last_method_check_time = current_time
 
-                update_crosshair_position(config, config.width // 2, config.height // 2)
+                capture_width, capture_height = get_capture_dimensions(config)
+                update_crosshair_position(config, capture_width // 2, capture_height // 2)
 
                 is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
                 if is_aiming:

@@ -9,6 +9,17 @@ if TYPE_CHECKING:
     from .config import Config
 
 
+def get_capture_dimensions(config: Config) -> Tuple[int, int]:
+    """Get active capture dimensions based on screenshot backend."""
+
+    if str(getattr(config, 'screenshot_method', 'mss')).lower() == 'uvc':
+        cap_w = int(getattr(config, 'uvc_width', 0) or 0)
+        cap_h = int(getattr(config, 'uvc_height', 0) or 0)
+        if cap_w > 0 and cap_h > 0:
+            return cap_w, cap_h
+    return int(config.width), int(config.height)
+
+
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:
     """Update crosshair position"""
 
@@ -39,14 +50,15 @@ def clear_queues(boxes_queue: queue.Queue, confidences_queue: queue.Queue) -> No
 def calculate_detection_region(config: Config, crosshair_x: int, crosshair_y: int) -> Dict[str, int]:
     """Calculate detection region"""
 
-    detection_size = int(getattr(config, 'detect_range_size', config.height))
-    detection_size = max(int(config.fov_size), min(int(config.height), detection_size))
+    capture_width, capture_height = get_capture_dimensions(config)
+    detection_size = int(getattr(config, 'detect_range_size', capture_height))
+    detection_size = max(int(config.fov_size), min(int(capture_height), detection_size))
     half_detection_size = detection_size // 2
 
     region_left = max(0, crosshair_x - half_detection_size)
     region_top = max(0, crosshair_y - half_detection_size)
-    region_width = max(0, min(detection_size, config.width - region_left))
-    region_height = max(0, min(detection_size, config.height - region_top))
+    region_width = max(0, min(detection_size, capture_width - region_left))
+    region_height = max(0, min(detection_size, capture_height - region_top))
 
     return {
         'left': region_left,
