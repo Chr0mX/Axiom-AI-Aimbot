@@ -118,6 +118,13 @@ class PyQtOverlay(QWidget):
 
     def update_overlay(self) -> None:
         """Fetch latest detection results from the queue and update display"""
+        if getattr(self.config, 'screenshot_method', 'mss') == 'uvc':
+            if self.isVisible():
+                self.hide()
+            return
+        if not self.isVisible():
+            self.show()
+
         desired_interval = max(int(self.config.detect_interval * 1000), 16)
         if desired_interval != self._last_timer_interval_ms:
             self.timer.setInterval(desired_interval)
@@ -253,6 +260,8 @@ class PyQtOverlay(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def paintEvent(self, event):
+        if getattr(self.config, 'screenshot_method', 'mss') == 'uvc':
+            return
         if not self.config.AimToggle:
             return
             

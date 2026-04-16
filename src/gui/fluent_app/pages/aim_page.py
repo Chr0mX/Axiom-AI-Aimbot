@@ -207,6 +207,33 @@ class AimPage(BasePage):
             parent=self.generalGroup
         )
 
+        self.uvcWidthCard = SliderSpinCard(
+            FluentIcon.FULL_SCREEN,
+            "UVC Width",
+            320, 7680,
+            suffix="px",
+            description="",
+            parent=self.generalGroup
+        )
+
+        self.uvcHeightCard = SliderSpinCard(
+            FluentIcon.FULL_SCREEN,
+            "UVC Height",
+            240, 4320,
+            suffix="px",
+            description="",
+            parent=self.generalGroup
+        )
+
+        self.uvcFpsCard = SliderSpinCard(
+            FluentIcon.SPEED_MEDIUM,
+            "UVC FPS",
+            1, 240,
+            suffix="",
+            description="",
+            parent=self.generalGroup
+        )
+
         self.uvcPreviewCard = SwitchSettingCard(
             FluentIcon.VIEW,
             "UVC Preview Window",
@@ -624,6 +651,9 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.aimPartCard)
         self.generalGroup.addSettingCard(self.mouseMoveCard)
         self.generalGroup.addSettingCard(self.uvcDeviceCard)
+        self.generalGroup.addSettingCard(self.uvcWidthCard)
+        self.generalGroup.addSettingCard(self.uvcHeightCard)
+        self.generalGroup.addSettingCard(self.uvcFpsCard)
         self.generalGroup.addSettingCard(self.uvcPreviewCard)
         self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
@@ -738,6 +768,9 @@ class AimPage(BasePage):
         self.mouseMoveCombo.currentTextChanged.connect(self._onMouseMoveChanged)
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)
         self.uvcDeviceCard.valueChanged.connect(self._onUvcDeviceChanged)
+        self.uvcWidthCard.valueChanged.connect(self._onUvcWidthChanged)
+        self.uvcHeightCard.valueChanged.connect(self._onUvcHeightChanged)
+        self.uvcFpsCard.valueChanged.connect(self._onUvcFpsChanged)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
         self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
@@ -845,6 +878,9 @@ class AimPage(BasePage):
         if screenshot_method in screenshot_methods:
             self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
         self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
+        self.uvcWidthCard.setValue(int(getattr(self._config, 'uvc_width', self._config.width)))
+        self.uvcHeightCard.setValue(int(getattr(self._config, 'uvc_height', self._config.height)))
+        self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
         self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
         self._updateUvcControlsVisibility(screenshot_method)
         self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
@@ -1018,10 +1054,25 @@ class AimPage(BasePage):
         if self._config:
             self._config.screenshot_method = text
         self._updateUvcControlsVisibility(text)
+        main_window = self.window()
+        if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
+            main_window.updateVisualsVisibilityForScreenshotMethod(text)
 
     def _onUvcDeviceChanged(self, value):
         if self._config:
             self._config.uvc_device_index = int(value)
+
+    def _onUvcWidthChanged(self, value):
+        if self._config:
+            self._config.uvc_width = int(value)
+
+    def _onUvcHeightChanged(self, value):
+        if self._config:
+            self._config.uvc_height = int(value)
+
+    def _onUvcFpsChanged(self, value):
+        if self._config:
+            self._config.uvc_fps = int(value)
 
     def _onUvcPreviewChanged(self, checked):
         if self._config:
@@ -1030,6 +1081,9 @@ class AimPage(BasePage):
     def _updateUvcControlsVisibility(self, screenshot_method):
         is_uvc = (screenshot_method == "uvc")
         self.uvcDeviceCard.setVisible(is_uvc)
+        self.uvcWidthCard.setVisible(is_uvc)
+        self.uvcHeightCard.setVisible(is_uvc)
+        self.uvcFpsCard.setVisible(is_uvc)
         self.uvcPreviewCard.setVisible(is_uvc)
 
     def _onAlwaysAimChanged(self, checked):
