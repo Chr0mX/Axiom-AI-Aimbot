@@ -52,9 +52,9 @@ def _try_hot_swap_model(config: Config, model: ort.InferenceSession, current_mod
     try:
         import onnxruntime as _ort
 
-        from .session_utils import optimize_onnx_session
+        from .session_utils import build_provider_list, optimize_onnx_session
 
-        providers = ['DmlExecutionProvider']
+        providers = build_provider_list(config)
         session_options = optimize_onnx_session(config)
         if session_options:
             new_model = _ort.InferenceSession(abs_model_path, providers=providers, sess_options=session_options)

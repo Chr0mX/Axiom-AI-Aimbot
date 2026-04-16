@@ -53,3 +53,23 @@ def optimize_onnx_session(config):
         logger.error("ONNX 優化失敗: %s", e)
         return None
 
+
+
+def build_provider_list(config):
+    """Build preferred ONNX Runtime provider list based on user config and availability."""
+    available = set(ort.get_available_providers())
+    backend = getattr(config, 'inference_backend', 'auto')
+
+    preferred_by_backend = {
+        'auto': ['CUDAExecutionProvider', 'DmlExecutionProvider', 'CPUExecutionProvider'],
+        'cuda': ['CUDAExecutionProvider', 'CPUExecutionProvider'],
+        'directml': ['DmlExecutionProvider', 'CPUExecutionProvider'],
+        'cpu': ['CPUExecutionProvider'],
+    }
+
+    preferred = preferred_by_backend.get(backend, preferred_by_backend['auto'])
+    filtered = [provider for provider in preferred if provider in available]
+
+    if not filtered:
+        return ['CPUExecutionProvider']
+    return filtered

@@ -131,7 +131,7 @@ if sys.platform == "win32":
 # 從我們自己建立的模組中導入
 from core.config import Config, load_config, save_config
 from win_utils import check_and_request_admin, test_ddxoft_functions, ensure_ddxoft_ready
-from core.session_utils import optimize_onnx_session
+from core.session_utils import build_provider_list, optimize_onnx_session
 from core.ai_loop import ai_logic_loop
 from core.auto_fire import auto_fire_loop
 from core.key_listener import aim_toggle_key_listener
@@ -193,8 +193,7 @@ def start_ai_threads(
     
     model = None
     try:
-        # 僅使用 DirectML 提供者
-        providers = ['DmlExecutionProvider']
+        providers = build_provider_list(config)
 
         # 獲取優化的會話選項
         session_options = optimize_onnx_session(config)
@@ -210,7 +209,7 @@ def start_ai_threads(
             logger.info("模型載入使用提供者: %s", actual_providers[0])
         else:
             logger.warning("無法獲取提供者資訊")
-            config.current_provider = 'DmlExecutionProvider'
+            config.current_provider = providers[0] if providers else 'CPUExecutionProvider'
     except Exception as e:
         logger.error("載入 ONNX 模型失敗: %s", e)
         logger.error("請確認已安裝 onnxruntime-directml 且系統支援 DirectML")
