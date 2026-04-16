@@ -174,7 +174,7 @@ class AimPage(BasePage):
 
         # Screenshot Method
         self.screenshotMethodCombo = ComboBox()
-        self.screenshotMethodCombo.addItems(["mss", "dxcam"])
+        self.screenshotMethodCombo.addItems(["mss", "dxcam", "uvc"])
         self.screenshotMethodCombo.setMinimumWidth(150)
         self.screenshotMethodCard = SettingCard(
             FluentIcon.CAMERA,
@@ -184,6 +184,22 @@ class AimPage(BasePage):
         )
         self.screenshotMethodCard.hBoxLayout.addWidget(self.screenshotMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.screenshotMethodCard.hBoxLayout.addSpacing(16)
+
+        self.uvcDeviceCard = SliderSpinCard(
+            FluentIcon.CAMERA,
+            "UVC Device Index",
+            0, 16,
+            suffix="",
+            description="",
+            parent=self.generalGroup
+        )
+
+        self.uvcPreviewCard = SwitchSettingCard(
+            FluentIcon.VIEW,
+            "UVC Preview Window",
+            "",
+            parent=self.generalGroup
+        )
 
         # Always Aim (no need to press aim key)
         self.alwaysAimCard = SwitchSettingCard(
@@ -593,6 +609,8 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.confidenceCard)
         self.generalGroup.addSettingCard(self.aimPartCard)
         self.generalGroup.addSettingCard(self.mouseMoveCard)
+        self.generalGroup.addSettingCard(self.uvcDeviceCard)
+        self.generalGroup.addSettingCard(self.uvcPreviewCard)
         self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
@@ -704,6 +722,8 @@ class AimPage(BasePage):
         self.aimPartCombo.currentIndexChanged.connect(self._onAimPartChanged)
         self.mouseMoveCombo.currentTextChanged.connect(self._onMouseMoveChanged)
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)
+        self.uvcDeviceCard.valueChanged.connect(self._onUvcDeviceChanged)
+        self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
         self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
@@ -793,10 +813,13 @@ class AimPage(BasePage):
         if self._config.mouse_move_method in mouse_methods:
             self.mouseMoveCombo.setCurrentIndex(mouse_methods.index(self._config.mouse_move_method))
 
-        screenshot_methods = ["mss", "dxcam"]
+        screenshot_methods = ["mss", "dxcam", "uvc"]
         screenshot_method = getattr(self._config, 'screenshot_method', 'mss')
         if screenshot_method in screenshot_methods:
             self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
+        self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
+        self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
+        self._updateUvcControlsVisibility(screenshot_method)
         self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
         self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
         self.idleDetectEnableCard.setChecked(getattr(self._config, 'idle_detect_enabled', True))
@@ -944,6 +967,20 @@ class AimPage(BasePage):
     def _onScreenshotMethodChanged(self, text):
         if self._config:
             self._config.screenshot_method = text
+        self._updateUvcControlsVisibility(text)
+
+    def _onUvcDeviceChanged(self, value):
+        if self._config:
+            self._config.uvc_device_index = int(value)
+
+    def _onUvcPreviewChanged(self, checked):
+        if self._config:
+            self._config.uvc_show_window = bool(checked)
+
+    def _updateUvcControlsVisibility(self, screenshot_method):
+        is_uvc = (screenshot_method == "uvc")
+        self.uvcDeviceCard.setVisible(is_uvc)
+        self.uvcPreviewCard.setVisible(is_uvc)
 
     def _onAlwaysAimChanged(self, checked):
         if self._config:

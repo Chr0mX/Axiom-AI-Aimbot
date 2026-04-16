@@ -324,6 +324,10 @@ def ai_logic_loop(
                 if config.single_target_mode:
                     boxes, confidences = find_closest_target(boxes, confidences, crosshair_x, crosshair_y)
 
+                # Runtime cache for UVC preview overlay rendering
+                config.latest_boxes = boxes
+                config.latest_confidences = confidences
+
                 if is_aiming and boxes:
                     process_aiming(
                         config,

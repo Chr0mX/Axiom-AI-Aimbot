@@ -827,7 +827,7 @@ class StatusPanel(QWidget):
         self.mouse_click_row.set_value(disp_click, click_color)
 
         # 更新 Screenshot Method
-        screenshot_map = {'mss': 'MSS', 'dxcam': 'DXcam'}
+        screenshot_map = {'mss': 'MSS', 'dxcam': 'DXcam', 'uvc': 'UVC'}
         disp_screenshot = screenshot_map.get(current_screenshot_method, str(current_screenshot_method))
         screenshot_color = None
 
@@ -844,6 +844,9 @@ class StatusPanel(QWidget):
                 disp_screenshot += " ✗"
                 screenshot_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
         elif current_screenshot_method == 'mss':
+            disp_screenshot += " ✓"
+            screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
+        elif current_screenshot_method == 'uvc':
             disp_screenshot += " ✓"
             screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
 

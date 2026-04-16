@@ -44,6 +44,12 @@ class Config:
         self.capture_left: int = 0
         self.capture_top: int = 0
         self.screenshot_method: str = "dxcam"  # 螢幕截圖方式
+        self.uvc_device_index: int = 0
+        self.uvc_width: int = self.width
+        self.uvc_height: int = self.height
+        self.uvc_fps: int = 60
+        self.uvc_show_window: bool = True
+        self.uvc_window_name: str = "Axiom UVC Preview"
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
         self.region: Dict[str, int] = {
@@ -193,6 +199,8 @@ class Config:
         # FPS 計數器（運行期狀態，不寫入配置檔）
         self.screenshot_frame_count: int = 0
         self.detection_frame_count: int = 0
+        self.latest_boxes: List[List[float]] = []
+        self.latest_confidences: List[float] = []
     
     def to_dict(self) -> Dict[str, Any]:
         """將可儲存的配置轉為字典"""
@@ -225,6 +233,12 @@ class Config:
             'idle_detect_interval': self.idle_detect_interval,
             'idle_detect_enabled': self.idle_detect_enabled,
             'screenshot_method': self.screenshot_method,
+            'uvc_device_index': self.uvc_device_index,
+            'uvc_width': self.uvc_width,
+            'uvc_height': self.uvc_height,
+            'uvc_fps': self.uvc_fps,
+            'uvc_show_window': self.uvc_show_window,
+            'uvc_window_name': self.uvc_window_name,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
             'fov_follow_mouse': self.fov_follow_mouse,
@@ -421,7 +435,7 @@ def _validate_mouse_method(config: Config) -> None:
 
 def _validate_screenshot_method(config: Config) -> None:
     """驗證並修正螢幕截圖方式"""
-    valid_screenshot_methods = ('mss', 'dxcam')
+    valid_screenshot_methods = ('mss', 'dxcam', 'uvc')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
 
