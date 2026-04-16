@@ -2,14 +2,14 @@ name: Auto Tag and Release
 
 on:
   workflow_run:
-    workflows:
-      - Build RemoteGamepadBridge
     types:
       - completed
     branches:
       - main
       - master
       - GPU
+
+  workflow_dispatch:
 
 permissions:
   contents: write
