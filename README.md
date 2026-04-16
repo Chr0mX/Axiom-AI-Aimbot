@@ -219,6 +219,26 @@ Axiom supports two ONNX Runtime acceleration paths on Windows:
 - **CUDA path (NVIDIA):**
   - `pip install -r requirements-cuda.txt`
 
+### Bundled runtime dependency bootstrap mode
+
+`啟動Launcher.bat` uses the bundled `src/python` runtime and, on launch:
+
+1. Checks whether core dependencies are already available.
+2. If missing, installs default runtime dependencies (`requirements-directml.txt`).
+3. Downloads wheel packages for all backends (`requirements-cpu.txt`, `requirements-directml.txt`, `requirements-cuda.txt`)
+   into `src/python/wheelhouse`.
+
+This keeps the release package lighter while still allowing backend switching prep (CPU/DirectML/CUDA) after first launch.
+
+### CUDA package/version quick guide
+
+- If your CUDA Toolkit is **12.x** (or you only use NVIDIA driver runtime), use:
+  - `pip install -U onnxruntime-gpu`
+- If your environment is fixed to **CUDA 11.x**, prefer:
+  - `pip install "onnxruntime-gpu==1.18.*"`
+
+If CUDA is selected but unavailable, Axiom now logs startup diagnostics and a suggested install command.
+
 ### Runtime provider selection
 
 At startup, Axiom logs:
@@ -227,6 +247,41 @@ At startup, Axiom logs:
 - final active provider used by the loaded model session
 
 Use these logs to verify whether CUDA was actually active, or whether runtime fell back to DirectML/CPU.
+
+## Reduce Package Size
+
+Yes — package size can be reduced significantly. In this repository, the largest parts are usually:
+
+- `src/python/Lib/site-packages/PyQt6`
+- `src/python/Lib/site-packages/cv2`
+- `src/python/Lib/site-packages/onnxruntime`
+- `src/python/Lib/site-packages/numpy`
+- `src/python/tcl` (Tk/Tcl)
+- `Model/` (ONNX models)
+
+Practical size-reduction options:
+
+1. **Ship one backend per build**
+   - DirectML build: include `onnxruntime-directml` only.
+   - CUDA build: include `onnxruntime-gpu` only.
+   - Avoid bundling both in the same artifact.
+
+2. **Trim unused Python stdlib/content from embedded runtime**
+   - Remove `tkinter` / Tcl demos if your app does not use Tk UI.
+   - Exclude test folders, docs, and caches (`__pycache__`, `.pyc`) from release artifacts.
+
+3. **Avoid duplicate dependency trees**
+   - This project uses both `src/python/Lib/site-packages` and `src/python/dependencies`; avoid copying the same packages into both locations in release output.
+
+4. **Split models from app binary**
+   - Keep only the default model in the base installer.
+   - Offer extra models as optional downloads.
+
+5. **Use compression in release packaging**
+   - If using PyInstaller, UPX/installer compression can reduce final installer size (with startup-time tradeoffs).
+
+6. **Optional plugin-style extras**
+   - Make non-core features (e.g., controller/serial extras) optional installs for users who need them.
 
 ## Usage
 

@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+
 net session >nul 2>&1
 if %errorlevel% NEQ 0 (
 	powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath 'cmd.exe' -Verb RunAs -ArgumentList '/c','\""%~f0"\" %*'" 
@@ -31,4 +32,12 @@ if %errorlevel% NEQ 0 (
 echo [Axiom] Visual C++ Redistributable installation completed.
 
 :VC_DONE
+echo [Axiom] Checking Python dependencies...
+src\python\python.exe src\tools\bootstrap_dependencies.py
+if %errorlevel% NEQ 0 (
+	echo [Axiom] Dependency bootstrap failed. Please check your network and Python runtime.
+	pause
+	exit /b 1
+)
+
 src\python\python.exe src\main.py

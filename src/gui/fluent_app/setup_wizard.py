@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractSlider, QDialog, QFrame, QHBoxLayout,
-    QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget,
+    QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget, QComboBox,
     QVBoxLayout, QWidget,
 )
 
@@ -290,7 +290,7 @@ class _ThemeCard(QFrame):
 # ──────────────────────────────────────────────────────────
 
 class SetupWizard(QDialog):
-    """首次啟動 5 步驟設置精靈。"""
+    """首次啟動 6 步驟設置精靈。"""
 
     # 完成後通知外部（包含是否為深色主題）
     setupComplete = pyqtSignal()
@@ -300,8 +300,9 @@ class SetupWizard(QDialog):
     STEP_LANGUAGE = 1
     STEP_THEME    = 2
     STEP_ACRYLIC  = 3
-    STEP_DONE     = 4
-    TOTAL_STEPS   = 5
+    STEP_INFER    = 4
+    STEP_DONE     = 5
+    TOTAL_STEPS   = 6
 
     def __init__(self, config, parent=None):
         super().__init__(parent)
@@ -373,6 +374,7 @@ class SetupWizard(QDialog):
             self._buildLanguagePage(),
             self._buildThemePage(),
             self._buildAcrylicPage(),
+            self._buildInferencePage(),
             self._buildDonePage(),
         ]
         for p in self._pages:
@@ -585,6 +587,47 @@ class SetupWizard(QDialog):
 
         return w
 
+    def _buildInferencePage(self) -> QWidget:
+        w = QWidget()
+        ly = QVBoxLayout(w)
+        ly.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ly.setSpacing(14)
+
+        self._lbl_infer_title = _lbl("", 18, bold=True)
+        self._lbl_infer_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ly.addWidget(self._lbl_infer_title)
+
+        self._lbl_infer_sub = _lbl("", 12)
+        self._lbl_infer_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ly.addWidget(self._lbl_infer_sub)
+
+        ly.addSpacing(8)
+
+        backend_row = QHBoxLayout()
+        backend_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        backend_row.setSpacing(10)
+
+        self._lbl_infer_backend = _lbl("", 12, bold=True)
+        self._lbl_infer_backend.setMinimumWidth(140)
+        backend_row.addWidget(self._lbl_infer_backend)
+
+        if _HAS_FLUENT:
+            self._cmb_infer_backend = ComboBox()
+        else:
+            self._cmb_infer_backend = QComboBox()  # type: ignore[assignment]
+        self._cmb_infer_backend.setMinimumWidth(220)
+        self._cmb_infer_backend.currentTextChanged.connect(self._onInferenceBackendChanged)
+        backend_row.addWidget(self._cmb_infer_backend)
+        ly.addLayout(backend_row)
+
+        self._lbl_infer_hint = _lbl("", 10)
+        self._lbl_infer_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_infer_hint.setStyleSheet("color: #888888;")
+        ly.addWidget(self._lbl_infer_hint)
+
+        self._refreshInferenceComboTexts()
+        return w
+
     # ── Navigation ────────────────────────────────────────
 
     def _onNext(self):
@@ -653,6 +696,31 @@ class SetupWizard(QDialog):
         pct = round(val / 255 * 100)
         self._lbl_opacity_val.setText(f"{pct}%")
 
+    def _refreshInferenceComboTexts(self):
+        # Keep stable internal values while allowing language-aware labels.
+        selected_backend = str(getattr(self._config, "inference_backend", "auto")).lower()
+        options = [
+            ("auto", self._langManager.get("wizard_backend_auto", "Auto (Recommended)")),
+            ("directml", self._langManager.get("wizard_backend_directml", "DirectML")),
+            ("cuda", self._langManager.get("wizard_backend_cuda", "CUDA (NVIDIA)")),
+            ("cpu", self._langManager.get("wizard_backend_cpu", "CPU")),
+        ]
+        self._infer_text_to_value: dict[str, str] = {}
+
+        self._cmb_infer_backend.blockSignals(True)
+        self._cmb_infer_backend.clear()
+        for value, text in options:
+            self._cmb_infer_backend.addItem(text)
+            self._infer_text_to_value[text] = value
+
+        selected_text = next((text for value, text in options if value == selected_backend), options[0][1])
+        self._cmb_infer_backend.setCurrentText(selected_text)
+        self._cmb_infer_backend.blockSignals(False)
+
+    def _onInferenceBackendChanged(self, text: str):
+        value = self._infer_text_to_value.get(text, "auto")
+        self._config.inference_backend = value
+
     # ── Text Update (language-aware) ──────────────────────
 
     def _updateTexts(self):
@@ -693,6 +761,17 @@ class SetupWizard(QDialog):
             lm.get("enable_acrylic_hint", "Only available on Windows 11"))
         self._lbl_opacity.setText(
             lm.get("wizard_acrylic_opacity", "Window Opacity"))
+
+        # Inference backend
+        self._lbl_infer_title.setText(
+            lm.get("wizard_inference_title", "Choose Inference Backend"))
+        self._lbl_infer_sub.setText(
+            lm.get("wizard_inference_subtitle", "Select the backend used for ONNX inference."))
+        self._lbl_infer_backend.setText(
+            lm.get("wizard_inference_backend_label", "Backend:"))
+        self._lbl_infer_hint.setText(
+            lm.get("wizard_inference_hint", "Tip: DirectML is the safest default on Windows; CUDA is for NVIDIA with matching CUDA/cuDNN."))
+        self._refreshInferenceComboTexts()
 
         # Done
         self._lbl_done_title.setText(

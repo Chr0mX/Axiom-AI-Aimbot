@@ -1,0 +1,16 @@
+# Core runtime dependencies
+numpy
+opencv-python
+onnxruntime
+mss
+dxcam; platform_system == "Windows"
+
+# UI
+PyQt6
+PyQt6-Fluent-Widgets
+PyQt6-Frameless-Window
+
+# Windows / device integrations
+pywin32
+pyserial
+vgamepad
