@@ -123,11 +123,26 @@ class UVCCapture:
                 pass
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
-        """Return BGRA frame cropped by region when provided."""
+        """Return BGRA frame cropped by region when provided.
+
+        UVC preview always renders on the full capture frame so the preview
+        window remains independent from the AI detection crop region.
+        """
 
         ok, frame_bgr = self.cap.read()
         if not ok or frame_bgr is None:
             return None
+
+        full_frame_bgr = frame_bgr
+
+        if self.show_window:
+            try:
+                preview_frame = self._draw_overlay(full_frame_bgr.copy(), region)
+                render_frame = self._render_preview_frame(preview_frame)
+                cv2.imshow(self.window_name, render_frame)
+                cv2.waitKey(1)
+            except Exception:
+                pass
 
         if region is not None:
             frame_h, frame_w = frame_bgr.shape[:2]
@@ -141,15 +156,6 @@ class UVCCapture:
                 return None
             frame_bgr = frame_bgr[top:bottom, left:right]
 
-        if self.show_window:
-            try:
-                preview_frame = self._draw_overlay(frame_bgr.copy(), region)
-                render_frame = self._render_preview_frame(preview_frame)
-                cv2.imshow(self.window_name, render_frame)
-                cv2.waitKey(1)
-            except Exception:
-                pass
-
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
 
     def _draw_overlay(self, frame_bgr: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
@@ -162,17 +168,17 @@ class UVCCapture:
         h, w = frame_bgr.shape[:2]
         region_left = int(region.get('left', 0)) if region else 0
         region_top = int(region.get('top', 0)) if region else 0
+        region_width = int(region.get('width', w)) if region else w
+        region_height = int(region.get('height', h)) if region else h
 
-        cx = int(getattr(cfg, 'crosshairX', w // 2)) - region_left
-        cy = int(getattr(cfg, 'crosshairY', h // 2)) - region_top
+        cx = int(getattr(cfg, 'crosshairX', w // 2))
+        cy = int(getattr(cfg, 'crosshairY', h // 2))
 
         if bool(getattr(cfg, 'show_detect_range', False)):
-            range_size = int(getattr(cfg, 'detect_range_size', min(w, h)))
-            half = max(1, range_size // 2)
-            x1 = max(0, cx - half)
-            y1 = max(0, cy - half)
-            x2 = min(w - 1, cx + half)
-            y2 = min(h - 1, cy + half)
+            x1 = max(0, region_left)
+            y1 = max(0, region_top)
+            x2 = min(w - 1, region_left + region_width)
+            y2 = min(h - 1, region_top + region_height)
             cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (255, 140, 0), 1, cv2.LINE_AA)
 
         if bool(getattr(cfg, 'show_fov', True)):
@@ -204,10 +210,6 @@ class UVCCapture:
                     x1, y1, x2, y2 = [int(v) for v in box]
                 except Exception:
                     continue
-                x1 -= region_left
-                x2 -= region_left
-                y1 -= region_top
-                y2 -= region_top
                 if x2 <= 0 or y2 <= 0 or x1 >= w or y1 >= h:
                     continue
                 x1 = max(0, min(w - 1, x1))

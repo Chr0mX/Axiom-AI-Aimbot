@@ -289,7 +289,6 @@ class AxiomWindow(FluentWindow):
         for page in pages:
             if hasattr(page, 'setConfig'):
                 page.setConfig(config)
-        self.updateVisualsVisibilityForScreenshotMethod(getattr(config, 'screenshot_method', 'mss'))
         
         # 從配置還原主題設定（無條件強制套用，避免狀態不一致）
         saved_dark = getattr(config, 'dark_mode', False)
