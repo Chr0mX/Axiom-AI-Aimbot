@@ -1,0 +1,36 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - '1.0'
+      - '1.1'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create release notes file
+        run: |
+          cat > release-${GITHUB_REF_NAME}.md <<EOF
+          # Release ${GITHUB_REF_NAME}
+
+          Automated release for tag ${GITHUB_REF_NAME}.
+
+          - Repository: ${{ github.repository }}
+          - Commit: ${{ github.sha }}
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-${{ github.ref_name }}.md
