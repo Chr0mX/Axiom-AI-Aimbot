@@ -208,9 +208,18 @@ def start_ai_threads(
         if actual_providers:
             config.current_provider = actual_providers[0]
             logger.info("模型載入使用提供者: %s", actual_providers[0])
+            logger.info("最終啟用 ONNX provider: %s", config.current_provider)
+
+            requested_backend = getattr(config, "inference_backend", "auto")
+            if requested_backend == "cuda" and config.current_provider != "CUDAExecutionProvider":
+                logger.warning(
+                    "已選擇 CUDA 後端，但實際 provider 為 %s。請檢查 onnxruntime-gpu、NVIDIA Driver、CUDA/cuDNN 相容性。",
+                    config.current_provider,
+                )
         else:
             logger.warning("無法獲取提供者資訊")
             config.current_provider = providers[0] if providers else 'CPUExecutionProvider'
+            logger.info("最終啟用 ONNX provider: %s", config.current_provider)
     except Exception as e:
         logger.error("載入 ONNX 模型失敗: %s", e)
         logger.error("請確認已安裝對應 ONNX Runtime 後端（CUDA/DirectML/CPU）")
@@ -239,6 +248,17 @@ def main():
 
     config = Config()
     load_config(config)
+
+    try:
+        available_providers = ort.get_available_providers()
+    except Exception as e:
+        available_providers = ["CPUExecutionProvider"]
+        logger.warning("取得可用 ONNX providers 失敗，預設為 CPUExecutionProvider：%s", e)
+
+    selected_backend = getattr(config, "inference_backend", "auto")
+    logger.info("ONNX 可用 providers: %s", available_providers)
+    logger.info("設定選擇推理後端: %s", selected_backend)
+    logger.info("最終啟用 ONNX provider: 尚未載入模型")
     
     # 調試：顯示載入的滑鼠移動方式
     logger.info("配置載入：滑鼠移動方式 %s", config.mouse_move_method)
