@@ -53,6 +53,7 @@ class Config:
         self.uvc_show_window: bool = True
         self.uvc_window_name: str = "Axiom UVC Preview"
         self.uvc_preview_scale_mode: str = "scale_to_fit"
+        self.ndi_source_name: str = ""
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
         self.region: Dict[str, int] = {
@@ -247,6 +248,7 @@ class Config:
             'uvc_show_window': self.uvc_show_window,
             'uvc_window_name': self.uvc_window_name,
             'uvc_preview_scale_mode': self.uvc_preview_scale_mode,
+            'ndi_source_name': self.ndi_source_name,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
             'fov_follow_mouse': self.fov_follow_mouse,
@@ -446,9 +448,10 @@ def _validate_mouse_method(config: Config) -> None:
 
 def _validate_screenshot_method(config: Config) -> None:
     """驗證並修正螢幕截圖方式"""
-    valid_screenshot_methods = ('mss', 'dxcam', 'uvc')
+    valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
+    config.ndi_source_name = str(getattr(config, 'ndi_source_name', '') or '').strip()
     if getattr(config, 'uvc_capture_method', 'dshow') not in ('auto', 'dshow', 'msmf', 'any'):
         config.uvc_capture_method = 'dshow'
     if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (

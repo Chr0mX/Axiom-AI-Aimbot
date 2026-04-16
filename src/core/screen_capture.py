@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import time
 from typing import TYPE_CHECKING, Any
 
 import cv2
@@ -63,6 +65,55 @@ def list_supported_uvc_resolutions(
     finally:
         cap.release()
     return sorted(supported, key=lambda item: (item[0] * item[1], item[0]))
+
+
+def list_available_ndi_sources(timeout_ms: int = 1200) -> list[str]:
+    """Try to discover NDI source names.
+
+    Returns an empty list when NDI SDK/Python bindings are unavailable.
+    You can also prefill entries via `AXIOM_NDI_SOURCES` (comma-separated).
+    """
+
+    preset_sources = [s.strip() for s in os.getenv('AXIOM_NDI_SOURCES', '').split(',') if s.strip()]
+    discovered: list[str] = list(dict.fromkeys(preset_sources))
+
+    try:
+        import ndilib as ndi  # type: ignore[import-not-found]
+    except ImportError:
+        return discovered
+
+    try:
+        initialize = getattr(ndi, 'initialize', None)
+        if callable(initialize) and not bool(initialize()):
+            return discovered
+
+        create_find = getattr(ndi, 'find_create_v2', None) or getattr(ndi, 'find_create', None)
+        get_sources = getattr(ndi, 'find_get_current_sources', None)
+        destroy_find = getattr(ndi, 'find_destroy', None)
+        wait_for_sources = getattr(ndi, 'find_wait_for_sources', None)
+        if not callable(create_find) or not callable(get_sources):
+            return discovered
+
+        find_inst = create_find()
+        if find_inst is None:
+            return discovered
+        try:
+            if callable(wait_for_sources):
+                wait_for_sources(find_inst, int(timeout_ms))
+            else:
+                time.sleep(max(0.0, timeout_ms / 1000.0))
+            sources = get_sources(find_inst) or []
+            for source in sources:
+                name = str(getattr(source, 'ndi_name', '') or getattr(source, 'p_ndi_name', '')).strip()
+                if name and name not in discovered:
+                    discovered.append(name)
+        finally:
+            if callable(destroy_find):
+                destroy_find(find_inst)
+    except Exception:
+        return discovered
+
+    return discovered
 
 
 class UVCCapture:
@@ -355,6 +406,15 @@ def initialize_screen_capture(config: Config) -> Any:
             return uvc_capture
         except Exception as exc:
             _warn_once('uvc_fallback_mss', f"[截圖] UVC 初始化失敗: {exc}，將回退至 mss")
+    elif screenshot_method == 'ndi':
+        ndi_source_name = str(getattr(config, 'ndi_source_name', '')).strip()
+        if ndi_source_name:
+            _warn_once(
+                'ndi_fallback_mss',
+                f"[截圖] NDI 來源 '{ndi_source_name}' 尚未安裝對應後端，將回退至 mss",
+            )
+        else:
+            _warn_once('ndi_fallback_mss', '[截圖] NDI 擷取尚未安裝對應後端，將回退至 mss')
     elif screenshot_method != 'mss':
         _warn_once('invalid_screenshot_method', f"[截圖] 未知截圖方式 '{screenshot_method}'，已改為 mss")
 
