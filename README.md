@@ -196,6 +196,38 @@ Axiom is designed for gamers who are at a disadvantage compared to regular playe
 - **RAM**: 32 GB or higher
 - **Graphics**: RTX 3060 or better
 
+## Requirements / Acceleration
+
+Axiom supports two ONNX Runtime acceleration paths on Windows:
+
+- **DirectML (default)**
+  - Package: `onnxruntime-directml`
+  - Best first choice for broad hardware compatibility (NVIDIA / AMD / Intel GPUs that support DirectX 12).
+  - This is the default in `requirements.txt`.
+
+- **CUDA (optional, NVIDIA-only)**
+  - Package: `onnxruntime-gpu`
+  - Requires version-compatible **NVIDIA Driver + CUDA + cuDNN + ONNX Runtime GPU build**.
+  - If these versions do not match, ONNX Runtime usually falls back to CPU (or fails to load CUDA provider).
+
+### Install options
+
+- **Default (DirectML):**
+  - `pip install -r requirements.txt`
+  - or `pip install -r requirements-directml.txt`
+
+- **CUDA path (NVIDIA):**
+  - `pip install -r requirements-cuda.txt`
+
+### Runtime provider selection
+
+At startup, Axiom logs:
+- `ort.get_available_providers()`
+- selected backend from config (`auto` / `cuda` / `directml` / `cpu`)
+- final active provider used by the loaded model session
+
+Use these logs to verify whether CUDA was actually active, or whether runtime fell back to DirectML/CPU.
+
 ## Usage
 
 ### Basic Operation
