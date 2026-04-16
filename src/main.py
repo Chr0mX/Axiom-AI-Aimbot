@@ -188,25 +188,6 @@ def _get_nvidia_smi_summary() -> str | None:
         return None
 
 
-def _recommended_ort_gpu_package(nvcc_version: str | None) -> str:
-    """
-    Return a practical install hint for onnxruntime-gpu based on CUDA major version.
-
-    ONNX Runtime docs indicate:
-    - PyPI defaults to CUDA 12.x from ORT 1.19+
-    - CUDA 11.x users should generally stay on ORT 1.18.x
-    """
-    if not nvcc_version:
-        return "pip install onnxruntime-gpu"
-
-    major = nvcc_version.split(".", 1)[0]
-    if major == "11":
-        return "pip install \"onnxruntime-gpu==1.18.*\""
-    if major == "12":
-        return "pip install -U onnxruntime-gpu"
-    return "pip install onnxruntime-gpu"
-
-
 def log_cuda_startup_check(config: Config, available_providers: list[str]) -> None:
     """
     Startup diagnostics for CUDA availability and likely runtime behavior.
@@ -217,7 +198,6 @@ def log_cuda_startup_check(config: Config, available_providers: list[str]) -> No
     has_cuda_ep = "CUDAExecutionProvider" in set(available_providers)
     nvcc_version = _get_nvcc_version()
     nvidia_summary = _get_nvidia_smi_summary()
-    install_hint = _recommended_ort_gpu_package(nvcc_version)
 
     logger.info(
         "CUDA 啟動檢查 | backend=%s | CUDAExecutionProvider=%s | nvcc=%s | nvidia-smi=%s",
@@ -234,11 +214,8 @@ def log_cuda_startup_check(config: Config, available_providers: list[str]) -> No
             logger.warning(
                 "已選擇 CUDA，但目前未偵測到 CUDAExecutionProvider；請安裝/檢查 onnxruntime-gpu 與 NVIDIA Driver/CUDA/cuDNN 版本相容性。"
             )
-            logger.warning("建議安裝指令: %s", install_hint)
-    elif selected_backend == "auto":
-        logger.info("CUDA 安裝建議（依本機 CUDA Toolkit 判斷）: %s", install_hint)
-        if has_cuda_ep:
-            logger.info("Auto 後端將優先嘗試 CUDAExecutionProvider。")
+    elif selected_backend == "auto" and has_cuda_ep:
+        logger.info("Auto 後端將優先嘗試 CUDAExecutionProvider。")
 
 def start_ai_threads(
     config: Config,
