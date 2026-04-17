@@ -6,9 +6,9 @@ import math
 import glob
 import re
 import sys
+import shutil
 import subprocess
 import threading
-from urllib.error import HTTPError
 from urllib.request import urlretrieve
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QStackedWidget
@@ -27,6 +27,7 @@ from ..components.slider_spin_card import SliderSpinCard, SliderLabelCard
 
 from ..base_page import BasePage
 from ..language_manager import t
+from win_utils.admin import is_admin, request_admin_privileges
 
 
 class AimPage(BasePage):
@@ -1179,16 +1180,26 @@ class AimPage(BasePage):
     def _runPipInstall(self, package_args: list[str]) -> bool:
         python_exe = self._getEmbeddedPythonExe()
         install_cmd = [python_exe, "-m", "pip", "install", *package_args]
+        print(f"[Dependency] Running pip command: {' '.join(install_cmd)}")
         try:
-            subprocess.run(
+            result = subprocess.run(
                 install_cmd,
                 check=True,
                 capture_output=True,
                 text=True,
             )
+            if result.stdout:
+                print(f"[Dependency][pip][stdout]\n{result.stdout}")
+            if result.stderr:
+                print(f"[Dependency][pip][stderr]\n{result.stderr}")
+            print("[Dependency] Pip install completed successfully.")
             return True
         except subprocess.CalledProcessError as exc:
             error_text = exc.stderr or exc.stdout or str(exc)
+            if exc.stdout:
+                print(f"[Dependency][pip][stdout]\n{exc.stdout}")
+            if exc.stderr:
+                print(f"[Dependency][pip][stderr]\n{exc.stderr}")
             lowered_error = error_text.lower()
             should_retry_user_install = (
                 "winerror 5" in lowered_error
@@ -1197,15 +1208,27 @@ class AimPage(BasePage):
             )
             if should_retry_user_install:
                 try:
-                    subprocess.run(
-                        [python_exe, "-m", "pip", "install", "--user", *package_args],
+                    user_cmd = [python_exe, "-m", "pip", "install", "--user", *package_args]
+                    print(f"[Dependency] Retrying pip command with --user: {' '.join(user_cmd)}")
+                    user_result = subprocess.run(
+                        user_cmd,
                         check=True,
                         capture_output=True,
                         text=True,
                     )
+                    if user_result.stdout:
+                        print(f"[Dependency][pip --user][stdout]\n{user_result.stdout}")
+                    if user_result.stderr:
+                        print(f"[Dependency][pip --user][stderr]\n{user_result.stderr}")
+                    print("[Dependency] Pip install completed successfully via --user.")
                     return True
                 except subprocess.CalledProcessError as user_exc:
                     error_text = user_exc.stderr or user_exc.stdout or str(user_exc)
+                    if user_exc.stdout:
+                        print(f"[Dependency][pip --user][stdout]\n{user_exc.stdout}")
+                    if user_exc.stderr:
+                        print(f"[Dependency][pip --user][stderr]\n{user_exc.stderr}")
+            print(f"[Dependency] Pip install failed: {error_text}")
             QMessageBox.warning(
                 self,
                 "Install failed",
@@ -1216,6 +1239,50 @@ class AimPage(BasePage):
                     "If needed, run as Administrator."
                 ),
             )
+            return False
+
+    def _ensureAdminForSystemInstall(self) -> bool:
+        """Ensure elevated permission for exe download/install operations."""
+        if is_admin():
+            print("[Dependency] Already running with administrator privileges.")
+            return True
+        print("[Dependency] Administrator privileges required for exe download/install. Requesting elevation...")
+        elevated = request_admin_privileges()
+        if not elevated:
+            print("[Dependency] Failed to acquire administrator privileges.")
+            QMessageBox.warning(
+                self,
+                "Administrator permissions required",
+                "System runtime install requires administrator permissions. Please restart as Administrator and retry.",
+            )
+        return elevated
+
+    def _downloadInstaller(self, url: str, output_name: str) -> str:
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        output_path = os.path.join(src_dir, output_name)
+        print(f"[Dependency] Downloading installer: {url}")
+        print(f"[Dependency] Saving installer to: {output_path}")
+        urlretrieve(url, output_path)
+        print("[Dependency] Installer download finished.")
+        return output_path
+
+    def _runExeInstaller(self, installer_path: str, silent_args: list[str] | None = None) -> bool:
+        install_cmd = [installer_path, *(silent_args or ["/S"])]
+        print(f"[Dependency] Running installer command: {' '.join(install_cmd)}")
+        try:
+            result = subprocess.run(install_cmd, check=True, capture_output=True, text=True)
+            if result.stdout:
+                print(f"[Dependency][installer][stdout]\n{result.stdout}")
+            if result.stderr:
+                print(f"[Dependency][installer][stderr]\n{result.stderr}")
+            print("[Dependency] Installer command completed successfully.")
+            return True
+        except subprocess.CalledProcessError as exc:
+            if exc.stdout:
+                print(f"[Dependency][installer][stdout]\n{exc.stdout}")
+            if exc.stderr:
+                print(f"[Dependency][installer][stderr]\n{exc.stderr}")
+            print(f"[Dependency] Installer command failed: {exc}")
             return False
 
     def _detectCudaMajorVersion(self) -> int | None:
@@ -1235,6 +1302,21 @@ class AimPage(BasePage):
             return int(match.group(1))
         except ValueError:
             return None
+
+    def _isNdiRuntimeInstalled(self) -> bool:
+        ndi_dll_candidates = [
+            os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "NDI", "NDI 6 Runtime", "Processing.NDI.Lib.x64.dll"),
+            os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "NDI", "NDI 5 Runtime", "Processing.NDI.Lib.x64.dll"),
+            os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "NDI", "NDI 6 Runtime", "Processing.NDI.Lib.x64.dll"),
+            os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "NDI", "NDI 5 Runtime", "Processing.NDI.Lib.x64.dll"),
+        ]
+        for dll_path in ndi_dll_candidates:
+            if dll_path and os.path.exists(dll_path):
+                print(f"[Dependency][NDI] Runtime detected via DLL: {dll_path}")
+                return True
+        in_path = bool(shutil.which("Processing.NDI.Lib.x64.dll"))
+        print(f"[Dependency][NDI] Runtime detected via PATH lookup: {in_path}")
+        return in_path
 
     def _saveConfigAndRelaunch(self):
         if not self._config:
@@ -1256,56 +1338,94 @@ class AimPage(BasePage):
         QApplication.quit()
 
     def _installCudaDependenciesAndRestart(self):
+        print("[Dependency][CUDA] Starting CUDA dependency setup flow.")
         base_packages = ["coloredlogs", "flatbuffers", "numpy", "packaging", "protobuf", "sympy"]
         if not self._runPipInstall(base_packages):
             return
+
         cuda_major = self._detectCudaMajorVersion()
+        print(f"[Dependency][CUDA] Detected CUDA major version: {cuda_major}")
+        if cuda_major not in (12, 13):
+            if not self._ensureAdminForSystemInstall():
+                return
+            try:
+                installer_path = self._downloadInstaller(
+                    "https://developer.download.nvidia.com/compute/cuda/13.2.1/local_installers/cuda_13.2.1_windows.exe",
+                    "cuda_13.2.1_windows.exe",
+                )
+            except Exception as exc:
+                print(f"[Dependency][CUDA] Failed to download CUDA runtime installer: {exc}")
+                QMessageBox.warning(
+                    self,
+                    "CUDA install failed",
+                    f"Failed to download CUDA runtime installer:\n{exc}",
+                )
+                return
+            if not self._runExeInstaller(installer_path, ["/S"]):
+                QMessageBox.warning(
+                    self,
+                    "CUDA install failed",
+                    "Failed to run CUDA runtime installer. Please install manually and retry.",
+                )
+                return
+            cuda_major = self._detectCudaMajorVersion()
+            print(f"[Dependency][CUDA] CUDA major version after installer run: {cuda_major}")
+
         if cuda_major == 12:
-            ort_pkg = "onnxruntime-gpu==1.19.2"
+            ort_pkg = "onnxruntime-gpu[cudnn]==1.19.2"
         elif cuda_major == 13:
-            ort_pkg = "onnxruntime-gpu==1.24.4"
+            ort_pkg = "onnxruntime-gpu[cudnn]==1.24.4"
         else:
             QMessageBox.warning(
                 self,
                 "CUDA detection failed",
-                "Unable to detect CUDA major version 12 or 13 via nvidia-smi.",
+                "Unable to detect CUDA major version 12 or 13 after installation attempt.",
             )
             return
         if not self._runPipInstall([ort_pkg]):
             return
+        print("[Dependency][CUDA] CUDA setup completed successfully. Relaunching app.")
         QMessageBox.information(self, "CUDA configured", "CUDA dependencies installed. The app will relaunch now.")
         self._saveConfigAndRelaunch()
 
     def _installNdiDependenciesAndRestart(self):
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        ndi_sources = [
-            ("https://downloads.ndi.tv/Tools/NDI%206%20Tools.exe", "NDI 6 Tools.exe"),
-            ("https://downloads.ndi.tv/SDK/NDI_SDK/NDI%206%20Runtime.exe", "NDI 6 Runtime.exe"),
-        ]
-        install_error = None
-        for ndi_url, installer_name in ndi_sources:
-            installer_path = os.path.join(src_dir, installer_name)
-            try:
-                urlretrieve(ndi_url, installer_path)
-                subprocess.run([installer_path, "/S"], check=True)
-                install_error = None
-                break
-            except HTTPError as exc:
-                install_error = exc
-                if exc.code == 403:
-                    continue
-            except Exception as exc:
-                install_error = exc
-                continue
-        if install_error is not None:
-            QMessageBox.warning(
-                self,
-                "NDI install failed",
-                f"{install_error}\n\nPlease install NDI manually from https://ndi.video/tools/ and try again.",
-            )
-            return
+        print("[Dependency][NDI] Starting NDI dependency setup flow.")
+        print("[Dependency][NDI] Step 1/3: Installing cyndilib first (pip install cyndilib).")
         if not self._runPipInstall(["cyndilib"]):
             return
+
+        print("[Dependency][NDI] Step 2/3: Detecting NDI runtime installation status.")
+        ndi_runtime_installed = self._isNdiRuntimeInstalled()
+        print(f"[Dependency][NDI] Runtime installed: {ndi_runtime_installed}")
+        if not ndi_runtime_installed:
+            if not self._ensureAdminForSystemInstall():
+                return
+            try:
+                installer_path = self._downloadInstaller(
+                    "https://downloads.ndi.tv/SDK/NDI_SDK/NDI%206%20Runtime.exe",
+                    "NDI 6 Runtime.exe",
+                )
+            except Exception as exc:
+                print(f"[Dependency][NDI] Failed to download NDI runtime installer: {exc}")
+                QMessageBox.warning(
+                    self,
+                    "NDI install failed",
+                    f"Failed to download NDI runtime installer:\n{exc}",
+                )
+                return
+            if not self._runExeInstaller(installer_path, ["/S"]):
+                QMessageBox.warning(
+                    self,
+                    "NDI install failed",
+                    "Failed to run NDI runtime installer. Please install manually and retry.",
+                )
+                return
+            print(f"[Dependency][NDI] Runtime installed after installer run: {self._isNdiRuntimeInstalled()}")
+        else:
+            print("[Dependency][NDI] Runtime already installed. Skipping installer download.")
+
+        print("[Dependency][NDI] Step 3/3: Saving config and restarting app.")
+        print("[Dependency][NDI] NDI setup completed successfully. Relaunching app.")
         QMessageBox.information(self, "NDI configured", "NDI runtime and cyndilib installed. The app will relaunch now.")
         self._saveConfigAndRelaunch()
 
