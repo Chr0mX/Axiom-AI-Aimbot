@@ -24,7 +24,13 @@ from .ai_loop_utils import (
     update_queues,
 )
 from .inference import PIDController, non_max_suppression, postprocess_outputs, preprocess_image
-from .screen_capture import _cleanup_capture, capture_frame, initialize_screen_capture, reinitialize_if_method_changed
+from .screen_capture import (
+    _cleanup_capture,
+    _detect_active_capture_method,
+    capture_frame,
+    initialize_screen_capture,
+    reinitialize_if_method_changed,
+)
 
 if TYPE_CHECKING:
     import onnxruntime as ort
@@ -176,7 +182,10 @@ def ai_logic_loop(
 
     def _capture_worker() -> None:
         _capture_backend[0] = initialize_screen_capture(config)
-        _active_method[0] = getattr(config, 'screenshot_method', 'mss')
+        _active_method[0] = _detect_active_capture_method(
+            _capture_backend[0],
+            getattr(config, 'screenshot_method', 'mss'),
+        )
 
         high_res_timer_enabled = False
         last_capture_perf = 0.0

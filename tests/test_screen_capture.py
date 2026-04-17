@@ -145,3 +145,81 @@ def test_extract_ndi_source_video_meta_supports_rate_fraction():
     assert (width, height) == (1920, 1080)
     assert fps is not None
     assert abs(fps - 59.94) < 0.02
+
+
+def test_detect_active_capture_method_identifies_fallback_to_mss():
+    from core import screen_capture as sc
+
+    class FakeMSSBackend:
+        __module__ = 'mss.windows'
+
+    backend = FakeMSSBackend()
+    assert sc._detect_active_capture_method(backend, 'ndi') == 'mss'
+
+
+def test_reinitialize_if_method_changed_uses_detected_active_method(monkeypatch):
+    from core import screen_capture as sc
+
+    class FakeMSSBackend:
+        __module__ = 'mss.windows'
+
+    class FakeNDIBackend:
+        pass
+
+    calls = {'count': 0}
+
+    def fake_initialize(config):
+        calls['count'] += 1
+        return FakeNDIBackend()
+
+    monkeypatch.setattr(sc, 'initialize_screen_capture', fake_initialize)
+    config = SimpleNamespace(screenshot_method='ndi')
+
+    # Simulate previous NDI init failed and app is currently running on mss.
+    backend, active = sc.reinitialize_if_method_changed(config, FakeMSSBackend(), 'ndi')
+
+    assert calls['count'] == 1
+    assert isinstance(backend, FakeNDIBackend)
+    assert active == 'ndi'
+
+
+def test_wait_for_receiver_connection_succeeds_after_connect(monkeypatch):
+    from core import screen_capture as sc
+
+    class FakeVideoFrame:
+        xres = 0
+
+    class FakeFrameSync:
+        def __init__(self, vf):
+            self.vf = vf
+            self.calls = 0
+
+        def capture_video(self):
+            self.calls += 1
+            if self.calls >= 2:
+                self.vf.xres = 1920
+
+    class FakeReceiver:
+        def __init__(self):
+            self.calls = 0
+
+        def is_connected(self):
+            self.calls += 1
+            return self.calls >= 2
+
+    monkeypatch.setattr(sc.time, 'sleep', lambda _: None)
+    vf = FakeVideoFrame()
+    frame_sync = FakeFrameSync(vf)
+    receiver = FakeReceiver()
+
+    ok = sc._wait_for_receiver_connection(
+        receiver,
+        frame_sync,
+        vf,
+        None,
+        None,
+        attempts=5,
+        interval_seconds=0.0,
+    )
+
+    assert ok is True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 import cv2
@@ -13,6 +14,58 @@ if TYPE_CHECKING:
 
 
 _WARNED_MESSAGES: set[str] = set()
+_CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
+
+
+def _detect_active_capture_method(screen_capture: Any, fallback_method: str = 'mss') -> str:
+    """Best-effort detection of the currently active capture backend name."""
+
+    if screen_capture is None:
+        return str(fallback_method or 'mss')
+
+    if isinstance(screen_capture, NDICapture):
+        return 'ndi'
+    if isinstance(screen_capture, UVCCapture):
+        return 'uvc'
+
+    module_name = str(getattr(type(screen_capture), '__module__', '')).lower()
+    if module_name.startswith('mss') or '.mss' in module_name:
+        return 'mss'
+    if module_name.startswith('dxcam') or '.dxcam' in module_name:
+        return 'dxcam'
+
+    return str(fallback_method or 'mss')
+
+
+def _wait_for_receiver_connection(
+    receiver: Any,
+    frame_sync: Any | None,
+    video_frame_sync: Any | None,
+    receive_fn: Any | None,
+    receive_video_flag: Any | None,
+    attempts: int = 30,
+    interval_seconds: float = 0.1,
+) -> bool:
+    """Wait until a cyndilib receiver becomes connected with video-ready state."""
+
+    for _ in range(max(1, int(attempts))):
+        try:
+            if receiver.is_connected():
+                if frame_sync is not None and video_frame_sync is not None:
+                    frame_sync.capture_video()
+                    if int(getattr(video_frame_sync, 'xres', 0) or 0) > 0:
+                        return True
+                elif callable(receive_fn) and receive_video_flag is not None:
+                    recv_result = receive_fn(receive_video_flag, 100)
+                    if recv_result & receive_video_flag:
+                        return True
+                else:
+                    return True
+        except Exception:
+            pass
+        time.sleep(max(0.0, float(interval_seconds)))
+
+    return bool(getattr(receiver, 'is_connected', lambda: False)())
 
 
 def _load_cyndilib_symbols() -> dict[str, Any]:
@@ -418,28 +471,25 @@ class NDICapture:
             else:
                 raise RuntimeError('Unsupported cyndilib version: no usable video frame API found')
 
-            if source is not None and not self._receiver.is_connected():
+            self._last_reconnect_attempt = 0.0
+            if source is not None:
+                # Always set source explicitly; some cyndilib versions don't
+                # reliably auto-connect when source is only passed in ctor.
                 self._receiver.set_source(source)
         except Exception as exc:
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
 
-        if not self._receiver.is_connected():
-            for _ in range(10):
-                if self._receiver.is_connected():
-                    break
-                try:
-                    if getattr(self, '_video_frame_sync', None) is not None and getattr(self._receiver, 'frame_sync', None) is not None:
-                        self._receiver.frame_sync.capture_video()
-                        if int(getattr(self._video_frame_sync, 'xres', 0) or 0) > 0:
-                            break
-                    else:
-                        recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 100)
-                        if recv_result & self._ReceiveFrameType.recv_video:
-                            break
-                except Exception:
-                    pass
+        connected = _wait_for_receiver_connection(
+            self._receiver,
+            getattr(self._receiver, 'frame_sync', None),
+            getattr(self, '_video_frame_sync', None),
+            getattr(self._receiver, 'receive', None),
+            getattr(self._ReceiveFrameType, 'recv_video', None),
+            attempts=30,
+            interval_seconds=0.1,
+        )
 
-        if not self._receiver.is_connected():
+        if not connected:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
 
         if self.show_window:
@@ -510,6 +560,28 @@ class NDICapture:
         return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA)
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
+        if not self._receiver.is_connected():
+            now = time.perf_counter()
+            if now - float(getattr(self, '_last_reconnect_attempt', 0.0) or 0.0) > 1.0:
+                self._last_reconnect_attempt = now
+                source = self._resolve_source()
+                if source is not None:
+                    try:
+                        self._receiver.set_source(source)
+                        _wait_for_receiver_connection(
+                            self._receiver,
+                            getattr(self._receiver, 'frame_sync', None),
+                            getattr(self, '_video_frame_sync', None),
+                            getattr(self._receiver, 'receive', None),
+                            getattr(self._ReceiveFrameType, 'recv_video', None),
+                            attempts=5,
+                            interval_seconds=0.05,
+                        )
+                    except Exception:
+                        pass
+            if not self._receiver.is_connected():
+                return None
+
         frame_obj: Any | None = None
         if getattr(self, '_video_frame_sync', None) is not None and getattr(self._receiver, 'frame_sync', None) is not None:
             try:
@@ -919,28 +991,39 @@ def reinitialize_if_method_changed(
     """
 
     desired = getattr(config, 'screenshot_method', 'mss')
-    if desired == active_method:
+    current_active = _detect_active_capture_method(current_capture, active_method)
+
+    # If the user still wants a non-mss backend but we're currently running on
+    # mss (due to fallback), periodically retry reinitialization.
+    if desired != current_active:
+        now = time.perf_counter()
+        last_attempt = float(getattr(config, '_last_capture_reinit_attempt', 0.0) or 0.0)
+        if now - last_attempt < _CAPTURE_RETRY_INTERVAL_SECONDS:
+            return current_capture, current_active
+        setattr(config, '_last_capture_reinit_attempt', now)
+
+    if desired == current_active:
         if desired == 'uvc' and hasattr(current_capture, 'config_signature'):
             if getattr(current_capture, 'config_signature', None) != _uvc_signature(config):
                 print('[截圖] 偵測到 UVC 設定變更，正在重新初始化…')
             else:
-                return current_capture, active_method
+                return current_capture, current_active
         elif desired == 'ndi' and hasattr(current_capture, 'config_signature'):
             if getattr(current_capture, 'config_signature', None) != _ndi_signature(config):
                 print('[截圖] 偵測到 NDI 設定變更，正在重新初始化…')
             else:
-                return current_capture, active_method
+                return current_capture, current_active
         else:
-            return current_capture, active_method
+            return current_capture, current_active
 
-    print(f'[截圖] 偵測到截圖方式變更: {active_method} → {desired}，正在重新初始化…')
+    print(f'[截圖] 偵測到截圖方式變更: {current_active} → {desired}，正在重新初始化…')
 
     # Release the old backend first
     _cleanup_capture(current_capture)
 
     new_capture = initialize_screen_capture(config)
     # Keep user's configured method in config; active backend is tracked separately.
-    new_method = getattr(config, 'screenshot_method', 'mss')
+    new_method = _detect_active_capture_method(new_capture, desired)
     return new_capture, new_method
 
 
