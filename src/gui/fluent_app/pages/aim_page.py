@@ -1191,8 +1191,12 @@ class AimPage(BasePage):
             self._config.uvc_preview_scale_mode = str(text)
 
     def _onNdiSourceChanged(self, text):
-        if self._config:
-            self._config.ndi_source_name = str(text).strip()
+        if not self._config:
+            return
+        source_name = self.ndiSourceCombo.currentData()
+        if not isinstance(source_name, str) or not source_name.strip():
+            source_name = str(text).strip()
+        self._config.ndi_source_name = source_name.strip()
 
     def _refreshUvcResolutions(self):
         if not self._config:
@@ -1225,24 +1229,39 @@ class AimPage(BasePage):
         if not self._config:
             return
         try:
-            from core.screen_capture import list_available_ndi_sources
-            sources = list_available_ndi_sources()
+            from core.screen_capture import list_available_ndi_source_details
+            source_details = list_available_ndi_source_details()
         except Exception:
-            sources = []
+            source_details = []
 
-        current_text = self.ndiSourceCombo.currentText().strip()
+        current_name = self.ndiSourceCombo.currentData()
+        if not isinstance(current_name, str):
+            current_name = self.ndiSourceCombo.currentText().strip()
         configured = str(getattr(self._config, 'ndi_source_name', '')).strip()
+
         self.ndiSourceCombo.blockSignals(True)
         self.ndiSourceCombo.clear()
-        for source in sources:
-            self.ndiSourceCombo.addItem(source)
-        if configured and self.ndiSourceCombo.findText(configured) < 0:
-            self.ndiSourceCombo.addItem(configured)
-        fallback = current_text or configured
-        if fallback:
-            idx = self.ndiSourceCombo.findText(fallback)
-            if idx >= 0:
-                self.ndiSourceCombo.setCurrentIndex(idx)
+
+        known_names: set[str] = set()
+        for detail in source_details:
+            name = str(detail.get('name', '')).strip()
+            if not name:
+                continue
+            label = str(detail.get('label', '')).strip() or name
+            self.ndiSourceCombo.addItem(label, name)
+            known_names.add(name)
+
+        if configured and configured not in known_names:
+            self.ndiSourceCombo.addItem(f"{configured} (Unknown @ Unknown fps)", configured)
+
+        fallback_name = configured or (current_name if isinstance(current_name, str) else '')
+        if fallback_name:
+            for i in range(self.ndiSourceCombo.count()):
+                data = self.ndiSourceCombo.itemData(i)
+                if isinstance(data, str) and data == fallback_name:
+                    self.ndiSourceCombo.setCurrentIndex(i)
+                    break
+
         self.ndiSourceCombo.blockSignals(False)
 
     def _updateCaptureControlsVisibility(self, screenshot_method):
