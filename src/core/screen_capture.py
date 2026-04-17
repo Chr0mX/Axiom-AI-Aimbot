@@ -15,6 +15,26 @@ if TYPE_CHECKING:
 _WARNED_MESSAGES: set[str] = set()
 
 
+def _load_ndi_framesync_symbols() -> dict[str, Any]:
+    """Load the cyndilib frame-sync API used by the NDI reference implementation."""
+
+    try:
+        from cyndilib.finder import Finder  # type: ignore[import-not-found]
+        from cyndilib.receiver import Receiver  # type: ignore[import-not-found]
+        from cyndilib.video_frame import VideoFrameSync  # type: ignore[import-not-found]
+        from cyndilib.wrapper.ndi_recv import RecvBandwidth, RecvColorFormat  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError('cyndilib (frame_sync API) is not installed') from exc
+
+    return {
+        'Finder': Finder,
+        'Receiver': Receiver,
+        'VideoFrameSync': VideoFrameSync,
+        'RecvColorFormat': RecvColorFormat,
+        'RecvBandwidth': RecvBandwidth,
+    }
+
+
 def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str]:
     return (
         int(getattr(config, 'uvc_device_index', 0)),
@@ -159,11 +179,15 @@ def _extract_ndi_source_video_meta(source: Any) -> tuple[int | None, int | None,
 def _render_preview_frame(window_name: str, mode: str, frame_bgr: np.ndarray) -> np.ndarray:
     """Render capture preview according to configured preview mode."""
 
+    # Lowest-latency mode: avoid any resize/canvas composition work.
+    if mode == 'low_latency':
+        return frame_bgr
+
     if mode == 'scale_to_canvas':
         try:
             _, _, width, height = cv2.getWindowImageRect(window_name)
             if width > 0 and height > 0:
-                return cv2.resize(frame_bgr, (width, height), interpolation=cv2.INTER_LINEAR)
+                return cv2.resize(frame_bgr, (width, height), interpolation=cv2.INTER_NEAREST)
         except Exception:
             return frame_bgr
     if mode == 'fit_to_screen':
@@ -189,8 +213,10 @@ def _render_preview_frame(window_name: str, mode: str, frame_bgr: np.ndarray) ->
         ratio = min(width / max(1, w), height / max(1, h))
         draw_w = max(1, int(w * ratio))
         draw_h = max(1, int(h * ratio))
-        resized = cv2.resize(frame_bgr, (draw_w, draw_h), interpolation=cv2.INTER_LINEAR)
-        canvas = np.zeros((height, width, 3), dtype=np.uint8)
+        resized = cv2.resize(frame_bgr, (draw_w, draw_h), interpolation=cv2.INTER_NEAREST)
+        channels = 1 if frame_bgr.ndim < 3 else frame_bgr.shape[2]
+        canvas_shape = (height, width) if channels == 1 else (height, width, channels)
+        canvas = np.zeros(canvas_shape, dtype=np.uint8)
         x = (width - draw_w) // 2
         y = (height - draw_h) // 2
         canvas[y:y + draw_h, x:x + draw_w] = resized
@@ -203,12 +229,14 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
     """Return discovered NDI sources with best-effort video metadata."""
 
     try:
-        from cyndilib import VideoRecvFrame  # type: ignore[import-not-found]
-        from cyndilib.finder import Finder  # type: ignore[import-not-found]
-        from cyndilib.receiver import ReceiveFrameType, Receiver  # type: ignore[import-not-found]
-        from cyndilib.wrapper import RecvColorFormat  # type: ignore[import-not-found]
-    except ImportError:
+        symbols = _load_ndi_framesync_symbols()
+    except RuntimeError:
         return []
+    Finder = symbols['Finder']
+    Receiver = symbols['Receiver']
+    VideoFrameSync = symbols['VideoFrameSync']
+    RecvColorFormat = symbols['RecvColorFormat']
+    RecvBandwidth = symbols['RecvBandwidth']
 
     details: list[dict[str, str | int | float | None]] = []
 
@@ -242,20 +270,27 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
                 if source is not None:
                     try:
                         width, height, fps = _extract_ndi_source_video_meta(source)
-                        receiver = Receiver(source=source, color_format=RecvColorFormat.BGRX_BGRA)
-                        video_frame = VideoRecvFrame()
-                        receiver.set_video_frame(video_frame)
+                        receiver = Receiver(
+                            source=source,
+                            color_format=RecvColorFormat.RGBX_RGBA,
+                            bandwidth=RecvBandwidth.highest,
+                        )
+                        video_frame = VideoFrameSync()
+                        receiver.frame_sync.set_video_frame(video_frame)
                         for _ in range(10):
-                            recv_result = receiver.receive(ReceiveFrameType.recv_video, 350)
-                            if recv_result & ReceiveFrameType.recv_video:
-                                frame_w, frame_h = video_frame.get_resolution()
-                                if frame_w and frame_h:
-                                    width, height = int(frame_w), int(frame_h)
-                                frame_rate = video_frame.get_frame_rate()
-                                if frame_rate:
-                                    fps = float(frame_rate)
-                                if width and height and fps:
-                                    break
+                            receiver.frame_sync.capture_video()
+                            frame_w = int(getattr(video_frame, 'xres', 0) or 0)
+                            frame_h = int(getattr(video_frame, 'yres', 0) or 0)
+                            if frame_w and frame_h:
+                                width, height = int(frame_w), int(frame_h)
+                            try:
+                                frame_rate = float(video_frame.get_frame_rate() or 0)
+                            except Exception:
+                                frame_rate = 0.0
+                            if frame_rate > 0:
+                                fps = frame_rate
+                            if width and height and fps:
+                                break
                     except Exception:
                         pass
                     finally:
@@ -289,25 +324,26 @@ class NDICapture:
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
         self.window_name = str(getattr(config, 'ndi_window_name', 'Axiom NDI Preview'))
-        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
+        self.preview_scale_mode = 'low_latency'
         self._finder: Any | None = None
 
         try:
-            from cyndilib import VideoRecvFrame  # type: ignore[import-not-found]
-            from cyndilib.finder import Finder  # type: ignore[import-not-found]
-            from cyndilib.receiver import ReceiveFrameType, Receiver  # type: ignore[import-not-found]
-            from cyndilib.wrapper import RecvColorFormat  # type: ignore[import-not-found]
-        except ImportError as exc:
+            symbols = _load_ndi_framesync_symbols()
+        except RuntimeError as exc:
             raise RuntimeError('cyndilib is not installed') from exc
-        self._Finder = Finder
-        self._ReceiveFrameType = ReceiveFrameType
+        self._Finder = symbols['Finder']
+        Receiver = symbols['Receiver']
+        RecvColorFormat = symbols['RecvColorFormat']
+        RecvBandwidth = symbols['RecvBandwidth']
+        VideoFrameSync = symbols['VideoFrameSync']
 
         try:
             self._receiver = Receiver(
-                color_format=RecvColorFormat.BGRX_BGRA,
+                color_format=RecvColorFormat.RGBX_RGBA,
+                bandwidth=RecvBandwidth.highest,
             )
-            self._video_frame = VideoRecvFrame()
-            self._receiver.set_video_frame(self._video_frame)
+            self._video_frame_sync = VideoFrameSync()
+            self._receiver.frame_sync.set_video_frame(self._video_frame_sync)
 
             source = self._resolve_source()
             if source is not None:
@@ -320,8 +356,8 @@ class NDICapture:
                 if self._receiver.is_connected():
                     break
                 try:
-                    recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 250)
-                    if recv_result & self._ReceiveFrameType.recv_video:
+                    self._receiver.frame_sync.capture_video()
+                    if int(getattr(self._video_frame_sync, 'xres', 0) or 0) > 0:
                         break
                 except Exception:
                     pass
@@ -363,52 +399,31 @@ class NDICapture:
 
     @staticmethod
     def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
-        width, height = frame.get_resolution()
+        width = int(getattr(frame, 'xres', 0) or 0)
+        height = int(getattr(frame, 'yres', 0) or 0)
         if width <= 0 or height <= 0:
             return None
 
-        raw = np.asarray(frame.current_frame_data, dtype=np.uint8)
+        raw = frame.get_array()
+        if raw is None:
+            return None
+        raw = np.asarray(raw, dtype=np.uint8)
         if raw.size == 0:
             return None
 
-        fourcc = str(frame.get_fourcc()).split('.')[-1].upper()
-        line_stride = int(frame.get_line_stride() or 0)
-
-        if fourcc in {'BGRA', 'BGRX', 'RGBA', 'RGBX'}:
-            row_bytes = abs(line_stride) if line_stride else (width * 4)
-            expected = row_bytes * height
-            if raw.size < expected:
-                return None
-            img = raw[:expected].reshape(height, row_bytes)
-            img = img[:, : width * 4].reshape(height, width, 4)
-            if fourcc in {'RGBA', 'RGBX'}:
-                return cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA)
-            return img
-
-        if fourcc == 'UYVY':
-            row_bytes = abs(line_stride) if line_stride else (width * 2)
-            expected = row_bytes * height
-            if raw.size < expected:
-                return None
-            yuv = raw[:expected].reshape(height, row_bytes)[:, : width * 2].reshape(height, width, 2)
-            return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGRA_UYVY)
-
-        # Fallback for unknown pixel format if receiver already provided BGRA layout.
         expected = width * height * 4
-        if raw.size >= expected:
-            return raw[:expected].reshape(height, width, 4)
-        return None
+        if raw.size < expected:
+            return None
+        rgba = raw[:expected].reshape(height, width, 4)
+        return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA)
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         try:
-            recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 10)
+            self._receiver.frame_sync.capture_video()
         except Exception:
             return None
-        if not (recv_result & self._ReceiveFrameType.recv_video):
-            return None
 
-        frame_obj = self._receiver.video_frame or self._video_frame
-        frame = self._bgra_from_cyndilib_frame(frame_obj)
+        frame = self._bgra_from_cyndilib_frame(self._video_frame_sync)
         if frame is None:
             return None
         full_frame = frame
@@ -427,8 +442,10 @@ class NDICapture:
 
         if self.show_window:
             try:
-                preview = cv2.cvtColor(full_frame, cv2.COLOR_BGRA2BGR)
+                # Keep preview path low-latency: avoid BGRA->BGR conversion unless needed.
+                preview = full_frame
                 if region is not None:
+                    preview = full_frame.copy()
                     frame_h, frame_w = preview.shape[:2]
                     left = max(0, int(region.get('left', 0)))
                     top = max(0, int(region.get('top', 0)))
@@ -437,7 +454,7 @@ class NDICapture:
                     right = min(frame_w - 1, left + width)
                     bottom = min(frame_h - 1, top + height)
                     if right > left and bottom > top:
-                        cv2.rectangle(preview, (left, top), (right, bottom), (255, 140, 0), 1, cv2.LINE_AA)
+                        cv2.rectangle(preview, (left, top), (right, bottom), (255, 140, 0, 255), 1, cv2.LINE_8)
                 render_frame = _render_preview_frame(self.window_name, self.preview_scale_mode, preview)
                 cv2.imshow(self.window_name, render_frame)
                 cv2.waitKey(1)
