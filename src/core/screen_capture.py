@@ -384,6 +384,8 @@ class NDICapture:
         self.preview_scale_mode = ndi_preview_scale_mode or 'low_latency'
         self._finder: Any | None = None
         self._source_assigned = False
+        self.preview_width = int(getattr(config, 'ndi_width', getattr(config, 'width', 0)) or 0)
+        self.preview_height = int(getattr(config, 'ndi_height', getattr(config, 'height', 0)) or 0)
 
         print('[Capture][NDI] Initializing cyndilib NDI backend...')
         if self.source_name:
@@ -613,9 +615,15 @@ class NDICapture:
         if frame is None:
             return None
         full_frame = frame
+        frame_h, frame_w = full_frame.shape[:2]
+        if frame_w > 0 and frame_h > 0:
+            self.preview_width = frame_w
+            self.preview_height = frame_h
+            # Expose active NDI stream resolution so detection/FOV use the same coordinate space.
+            self.config.ndi_width = frame_w
+            self.config.ndi_height = frame_h
 
         if region is not None:
-            frame_h, frame_w = frame.shape[:2]
             left = max(0, int(region.get('left', 0)))
             top = max(0, int(region.get('top', 0)))
             width = max(0, int(region.get('width', frame_w)))
@@ -628,19 +636,7 @@ class NDICapture:
 
         if self.show_window:
             try:
-                # Keep preview path low-latency: avoid BGRA->BGR conversion unless needed.
-                preview = full_frame
-                if region is not None:
-                    preview = full_frame.copy()
-                    frame_h, frame_w = preview.shape[:2]
-                    left = max(0, int(region.get('left', 0)))
-                    top = max(0, int(region.get('top', 0)))
-                    width = max(0, int(region.get('width', frame_w)))
-                    height = max(0, int(region.get('height', frame_h)))
-                    right = min(frame_w - 1, left + width)
-                    bottom = min(frame_h - 1, top + height)
-                    if right > left and bottom > top:
-                        cv2.rectangle(preview, (left, top), (right, bottom), (255, 140, 0, 255), 1, cv2.LINE_8)
+                preview = self._draw_overlay(full_frame.copy(), region)
                 render_frame = _render_preview_frame(self.window_name, self.preview_scale_mode, preview)
                 cv2.imshow(self.window_name, render_frame)
                 cv2.waitKey(1)
@@ -652,6 +648,76 @@ class NDICapture:
         if frame.ndim == 3 and frame.shape[2] == 3:
             return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
         return None
+
+    def _draw_overlay(self, frame_bgra: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
+        """Draw overlay visuals in NDI preview window using active capture coordinates."""
+
+        cfg = self.config
+        if not bool(getattr(cfg, 'AimToggle', True)):
+            return frame_bgra
+
+        h, w = frame_bgra.shape[:2]
+        region_left = int(region.get('left', 0)) if region else 0
+        region_top = int(region.get('top', 0)) if region else 0
+        region_width = int(region.get('width', w)) if region else w
+        region_height = int(region.get('height', h)) if region else h
+
+        cx = int(getattr(cfg, 'crosshairX', w // 2))
+        cy = int(getattr(cfg, 'crosshairY', h // 2))
+
+        if bool(getattr(cfg, 'show_detect_range', False)):
+            x1 = max(0, region_left)
+            y1 = max(0, region_top)
+            x2 = min(w - 1, region_left + region_width)
+            y2 = min(h - 1, region_top + region_height)
+            cv2.rectangle(frame_bgra, (x1, y1), (x2, y2), (255, 140, 0, 255), 1, cv2.LINE_AA)
+
+        if bool(getattr(cfg, 'show_fov', True)):
+            fov = int(getattr(cfg, 'fov_size', 220))
+            half = max(1, fov // 2)
+            x1, y1 = cx - half, cy - half
+            x2, y2 = cx + half, cy + half
+            corner = max(8, min(20, fov // 6))
+            color = (0, 0, 255, 255)
+            cv2.line(frame_bgra, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
+            cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame_bgra, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
+            cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame_bgra, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
+            cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame_bgra, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
+            cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
+
+        if bool(getattr(cfg, 'show_boxes', True)):
+            boxes = list(getattr(cfg, 'latest_boxes', []) or [])
+            confidences = list(getattr(cfg, 'latest_confidences', []) or [])
+            show_conf = bool(getattr(cfg, 'show_confidence', True))
+            for i, box in enumerate(boxes):
+                try:
+                    x1, y1, x2, y2 = [int(v) for v in box]
+                except Exception:
+                    continue
+                if x2 <= 0 or y2 <= 0 or x1 >= w or y1 >= h:
+                    continue
+                x1 = max(0, min(w - 1, x1))
+                y1 = max(0, min(h - 1, y1))
+                x2 = max(0, min(w - 1, x2))
+                y2 = max(0, min(h - 1, y2))
+                cv2.rectangle(frame_bgra, (x1, y1), (x2, y2), (0, 255, 0, 255), 2, cv2.LINE_AA)
+                if show_conf and i < len(confidences):
+                    conf = float(confidences[i]) * 100.0
+                    cv2.putText(
+                        frame_bgra,
+                        f"{conf:.0f}%",
+                        (max(0, x1 - 5), max(15, y1 - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
+
+        return frame_bgra
 
     def close(self) -> None:
         for method_name in ('disconnect', 'close', 'release', 'stop', 'shutdown'):
