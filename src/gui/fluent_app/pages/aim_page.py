@@ -272,7 +272,7 @@ class AimPage(BasePage):
 
         self.uvcPreviewCard = SwitchSettingCard(
             FluentIcon.VIEW,
-            "UVC Preview Window",
+            "Capture Preview Window",
             "",
             parent=self.generalGroup
         )
@@ -282,7 +282,7 @@ class AimPage(BasePage):
         self.uvcPreviewScaleCombo.setMinimumWidth(170)
         self.uvcPreviewScaleCard = SettingCard(
             FluentIcon.FULL_SCREEN,
-            "UVC Preview Scale Mode",
+            "Capture Preview Scale Mode",
             "",
             self.generalGroup
         )
@@ -290,7 +290,7 @@ class AimPage(BasePage):
         self.uvcPreviewScaleCard.hBoxLayout.addSpacing(16)
 
         self.ndiSourceCombo = ComboBox()
-        self.ndiSourceCombo.setMinimumWidth(220)
+        self.ndiSourceCombo.setMinimumWidth(360)
         self.ndiSourceCard = SettingCard(
             FluentIcon.CAMERA,
             "NDI Stream",
@@ -1272,8 +1272,8 @@ class AimPage(BasePage):
         self.uvcRefreshResolutionCard.setVisible(is_uvc)
         self.uvcFpsCard.setVisible(is_uvc)
         self.uvcCaptureMethodCard.setVisible(is_uvc)
-        self.uvcPreviewCard.setVisible(is_uvc)
-        self.uvcPreviewScaleCard.setVisible(is_uvc)
+        self.uvcPreviewCard.setVisible(is_uvc or is_ndi)
+        self.uvcPreviewScaleCard.setVisible(is_uvc or is_ndi)
         self.ndiSourceCard.setVisible(is_ndi)
         self.ndiRefreshCard.setVisible(is_ndi)
 
@@ -1667,8 +1667,8 @@ class AimPage(BasePage):
         self.uvcRefreshResolutionBtn.setText(t("refresh"))
         self.uvcFpsCard.titleLabel.setText("UVC FPS")
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
-        self.uvcPreviewCard.titleLabel.setText("UVC Preview Window")
-        self.uvcPreviewScaleCard.titleLabel.setText("UVC Preview Scale Mode")
+        self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
+        self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
         self.ndiSourceCard.titleLabel.setText("NDI Stream")
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
         self.ndiRefreshBtn.setText(t("refresh"))
