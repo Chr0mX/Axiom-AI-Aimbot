@@ -4,7 +4,7 @@ opencv-python
 onnxruntime-gpu
 mss
 dxcam; platform_system == "Windows"
-distoav
+cyndilib
 
 # UI
 PyQt6

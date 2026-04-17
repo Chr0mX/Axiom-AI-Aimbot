@@ -294,7 +294,7 @@ class AimPage(BasePage):
         self.ndiSourceCard = SettingCard(
             FluentIcon.CAMERA,
             "NDI Stream",
-            "Select the distoAV NDI source to capture",
+            "Select the NDI source to capture",
             self.generalGroup
         )
         self.ndiSourceCard.hBoxLayout.addWidget(self.ndiSourceCombo, 0, Qt.AlignmentFlag.AlignRight)

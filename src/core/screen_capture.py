@@ -47,40 +47,44 @@ def _extract_ndi_source_name(source: Any) -> str:
 
 
 def list_available_ndi_sources() -> list[str]:
-    """Return discovered NDI source names via distoAV when available."""
+    """Return discovered NDI source names via cyndilib when available."""
 
     try:
-        import distoav  # type: ignore[import-not-found]
+        from cyndilib.finder import Finder  # type: ignore[import-not-found]
     except ImportError:
         return []
 
-    discoverers = (
-        getattr(distoav, 'list_sources', None),
-        getattr(distoav, 'get_sources', None),
-        getattr(distoav, 'discover_sources', None),
-        getattr(distoav, 'ndi_sources', None),
-    )
-    for discover in discoverers:
-        if not callable(discover):
-            continue
-        try:
-            entries = discover()
-        except Exception:
-            continue
-        if not entries:
-            continue
+    def _normalize(names: list[Any]) -> list[str]:
         result: list[str] = []
-        for entry in entries:
+        for entry in names:
             name = _extract_ndi_source_name(entry)
             if name and name not in result:
                 result.append(name)
-        if result:
-            return result
-    return []
+        return result
+
+    try:
+        with Finder() as finder:
+            # Attempt immediate query first.
+            names = _normalize(finder.get_source_names())
+            if names:
+                return names
+
+            # Then wait briefly for discovery updates.
+            try:
+                changed = finder.wait_for_sources(0.25)
+            except TypeError:
+                changed = finder.wait_for_sources(timeout=0.25)
+            if changed:
+                names = _normalize(finder.update_sources())
+                if names:
+                    return names
+            return _normalize(finder.get_source_names())
+    except Exception:
+        return []
 
 
 class NDICapture:
-    """NDI capture backend powered by distoAV."""
+    """NDI capture backend powered by cyndilib."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -88,81 +92,99 @@ class NDICapture:
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
 
         try:
-            import distoav  # type: ignore[import-not-found]
+            from cyndilib import VideoRecvFrame  # type: ignore[import-not-found]
+            from cyndilib.finder import Finder  # type: ignore[import-not-found]
+            from cyndilib.receiver import ReceiveFrameType, Receiver  # type: ignore[import-not-found]
+            from cyndilib.wrapper import RecvColorFormat  # type: ignore[import-not-found]
         except ImportError as exc:
-            raise RuntimeError('distoAV is not installed') from exc
-        self._distoav = distoav
-        self._receiver = self._create_receiver()
-        if self._receiver is None:
-            raise RuntimeError('Failed to initialize distoAV NDI receiver')
+            raise RuntimeError('cyndilib is not installed') from exc
+        self._Finder = Finder
+        self._ReceiveFrameType = ReceiveFrameType
 
-    def _create_receiver(self) -> Any | None:
-        module = self._distoav
-        source_name = self.source_name
-        receiver_builders = (
-            getattr(module, 'NDIReceiver', None),
-            getattr(module, 'Receiver', None),
-            getattr(module, 'NDIInput', None),
-            getattr(module, 'create_receiver', None),
-            getattr(module, 'open_receiver', None),
-        )
-        for builder in receiver_builders:
-            if builder is None:
-                continue
-            try:
-                if callable(builder):
-                    try:
-                        receiver = builder(source_name=source_name) if source_name else builder()
-                    except TypeError:
-                        receiver = builder(source_name) if source_name else builder()
-                else:
-                    continue
-            except Exception:
-                continue
-            if receiver is not None:
-                return receiver
+        try:
+            self._receiver = Receiver(
+                source_name=self.source_name,
+                color_format=RecvColorFormat.BGRX_BGRA,
+            )
+            self._video_frame = VideoRecvFrame()
+            self._receiver.set_video_frame(self._video_frame)
+            if not self._receiver.is_connected():
+                source = self._resolve_source()
+                if source is not None:
+                    self._receiver.connect_to(source)
+        except Exception as exc:
+            raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
+
+        if not self._receiver.is_connected():
+            raise RuntimeError('Failed to connect to NDI source via cyndilib')
+
+    def _resolve_source(self) -> Any | None:
+        if not self.source_name:
+            return None
+        try:
+            with self._Finder() as finder:
+                source = finder.get_source(self.source_name)
+                if source is not None:
+                    return source
+                try:
+                    changed = finder.wait_for_sources(0.25)
+                except TypeError:
+                    changed = finder.wait_for_sources(timeout=0.25)
+                if changed:
+                    finder.update_sources()
+                return finder.get_source(self.source_name)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
+        width, height = frame.get_resolution()
+        if width <= 0 or height <= 0:
+            return None
+
+        raw = np.asarray(frame.current_frame_data, dtype=np.uint8)
+        if raw.size == 0:
+            return None
+
+        fourcc = str(frame.get_fourcc()).split('.')[-1].upper()
+        line_stride = int(frame.get_line_stride() or 0)
+
+        if fourcc in {'BGRA', 'BGRX', 'RGBA', 'RGBX'}:
+            row_bytes = abs(line_stride) if line_stride else (width * 4)
+            expected = row_bytes * height
+            if raw.size < expected:
+                return None
+            img = raw[:expected].reshape(height, row_bytes)
+            img = img[:, : width * 4].reshape(height, width, 4)
+            if fourcc in {'RGBA', 'RGBX'}:
+                return cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA)
+            return img
+
+        if fourcc == 'UYVY':
+            row_bytes = abs(line_stride) if line_stride else (width * 2)
+            expected = row_bytes * height
+            if raw.size < expected:
+                return None
+            yuv = raw[:expected].reshape(height, row_bytes)[:, : width * 2].reshape(height, width, 2)
+            return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGRA_UYVY)
+
+        # Fallback for unknown pixel format if receiver already provided BGRA layout.
+        expected = width * height * 4
+        if raw.size >= expected:
+            return raw[:expected].reshape(height, width, 4)
         return None
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
-        frame: Any | None = None
-        readers = (
-            getattr(self._receiver, 'get_frame', None),
-            getattr(self._receiver, 'read', None),
-            getattr(self._receiver, 'recv', None),
-            getattr(self._receiver, 'receive_frame', None),
-            getattr(self._receiver, 'capture', None),
-        )
-        for reader in readers:
-            if not callable(reader):
-                continue
-            try:
-                data = reader()
-            except TypeError:
-                try:
-                    data = reader(timeout_ms=10)
-                except Exception:
-                    continue
-            except Exception:
-                continue
-
-            if isinstance(data, tuple) and len(data) >= 2 and isinstance(data[0], bool):
-                ok, candidate = data[0], data[1]
-                if not ok:
-                    continue
-                frame = candidate
-            elif isinstance(data, tuple) and len(data) >= 1:
-                frame = data[-1]
-            else:
-                frame = data
-            if frame is not None:
-                break
-
-        if frame is None:
+        try:
+            recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 10)
+        except Exception:
+            return None
+        if not (recv_result & self._ReceiveFrameType.recv_video):
             return None
 
-        if not isinstance(frame, np.ndarray):
-            frame = np.asarray(frame)
-        if frame.ndim != 3 or frame.shape[2] < 3:
+        frame_obj = self._receiver.video_frame or self._video_frame
+        frame = self._bgra_from_cyndilib_frame(frame_obj)
+        if frame is None:
             return None
 
         if region is not None:
@@ -177,13 +199,14 @@ class NDICapture:
                 return None
             frame = frame[top:bottom, left:right]
 
-        if frame.shape[2] == 4:
+        if frame.ndim == 3 and frame.shape[2] == 4:
             return frame
-        return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+        if frame.ndim == 3 and frame.shape[2] == 3:
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+        return None
 
     def close(self) -> None:
-        close_methods = ('close', 'release', 'stop', 'shutdown')
-        for method_name in close_methods:
+        for method_name in ('disconnect', 'close', 'release', 'stop', 'shutdown'):
             method = getattr(self._receiver, method_name, None)
             if callable(method):
                 try:
@@ -522,7 +545,7 @@ def initialize_screen_capture(config: Config) -> Any:
     elif screenshot_method == 'ndi':
         try:
             ndi_capture = NDICapture(config)
-            print('[截圖] 已啟用 NDI (distoAV) 截圖後端')
+            print('[截圖] 已啟用 NDI (cyndilib) 截圖後端')
             return ndi_capture
         except Exception as exc:
             _warn_once('ndi_fallback_mss', f"[截圖] NDI 初始化失敗: {exc}，將回退至 mss")

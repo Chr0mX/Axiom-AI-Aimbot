@@ -851,8 +851,8 @@ class StatusPanel(QWidget):
             screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
         elif current_screenshot_method == 'ndi':
             try:
-                import distoav  # type: ignore[import-not-found]
-                if distoav is not None:
+                import cyndilib  # type: ignore[import-not-found]
+                if cyndilib is not None:
                     disp_screenshot += " ✓"
                     screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
             except ImportError:
