@@ -15,23 +15,52 @@ if TYPE_CHECKING:
 _WARNED_MESSAGES: set[str] = set()
 
 
-def _load_ndi_framesync_symbols() -> dict[str, Any]:
-    """Load the cyndilib frame-sync API used by the NDI reference implementation."""
+def _load_cyndilib_symbols() -> dict[str, Any]:
+    """Load cyndilib objects while supporting API differences across versions."""
 
     try:
         from cyndilib.finder import Finder  # type: ignore[import-not-found]
-        from cyndilib.receiver import Receiver  # type: ignore[import-not-found]
-        from cyndilib.video_frame import VideoFrameSync  # type: ignore[import-not-found]
-        from cyndilib.wrapper.ndi_recv import RecvBandwidth, RecvColorFormat  # type: ignore[import-not-found]
+        from cyndilib.receiver import ReceiveFrameType, Receiver  # type: ignore[import-not-found]
     except ImportError as exc:
-        raise RuntimeError('cyndilib (frame_sync API) is not installed') from exc
+        raise RuntimeError('cyndilib is not installed') from exc
+
+    RecvColorFormat: Any
+    RecvBandwidth: Any | None = None
+    try:
+        from cyndilib.wrapper.ndi_recv import (  # type: ignore[import-not-found]
+            RecvBandwidth as _RecvBandwidth,
+            RecvColorFormat as _RecvColorFormat,
+        )
+
+        RecvColorFormat = _RecvColorFormat
+        RecvBandwidth = _RecvBandwidth
+    except ImportError:
+        from cyndilib.wrapper import RecvColorFormat as _RecvColorFormat  # type: ignore[import-not-found]
+
+        RecvColorFormat = _RecvColorFormat
+
+    VideoFrameSync: Any | None = None
+    VideoRecvFrame: Any | None = None
+    try:
+        from cyndilib.video_frame import VideoFrameSync as _VideoFrameSync  # type: ignore[import-not-found]
+
+        VideoFrameSync = _VideoFrameSync
+    except ImportError:
+        try:
+            from cyndilib import VideoRecvFrame as _VideoRecvFrame  # type: ignore[import-not-found]
+
+            VideoRecvFrame = _VideoRecvFrame
+        except ImportError:
+            pass
 
     return {
         'Finder': Finder,
         'Receiver': Receiver,
-        'VideoFrameSync': VideoFrameSync,
+        'ReceiveFrameType': ReceiveFrameType,
         'RecvColorFormat': RecvColorFormat,
         'RecvBandwidth': RecvBandwidth,
+        'VideoFrameSync': VideoFrameSync,
+        'VideoRecvFrame': VideoRecvFrame,
     }
 
 
@@ -229,14 +258,15 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
     """Return discovered NDI sources with best-effort video metadata."""
 
     try:
-        symbols = _load_ndi_framesync_symbols()
+        symbols = _load_cyndilib_symbols()
     except RuntimeError:
         return []
     Finder = symbols['Finder']
     Receiver = symbols['Receiver']
-    VideoFrameSync = symbols['VideoFrameSync']
+    ReceiveFrameType = symbols['ReceiveFrameType']
     RecvColorFormat = symbols['RecvColorFormat']
-    RecvBandwidth = symbols['RecvBandwidth']
+    VideoFrameSync = symbols['VideoFrameSync']
+    VideoRecvFrame = symbols['VideoRecvFrame']
 
     details: list[dict[str, str | int | float | None]] = []
 
@@ -270,25 +300,36 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
                 if source is not None:
                     try:
                         width, height, fps = _extract_ndi_source_video_meta(source)
-                        receiver = Receiver(
-                            source=source,
-                            color_format=RecvColorFormat.RGBX_RGBA,
-                            bandwidth=RecvBandwidth.highest,
-                        )
-                        video_frame = VideoFrameSync()
-                        receiver.frame_sync.set_video_frame(video_frame)
+                        receiver = Receiver(source=source, color_format=RecvColorFormat.BGRX_BGRA)
+                        if VideoFrameSync is not None and getattr(receiver, 'frame_sync', None) is not None:
+                            video_frame = VideoFrameSync()
+                            receiver.frame_sync.set_video_frame(video_frame)
+                            capture_video = True
+                        elif VideoRecvFrame is not None:
+                            video_frame = VideoRecvFrame()
+                            receiver.set_video_frame(video_frame)
+                            capture_video = False
+                        else:
+                            video_frame = None
+                            capture_video = False
+
                         for _ in range(10):
-                            receiver.frame_sync.capture_video()
-                            frame_w = int(getattr(video_frame, 'xres', 0) or 0)
-                            frame_h = int(getattr(video_frame, 'yres', 0) or 0)
+                            if capture_video and video_frame is not None:
+                                receiver.frame_sync.capture_video()
+                                frame_w = int(getattr(video_frame, 'xres', 0) or 0)
+                                frame_h = int(getattr(video_frame, 'yres', 0) or 0)
+                                frame_rate = float(getattr(video_frame, 'frame_rate_N', 0) or 0)
+                            else:
+                                recv_result = receiver.receive(ReceiveFrameType.recv_video, 350)
+                                if not (recv_result & ReceiveFrameType.recv_video) or video_frame is None:
+                                    continue
+                                frame_w, frame_h = video_frame.get_resolution()
+                                frame_rate = video_frame.get_frame_rate()
+
                             if frame_w and frame_h:
                                 width, height = int(frame_w), int(frame_h)
-                            try:
-                                frame_rate = float(video_frame.get_frame_rate() or 0)
-                            except Exception:
-                                frame_rate = 0.0
-                            if frame_rate > 0:
-                                fps = frame_rate
+                            if frame_rate:
+                                fps = float(frame_rate)
                             if width and height and fps:
                                 break
                     except Exception:
@@ -324,26 +365,39 @@ class NDICapture:
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
         self.window_name = str(getattr(config, 'ndi_window_name', 'Axiom NDI Preview'))
-        self.preview_scale_mode = 'low_latency'
+        # NDI preview prioritizes minimal display latency by default.
+        ndi_preview_scale_mode = str(getattr(config, 'ndi_preview_scale_mode', '')).lower().strip()
+        self.preview_scale_mode = ndi_preview_scale_mode or 'low_latency'
         self._finder: Any | None = None
 
         try:
-            symbols = _load_ndi_framesync_symbols()
+            symbols = _load_cyndilib_symbols()
         except RuntimeError as exc:
             raise RuntimeError('cyndilib is not installed') from exc
         self._Finder = symbols['Finder']
+        self._ReceiveFrameType = symbols['ReceiveFrameType']
         Receiver = symbols['Receiver']
         RecvColorFormat = symbols['RecvColorFormat']
         RecvBandwidth = symbols['RecvBandwidth']
         VideoFrameSync = symbols['VideoFrameSync']
+        VideoRecvFrame = symbols['VideoRecvFrame']
 
         try:
-            self._receiver = Receiver(
-                color_format=RecvColorFormat.RGBX_RGBA,
-                bandwidth=RecvBandwidth.highest,
-            )
-            self._video_frame_sync = VideoFrameSync()
-            self._receiver.frame_sync.set_video_frame(self._video_frame_sync)
+            receiver_kwargs: dict[str, Any] = {'color_format': RecvColorFormat.RGBX_RGBA}
+            if RecvBandwidth is not None and hasattr(RecvBandwidth, 'highest'):
+                receiver_kwargs['bandwidth'] = RecvBandwidth.highest
+            self._receiver = Receiver(**receiver_kwargs)
+
+            self._video_frame_sync: Any | None = None
+            self._video_frame: Any | None = None
+            if VideoFrameSync is not None and getattr(self._receiver, 'frame_sync', None) is not None:
+                self._video_frame_sync = VideoFrameSync()
+                self._receiver.frame_sync.set_video_frame(self._video_frame_sync)
+            elif VideoRecvFrame is not None:
+                self._video_frame = VideoRecvFrame()
+                self._receiver.set_video_frame(self._video_frame)
+            else:
+                raise RuntimeError('Unsupported cyndilib version: no usable video frame API found')
 
             source = self._resolve_source()
             if source is not None:
@@ -399,8 +453,23 @@ class NDICapture:
 
     @staticmethod
     def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
-        width = int(getattr(frame, 'xres', 0) or 0)
-        height = int(getattr(frame, 'yres', 0) or 0)
+        if hasattr(frame, 'get_array'):
+            try:
+                raw = frame.get_array()
+                width = int(getattr(frame, 'xres', 0) or 0)
+                height = int(getattr(frame, 'yres', 0) or 0)
+                if width <= 0 or height <= 0:
+                    return None
+                arr = np.asarray(raw, dtype=np.uint8)
+                expected = width * height * 4
+                if arr.size < expected:
+                    return None
+                arr = arr[:expected].reshape(height, width, 4)
+                return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
+            except Exception:
+                return None
+
+        width, height = frame.get_resolution()
         if width <= 0 or height <= 0:
             return None
 
@@ -418,12 +487,25 @@ class NDICapture:
         return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA)
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
-        try:
-            self._receiver.frame_sync.capture_video()
-        except Exception:
-            return None
+        frame_obj: Any | None = None
+        if getattr(self, '_video_frame_sync', None) is not None and getattr(self._receiver, 'frame_sync', None) is not None:
+            try:
+                self._receiver.frame_sync.capture_video()
+            except Exception:
+                return None
+            frame_obj = self._video_frame_sync
+            if int(getattr(frame_obj, 'xres', 0) or 0) <= 0 or int(getattr(frame_obj, 'yres', 0) or 0) <= 0:
+                return None
+        else:
+            try:
+                recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 10)
+            except Exception:
+                return None
+            if not (recv_result & self._ReceiveFrameType.recv_video):
+                return None
+            frame_obj = self._receiver.video_frame or self._video_frame
 
-        frame = self._bgra_from_cyndilib_frame(self._video_frame_sync)
+        frame = self._bgra_from_cyndilib_frame(frame_obj)
         if frame is None:
             return None
         full_frame = frame
