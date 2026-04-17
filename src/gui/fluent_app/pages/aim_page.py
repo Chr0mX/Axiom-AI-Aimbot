@@ -187,7 +187,7 @@ class AimPage(BasePage):
 
         # Screenshot Method
         self.screenshotMethodCombo = ComboBox()
-        self.screenshotMethodCombo.addItems(["mss", "dxcam", "uvc"])
+        self.screenshotMethodCombo.addItems(["mss", "dxcam", "uvc", "ndi"])
         self.screenshotMethodCombo.setMinimumWidth(150)
         self.screenshotMethodCard = SettingCard(
             FluentIcon.CAMERA,
@@ -288,6 +288,28 @@ class AimPage(BasePage):
         )
         self.uvcPreviewScaleCard.hBoxLayout.addWidget(self.uvcPreviewScaleCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcPreviewScaleCard.hBoxLayout.addSpacing(16)
+
+        self.ndiSourceCombo = ComboBox()
+        self.ndiSourceCombo.setMinimumWidth(220)
+        self.ndiSourceCard = SettingCard(
+            FluentIcon.CAMERA,
+            "NDI Stream",
+            "Select the distoAV NDI source to capture",
+            self.generalGroup
+        )
+        self.ndiSourceCard.hBoxLayout.addWidget(self.ndiSourceCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.ndiSourceCard.hBoxLayout.addSpacing(16)
+
+        self.ndiRefreshBtn = PushButton(t("refresh"))
+        self.ndiRefreshBtn.setFixedWidth(80)
+        self.ndiRefreshCard = SettingCard(
+            FluentIcon.SYNC,
+            "Refresh NDI Streams",
+            "",
+            self.generalGroup
+        )
+        self.ndiRefreshCard.hBoxLayout.addWidget(self.ndiRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.ndiRefreshCard.hBoxLayout.addSpacing(16)
 
         # Always Aim (no need to press aim key)
         self.alwaysAimCard = SwitchSettingCard(
@@ -707,6 +729,8 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.uvcCaptureMethodCard)
         self.generalGroup.addSettingCard(self.uvcPreviewCard)
         self.generalGroup.addSettingCard(self.uvcPreviewScaleCard)
+        self.generalGroup.addSettingCard(self.ndiSourceCard)
+        self.generalGroup.addSettingCard(self.ndiRefreshCard)
         self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
@@ -826,6 +850,8 @@ class AimPage(BasePage):
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
         self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
+        self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
+        self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
         self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
@@ -927,7 +953,7 @@ class AimPage(BasePage):
         if self._config.mouse_move_method in mouse_methods:
             self.mouseMoveCombo.setCurrentIndex(mouse_methods.index(self._config.mouse_move_method))
 
-        screenshot_methods = ["mss", "dxcam", "uvc"]
+        screenshot_methods = ["mss", "dxcam", "uvc", "ndi"]
         screenshot_method = getattr(self._config, 'screenshot_method', 'mss')
         if screenshot_method in screenshot_methods:
             self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
@@ -944,7 +970,16 @@ class AimPage(BasePage):
         self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
         self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
         self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
-        self._updateUvcControlsVisibility(screenshot_method)
+        self._refreshNdiSources()
+        ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
+        if ndi_source:
+            idx = self.ndiSourceCombo.findText(ndi_source)
+            if idx < 0:
+                self.ndiSourceCombo.addItem(ndi_source)
+                idx = self.ndiSourceCombo.findText(ndi_source)
+            if idx >= 0:
+                self.ndiSourceCombo.setCurrentIndex(idx)
+        self._updateCaptureControlsVisibility(screenshot_method)
         self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
         self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
         self.idleDetectEnableCard.setChecked(getattr(self._config, 'idle_detect_enabled', True))
@@ -1115,7 +1150,7 @@ class AimPage(BasePage):
     def _onScreenshotMethodChanged(self, text):
         if self._config:
             self._config.screenshot_method = text
-        self._updateUvcControlsVisibility(text)
+        self._updateCaptureControlsVisibility(text)
         main_window = self.window()
         if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
             main_window.updateVisualsVisibilityForScreenshotMethod(text)
@@ -1155,6 +1190,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.uvc_preview_scale_mode = str(text)
 
+    def _onNdiSourceChanged(self, text):
+        if self._config:
+            self._config.ndi_source_name = str(text).strip()
+
     def _refreshUvcResolutions(self):
         if not self._config:
             return
@@ -1182,8 +1221,33 @@ class AimPage(BasePage):
                 self.uvcResolutionCombo.setCurrentIndex(idx)
         self.uvcResolutionCombo.blockSignals(False)
 
-    def _updateUvcControlsVisibility(self, screenshot_method):
+    def _refreshNdiSources(self):
+        if not self._config:
+            return
+        try:
+            from core.screen_capture import list_available_ndi_sources
+            sources = list_available_ndi_sources()
+        except Exception:
+            sources = []
+
+        current_text = self.ndiSourceCombo.currentText().strip()
+        configured = str(getattr(self._config, 'ndi_source_name', '')).strip()
+        self.ndiSourceCombo.blockSignals(True)
+        self.ndiSourceCombo.clear()
+        for source in sources:
+            self.ndiSourceCombo.addItem(source)
+        if configured and self.ndiSourceCombo.findText(configured) < 0:
+            self.ndiSourceCombo.addItem(configured)
+        fallback = current_text or configured
+        if fallback:
+            idx = self.ndiSourceCombo.findText(fallback)
+            if idx >= 0:
+                self.ndiSourceCombo.setCurrentIndex(idx)
+        self.ndiSourceCombo.blockSignals(False)
+
+    def _updateCaptureControlsVisibility(self, screenshot_method):
         is_uvc = (screenshot_method == "uvc")
+        is_ndi = (screenshot_method == "ndi")
         self.uvcDeviceCard.setVisible(is_uvc)
         self.uvcResolutionCard.setVisible(is_uvc)
         self.uvcRefreshResolutionCard.setVisible(is_uvc)
@@ -1191,6 +1255,8 @@ class AimPage(BasePage):
         self.uvcCaptureMethodCard.setVisible(is_uvc)
         self.uvcPreviewCard.setVisible(is_uvc)
         self.uvcPreviewScaleCard.setVisible(is_uvc)
+        self.ndiSourceCard.setVisible(is_ndi)
+        self.ndiRefreshCard.setVisible(is_ndi)
 
     def _onAlwaysAimChanged(self, checked):
         if self._config:
@@ -1584,6 +1650,9 @@ class AimPage(BasePage):
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
         self.uvcPreviewCard.titleLabel.setText("UVC Preview Window")
         self.uvcPreviewScaleCard.titleLabel.setText("UVC Preview Scale Mode")
+        self.ndiSourceCard.titleLabel.setText("NDI Stream")
+        self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
+        self.ndiRefreshBtn.setText(t("refresh"))
         self.alwaysAimCard.titleLabel.setText(t("always_aim"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))

@@ -4,6 +4,7 @@ opencv-python
 onnxruntime-directml
 mss
 dxcam; platform_system == "Windows"
+distoav
 
 # UI
 PyQt6

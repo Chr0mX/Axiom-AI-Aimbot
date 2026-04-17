@@ -827,7 +827,7 @@ class StatusPanel(QWidget):
         self.mouse_click_row.set_value(disp_click, click_color)
 
         # 更新 Screenshot Method
-        screenshot_map = {'mss': 'MSS', 'dxcam': 'DXcam', 'uvc': 'UVC'}
+        screenshot_map = {'mss': 'MSS', 'dxcam': 'DXcam', 'uvc': 'UVC', 'ndi': 'NDI'}
         disp_screenshot = screenshot_map.get(current_screenshot_method, str(current_screenshot_method))
         screenshot_color = None
 
@@ -849,6 +849,15 @@ class StatusPanel(QWidget):
         elif current_screenshot_method == 'uvc':
             disp_screenshot += " ✓"
             screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
+        elif current_screenshot_method == 'ndi':
+            try:
+                import distoav  # type: ignore[import-not-found]
+                if distoav is not None:
+                    disp_screenshot += " ✓"
+                    screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
+            except ImportError:
+                disp_screenshot += " ✗"
+                screenshot_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
 
         self.screenshot_row.label.setText(get_text('screenshot_method'))
         self.screenshot_row.set_value(disp_screenshot, screenshot_color)
