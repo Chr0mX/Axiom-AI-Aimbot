@@ -236,9 +236,8 @@ def list_available_ndi_sources() -> list[str]:
 
 
 def _format_ndi_source_label(name: str, width: int | None, height: int | None, fps: float | None) -> str:
-    resolution = f"{int(width)}x{int(height)}" if width and height else "Unknown"
-    fps_text = f"{fps:.2f}" if fps and fps > 0 else "Unknown"
-    return f"{name} ({resolution} @ {fps_text} fps)"
+    _ = (width, height, fps)
+    return name
 
 
 def _extract_ndi_source_video_meta(source: Any) -> tuple[int | None, int | None, float | None]:
@@ -321,18 +320,13 @@ def _render_preview_frame(window_name: str, mode: str, frame_bgr: np.ndarray) ->
 
 
 def list_available_ndi_source_details() -> list[dict[str, str | int | float | None]]:
-    """Return discovered NDI sources with best-effort video metadata."""
+    """Return discovered NDI sources without querying stream resolution/FPS."""
 
     try:
         symbols = _load_cyndilib_symbols()
     except RuntimeError:
         return []
     Finder = symbols['Finder']
-    Receiver = symbols['Receiver']
-    ReceiveFrameType = symbols['ReceiveFrameType']
-    RecvColorFormat = symbols['RecvColorFormat']
-    VideoFrameSync = symbols['VideoFrameSync']
-    VideoRecvFrame = symbols['VideoRecvFrame']
 
     details: list[dict[str, str | int | float | None]] = []
 
@@ -360,52 +354,6 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
                 width: int | None = None
                 height: int | None = None
                 fps: float | None = None
-
-                source = _find_ndi_source_by_name(finder, name)
-                receiver: Any | None = None
-                if source is not None:
-                    try:
-                        width, height, fps = _extract_ndi_source_video_meta(source)
-                        receiver = Receiver(source=source, color_format=RecvColorFormat.BGRX_BGRA)
-                        if VideoFrameSync is not None and getattr(receiver, 'frame_sync', None) is not None:
-                            video_frame = VideoFrameSync()
-                            receiver.frame_sync.set_video_frame(video_frame)
-                            capture_video = True
-                        elif VideoRecvFrame is not None:
-                            video_frame = VideoRecvFrame()
-                            receiver.set_video_frame(video_frame)
-                            capture_video = False
-                        else:
-                            video_frame = None
-                            capture_video = False
-
-                        for _ in range(10):
-                            if capture_video and video_frame is not None:
-                                receiver.frame_sync.capture_video()
-                                frame_w = int(getattr(video_frame, 'xres', 0) or 0)
-                                frame_h = int(getattr(video_frame, 'yres', 0) or 0)
-                                frame_rate = float(getattr(video_frame, 'frame_rate_N', 0) or 0)
-                            else:
-                                recv_result = receiver.receive(ReceiveFrameType.recv_video, 350)
-                                if not (recv_result & ReceiveFrameType.recv_video) or video_frame is None:
-                                    continue
-                                frame_w, frame_h = video_frame.get_resolution()
-                                frame_rate = video_frame.get_frame_rate()
-
-                            if frame_w and frame_h:
-                                width, height = int(frame_w), int(frame_h)
-                            if frame_rate:
-                                fps = float(frame_rate)
-                            if width and height and fps:
-                                break
-                    except Exception:
-                        pass
-                    finally:
-                        if receiver is not None:
-                            try:
-                                receiver.disconnect()
-                            except Exception:
-                                pass
 
                 details.append(
                     {
