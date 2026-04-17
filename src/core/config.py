@@ -54,6 +54,8 @@ class Config:
         self.uvc_window_name: str = "Axiom UVC Preview"
         self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.ndi_source_name: str = ""
+        self.ndi_width: int = 0
+        self.ndi_height: int = 0
         self.video_filters: List[Dict[str, Any]] = []
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
@@ -250,6 +252,8 @@ class Config:
             'uvc_window_name': self.uvc_window_name,
             'uvc_preview_scale_mode': self.uvc_preview_scale_mode,
             'ndi_source_name': self.ndi_source_name,
+            'ndi_width': self.ndi_width,
+            'ndi_height': self.ndi_height,
             'video_filters': self.video_filters,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
@@ -454,6 +458,14 @@ def _validate_screenshot_method(config: Config) -> None:
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
     config.ndi_source_name = str(getattr(config, 'ndi_source_name', '') or '').strip()
+    try:
+        config.ndi_width = max(0, int(getattr(config, 'ndi_width', 0) or 0))
+    except (TypeError, ValueError):
+        config.ndi_width = 0
+    try:
+        config.ndi_height = max(0, int(getattr(config, 'ndi_height', 0) or 0))
+    except (TypeError, ValueError):
+        config.ndi_height = 0
     if getattr(config, 'uvc_capture_method', 'dshow') not in ('auto', 'dshow', 'msmf', 'any'):
         config.uvc_capture_method = 'dshow'
     if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (

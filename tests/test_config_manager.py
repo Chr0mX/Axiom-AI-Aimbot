@@ -62,6 +62,7 @@ class TestConfigManagerSaveLoad:
             c = _make_config()
             c.fov_size = 777
             c.status_panel_show_mouse_click = False
+            c.ndi_source_name = "distoav-main"
             cm.save_config(c, "test_profile")
             filepath = os.path.join(tmpdir, "test_profile.json")
             with open(filepath, 'r', encoding='utf-8') as f:
@@ -70,6 +71,7 @@ class TestConfigManagerSaveLoad:
             assert 'config' in data
             assert data['config']['fov_size'] == 777
             assert data['config']['status_panel_show_mouse_click'] is False
+            assert data['config']['ndi_source_name'] == "distoav-main"
 
     def test_load_config_restores_values(self):
         from core.config_manager import ConfigManager

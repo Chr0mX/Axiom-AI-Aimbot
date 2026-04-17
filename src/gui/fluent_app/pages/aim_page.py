@@ -1415,7 +1415,10 @@ class AimPage(BasePage):
 
     def _onNdiSourceChanged(self, text):
         if self._config:
-            self._config.ndi_source_name = str(text).strip()
+            value = str(text).strip()
+            if value == "Auto (first source)":
+                value = ""
+            self._config.ndi_source_name = value
 
     def _openVideoFiltersDialog(self):
         if not self._config:
