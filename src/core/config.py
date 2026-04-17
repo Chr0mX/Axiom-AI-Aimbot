@@ -54,6 +54,8 @@ class Config:
         self.uvc_window_name: str = "Axiom UVC Preview"
         self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.ndi_source_name: str = ""
+        self.ndi_width: int = self.width
+        self.ndi_height: int = self.height
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
         self.region: Dict[str, int] = {
