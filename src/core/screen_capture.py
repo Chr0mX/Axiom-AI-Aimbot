@@ -64,23 +64,108 @@ def list_available_ndi_sources() -> list[str]:
 
     try:
         with Finder() as finder:
-            # Attempt immediate query first.
+            if not getattr(finder, "is_open", False):
+                finder.open()
             names = _normalize(finder.get_source_names())
             if names:
                 return names
 
-            # Then wait briefly for discovery updates.
-            try:
-                changed = finder.wait_for_sources(0.25)
-            except TypeError:
-                changed = finder.wait_for_sources(timeout=0.25)
-            if changed:
-                names = _normalize(finder.update_sources())
-                if names:
-                    return names
+            # Discovery can take a few seconds on some networks.
+            for _ in range(6):
+                try:
+                    changed = finder.wait_for_sources(0.5)
+                except TypeError:
+                    changed = finder.wait_for_sources(timeout=0.5)
+                if changed:
+                    finder.update_sources()
+                    names = _normalize(finder.get_source_names())
+                    if names:
+                        return names
             return _normalize(finder.get_source_names())
     except Exception:
         return []
+
+
+def _format_ndi_source_label(name: str, width: int | None, height: int | None, fps: float | None) -> str:
+    resolution = f"{int(width)}x{int(height)}" if width and height else "Unknown"
+    fps_text = f"{fps:.2f}" if fps and fps > 0 else "Unknown"
+    return f"{name} ({resolution} @ {fps_text} fps)"
+
+
+def list_available_ndi_source_details() -> list[dict[str, str | int | float | None]]:
+    """Return discovered NDI sources with best-effort video metadata."""
+
+    try:
+        from cyndilib import VideoRecvFrame  # type: ignore[import-not-found]
+        from cyndilib.finder import Finder  # type: ignore[import-not-found]
+        from cyndilib.receiver import ReceiveFrameType, Receiver  # type: ignore[import-not-found]
+        from cyndilib.wrapper import RecvColorFormat  # type: ignore[import-not-found]
+    except ImportError:
+        return []
+
+    details: list[dict[str, str | int | float | None]] = []
+
+    try:
+        with Finder() as finder:
+            if not getattr(finder, "is_open", False):
+                finder.open()
+
+            names = [n for n in finder.get_source_names() if isinstance(n, str) and n.strip()]
+            if not names:
+                for _ in range(6):
+                    try:
+                        changed = finder.wait_for_sources(0.5)
+                    except TypeError:
+                        changed = finder.wait_for_sources(timeout=0.5)
+                    if changed:
+                        finder.update_sources()
+                        names = [n for n in finder.get_source_names() if isinstance(n, str) and n.strip()]
+                        if names:
+                            break
+            if not names:
+                return []
+
+            for name in names:
+                width: int | None = None
+                height: int | None = None
+                fps: float | None = None
+
+                source = finder.get_source(name)
+                receiver: Any | None = None
+                if source is not None:
+                    try:
+                        receiver = Receiver(source=source, color_format=RecvColorFormat.BGRX_BGRA)
+                        video_frame = VideoRecvFrame()
+                        receiver.set_video_frame(video_frame)
+                        for _ in range(4):
+                            recv_result = receiver.receive(ReceiveFrameType.recv_video, 250)
+                            if recv_result & ReceiveFrameType.recv_video:
+                                width, height = video_frame.get_resolution()
+                                frame_rate = video_frame.get_frame_rate()
+                                fps = float(frame_rate) if frame_rate else None
+                                break
+                    except Exception:
+                        pass
+                    finally:
+                        if receiver is not None:
+                            try:
+                                receiver.disconnect()
+                            except Exception:
+                                pass
+
+                details.append(
+                    {
+                        'name': name,
+                        'width': width,
+                        'height': height,
+                        'fps': fps,
+                        'label': _format_ndi_source_label(name, width, height, fps),
+                    }
+                )
+    except Exception:
+        return []
+
+    return details
 
 
 class NDICapture:
@@ -90,6 +175,7 @@ class NDICapture:
         self.config = config
         self.config_signature = _ndi_signature(config)
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
+        self._finder: Any | None = None
 
         try:
             from cyndilib import VideoRecvFrame  # type: ignore[import-not-found]
@@ -122,17 +208,25 @@ class NDICapture:
         if not self.source_name:
             return None
         try:
-            with self._Finder() as finder:
+            if self._finder is None:
+                self._finder = self._Finder()
+            finder = self._finder
+            if not getattr(finder, "is_open", False):
+                finder.open()
+            source = finder.get_source(self.source_name)
+            if source is not None:
+                return source
+            for _ in range(6):
+                try:
+                    changed = finder.wait_for_sources(0.5)
+                except TypeError:
+                    changed = finder.wait_for_sources(timeout=0.5)
+                if changed:
+                    finder.update_sources()
                 source = finder.get_source(self.source_name)
                 if source is not None:
                     return source
-                try:
-                    changed = finder.wait_for_sources(0.25)
-                except TypeError:
-                    changed = finder.wait_for_sources(timeout=0.25)
-                if changed:
-                    finder.update_sources()
-                return finder.get_source(self.source_name)
+            return None
         except Exception:
             return None
 
@@ -213,6 +307,16 @@ class NDICapture:
                     method()
                 except Exception:
                     pass
+
+        finder = getattr(self, '_finder', None)
+        if finder is not None:
+            for method_name in ('close', 'stop', 'shutdown'):
+                method = getattr(finder, method_name, None)
+                if callable(method):
+                    try:
+                        method()
+                    except Exception:
+                        pass
 
 
 def list_supported_uvc_resolutions(
