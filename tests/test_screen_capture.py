@@ -119,3 +119,29 @@ def test_capture_frame_prints_error_prompt_once(monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert output.count('[截圖] 抓圖失敗: capture failed') == 1
+
+
+def test_find_ndi_source_by_name_accepts_stream_name_case_insensitive():
+    from core import screen_capture as sc
+
+    source = SimpleNamespace(name='OBS-PC', stream_name='MainFeed')
+
+    class FakeFinder:
+        def get_source(self, target):
+            return None
+
+        def __iter__(self):
+            yield source
+
+    assert sc._find_ndi_source_by_name(FakeFinder(), 'mainfeed') is source
+
+
+def test_extract_ndi_source_video_meta_supports_rate_fraction():
+    from core import screen_capture as sc
+
+    source = SimpleNamespace(width=1920, height=1080, frame_rate_N=60000, frame_rate_D=1001)
+    width, height, fps = sc._extract_ndi_source_video_meta(source)
+
+    assert (width, height) == (1920, 1080)
+    assert fps is not None
+    assert abs(fps - 59.94) < 0.02

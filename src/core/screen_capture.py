@@ -100,9 +100,10 @@ def _extract_ndi_source_name(source: Any) -> str:
 
 
 def _extract_ndi_stream_name(source: Any) -> str:
-    value = getattr(source, 'stream_name', None)
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+    for attr in ('stream_name', 'ndi_name', 'stream', 'source_name', 'name'):
+        value = getattr(source, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return ''
 
 
@@ -112,6 +113,7 @@ def _find_ndi_source_by_name(finder: Any, target_name: str) -> Any | None:
     target = str(target_name or '').strip()
     if not target:
         return None
+    target_lower = target.lower()
 
     # Fast path for full-name exact match.
     try:
@@ -126,7 +128,13 @@ def _find_ndi_source_by_name(finder: Any, target_name: str) -> Any | None:
         for source in finder:
             full_name = _extract_ndi_source_name(source)
             stream_name = _extract_ndi_stream_name(source)
-            if target in {full_name, stream_name}:
+            full_name_lower = full_name.lower()
+            stream_name_lower = stream_name.lower()
+            if (
+                target_lower in {full_name_lower, stream_name_lower}
+                or full_name_lower.endswith(f"({target_lower})")
+                or stream_name_lower.endswith(f"({target_lower})")
+            ):
                 return source
     except Exception:
         pass
@@ -201,6 +209,11 @@ def _extract_ndi_source_video_meta(source: Any) -> tuple[int | None, int | None,
         if isinstance(value, (int, float)) and float(value) > 0:
             fps = float(value)
             break
+    if fps is None:
+        num = getattr(source, 'frame_rate_N', None)
+        den = getattr(source, 'frame_rate_D', None)
+        if isinstance(num, (int, float)) and isinstance(den, (int, float)) and float(den) > 0:
+            fps = float(num) / float(den)
 
     return width, height, fps
 
@@ -383,9 +396,15 @@ class NDICapture:
         VideoRecvFrame = symbols['VideoRecvFrame']
 
         try:
+            source = self._resolve_source()
+            if self.source_name and source is None:
+                raise RuntimeError(f"NDI source '{self.source_name}' not found")
+
             receiver_kwargs: dict[str, Any] = {'color_format': RecvColorFormat.RGBX_RGBA}
             if RecvBandwidth is not None and hasattr(RecvBandwidth, 'highest'):
                 receiver_kwargs['bandwidth'] = RecvBandwidth.highest
+            if source is not None:
+                receiver_kwargs['source'] = source
             self._receiver = Receiver(**receiver_kwargs)
 
             self._video_frame_sync: Any | None = None
@@ -399,8 +418,7 @@ class NDICapture:
             else:
                 raise RuntimeError('Unsupported cyndilib version: no usable video frame API found')
 
-            source = self._resolve_source()
-            if source is not None:
+            if source is not None and not self._receiver.is_connected():
                 self._receiver.set_source(source)
         except Exception as exc:
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
@@ -410,9 +428,14 @@ class NDICapture:
                 if self._receiver.is_connected():
                     break
                 try:
-                    self._receiver.frame_sync.capture_video()
-                    if int(getattr(self._video_frame_sync, 'xres', 0) or 0) > 0:
-                        break
+                    if getattr(self, '_video_frame_sync', None) is not None and getattr(self._receiver, 'frame_sync', None) is not None:
+                        self._receiver.frame_sync.capture_video()
+                        if int(getattr(self._video_frame_sync, 'xres', 0) or 0) > 0:
+                            break
+                    else:
+                        recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 100)
+                        if recv_result & self._ReceiveFrameType.recv_video:
+                            break
                 except Exception:
                     pass
 
