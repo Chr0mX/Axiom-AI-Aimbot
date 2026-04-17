@@ -7,12 +7,7 @@ import logging
 
 import numpy as np
 import onnx
-
-try:
-    import sympy
-except ImportError:
-    raise ImportError("sympy is required for symbolic shape inference. Install with: pip install sympy") from None
-
+import sympy
 from onnx import helper, numpy_helper, shape_inference
 from packaging import version
 
