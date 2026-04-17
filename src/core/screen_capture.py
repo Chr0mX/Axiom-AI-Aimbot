@@ -435,6 +435,13 @@ class NDICapture:
         ndi_preview_scale_mode = str(getattr(config, 'ndi_preview_scale_mode', '')).lower().strip()
         self.preview_scale_mode = ndi_preview_scale_mode or 'low_latency'
         self._finder: Any | None = None
+        self._source_assigned = False
+
+        print('[Capture][NDI] Initializing cyndilib NDI backend...')
+        if self.source_name:
+            print(f"[Capture][NDI] Requested source name from config: '{self.source_name}'.")
+        else:
+            print('[Capture][NDI] No source name configured. First discovered source will be auto-selected.')
 
         try:
             symbols = _load_cyndilib_symbols()
@@ -458,16 +465,21 @@ class NDICapture:
                 receiver_kwargs['bandwidth'] = RecvBandwidth.highest
             if source is not None:
                 receiver_kwargs['source'] = source
+                self._source_assigned = True
+                print(f"[Capture][NDI] Receiver will start with source '{_extract_ndi_source_name(source)}'.")
             self._receiver = Receiver(**receiver_kwargs)
+            print('[Capture][NDI] Receiver object created successfully.')
 
             self._video_frame_sync: Any | None = None
             self._video_frame: Any | None = None
             if VideoFrameSync is not None and getattr(self._receiver, 'frame_sync', None) is not None:
                 self._video_frame_sync = VideoFrameSync()
                 self._receiver.frame_sync.set_video_frame(self._video_frame_sync)
+                print('[Capture][NDI] Using VideoFrameSync capture path (matches gist flow).')
             elif VideoRecvFrame is not None:
                 self._video_frame = VideoRecvFrame()
                 self._receiver.set_video_frame(self._video_frame)
+                print('[Capture][NDI] Using VideoRecvFrame fallback path (legacy cyndilib compatibility).')
             else:
                 raise RuntimeError('Unsupported cyndilib version: no usable video frame API found')
 
@@ -476,6 +488,9 @@ class NDICapture:
                 # Always set source explicitly; some cyndilib versions don't
                 # reliably auto-connect when source is only passed in ctor.
                 self._receiver.set_source(source)
+                self._source_assigned = True
+            elif not self.source_name:
+                self._assign_first_available_source()
         except Exception as exc:
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
 
@@ -491,10 +506,12 @@ class NDICapture:
 
         if not connected:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
+        print('[Capture][NDI] Receiver connected and video stream is ready.')
 
         if self.show_window:
             try:
                 cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+                print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
             except Exception:
                 pass
 
@@ -504,11 +521,14 @@ class NDICapture:
         try:
             if self._finder is None:
                 self._finder = self._Finder()
+                print('[Capture][NDI] Finder instance created.')
             finder = self._finder
             if not getattr(finder, "is_open", False):
                 finder.open()
+                print('[Capture][NDI] Finder opened for network source discovery.')
             source = _find_ndi_source_by_name(finder, self.source_name)
             if source is not None:
+                print(f"[Capture][NDI] Matched configured source '{self.source_name}'.")
                 return source
             for _ in range(6):
                 try:
@@ -517,12 +537,49 @@ class NDICapture:
                     changed = finder.wait_for_sources(timeout=0.5)
                 if changed:
                     finder.update_sources()
+                    print('[Capture][NDI] Source list changed while searching for configured source.')
                 source = _find_ndi_source_by_name(finder, self.source_name)
                 if source is not None:
+                    print(f"[Capture][NDI] Found configured source after refresh: '{self.source_name}'.")
                     return source
+            print(f"[Capture][NDI] Could not find configured source '{self.source_name}' after retries.")
             return None
         except Exception:
             return None
+
+    def _assign_first_available_source(self) -> None:
+        """Follow gist behavior: when no source is set, auto-select first discovered stream."""
+
+        try:
+            if self._finder is None:
+                self._finder = self._Finder()
+                print('[Capture][NDI] Finder instance created for auto-select mode.')
+            finder = self._finder
+            if not getattr(finder, 'is_open', False):
+                finder.open()
+                print('[Capture][NDI] Finder opened for auto-select mode.')
+
+            for attempt in range(8):
+                names = [name for name in finder.get_source_names() if isinstance(name, str) and name.strip()]
+                if names:
+                    selected_name = names[0].strip()
+                    with finder.notify:
+                        selected_source = finder.get_source(selected_name)
+                        self._receiver.set_source(selected_source)
+                        self._source_assigned = True
+                        print(f"[Capture][NDI] Auto-selected first available source: '{selected_name}'.")
+                    return
+                try:
+                    changed = finder.wait_for_sources(0.5)
+                except TypeError:
+                    changed = finder.wait_for_sources(timeout=0.5)
+                if changed:
+                    finder.update_sources()
+                    print(f'[Capture][NDI] Waiting for source discovery (attempt {attempt + 1}/8)...')
+
+            print('[Capture][NDI] No NDI sources discovered for auto-select within timeout window.')
+        except Exception as exc:
+            print(f'[Capture][NDI] Auto-select source setup failed: {exc}')
 
     @staticmethod
     def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
@@ -568,6 +625,8 @@ class NDICapture:
                 if source is not None:
                     try:
                         self._receiver.set_source(source)
+                        self._source_assigned = True
+                        print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
                         _wait_for_receiver_connection(
                             self._receiver,
                             getattr(self._receiver, 'frame_sync', None),
@@ -579,6 +638,8 @@ class NDICapture:
                         )
                     except Exception:
                         pass
+                elif not self.source_name and not self._source_assigned:
+                    self._assign_first_available_source()
             if not self._receiver.is_connected():
                 return None
 
@@ -904,13 +965,19 @@ def _initialize_dxcam_capture() -> Any | None:
     try:
         import dxcam  # type: ignore[import-not-found]
     except ImportError:
-        _warn_once('dxcam_import_error', '[截圖] dxcam 未安裝，無法使用 dxcam 後端')
+        _warn_once(
+            'dxcam_import_error',
+            '[Capture] DXcam backend requested but package is not installed. Falling back to MSS.',
+        )
         return None
 
     try:
         return dxcam.create(output_color='BGRA')
     except Exception as exc:
-        _warn_once('dxcam_create_error', f"[截圖] dxcam 初始化失敗: {exc}，將回退至 mss")
+        _warn_once(
+            'dxcam_create_error',
+            f'[Capture] DXcam initialization failed with "{exc}". Falling back to MSS backend.',
+        )
         return None
 
 
@@ -948,33 +1015,42 @@ def initialize_screen_capture(config: Config) -> Any:
     if screenshot_method == 'dxcam':
         dxcam_capture = _initialize_dxcam_capture()
         if dxcam_capture is not None:
-            print('[截圖] 已啟用 dxcam 截圖後端')
+            print('[Capture] DXcam backend initialized successfully (BGRA output).')
             return dxcam_capture
-        _warn_once('dxcam_fallback_mss', '[截圖] dxcam 不可用，已自動切換為 mss')
+        _warn_once('dxcam_fallback_mss', '[Capture] DXcam backend unavailable; automatic fallback to MSS is active.')
     elif screenshot_method == 'uvc':
         try:
             uvc_capture = UVCCapture(config)
-            print('[截圖] 已啟用 UVC (OpenCV VideoCapture) 截圖後端')
+            print('[Capture] UVC backend initialized via OpenCV VideoCapture.')
             return uvc_capture
         except Exception as exc:
-            _warn_once('uvc_fallback_mss', f"[截圖] UVC 初始化失敗: {exc}，將回退至 mss")
+            _warn_once(
+                'uvc_fallback_mss',
+                f'[Capture] UVC initialization failed with "{exc}". Falling back to MSS backend.',
+            )
     elif screenshot_method == 'ndi':
         try:
             ndi_capture = NDICapture(config)
-            print('[截圖] 已啟用 NDI (cyndilib) 截圖後端')
+            print('[Capture] NDI backend initialized via cyndilib and is now active.')
             return ndi_capture
         except Exception as exc:
-            _warn_once('ndi_fallback_mss', f"[截圖] NDI 初始化失敗: {exc}，將回退至 mss")
+            _warn_once(
+                'ndi_fallback_mss',
+                f'[Capture][NDI] Initialization failed with "{exc}". Falling back to MSS backend.',
+            )
     elif screenshot_method != 'mss':
-        _warn_once('invalid_screenshot_method', f"[截圖] 未知截圖方式 '{screenshot_method}'，已改為 mss")
+        _warn_once(
+            'invalid_screenshot_method',
+            f"[Capture] Unknown screenshot method '{screenshot_method}'. Falling back to MSS backend.",
+        )
 
     try:
         mss_capture = mss.mss()
     except Exception as exc:
-        print(f"[截圖] mss 初始化失敗: {exc}")
+        print(f'[Capture] MSS initialization failed with "{exc}".')
         raise
 
-    print('[截圖] 已啟用 mss 截圖後端')
+    print('[Capture] MSS backend initialized successfully.')
     return mss_capture
 
 
@@ -1005,18 +1081,18 @@ def reinitialize_if_method_changed(
     if desired == current_active:
         if desired == 'uvc' and hasattr(current_capture, 'config_signature'):
             if getattr(current_capture, 'config_signature', None) != _uvc_signature(config):
-                print('[截圖] 偵測到 UVC 設定變更，正在重新初始化…')
+                print('[Capture] UVC configuration changed. Reinitializing UVC backend...')
             else:
                 return current_capture, current_active
         elif desired == 'ndi' and hasattr(current_capture, 'config_signature'):
             if getattr(current_capture, 'config_signature', None) != _ndi_signature(config):
-                print('[截圖] 偵測到 NDI 設定變更，正在重新初始化…')
+                print('[Capture][NDI] NDI configuration changed. Reinitializing NDI backend...')
             else:
                 return current_capture, current_active
         else:
             return current_capture, current_active
 
-    print(f'[截圖] 偵測到截圖方式變更: {current_active} → {desired}，正在重新初始化…')
+    print(f'[Capture] Screenshot method transition detected: {current_active} -> {desired}. Reinitializing backend...')
 
     # Release the old backend first
     _cleanup_capture(current_capture)
