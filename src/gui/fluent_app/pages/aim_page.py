@@ -1103,7 +1103,9 @@ class AimPage(BasePage):
         if getattr(self._config, "inference_backend", "auto") != selected_backend:
             self._config.inference_backend = selected_backend
         if selected_backend == "cuda" and not self._isLoadingConfig:
-            self._installCudaDependenciesAndRestart()
+            has_ran = bool(getattr(self._config, "cuda_installer_ran_once", False))
+            if not has_ran and self._runLocalInstallerScript("install_cuda_local.py", "CUDA"):
+                self._config.cuda_installer_ran_once = True
         self._updateInferenceBackendSubtitle()
 
     def _updateInferenceBackendSubtitle(self):
@@ -1164,11 +1166,57 @@ class AimPage(BasePage):
         if self._config:
             self._config.screenshot_method = text
         if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
-            self._installNdiDependenciesAndRestart()
+            has_ran = bool(getattr(self._config, "ndi_installer_ran_once", False))
+            if not has_ran and self._runLocalInstallerScript("install_cyndilib.py", "NDI"):
+                self._config.ndi_installer_ran_once = True
         self._updateCaptureControlsVisibility(text)
         main_window = self.window()
         if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
             main_window.updateVisualsVisibilityForScreenshotMethod(text)
+
+    def _runLocalInstallerScript(self, script_name: str, feature_name: str) -> bool:
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        script_path = os.path.join(src_dir, script_name)
+        if not os.path.exists(script_path):
+            QMessageBox.warning(
+                self,
+                f"{feature_name} install failed",
+                f"Missing installer script:\n{script_path}",
+            )
+            return False
+
+        python_exe = self._getEmbeddedPythonExe()
+        install_cmd = [python_exe, script_path]
+        print(f"[Dependency][{feature_name}] Running local installer script: {' '.join(install_cmd)}")
+        try:
+            result = subprocess.run(
+                install_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if result.stdout:
+                print(f"[Dependency][{feature_name}][stdout]\n{result.stdout}")
+            if result.stderr:
+                print(f"[Dependency][{feature_name}][stderr]\n{result.stderr}")
+            print(f"[Dependency][{feature_name}] Local installer script completed successfully.")
+            return True
+        except subprocess.CalledProcessError as exc:
+            if exc.stdout:
+                print(f"[Dependency][{feature_name}][stdout]\n{exc.stdout}")
+            if exc.stderr:
+                print(f"[Dependency][{feature_name}][stderr]\n{exc.stderr}")
+            error_text = exc.stderr or exc.stdout or str(exc)
+            QMessageBox.warning(
+                self,
+                f"{feature_name} install failed",
+                (
+                    f"Failed command: {' '.join(install_cmd)}\n\n"
+                    f"{error_text}\n\n"
+                    "Please run the installer script manually and try again."
+                ),
+            )
+            return False
 
     def _getEmbeddedPythonExe(self) -> str:
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
