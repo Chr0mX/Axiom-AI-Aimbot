@@ -2,18 +2,11 @@
 import sys
 import os
 
-# Ensure src and bundled dependencies are in path
+# Ensure src and dependencies are in path
 _src_dir = os.path.dirname(os.path.abspath(__file__))
-_python_dir = os.path.join(_src_dir, "python")
-_candidate_paths = [
-    _src_dir,
-    os.path.join(_python_dir, "dependencies"),
-    os.path.join(_python_dir, "Lib", "site-packages"),
-    os.path.join(_python_dir, "src", "python", "Lib", "site-packages"),
-]
-for _path in _candidate_paths:
-    if os.path.isdir(_path) and _path not in sys.path:
-        sys.path.insert(0, _path)
+_deps_dir = os.path.join(_src_dir, "python", "dependencies")
+sys.path.insert(0, _deps_dir)
+sys.path.insert(0, _src_dir)
 
 from PyQt6.QtWidgets import QApplication
 from gui.fluent_app.window import AxiomWindow

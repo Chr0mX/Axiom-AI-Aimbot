@@ -37,17 +37,11 @@ src_dir = os.path.dirname(os.path.abspath(__file__))
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
-# Add bundled Python paths to sys.path (portable package layout)
+# Add dependencies directory to Python path (located in src/python/dependencies)
 python_dir = os.path.join(src_dir, "python")
 dependencies_dir = os.path.join(python_dir, "dependencies")
-bundle_site_packages = [
-    dependencies_dir,
-    os.path.join(python_dir, "Lib", "site-packages"),
-    os.path.join(python_dir, "src", "python", "Lib", "site-packages"),
-]
-for candidate in bundle_site_packages:
-    if os.path.isdir(candidate) and candidate not in sys.path:
-        sys.path.insert(0, candidate)
+if dependencies_dir not in sys.path:
+    sys.path.insert(0, dependencies_dir)
 
 # Add extra paths for pywin32
 win32_dir = os.path.join(dependencies_dir, "win32")
