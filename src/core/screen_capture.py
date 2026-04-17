@@ -410,8 +410,8 @@ class NDICapture:
                 if self._receiver.is_connected():
                     break
                 try:
-                    recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 250)
-                    if recv_result & self._ReceiveFrameType.recv_video:
+                    self._receiver.frame_sync.capture_video()
+                    if int(getattr(self._video_frame_sync, 'xres', 0) or 0) > 0:
                         break
                 except Exception:
                     pass
@@ -473,37 +473,18 @@ class NDICapture:
         if width <= 0 or height <= 0:
             return None
 
-        raw = np.asarray(frame.current_frame_data, dtype=np.uint8)
+        raw = frame.get_array()
+        if raw is None:
+            return None
+        raw = np.asarray(raw, dtype=np.uint8)
         if raw.size == 0:
             return None
 
-        fourcc = str(frame.get_fourcc()).split('.')[-1].upper()
-        line_stride = int(frame.get_line_stride() or 0)
-
-        if fourcc in {'BGRA', 'BGRX', 'RGBA', 'RGBX'}:
-            row_bytes = abs(line_stride) if line_stride else (width * 4)
-            expected = row_bytes * height
-            if raw.size < expected:
-                return None
-            img = raw[:expected].reshape(height, row_bytes)
-            img = img[:, : width * 4].reshape(height, width, 4)
-            if fourcc in {'RGBA', 'RGBX'}:
-                return cv2.cvtColor(img, cv2.COLOR_RGBA2BGRA)
-            return img
-
-        if fourcc == 'UYVY':
-            row_bytes = abs(line_stride) if line_stride else (width * 2)
-            expected = row_bytes * height
-            if raw.size < expected:
-                return None
-            yuv = raw[:expected].reshape(height, row_bytes)[:, : width * 2].reshape(height, width, 2)
-            return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGRA_UYVY)
-
-        # Fallback for unknown pixel format if receiver already provided BGRA layout.
         expected = width * height * 4
-        if raw.size >= expected:
-            return raw[:expected].reshape(height, width, 4)
-        return None
+        if raw.size < expected:
+            return None
+        rgba = raw[:expected].reshape(height, width, 4)
+        return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA)
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         frame_obj: Any | None = None
