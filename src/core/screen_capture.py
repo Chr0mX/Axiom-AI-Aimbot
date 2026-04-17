@@ -50,6 +50,41 @@ def _extract_ndi_source_name(source: Any) -> str:
     return as_text
 
 
+def _extract_ndi_stream_name(source: Any) -> str:
+    value = getattr(source, 'stream_name', None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ''
+
+
+def _find_ndi_source_by_name(finder: Any, target_name: str) -> Any | None:
+    """Find an NDI source by full source name or stream name."""
+
+    target = str(target_name or '').strip()
+    if not target:
+        return None
+
+    # Fast path for full-name exact match.
+    try:
+        source = finder.get_source(target)
+        if source is not None:
+            return source
+    except Exception:
+        pass
+
+    # Fall back to iteration and stream-name matching (as shown in cyndilib docs).
+    try:
+        for source in finder:
+            full_name = _extract_ndi_source_name(source)
+            stream_name = _extract_ndi_stream_name(source)
+            if target in {full_name, stream_name}:
+                return source
+    except Exception:
+        pass
+
+    return None
+
+
 def list_available_ndi_sources() -> list[str]:
     """Return discovered NDI source names via cyndilib when available."""
 
@@ -202,7 +237,7 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
                 height: int | None = None
                 fps: float | None = None
 
-                source = finder.get_source(name)
+                source = _find_ndi_source_by_name(finder, name)
                 receiver: Any | None = None
                 if source is not None:
                     try:
@@ -269,17 +304,27 @@ class NDICapture:
 
         try:
             self._receiver = Receiver(
-                source_name=self.source_name,
                 color_format=RecvColorFormat.BGRX_BGRA,
             )
             self._video_frame = VideoRecvFrame()
             self._receiver.set_video_frame(self._video_frame)
-            if not self._receiver.is_connected():
-                source = self._resolve_source()
-                if source is not None:
-                    self._receiver.connect_to(source)
+
+            source = self._resolve_source()
+            if source is not None:
+                self._receiver.set_source(source)
         except Exception as exc:
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
+
+        if not self._receiver.is_connected():
+            for _ in range(10):
+                if self._receiver.is_connected():
+                    break
+                try:
+                    recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 250)
+                    if recv_result & self._ReceiveFrameType.recv_video:
+                        break
+                except Exception:
+                    pass
 
         if not self._receiver.is_connected():
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
@@ -299,7 +344,7 @@ class NDICapture:
             finder = self._finder
             if not getattr(finder, "is_open", False):
                 finder.open()
-            source = finder.get_source(self.source_name)
+            source = _find_ndi_source_by_name(finder, self.source_name)
             if source is not None:
                 return source
             for _ in range(6):
@@ -309,7 +354,7 @@ class NDICapture:
                     changed = finder.wait_for_sources(timeout=0.5)
                 if changed:
                     finder.update_sources()
-                source = finder.get_source(self.source_name)
+                source = _find_ndi_source_by_name(finder, self.source_name)
                 if source is not None:
                     return source
             return None
