@@ -850,8 +850,17 @@ class StatusPanel(QWidget):
             disp_screenshot += " ✓"
             screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
         elif current_screenshot_method == 'ndi':
-            disp_screenshot += " ⚠"
-            screenshot_color = FluentColors.to_css_rgba(FluentColors.get_warning_color())
+            try:
+                import ndilib as ndi  # type: ignore[import-not-found]
+                if ndi is not None:
+                    disp_screenshot += " ✓"
+                    screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
+                else:
+                    disp_screenshot += " ✗"
+                    screenshot_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
+            except ImportError:
+                disp_screenshot += " ✗"
+                screenshot_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
 
         self.screenshot_row.label.setText(get_text('screenshot_method'))
         self.screenshot_row.set_value(disp_screenshot, screenshot_color)

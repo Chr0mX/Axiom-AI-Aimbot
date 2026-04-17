@@ -12,9 +12,15 @@ if TYPE_CHECKING:
 def get_capture_dimensions(config: Config) -> Tuple[int, int]:
     """Get active capture dimensions based on screenshot backend."""
 
-    if str(getattr(config, 'screenshot_method', 'mss')).lower() == 'uvc':
+    method = str(getattr(config, 'screenshot_method', 'mss')).lower()
+    if method == 'uvc':
         cap_w = int(getattr(config, 'uvc_width', 0) or 0)
         cap_h = int(getattr(config, 'uvc_height', 0) or 0)
+        if cap_w > 0 and cap_h > 0:
+            return cap_w, cap_h
+    elif method == 'ndi':
+        cap_w = int(getattr(config, 'ndi_width', 0) or 0)
+        cap_h = int(getattr(config, 'ndi_height', 0) or 0)
         if cap_w > 0 and cap_h > 0:
             return cap_w, cap_h
     return int(config.width), int(config.height)

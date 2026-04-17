@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import ctypes
 from typing import TYPE_CHECKING, Any
 
 import cv2
@@ -219,6 +220,215 @@ def list_available_ndi_sources(timeout_ms: int = 1200) -> list[str]:
     return discovered
 
 
+def _ndi_source_name(source: Any) -> str:
+    return str(getattr(source, 'ndi_name', '') or getattr(source, 'p_ndi_name', '')).strip()
+
+
+def _crop_bgra_frame(frame_bgra: np.ndarray, region: dict[str, int] | None) -> np.ndarray | None:
+    if region is None:
+        return frame_bgra
+
+    frame_h, frame_w = frame_bgra.shape[:2]
+    left = max(0, int(region.get('left', 0)))
+    top = max(0, int(region.get('top', 0)))
+    width = max(0, int(region.get('width', frame_w)))
+    height = max(0, int(region.get('height', frame_h)))
+    right = min(frame_w, left + width)
+    bottom = min(frame_h, top + height)
+    if right <= left or bottom <= top:
+        return None
+    return frame_bgra[top:bottom, left:right]
+
+
+class NDICapture:
+    """NDI receive backend using ndilib Python bindings."""
+
+    def __init__(self, config: Config) -> None:
+        self.config = config
+        self.backend_name = 'ndi'
+        self.find_inst: Any | None = None
+        self.recv_inst: Any | None = None
+        self.selected_source_name = ''
+        self._pending_video_frame: Any | None = None
+
+        try:
+            import ndilib as ndi  # type: ignore[import-not-found]
+        except ImportError as exc:
+            raise RuntimeError('NDI Python bindings unavailable (ndilib)') from exc
+
+        self.ndi = ndi
+        initialize = getattr(ndi, 'initialize', None)
+        if callable(initialize) and not bool(initialize()):
+            raise RuntimeError('NDI initialization failed')
+
+        create_find = getattr(ndi, 'find_create_v2', None) or getattr(ndi, 'find_create', None)
+        if not callable(create_find):
+            raise RuntimeError('NDI source discovery API unavailable')
+        self.find_inst = create_find()
+        if self.find_inst is None:
+            raise RuntimeError('NDI source finder creation failed')
+
+        sources = self._discover_sources(timeout_ms=1500)
+        if not sources:
+            raise RuntimeError('No NDI sources discovered')
+
+        preferred_name = str(getattr(config, 'ndi_source_name', '')).strip()
+        selected_source = None
+        if preferred_name:
+            for source in sources:
+                if _ndi_source_name(source) == preferred_name:
+                    selected_source = source
+                    break
+            if selected_source is None:
+                raise RuntimeError(f"NDI source not found: '{preferred_name}'")
+        else:
+            selected_source = sources[0]
+            config.ndi_source_name = _ndi_source_name(selected_source)
+
+        self.selected_source_name = _ndi_source_name(selected_source)
+        self.recv_inst = self._create_receiver()
+        connect_fn = getattr(ndi, 'recv_connect', None) or getattr(ndi, 'RecvConnect', None)
+        if not callable(connect_fn):
+            raise RuntimeError('NDI receiver connect API unavailable')
+        connect_fn(self.recv_inst, selected_source)
+
+    def _discover_sources(self, timeout_ms: int) -> list[Any]:
+        wait_for_sources = getattr(self.ndi, 'find_wait_for_sources', None)
+        get_sources = getattr(self.ndi, 'find_get_current_sources', None)
+        if not callable(get_sources):
+            return []
+
+        if callable(wait_for_sources):
+            wait_for_sources(self.find_inst, int(timeout_ms))
+        else:
+            time.sleep(max(0.0, timeout_ms / 1000.0))
+        return list(get_sources(self.find_inst) or [])
+
+    def _create_receiver(self) -> Any:
+        ndi = self.ndi
+        recv_create = getattr(ndi, 'recv_create_v3', None) or getattr(ndi, 'recv_create_v2', None) or getattr(ndi, 'recv_create', None)
+        if not callable(recv_create):
+            raise RuntimeError('NDI receiver creation API unavailable')
+
+        settings_factory = getattr(ndi, 'RecvCreateV3', None) or getattr(ndi, 'RecvCreateV2', None) or getattr(ndi, 'RecvCreate', None)
+        settings = settings_factory() if callable(settings_factory) else None
+        if settings is not None and hasattr(settings, 'color_format'):
+            color_bgra = getattr(ndi, 'RECV_COLOR_FORMAT_BGRX_BGRA', None)
+            if color_bgra is not None:
+                settings.color_format = color_bgra
+
+        try:
+            recv_inst = recv_create(settings) if settings is not None else recv_create()
+        except TypeError:
+            recv_inst = recv_create()
+        if recv_inst is None:
+            raise RuntimeError('NDI receiver creation failed')
+        return recv_inst
+
+    def _read_video_frame(self, timeout_ms: int = 100) -> np.ndarray | None:
+        ndi = self.ndi
+        capture_fn = getattr(ndi, 'recv_capture_v2', None) or getattr(ndi, 'recv_capture', None)
+        free_video_fn = getattr(ndi, 'recv_free_video_v2', None) or getattr(ndi, 'recv_free_video', None)
+        if not callable(capture_fn) or not callable(free_video_fn):
+            return None
+
+        capture_result = capture_fn(self.recv_inst, int(timeout_ms))
+        frame_type = None
+        video_frame = None
+        if isinstance(capture_result, tuple):
+            if len(capture_result) >= 2:
+                frame_type = capture_result[0]
+                video_frame = capture_result[1]
+        else:
+            frame_type = capture_result
+            video_frame = None
+
+        frame_type_video = getattr(ndi, 'FRAME_TYPE_VIDEO', None)
+        if frame_type_video is not None and frame_type != frame_type_video:
+            return None
+        if video_frame is None:
+            return None
+
+        try:
+            return self._video_frame_to_bgra(video_frame)
+        finally:
+            try:
+                free_video_fn(self.recv_inst, video_frame)
+            except Exception:
+                pass
+
+    def _video_frame_to_bgra(self, video_frame: Any) -> np.ndarray | None:
+        width = int(getattr(video_frame, 'xres', 0) or getattr(video_frame, 'width', 0) or 0)
+        height = int(getattr(video_frame, 'yres', 0) or getattr(video_frame, 'height', 0) or 0)
+        if width <= 0 or height <= 0:
+            return None
+
+        stride = int(getattr(video_frame, 'line_stride_in_bytes', 0) or width * 4)
+        if stride <= 0:
+            return None
+        required = stride * height
+        if required <= 0:
+            return None
+
+        data = getattr(video_frame, 'data', None) or getattr(video_frame, 'p_data', None)
+        if data is None:
+            return None
+
+        flat: np.ndarray | None = None
+        if isinstance(data, np.ndarray):
+            flat = data.reshape(-1)
+        elif isinstance(data, (bytes, bytearray, memoryview)):
+            flat = np.frombuffer(data, dtype=np.uint8)
+        else:
+            try:
+                ptr = ctypes.cast(data, ctypes.POINTER(ctypes.c_uint8))
+                flat = np.ctypeslib.as_array(ptr, shape=(required,))
+            except Exception:
+                flat = None
+
+        if flat is None or flat.size < required:
+            return None
+        rows = flat[:required].reshape((height, stride))
+        pixel_bytes = rows[:, : width * 4]
+        return np.ascontiguousarray(pixel_bytes.reshape((height, width, 4)))
+
+    def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
+        frame_bgra = self._read_video_frame()
+        if frame_bgra is None:
+            return None
+        frame_bgra = apply_configured_video_filters(frame_bgra, self.config, 'ndi')
+        cropped = _crop_bgra_frame(frame_bgra, region)
+        if cropped is None:
+            return None
+        self.config.ndi_width = int(frame_bgra.shape[1])
+        self.config.ndi_height = int(frame_bgra.shape[0])
+        return cropped
+
+    def close(self) -> None:
+        destroy_recv = getattr(self.ndi, 'recv_destroy', None)
+        if callable(destroy_recv) and self.recv_inst is not None:
+            try:
+                destroy_recv(self.recv_inst)
+            except Exception:
+                pass
+            self.recv_inst = None
+
+        destroy_find = getattr(self.ndi, 'find_destroy', None)
+        if callable(destroy_find) and self.find_inst is not None:
+            try:
+                destroy_find(self.find_inst)
+            except Exception:
+                pass
+            self.find_inst = None
+
+        destroy = getattr(self.ndi, 'destroy', None)
+        if callable(destroy):
+            try:
+                destroy()
+            except Exception:
+                pass
+
+
 class UVCCapture:
     """OpenCV VideoCapture backend for UVC capture cards/cameras."""
 
@@ -303,16 +513,10 @@ class UVCCapture:
                 pass
 
         if region is not None:
-            frame_h, frame_w = frame_bgr.shape[:2]
-            left = max(0, int(region.get('left', 0)))
-            top = max(0, int(region.get('top', 0)))
-            width = max(0, int(region.get('width', frame_w)))
-            height = max(0, int(region.get('height', frame_h)))
-            right = min(frame_w, left + width)
-            bottom = min(frame_h, top + height)
-            if right <= left or bottom <= top:
+            cropped = _crop_bgra_frame(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA), region)
+            if cropped is None:
                 return None
-            frame_bgr = frame_bgr[top:bottom, left:right]
+            frame_bgr = cropped[:, :, :3]
 
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
 
@@ -514,14 +718,16 @@ def initialize_screen_capture(config: Config) -> Any:
         except Exception as exc:
             _warn_once('uvc_fallback_mss', f"[截圖] UVC 初始化失敗: {exc}，將回退至 mss")
     elif screenshot_method == 'ndi':
-        ndi_source_name = str(getattr(config, 'ndi_source_name', '')).strip()
-        if ndi_source_name:
-            _warn_once(
-                'ndi_fallback_mss',
-                f"[截圖] NDI 來源 '{ndi_source_name}' 尚未安裝對應後端，將回退至 mss",
-            )
-        else:
-            _warn_once('ndi_fallback_mss', '[截圖] NDI 擷取尚未安裝對應後端，將回退至 mss')
+        try:
+            ndi_capture = NDICapture(config)
+            source = str(getattr(ndi_capture, 'selected_source_name', '')).strip()
+            if source:
+                print(f"[截圖] 已啟用 NDI 擷取後端: {source}")
+            else:
+                print('[截圖] 已啟用 NDI 擷取後端')
+            return ndi_capture
+        except Exception as exc:
+            _warn_once('ndi_fallback_mss', f"[截圖] NDI 初始化失敗: {exc}，將回退至 mss")
     elif screenshot_method != 'mss':
         _warn_once('invalid_screenshot_method', f"[截圖] 未知截圖方式 '{screenshot_method}'，已改為 mss")
 
@@ -615,7 +821,7 @@ def capture_frame(screen_capture: Any, region: dict[str, int]) -> np.ndarray | N
         _warn_once('capture_empty_frame', '[截圖] 抓到空影像，已略過該幀')
         return None
 
-    if getattr(screen_capture, 'backend_name', '') != 'uvc':
+    if getattr(screen_capture, 'backend_name', '') not in {'uvc', 'ndi'}:
         config_obj = getattr(screen_capture, 'config', None)
         method = str(getattr(config_obj, 'screenshot_method', 'mss')).lower() if config_obj else 'mss'
         if method in {'uvc', 'ndi'} and config_obj is not None:

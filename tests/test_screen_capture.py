@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import sys
 
 import numpy as np
 
@@ -119,3 +120,54 @@ def test_capture_frame_prints_error_prompt_once(monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert output.count('[截圖] 抓圖失敗: capture failed') == 1
+
+
+def test_initialize_screen_capture_uses_ndi_backend_when_available(monkeypatch):
+    from core import screen_capture as sc
+
+    class FakeNDICapture:
+        backend_name = "ndi"
+
+        def __init__(self, config):
+            self.config = config
+            self.selected_source_name = "distoav-main"
+
+    monkeypatch.setattr(sc, 'NDICapture', FakeNDICapture)
+    config = SimpleNamespace(screenshot_method='ndi', ndi_source_name='distoav-main')
+    backend = sc.initialize_screen_capture(config)
+    assert isinstance(backend, FakeNDICapture)
+    assert backend.selected_source_name == 'distoav-main'
+
+
+def test_list_available_ndi_sources_reads_names_from_ndilib(monkeypatch):
+    from core import screen_capture as sc
+
+    class FakeSource:
+        def __init__(self, name):
+            self.ndi_name = name
+
+    class FakeNdi:
+        @staticmethod
+        def initialize():
+            return True
+
+        @staticmethod
+        def find_create_v2():
+            return object()
+
+        @staticmethod
+        def find_wait_for_sources(_finder, _timeout):
+            return True
+
+        @staticmethod
+        def find_get_current_sources(_finder):
+            return [FakeSource('distoav-main'), FakeSource('game-feed')]
+
+        @staticmethod
+        def find_destroy(_finder):
+            return None
+
+    monkeypatch.setitem(sys.modules, 'ndilib', FakeNdi)
+    sources = sc.list_available_ndi_sources(timeout_ms=1)
+    assert 'distoav-main' in sources
+    assert 'game-feed' in sources

@@ -155,6 +155,8 @@ class ConfigManager:
             'uvc_capture_method': getattr(config_instance, 'uvc_capture_method', 'dshow'),
             'uvc_show_window': getattr(config_instance, 'uvc_show_window', True),
             'uvc_preview_scale_mode': getattr(config_instance, 'uvc_preview_scale_mode', 'scale_to_fit'),
+            'ndi_source_name': getattr(config_instance, 'ndi_source_name', ''),
+            'video_filters': getattr(config_instance, 'video_filters', []),
 
             # Y軸壓槍速度歸零
             'aim_y_reduce_enabled': getattr(config_instance, 'aim_y_reduce_enabled', False),
