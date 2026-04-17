@@ -28,8 +28,12 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
     )
 
 
-def _ndi_signature(config: Config) -> tuple[str]:
-    return (str(getattr(config, 'ndi_source_name', '')).strip(),)
+def _ndi_signature(config: Config) -> tuple[str, bool, str]:
+    return (
+        str(getattr(config, 'ndi_source_name', '')).strip(),
+        bool(getattr(config, 'uvc_show_window', False)),
+        str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
+    )
 
 
 def _extract_ndi_source_name(source: Any) -> str:
@@ -44,6 +48,41 @@ def _extract_ndi_source_name(source: Any) -> str:
     except Exception:
         as_text = ''
     return as_text
+
+
+def _extract_ndi_stream_name(source: Any) -> str:
+    value = getattr(source, 'stream_name', None)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return ''
+
+
+def _find_ndi_source_by_name(finder: Any, target_name: str) -> Any | None:
+    """Find an NDI source by full source name or stream name."""
+
+    target = str(target_name or '').strip()
+    if not target:
+        return None
+
+    # Fast path for full-name exact match.
+    try:
+        source = finder.get_source(target)
+        if source is not None:
+            return source
+    except Exception:
+        pass
+
+    # Fall back to iteration and stream-name matching (as shown in cyndilib docs).
+    try:
+        for source in finder:
+            full_name = _extract_ndi_source_name(source)
+            stream_name = _extract_ndi_stream_name(source)
+            if target in {full_name, stream_name}:
+                return source
+    except Exception:
+        pass
+
+    return None
 
 
 def list_available_ndi_sources() -> list[str]:
@@ -92,6 +131,74 @@ def _format_ndi_source_label(name: str, width: int | None, height: int | None, f
     return f"{name} ({resolution} @ {fps_text} fps)"
 
 
+def _extract_ndi_source_video_meta(source: Any) -> tuple[int | None, int | None, float | None]:
+    """Best-effort metadata extraction from cyndilib source objects."""
+
+    width = height = None
+    fps = None
+
+    for key in ('width', 'xres', 'video_width', 'frame_width'):
+        value = getattr(source, key, None)
+        if isinstance(value, (int, float)) and int(value) > 0:
+            width = int(value)
+            break
+    for key in ('height', 'yres', 'video_height', 'frame_height'):
+        value = getattr(source, key, None)
+        if isinstance(value, (int, float)) and int(value) > 0:
+            height = int(value)
+            break
+    for key in ('frame_rate', 'framerate', 'fps', 'video_fps'):
+        value = getattr(source, key, None)
+        if isinstance(value, (int, float)) and float(value) > 0:
+            fps = float(value)
+            break
+
+    return width, height, fps
+
+
+def _render_preview_frame(window_name: str, mode: str, frame_bgr: np.ndarray) -> np.ndarray:
+    """Render capture preview according to configured preview mode."""
+
+    if mode == 'scale_to_canvas':
+        try:
+            _, _, width, height = cv2.getWindowImageRect(window_name)
+            if width > 0 and height > 0:
+                return cv2.resize(frame_bgr, (width, height), interpolation=cv2.INTER_LINEAR)
+        except Exception:
+            return frame_bgr
+    if mode == 'fit_to_screen':
+        try:
+            screen_w, screen_h = 1920, 1080
+            max_w = max(320, int(screen_w * 0.9))
+            max_h = max(240, int(screen_h * 0.9))
+            h, w = frame_bgr.shape[:2]
+            ratio = min(max_w / max(1, w), max_h / max(1, h))
+            target_w = max(1, int(w * ratio))
+            target_h = max(1, int(h * ratio))
+            cv2.resizeWindow(window_name, target_w, target_h)
+        except Exception:
+            pass
+        return frame_bgr
+
+    # default: scale_to_fit
+    try:
+        _, _, width, height = cv2.getWindowImageRect(window_name)
+        if width <= 0 or height <= 0:
+            return frame_bgr
+        h, w = frame_bgr.shape[:2]
+        ratio = min(width / max(1, w), height / max(1, h))
+        draw_w = max(1, int(w * ratio))
+        draw_h = max(1, int(h * ratio))
+        resized = cv2.resize(frame_bgr, (draw_w, draw_h), interpolation=cv2.INTER_LINEAR)
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
+        x = (width - draw_w) // 2
+        y = (height - draw_h) // 2
+        canvas[y:y + draw_h, x:x + draw_w] = resized
+        return canvas
+    except Exception:
+        return frame_bgr
+
+
 def list_available_ndi_source_details() -> list[dict[str, str | int | float | None]]:
     """Return discovered NDI sources with best-effort video metadata."""
 
@@ -130,20 +237,25 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
                 height: int | None = None
                 fps: float | None = None
 
-                source = finder.get_source(name)
+                source = _find_ndi_source_by_name(finder, name)
                 receiver: Any | None = None
                 if source is not None:
                     try:
+                        width, height, fps = _extract_ndi_source_video_meta(source)
                         receiver = Receiver(source=source, color_format=RecvColorFormat.BGRX_BGRA)
                         video_frame = VideoRecvFrame()
                         receiver.set_video_frame(video_frame)
-                        for _ in range(4):
-                            recv_result = receiver.receive(ReceiveFrameType.recv_video, 250)
+                        for _ in range(10):
+                            recv_result = receiver.receive(ReceiveFrameType.recv_video, 350)
                             if recv_result & ReceiveFrameType.recv_video:
-                                width, height = video_frame.get_resolution()
+                                frame_w, frame_h = video_frame.get_resolution()
+                                if frame_w and frame_h:
+                                    width, height = int(frame_w), int(frame_h)
                                 frame_rate = video_frame.get_frame_rate()
-                                fps = float(frame_rate) if frame_rate else None
-                                break
+                                if frame_rate:
+                                    fps = float(frame_rate)
+                                if width and height and fps:
+                                    break
                     except Exception:
                         pass
                     finally:
@@ -175,6 +287,9 @@ class NDICapture:
         self.config = config
         self.config_signature = _ndi_signature(config)
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
+        self.show_window = bool(getattr(config, 'uvc_show_window', False))
+        self.window_name = str(getattr(config, 'ndi_window_name', 'Axiom NDI Preview'))
+        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
         self._finder: Any | None = None
 
         try:
@@ -189,20 +304,36 @@ class NDICapture:
 
         try:
             self._receiver = Receiver(
-                source_name=self.source_name,
                 color_format=RecvColorFormat.BGRX_BGRA,
             )
             self._video_frame = VideoRecvFrame()
             self._receiver.set_video_frame(self._video_frame)
-            if not self._receiver.is_connected():
-                source = self._resolve_source()
-                if source is not None:
-                    self._receiver.connect_to(source)
+
+            source = self._resolve_source()
+            if source is not None:
+                self._receiver.set_source(source)
         except Exception as exc:
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
 
         if not self._receiver.is_connected():
+            for _ in range(10):
+                if self._receiver.is_connected():
+                    break
+                try:
+                    recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 250)
+                    if recv_result & self._ReceiveFrameType.recv_video:
+                        break
+                except Exception:
+                    pass
+
+        if not self._receiver.is_connected():
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
+
+        if self.show_window:
+            try:
+                cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+            except Exception:
+                pass
 
     def _resolve_source(self) -> Any | None:
         if not self.source_name:
@@ -213,7 +344,7 @@ class NDICapture:
             finder = self._finder
             if not getattr(finder, "is_open", False):
                 finder.open()
-            source = finder.get_source(self.source_name)
+            source = _find_ndi_source_by_name(finder, self.source_name)
             if source is not None:
                 return source
             for _ in range(6):
@@ -223,7 +354,7 @@ class NDICapture:
                     changed = finder.wait_for_sources(timeout=0.5)
                 if changed:
                     finder.update_sources()
-                source = finder.get_source(self.source_name)
+                source = _find_ndi_source_by_name(finder, self.source_name)
                 if source is not None:
                     return source
             return None
@@ -280,6 +411,7 @@ class NDICapture:
         frame = self._bgra_from_cyndilib_frame(frame_obj)
         if frame is None:
             return None
+        full_frame = frame
 
         if region is not None:
             frame_h, frame_w = frame.shape[:2]
@@ -292,6 +424,25 @@ class NDICapture:
             if right <= left or bottom <= top:
                 return None
             frame = frame[top:bottom, left:right]
+
+        if self.show_window:
+            try:
+                preview = cv2.cvtColor(full_frame, cv2.COLOR_BGRA2BGR)
+                if region is not None:
+                    frame_h, frame_w = preview.shape[:2]
+                    left = max(0, int(region.get('left', 0)))
+                    top = max(0, int(region.get('top', 0)))
+                    width = max(0, int(region.get('width', frame_w)))
+                    height = max(0, int(region.get('height', frame_h)))
+                    right = min(frame_w - 1, left + width)
+                    bottom = min(frame_h - 1, top + height)
+                    if right > left and bottom > top:
+                        cv2.rectangle(preview, (left, top), (right, bottom), (255, 140, 0), 1, cv2.LINE_AA)
+                render_frame = _render_preview_frame(self.window_name, self.preview_scale_mode, preview)
+                cv2.imshow(self.window_name, render_frame)
+                cv2.waitKey(1)
+            except Exception:
+                pass
 
         if frame.ndim == 3 and frame.shape[2] == 4:
             return frame
@@ -317,6 +468,11 @@ class NDICapture:
                         method()
                     except Exception:
                         pass
+        if self.show_window:
+            try:
+                cv2.destroyWindow(self.window_name)
+            except Exception:
+                pass
 
 
 def list_supported_uvc_resolutions(
@@ -524,45 +680,7 @@ class UVCCapture:
         return frame_bgr
 
     def _render_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
-        mode = self.preview_scale_mode
-        if mode == 'scale_to_canvas':
-            try:
-                _, _, width, height = cv2.getWindowImageRect(self.window_name)
-                if width > 0 and height > 0:
-                    return cv2.resize(frame_bgr, (width, height), interpolation=cv2.INTER_LINEAR)
-            except Exception:
-                return frame_bgr
-        if mode == 'fit_to_screen':
-            try:
-                screen_w, screen_h = 1920, 1080
-                max_w = max(320, int(screen_w * 0.9))
-                max_h = max(240, int(screen_h * 0.9))
-                h, w = frame_bgr.shape[:2]
-                ratio = min(max_w / max(1, w), max_h / max(1, h))
-                target_w = max(1, int(w * ratio))
-                target_h = max(1, int(h * ratio))
-                cv2.resizeWindow(self.window_name, target_w, target_h)
-            except Exception:
-                pass
-            return frame_bgr
-
-        # default: scale_to_fit
-        try:
-            _, _, width, height = cv2.getWindowImageRect(self.window_name)
-            if width <= 0 or height <= 0:
-                return frame_bgr
-            h, w = frame_bgr.shape[:2]
-            ratio = min(width / max(1, w), height / max(1, h))
-            draw_w = max(1, int(w * ratio))
-            draw_h = max(1, int(h * ratio))
-            resized = cv2.resize(frame_bgr, (draw_w, draw_h), interpolation=cv2.INTER_LINEAR)
-            canvas = np.zeros((height, width, 3), dtype=np.uint8)
-            x = (width - draw_w) // 2
-            y = (height - draw_h) // 2
-            canvas[y:y + draw_h, x:x + draw_w] = resized
-            return canvas
-        except Exception:
-            return frame_bgr
+        return _render_preview_frame(self.window_name, self.preview_scale_mode, frame_bgr)
 
     def close(self) -> None:
         if self.cap is not None:
