@@ -8,6 +8,7 @@ import re
 import sys
 import subprocess
 import threading
+from urllib.error import HTTPError
 from urllib.request import urlretrieve
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QStackedWidget
@@ -1177,19 +1178,43 @@ class AimPage(BasePage):
 
     def _runPipInstall(self, package_args: list[str]) -> bool:
         python_exe = self._getEmbeddedPythonExe()
+        install_cmd = [python_exe, "-m", "pip", "install", *package_args]
         try:
             subprocess.run(
-                [python_exe, "-m", "pip", "install", *package_args],
+                install_cmd,
                 check=True,
                 capture_output=True,
                 text=True,
             )
             return True
         except subprocess.CalledProcessError as exc:
+            error_text = exc.stderr or exc.stdout or str(exc)
+            lowered_error = error_text.lower()
+            should_retry_user_install = (
+                "winerror 5" in lowered_error
+                or "access is denied" in lowered_error
+                or "permission denied" in lowered_error
+            )
+            if should_retry_user_install:
+                try:
+                    subprocess.run(
+                        [python_exe, "-m", "pip", "install", "--user", *package_args],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    return True
+                except subprocess.CalledProcessError as user_exc:
+                    error_text = user_exc.stderr or user_exc.stdout or str(user_exc)
             QMessageBox.warning(
                 self,
                 "Install failed",
-                f"Failed command: pip install {' '.join(package_args)}\n\n{exc.stderr or exc.stdout or str(exc)}",
+                (
+                    f"Failed command: pip install {' '.join(package_args)}\n\n"
+                    f"{error_text}\n\n"
+                    "Tip: close other running instances, then try again. "
+                    "If needed, run as Administrator."
+                ),
             )
             return False
 
@@ -1253,12 +1278,31 @@ class AimPage(BasePage):
 
     def _installNdiDependenciesAndRestart(self):
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        ndi_installer_path = os.path.join(src_dir, "NDI 6 Tools.exe")
-        try:
-            urlretrieve("https://downloads.ndi.tv/Tools/NDI%206%20Tools.exe", ndi_installer_path)
-            subprocess.run([ndi_installer_path, "/S"], check=True)
-        except Exception as exc:
-            QMessageBox.warning(self, "NDI install failed", str(exc))
+        ndi_sources = [
+            ("https://downloads.ndi.tv/Tools/NDI%206%20Tools.exe", "NDI 6 Tools.exe"),
+            ("https://downloads.ndi.tv/SDK/NDI_SDK/NDI%206%20Runtime.exe", "NDI 6 Runtime.exe"),
+        ]
+        install_error = None
+        for ndi_url, installer_name in ndi_sources:
+            installer_path = os.path.join(src_dir, installer_name)
+            try:
+                urlretrieve(ndi_url, installer_path)
+                subprocess.run([installer_path, "/S"], check=True)
+                install_error = None
+                break
+            except HTTPError as exc:
+                install_error = exc
+                if exc.code == 403:
+                    continue
+            except Exception as exc:
+                install_error = exc
+                continue
+        if install_error is not None:
+            QMessageBox.warning(
+                self,
+                "NDI install failed",
+                f"{install_error}\n\nPlease install NDI manually from https://ndi.video/tools/ and try again.",
+            )
             return
         if not self._runPipInstall(["cyndilib"]):
             return
