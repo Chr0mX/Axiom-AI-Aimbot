@@ -18,14 +18,6 @@ from win_utils.gamepad_input import (
     GP_VK_MIN, GP_VK_MAX,
 )
 
-MOUSE_VK_BIND_OPTIONS = (
-    (0x01, "Mouse Left"),
-    (0x02, "Mouse Right"),
-    (0x04, "Mouse Middle"),
-    (0x05, "Mouse X1"),
-    (0x06, "Mouse X2"),
-)
-
 
 # 虛擬鍵碼對應翻譯 key 表
 VK_CODE_TRANSLATION_MAP = {
@@ -132,26 +124,10 @@ class KeyBindButton(PushButton):
         from PyQt6.QtWidgets import QMenu
         from PyQt6.QtGui import QAction
         menu = QMenu(self)
-
-        # 快速綁定滑鼠按鍵（用於無法直接回報按鍵事件的硬體，例如 MAKCU）
-        for vk_code, label in MOUSE_VK_BIND_OPTIONS:
-            action = QAction(f"Bind {label}", self)
-            action.triggered.connect(lambda checked=False, code=vk_code: self._bindDirectVk(code))
-            menu.addAction(action)
-
-        menu.addSeparator()
         clearAction = QAction(t("key_clear"), self)
         clearAction.triggered.connect(self._clearBinding)
         menu.addAction(clearAction)
         menu.exec(self.mapToGlobal(pos))
-
-    def _bindDirectVk(self, vk_code: int):
-        """直接綁定指定 VK（例如滑鼠按鍵）"""
-        self._vkCode = int(vk_code)
-        self._updateText()
-        if self._listening:
-            self._stopListening()
-        self.keyBound.emit(self._vkCode)
 
     def _clearBinding(self):
         """清除按鍵綁定"""
