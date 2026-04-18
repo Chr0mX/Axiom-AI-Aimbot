@@ -32,8 +32,16 @@ def warn(msg: str) -> None:
     print(f"[WARN] {msg}")
 
 
+def pause_exit() -> None:
+    try:
+        input("Press Enter to exit...")
+    except EOFError:
+        pass
+
+
 def fail(msg: str, code: int = 1) -> None:
     print(f"[ERROR] {msg}")
+    pause_exit()
     sys.exit(code)
 
 
@@ -123,7 +131,34 @@ def toolkit_installed(cuda_major: str) -> bool:
 def download_file(url: str, dest: Path) -> None:
     log(f"Downloading: {url}")
     log(f"Saving to: {dest}")
-    urllib.request.urlretrieve(url, dest)
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "*/*",
+            },
+        )
+        with urllib.request.urlopen(req) as response, open(dest, "wb") as f:
+            shutil.copyfileobj(response, f)
+        return
+    except Exception as e:
+        warn(f"Python download failed: {e}. Trying PowerShell fallback...")
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f"Invoke-WebRequest -Uri '{url}' -OutFile '{dest}'"
+        ],
+        text=True,
+    )
+    if result.returncode != 0:
+        fail(f"Failed to download file from {url}")
 
 
 def install_cuda_toolkit(cuda_major: str) -> None:
@@ -141,7 +176,19 @@ def install_cuda_toolkit(cuda_major: str) -> None:
         log(f"Installer already exists: {installer}")
 
     # NVIDIA documents -s for silent install on Windows.
-    run([str(installer), "-s"])
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f'Start-Process -FilePath "{installer}" -ArgumentList \'-s\' -Verb RunAs -Wait'
+        ],
+        text=True,
+    )
+    if result.returncode != 0:
+        fail(f"CUDA installer exited with code {result.returncode}")
 
 
 def pip_install(args):
@@ -196,4 +243,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("[ERROR] Interrupted by user.")
+        pause_exit()
+        sys.exit(1)
+    except Exception as e:
+        print(f"[ERROR] Unexpected error: {e}")
+        pause_exit()
+        sys.exit(1)
