@@ -1105,8 +1105,8 @@ class AimPage(BasePage):
         if selected_backend == "cuda" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "cuda_installer_ran_once", False))
             if not has_ran:
-                self._config.cuda_installer_ran_once = True
-                self._runLocalInstallerScript("install_cuda_local.py", "CUDA")
+                if self._runLocalInstallerScript("install_cuda_local.py", "CUDA"):
+                    self._config.cuda_installer_ran_once = True
         self._updateInferenceBackendSubtitle()
 
     def _updateInferenceBackendSubtitle(self):
@@ -1169,8 +1169,8 @@ class AimPage(BasePage):
         if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "ndi_installer_ran_once", False))
             if not has_ran:
-                self._config.ndi_installer_ran_once = True
-                self._runLocalInstallerScript("install_cyndilib.py", "NDI")
+                if self._runLocalInstallerScript("install_cyndilib.py", "NDI"):
+                    self._config.ndi_installer_ran_once = True
         self._updateCaptureControlsVisibility(text)
         main_window = self.window()
         if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
@@ -1191,16 +1191,11 @@ class AimPage(BasePage):
         install_cmd = [python_exe, script_path]
         print(f"[Dependency][{feature_name}] Running local installer script: {' '.join(install_cmd)}")
         try:
-            result = subprocess.run(
+            subprocess.run(
                 install_cmd,
                 check=True,
-                capture_output=True,
                 text=True,
             )
-            if result.stdout:
-                print(f"[Dependency][{feature_name}][stdout]\n{result.stdout}")
-            if result.stderr:
-                print(f"[Dependency][{feature_name}][stderr]\n{result.stderr}")
             print(f"[Dependency][{feature_name}] Local installer script completed successfully.")
             return True
         except subprocess.CalledProcessError as exc:
