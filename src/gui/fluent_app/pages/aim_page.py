@@ -1104,8 +1104,9 @@ class AimPage(BasePage):
             self._config.inference_backend = selected_backend
         if selected_backend == "cuda" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "cuda_installer_ran_once", False))
-            if not has_ran and self._runLocalInstallerScript("install_cuda_local.py", "CUDA"):
+            if not has_ran:
                 self._config.cuda_installer_ran_once = True
+                self._runLocalInstallerScript("install_cuda_local.py", "CUDA")
         self._updateInferenceBackendSubtitle()
 
     def _updateInferenceBackendSubtitle(self):
@@ -1167,8 +1168,9 @@ class AimPage(BasePage):
             self._config.screenshot_method = text
         if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "ndi_installer_ran_once", False))
-            if not has_ran and self._runLocalInstallerScript("install_cyndilib.py", "NDI"):
+            if not has_ran:
                 self._config.ndi_installer_ran_once = True
+                self._runLocalInstallerScript("install_cyndilib.py", "NDI")
         self._updateCaptureControlsVisibility(text)
         main_window = self.window()
         if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
