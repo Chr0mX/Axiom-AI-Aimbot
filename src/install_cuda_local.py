@@ -6,11 +6,10 @@ import sys
 import urllib.request
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-PYTHON_DIR = BASE_DIR / "python"
+PYTHON_DIR = Path("./python")
 PYTHON_EXE = PYTHON_DIR / "python.exe"
 SITE_PACKAGES = PYTHON_DIR / "Lib" / "site-packages"
-DOWNLOAD_DIR = BASE_DIR / "win_utils"
+DOWNLOAD_DIR = Path("./win_utils")
 
 CUDA13_URL = "https://developer.download.nvidia.com/compute/cuda/13.2.1/local_installers/cuda_13.2.1_windows.exe"
 CUDA12_URL = "https://developer.download.nvidia.com/compute/cuda/12.0.0/local_installers/cuda_12.0.0_527.41_windows.exe"
