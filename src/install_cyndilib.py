@@ -7,7 +7,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-NDI_RUNTIME_URL = "https://downloads.ndi.tv/SDK/NDI_SDK/NDI%206%20Runtime.exe"
+NDI_RUNTIME_URL = "https://ndi.link/NDIRedistV6"
 BASE_DIR = Path(__file__).resolve().parent
 LOCAL_PYTHON_DIR = BASE_DIR / "python"
 LOCAL_PYTHON_EXE = LOCAL_PYTHON_DIR / "python.exe"
@@ -24,9 +24,17 @@ def warn(message: str) -> None:
     print(f"[WARN] {message}")
 
 
+def pause_exit(code: int = 0) -> None:
+    try:
+        input("Press Enter to exit...")
+    except EOFError:
+        pass
+    sys.exit(code)
+
+
 def fail(message: str, code: int = 1) -> None:
     print(f"[ERROR] {message}")
-    sys.exit(code)
+    pause_exit(code)
 
 
 def run(cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
@@ -69,10 +77,7 @@ def is_cyndilib_installed() -> bool:
 
 def find_ndi_runtime_dll() -> Path | None:
     candidates = [
-        Path(r"C:\Program Files\NDI\NDI 6 Runtime\Processing.NDI.Lib.x64.dll"),
-        Path(r"C:\Program Files\NDI\NDI 6 Runtime\Bin\x64\Processing.NDI.Lib.x64.dll"),
-        Path(r"C:\Program Files\NDI\Runtime\v6\Processing.NDI.Lib.x64.dll"),
-        Path(r"C:\Windows\System32\Processing.NDI.Lib.x64.dll"),
+        Path(r"C:\Program Files\NDI\NDI 6 Runtime\v6\Processing.NDI.Lib.x64.dll"),
     ]
     for path in candidates:
         if path.exists():
@@ -86,8 +91,34 @@ def is_ndi_runtime_installed() -> bool:
 
 def download_file(url: str, destination: Path) -> None:
     log(f"Downloading: {url}")
-    with urllib.request.urlopen(url) as response, open(destination, "wb") as f:
-        shutil.copyfileobj(response, f)
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "*/*",
+            },
+        )
+        with urllib.request.urlopen(req) as response, open(destination, "wb") as f:
+            shutil.copyfileobj(response, f)
+    except Exception as first_error:
+        warn(f"Direct download failed: {first_error}")
+        log("Retrying download with PowerShell Invoke-WebRequest...")
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                f"Invoke-WebRequest -Uri '{url}' -OutFile '{destination}'",
+            ],
+            text=True,
+        )
+        if result.returncode != 0:
+            fail(f"Failed to download file from {url}")
+
     log(f"Saved to: {destination}")
 
 
@@ -140,4 +171,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[ERROR] Script interrupted by user.")
+        pause_exit(1)
+    except Exception as e:
+        print(f"[ERROR] Unexpected error: {e}")
+        pause_exit(1)
