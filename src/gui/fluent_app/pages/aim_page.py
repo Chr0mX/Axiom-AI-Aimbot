@@ -1101,7 +1101,7 @@ class AimPage(BasePage):
         if selected_backend == "cuda" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "cuda_installer_ran_once", False))
             if not has_ran:
-                if self._runLocalInstallerScript("install_cuda_local.py", "CUDA"):
+                if self._runLocalInstallerScript("install_cuda_local.py", "CUDA", capture_output=False):
                     self._config.cuda_installer_ran_once = True
         self._updateInferenceBackendSubtitle()
 
@@ -1172,7 +1172,7 @@ class AimPage(BasePage):
         if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
             main_window.updateVisualsVisibilityForScreenshotMethod(text)
 
-    def _runLocalInstallerScript(self, script_name: str, feature_name: str) -> bool:
+    def _runLocalInstallerScript(self, script_name: str, feature_name: str, capture_output: bool = True) -> bool:
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         script_path = os.path.join(src_dir, script_name)
         if not os.path.exists(script_path):
@@ -1187,25 +1187,34 @@ class AimPage(BasePage):
         install_cmd = [python_exe, script_path]
         print(f"[Dependency][{feature_name}] Running local installer script: {' '.join(install_cmd)}")
         try:
-            result = subprocess.run(
-                install_cmd,
-                check=True,
-                text=True,
-                capture_output=True,
-            )
-            if result.stdout:
-                print(f"[Dependency][{feature_name}][stdout]\n{result.stdout}")
+            if capture_output:
+                result = subprocess.run(
+                    install_cmd,
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                if result.stdout:
+                    print(f"[Dependency][{feature_name}][stdout]\n{result.stdout}")
+            else:
+                # Run visibly without capturing — required for installers that need
+                # UAC elevation, spawn child processes, or show their own UI (e.g. CUDA).
+                subprocess.run(
+                    install_cmd,
+                    check=True,
+                    text=True,
+                )
             print(f"[Dependency][{feature_name}] Local installer script completed successfully.")
             return True
         except subprocess.CalledProcessError as exc:
-            if exc.stdout:
+            if getattr(exc, 'stdout', None):
                 print(f"[Dependency][{feature_name}][stdout]\n{exc.stdout}")
-            if exc.stderr:
+            if getattr(exc, 'stderr', None):
                 print(f"[Dependency][{feature_name}][stderr]\n{exc.stderr}")
             parts = []
-            if exc.stderr:
+            if getattr(exc, 'stderr', None):
                 parts.append(exc.stderr.strip())
-            if exc.stdout:
+            if getattr(exc, 'stdout', None):
                 parts.append(exc.stdout.strip())
             error_text = "\n".join(parts) if parts else str(exc)
             QMessageBox.warning(
