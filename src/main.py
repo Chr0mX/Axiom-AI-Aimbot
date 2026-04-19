@@ -94,6 +94,65 @@ from typing import Optional
 import pywintypes
 import onnxruntime as ort
 
+# ── CUDA / cuDNN DLL pre-registration ────────────────────────────────────────
+# MUST happen immediately after `import onnxruntime` and before ANY ort call
+# (including ort.get_available_providers).  ORT probes for CUDA DLLs the first
+# time it is touched; if the nvidia site-package bin dirs are not on the DLL
+# search path by then, it silently falls back to CPU.
+#
+# Expected layout installed by pip (nvidia-cublas-cu12, nvidia-cudnn-cu12, …):
+#   <site-packages>/nvidia/cuda_runtime/bin/  – cudart64_12.dll
+#   <site-packages>/nvidia/cublas/bin/        – cublas64_12.dll, cublasLt64_12.dll
+#   <site-packages>/nvidia/cudnn/bin/         – cudnn*.dll
+# ---------------------------------------------------------------------------
+def _register_nvidia_dll_dirs() -> None:
+    """Add every nvidia sub-package bin/ dir to the Windows DLL search path."""
+    if sys.platform != "win32":
+        return
+    try:
+        import site
+        all_site_dirs: list[str] = list(site.getsitepackages())
+        try:
+            all_site_dirs.append(site.getusersitepackages())
+        except (AttributeError, NotImplementedError):
+            pass
+
+        nvidia_sub_packages = [
+            "cuda_runtime",
+            "cublas",       # ships cublasLt64_12.dll – the one ORT needs
+            "cufft",
+            "curand",
+            "cusolver",
+            "cusparse",
+            "cudnn",
+        ]
+
+        registered: list[str] = []
+        for sp in all_site_dirs:
+            for sub in nvidia_sub_packages:
+                bin_dir = os.path.join(sp, "nvidia", sub, "bin")
+                if not os.path.isdir(bin_dir):
+                    continue
+                # Both PATH and add_dll_directory are needed on Win 10+
+                os.environ["PATH"] = f"{bin_dir};{os.environ.get('PATH', '')}"
+                try:
+                    os.add_dll_directory(bin_dir)
+                except (AttributeError, OSError):
+                    pass
+                registered.append(bin_dir)
+
+        if registered:
+            # Use print here – logger may not be initialised yet at import time
+            print(f"[CUDA] Registered {len(registered)} nvidia DLL dirs from site-packages")
+        else:
+            print("[CUDA] Warning: no nvidia site-package bin dirs found – "
+                  "install nvidia-cublas-cu12, nvidia-cudnn-cu12, etc.")
+    except Exception as exc:
+        print(f"[CUDA] DLL pre-registration failed: {exc}")
+
+_register_nvidia_dll_dirs()
+# ─────────────────────────────────────────────────────────────────────────────
+
 # When bundled with PyInstaller, ensure native dependencies are discoverable.
 _DLL_DIR_HANDLES = []
 if sys.platform == "win32":
