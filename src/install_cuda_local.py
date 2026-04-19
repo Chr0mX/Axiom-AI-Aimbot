@@ -23,6 +23,13 @@ COMMON_DEPS = [
     "sympy",
 ]
 
+# nvidia-smi is sometimes not on PATH but lives in a well-known location
+_NVIDIA_SMI_FALLBACK_PATHS = [
+    Path(r"C:/Windows/System32/nvidia-smi.exe"),
+    Path(r"C:/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe"),
+    Path(r"C:/Program Files/NVIDIA/nvidia-smi.exe"),
+]
+
 
 def log(msg: str) -> None:
     print(f"[INFO] {msg}")
@@ -40,7 +47,7 @@ def pause_exit() -> None:
 
 
 def fail(msg: str, code: int = 1) -> None:
-    print(f"[ERROR] {msg}")
+    print(f"[ERROR] {msg}", file=sys.stderr)
     pause_exit()
     sys.exit(code)
 
@@ -62,10 +69,23 @@ def ensure_paths() -> None:
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def detect_cuda_from_nvidia_smi() -> str:
+def _find_nvidia_smi() -> str | None:
     smi = shutil.which("nvidia-smi")
+    if smi:
+        return smi
+    for candidate in _NVIDIA_SMI_FALLBACK_PATHS:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def detect_cuda_from_nvidia_smi() -> str:
+    smi = _find_nvidia_smi()
     if not smi:
-        fail("nvidia-smi not found in PATH.")
+        fail(
+            "nvidia-smi not found. Make sure NVIDIA drivers are installed and "
+            "nvidia-smi is accessible (check PATH or install NVIDIA drivers)."
+        )
 
     result = run_capture([smi])
     output = (result.stdout or "") + "\n" + (result.stderr or "")
@@ -74,57 +94,46 @@ def detect_cuda_from_nvidia_smi() -> str:
 
     match = re.search(r"CUDA Version\s*:\s*(\d+)(?:\.(\d+))?", output)
     if not match:
-        match = re.search(r"CUDA Version:\s*(\d+)(?:\.(\d+))?", output)
-    if not match:
-        fail("Could not parse CUDA Version from nvidia-smi output.")
+        fail(
+            f"Could not parse CUDA Version from nvidia-smi output.\n"
+            f"nvidia-smi output:\n{output}"
+        )
 
     major = match.group(1)
-    log(f"nvidia-smi reports CUDA Version: {match.group(0).split(':',1)[1].strip()}")
+    log(f"nvidia-smi reports CUDA Version: {match.group(0).split(':', 1)[1].strip()}")
 
     if major not in {"12", "13"}:
-        fail(f"Unsupported CUDA major version from nvidia-smi: {major}. Expected 12 or 13.")
+        fail(
+            f"Unsupported CUDA major version from nvidia-smi: {major}. "
+            "Expected 12 or 13. Please update your NVIDIA drivers."
+        )
 
     return major
 
 
-CUDA_PATH_PATTERNS = {
-    "12": [
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.0"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.1"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.2"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.5"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.7"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9"),
-    ],
-    "13": [
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2"),
-    ],
-}
-
-
-def toolkit_installed(cuda_major: str) -> bool:
-    for path in CUDA_PATH_PATTERNS[cuda_major]:
-        nvcc = path / "bin" / "nvcc.exe"
-        cudart = path / "bin" / "cudart64*.dll"
-        if path.exists() and nvcc.exists():
-            log(f"Detected CUDA Toolkit {cuda_major} at: {path}")
-            return True
-
+def _find_cuda_toolkit_dir(cuda_major: str) -> Path | None:
+    base = Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA")
+    if base.exists():
+        for entry in sorted(base.iterdir()):
+            if entry.is_dir() and entry.name.lower().startswith(f"v{cuda_major}."):
+                nvcc = entry / "bin" / "nvcc.exe"
+                if nvcc.exists():
+                    return entry
     env_path = os.environ.get("CUDA_PATH")
     if env_path:
         p = Path(env_path)
         if p.exists() and p.name.lower().startswith(f"v{cuda_major}."):
             nvcc = p / "bin" / "nvcc.exe"
             if nvcc.exists():
-                log(f"Detected CUDA Toolkit {cuda_major} from CUDA_PATH: {p}")
-                return True
+                return p
+    return None
 
+
+def toolkit_installed(cuda_major: str) -> bool:
+    found = _find_cuda_toolkit_dir(cuda_major)
+    if found:
+        log(f"Detected CUDA Toolkit {cuda_major} at: {found}")
+        return True
     return False
 
 
@@ -175,7 +184,6 @@ def install_cuda_toolkit(cuda_major: str) -> None:
     else:
         log(f"Installer already exists: {installer}")
 
-    # NVIDIA documents -s for silent install on Windows.
     result = subprocess.run(
         [
             "powershell",
@@ -246,10 +254,10 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("[ERROR] Interrupted by user.")
+        print("[ERROR] Interrupted by user.", file=sys.stderr)
         pause_exit()
         sys.exit(1)
     except Exception as e:
-        print(f"[ERROR] Unexpected error: {e}")
+        print(f"[ERROR] Unexpected error: {e}", file=sys.stderr)
         pause_exit()
         sys.exit(1)
