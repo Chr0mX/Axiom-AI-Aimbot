@@ -5,7 +5,7 @@ import logging
 import onnxruntime as ort
 
 
-def build_provider_list(config) -> list[str]:
+def build_provider_list(config) -> list:
     """Build provider priority list based on user backend preference."""
     try:
         available = set(ort.get_available_providers())
@@ -21,7 +21,21 @@ def build_provider_list(config) -> list[str]:
     }
     preferred = provider_map.get(backend, provider_map["auto"])
     filtered = [provider for provider in preferred if provider in available]
-    return filtered or ["CPUExecutionProvider"]
+
+    result = []
+    for provider in filtered:
+        if provider == "CUDAExecutionProvider":
+            result.append((
+                "CUDAExecutionProvider",
+                {
+                    "cudnn_conv_algo_search": "HEURISTIC",
+                    "do_copy_in_default_stream": True,
+                    "arena_extend_strategy": "kSameAsRequested",
+                },
+            ))
+        else:
+            result.append(provider)
+    return result or ["CPUExecutionProvider"]
 
 
 def optimize_onnx_session(config):
