@@ -11,7 +11,8 @@ PYTHON_EXE = PYTHON_DIR / "python.exe"
 SITE_PACKAGES = PYTHON_DIR / "Lib" / "site-packages"
 DOWNLOAD_DIR = Path("./win_utils")
 
-CUDA12_URL = "https://developer.download.nvidia.com/compute/cuda/12.6.3/local_installers/cuda_12.6.3_561.17_windows.exe"
+CUDA13_URL = "https://developer.download.nvidia.com/compute/cuda/13.2.1/local_installers/cuda_13.2.1_windows.exe"
+CUDA12_URL = "https://developer.download.nvidia.com/compute/cuda/12.0.0/local_installers/cuda_12.0.0_527.41_windows.exe"
 
 COMMON_DEPS = [
     "coloredlogs",
@@ -101,20 +102,11 @@ def detect_cuda_from_nvidia_smi() -> str:
     major = match.group(1)
     log(f"nvidia-smi reports CUDA Version: {match.group(0).split(':', 1)[1].strip()}")
 
-    if major not in {"11", "12"}:
+    if major not in {"12", "13"}:
         fail(
             f"Unsupported CUDA major version from nvidia-smi: {major}. "
-            "Expected 11 or 12. Please update your NVIDIA drivers."
+            "Expected 12 or 13. Please update your NVIDIA drivers."
         )
-
-    # Treat CUDA 11 as CUDA 12 — onnxruntime-gpu CUDA 12 packages work with
-    # CUDA 11.8+ drivers via the CUDA compatibility layer.
-    if major == "11":
-        warn(
-            "CUDA 11 detected. Using CUDA 12 onnxruntime packages "
-            "(requires CUDA 11.8+ driver)."
-        )
-        return "12"
 
     return major
 
@@ -179,8 +171,12 @@ def download_file(url: str, dest: Path) -> None:
 
 
 def install_cuda_toolkit(cuda_major: str) -> None:
-    url = CUDA12_URL
-    filename = "cuda_12.6.3_windows.exe"
+    if cuda_major == "13":
+        url = CUDA13_URL
+        filename = "cuda_13.2.1_windows.exe"
+    else:
+        url = CUDA12_URL
+        filename = "cuda_12.0.0_windows.exe"
 
     installer = DOWNLOAD_DIR / filename
     if not installer.exists():
@@ -211,14 +207,24 @@ def pip_install(args):
 def install_python_packages(cuda_major: str) -> None:
     pip_install(COMMON_DEPS)
 
-    pip_install([
-        "--pre",
-        "--index-url",
-        "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/",
-        "onnxruntime-gpu",
-        "--no-deps",
-    ])
-    pip_install(["nvidia-cudnn-cu12"])
+    if cuda_major == "13":
+        pip_install([
+            "--pre",
+            "--index-url",
+            "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ort-cuda-13-nightly/pypi/simple/",
+            "onnxruntime-gpu",
+            "--no-deps",
+        ])
+        pip_install(["nvidia-cudnn-cu13"])
+    else:
+        pip_install([
+            "--pre",
+            "--index-url",
+            "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/",
+            "onnxruntime-gpu",
+            "--no-deps",
+        ])
+        pip_install(["nvidia-cudnn-cu12"])
 
 
 def main() -> None:
