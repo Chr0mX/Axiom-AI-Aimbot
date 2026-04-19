@@ -11,8 +11,7 @@ PYTHON_EXE = PYTHON_DIR / "python.exe"
 SITE_PACKAGES = PYTHON_DIR / "Lib" / "site-packages"
 DOWNLOAD_DIR = Path("./win_utils")
 
-CUDA13_URL = "https://developer.download.nvidia.com/compute/cuda/13.2.1/local_installers/cuda_13.2.1_windows.exe"
-CUDA12_URL = "https://developer.download.nvidia.com/compute/cuda/12.0.0/local_installers/cuda_12.0.0_527.41_windows.exe"
+CUDA12_URL = "https://developer.download.nvidia.com/compute/cuda/12.6.3/local_installers/cuda_12.6.3_561.17_windows.exe"
 
 COMMON_DEPS = [
     "coloredlogs",
@@ -21,6 +20,13 @@ COMMON_DEPS = [
     "packaging",
     "protobuf",
     "sympy",
+]
+
+# nvidia-smi is sometimes not on PATH but lives in a well-known location
+_NVIDIA_SMI_FALLBACK_PATHS = [
+    Path(r"C:/Windows/System32/nvidia-smi.exe"),
+    Path(r"C:/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe"),
+    Path(r"C:/Program Files/NVIDIA/nvidia-smi.exe"),
 ]
 
 
@@ -40,7 +46,7 @@ def pause_exit() -> None:
 
 
 def fail(msg: str, code: int = 1) -> None:
-    print(f"[ERROR] {msg}")
+    print(f"[ERROR] {msg}", file=sys.stderr)
     pause_exit()
     sys.exit(code)
 
@@ -62,10 +68,23 @@ def ensure_paths() -> None:
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def detect_cuda_from_nvidia_smi() -> str:
+def _find_nvidia_smi() -> str | None:
     smi = shutil.which("nvidia-smi")
+    if smi:
+        return smi
+    for candidate in _NVIDIA_SMI_FALLBACK_PATHS:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def detect_cuda_from_nvidia_smi() -> str:
+    smi = _find_nvidia_smi()
     if not smi:
-        fail("nvidia-smi not found in PATH.")
+        fail(
+            "nvidia-smi not found. Make sure NVIDIA drivers are installed and "
+            "nvidia-smi is accessible (check PATH or install NVIDIA drivers)."
+        )
 
     result = run_capture([smi])
     output = (result.stdout or "") + "\n" + (result.stderr or "")
@@ -74,57 +93,55 @@ def detect_cuda_from_nvidia_smi() -> str:
 
     match = re.search(r"CUDA Version\s*:\s*(\d+)(?:\.(\d+))?", output)
     if not match:
-        match = re.search(r"CUDA Version:\s*(\d+)(?:\.(\d+))?", output)
-    if not match:
-        fail("Could not parse CUDA Version from nvidia-smi output.")
+        fail(
+            f"Could not parse CUDA Version from nvidia-smi output.\n"
+            f"nvidia-smi output:\n{output}"
+        )
 
     major = match.group(1)
-    log(f"nvidia-smi reports CUDA Version: {match.group(0).split(':',1)[1].strip()}")
+    log(f"nvidia-smi reports CUDA Version: {match.group(0).split(':', 1)[1].strip()}")
 
-    if major not in {"12", "13"}:
-        fail(f"Unsupported CUDA major version from nvidia-smi: {major}. Expected 12 or 13.")
+    if major not in {"11", "12"}:
+        fail(
+            f"Unsupported CUDA major version from nvidia-smi: {major}. "
+            "Expected 11 or 12. Please update your NVIDIA drivers."
+        )
+
+    # Treat CUDA 11 as CUDA 12 — onnxruntime-gpu CUDA 12 packages work with
+    # CUDA 11.8+ drivers via the CUDA compatibility layer.
+    if major == "11":
+        warn(
+            "CUDA 11 detected. Using CUDA 12 onnxruntime packages "
+            "(requires CUDA 11.8+ driver)."
+        )
+        return "12"
 
     return major
 
 
-CUDA_PATH_PATTERNS = {
-    "12": [
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.0"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.1"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.2"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.3"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.4"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.5"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.6"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.7"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.9"),
-    ],
-    "13": [
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.1"),
-        Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.2"),
-    ],
-}
-
-
-def toolkit_installed(cuda_major: str) -> bool:
-    for path in CUDA_PATH_PATTERNS[cuda_major]:
-        nvcc = path / "bin" / "nvcc.exe"
-        cudart = path / "bin" / "cudart64*.dll"
-        if path.exists() and nvcc.exists():
-            log(f"Detected CUDA Toolkit {cuda_major} at: {path}")
-            return True
-
+def _find_cuda_toolkit_dir(cuda_major: str) -> Path | None:
+    base = Path(r"C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA")
+    if base.exists():
+        for entry in sorted(base.iterdir()):
+            if entry.is_dir() and entry.name.lower().startswith(f"v{cuda_major}."):
+                nvcc = entry / "bin" / "nvcc.exe"
+                if nvcc.exists():
+                    return entry
     env_path = os.environ.get("CUDA_PATH")
     if env_path:
         p = Path(env_path)
         if p.exists() and p.name.lower().startswith(f"v{cuda_major}."):
             nvcc = p / "bin" / "nvcc.exe"
             if nvcc.exists():
-                log(f"Detected CUDA Toolkit {cuda_major} from CUDA_PATH: {p}")
-                return True
+                return p
+    return None
 
+
+def toolkit_installed(cuda_major: str) -> bool:
+    found = _find_cuda_toolkit_dir(cuda_major)
+    if found:
+        log(f"Detected CUDA Toolkit {cuda_major} at: {found}")
+        return True
     return False
 
 
@@ -162,12 +179,8 @@ def download_file(url: str, dest: Path) -> None:
 
 
 def install_cuda_toolkit(cuda_major: str) -> None:
-    if cuda_major == "13":
-        url = CUDA13_URL
-        filename = "cuda_13.2.1_windows.exe"
-    else:
-        url = CUDA12_URL
-        filename = "cuda_12.0.0_windows.exe"
+    url = CUDA12_URL
+    filename = "cuda_12.6.3_windows.exe"
 
     installer = DOWNLOAD_DIR / filename
     if not installer.exists():
@@ -175,7 +188,6 @@ def install_cuda_toolkit(cuda_major: str) -> None:
     else:
         log(f"Installer already exists: {installer}")
 
-    # NVIDIA documents -s for silent install on Windows.
     result = subprocess.run(
         [
             "powershell",
@@ -199,24 +211,14 @@ def pip_install(args):
 def install_python_packages(cuda_major: str) -> None:
     pip_install(COMMON_DEPS)
 
-    if cuda_major == "13":
-        pip_install([
-            "--pre",
-            "--index-url",
-            "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ort-cuda-13-nightly/pypi/simple/",
-            "onnxruntime-gpu",
-            "--no-deps",
-        ])
-        pip_install(["nvidia-cudnn-cu13"])
-    else:
-        pip_install([
-            "--pre",
-            "--index-url",
-            "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/",
-            "onnxruntime-gpu",
-            "--no-deps",
-        ])
-        pip_install(["nvidia-cudnn-cu12"])
+    pip_install([
+        "--pre",
+        "--index-url",
+        "https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/",
+        "onnxruntime-gpu",
+        "--no-deps",
+    ])
+    pip_install(["nvidia-cudnn-cu12"])
 
 
 def main() -> None:
@@ -246,10 +248,10 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("[ERROR] Interrupted by user.")
+        print("[ERROR] Interrupted by user.", file=sys.stderr)
         pause_exit()
         sys.exit(1)
     except Exception as e:
-        print(f"[ERROR] Unexpected error: {e}")
+        print(f"[ERROR] Unexpected error: {e}", file=sys.stderr)
         pause_exit()
         sys.exit(1)

@@ -1187,11 +1187,14 @@ class AimPage(BasePage):
         install_cmd = [python_exe, script_path]
         print(f"[Dependency][{feature_name}] Running local installer script: {' '.join(install_cmd)}")
         try:
-            subprocess.run(
+            result = subprocess.run(
                 install_cmd,
                 check=True,
                 text=True,
+                capture_output=True,
             )
+            if result.stdout:
+                print(f"[Dependency][{feature_name}][stdout]\n{result.stdout}")
             print(f"[Dependency][{feature_name}] Local installer script completed successfully.")
             return True
         except subprocess.CalledProcessError as exc:
@@ -1199,7 +1202,12 @@ class AimPage(BasePage):
                 print(f"[Dependency][{feature_name}][stdout]\n{exc.stdout}")
             if exc.stderr:
                 print(f"[Dependency][{feature_name}][stderr]\n{exc.stderr}")
-            error_text = exc.stderr or exc.stdout or str(exc)
+            parts = []
+            if exc.stderr:
+                parts.append(exc.stderr.strip())
+            if exc.stdout:
+                parts.append(exc.stdout.strip())
+            error_text = "\n".join(parts) if parts else str(exc)
             QMessageBox.warning(
                 self,
                 f"{feature_name} install failed",
