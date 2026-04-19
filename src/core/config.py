@@ -72,6 +72,8 @@ class Config:
         self.model_path: str = os.path.join('Model', 'Roblox_8n.onnx')
         self.current_provider: str = "DmlExecutionProvider"
         self.inference_backend: str = "auto"
+        self.cuda_installer_ran_once: bool = False
+        self.ndi_installer_ran_once: bool = False
         # Hybrid computing: Automatically fallback to CPU when operators are not supported by DirectML
         # ONNX Runtime providers = ['DmlExecutionProvider', 'CPUExecutionProvider']
         self.dml_cpu_fallback: bool = True
@@ -218,6 +220,8 @@ class Config:
             'model_input_size': self.model_input_size,
             'current_provider': self.current_provider,
             'inference_backend': self.inference_backend,
+            'cuda_installer_ran_once': self.cuda_installer_ran_once,
+            'ndi_installer_ran_once': self.ndi_installer_ran_once,
             'dml_cpu_fallback': self.dml_cpu_fallback,
             'pid_kp_x': self.pid_kp_x,
             'pid_ki_x': self.pid_ki_x,

@@ -4,9 +4,11 @@
 import os
 import math
 import glob
+import sys
+import subprocess
 import threading
 from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QStackedWidget
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QStackedWidget
 from PyQt6.QtGui import QDesktopServices
 from qfluentwidgets import (
     SettingCardGroup, ComboBoxSettingCard, SwitchSettingCard,
@@ -30,6 +32,7 @@ class AimPage(BasePage):
     def __init__(self, parent=None):
         super().__init__("tab_aim_control", parent)
         self._config = None
+        self._isLoadingConfig = False
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -903,131 +906,135 @@ class AimPage(BasePage):
         """從 Config 載入值"""
         if not self._config:
             return
+        self._isLoadingConfig = True
 
-        # 刷新模型列表並選中當前模型（暫時阻斷信號避免覆蓋設定）
-        self.modelCombo.blockSignals(True)
-        self._refreshModelList()
-        model_name = os.path.basename(self._config.model_path)
+        try:
+            # 刷新模型列表並選中當前模型（暫時阻斷信號避免覆蓋設定）
+            self.modelCombo.blockSignals(True)
+            self._refreshModelList()
+            model_name = os.path.basename(self._config.model_path)
 
-        # 大小寫不敏感比對
-        idx = -1
-        for i in range(self.modelCombo.count()):
-            if self.modelCombo.itemText(i).lower() == model_name.lower():
-                idx = i
-                break
+            # 大小寫不敏感比對
+            idx = -1
+            for i in range(self.modelCombo.count()):
+                if self.modelCombo.itemText(i).lower() == model_name.lower():
+                    idx = i
+                    break
 
-        if idx >= 0:
-            self.modelCombo.setCurrentIndex(idx)
-        self.modelCombo.blockSignals(False)
+            if idx >= 0:
+                self.modelCombo.setCurrentIndex(idx)
+            self.modelCombo.blockSignals(False)
 
-        backend_map = {
-            "auto": "Auto",
-            "cuda": "CUDA",
-            "directml": "DirectML",
-            "cpu": "CPU",
-        }
-        self.inferenceBackendCombo.blockSignals(True)
-        backend_text = backend_map.get(getattr(self._config, "inference_backend", "auto").lower(), "Auto")
-        self.inferenceBackendCombo.setCurrentText(backend_text)
-        self.inferenceBackendCombo.blockSignals(False)
-        self._updateInferenceBackendSubtitle()
+            backend_map = {
+                "auto": "Auto",
+                "cuda": "CUDA",
+                "directml": "DirectML",
+                "cpu": "CPU",
+            }
+            self.inferenceBackendCombo.blockSignals(True)
+            backend_text = backend_map.get(getattr(self._config, "inference_backend", "auto").lower(), "Auto")
+            self.inferenceBackendCombo.setCurrentText(backend_text)
+            self.inferenceBackendCombo.blockSignals(False)
+            self._updateInferenceBackendSubtitle()
 
-        # FOV 與偵測範圍 - 使用新組件的 setValue
-        self.fovCard.setValue(self._config.fov_size)
-        self.fovFollowCard.setChecked(self._config.fov_follow_mouse)
-        self.detectRangeCard.setValue(self._config.detect_range_size)
+            # FOV 與偵測範圍 - 使用新組件的 setValue
+            self.fovCard.setValue(self._config.fov_size)
+            self.fovFollowCard.setChecked(self._config.fov_follow_mouse)
+            self.detectRangeCard.setValue(self._config.detect_range_size)
 
-        # 通用參數 - 使用新組件的 setValue
-        interval_ms = int(self._config.detect_interval * 1000)
-        self.detectIntervalCard.setValue(interval_ms)
-        screenshot_interval_ms = int(getattr(self._config, 'screenshot_interval', self._config.detect_interval) * 1000)
-        self.screenshotIntervalCard.setValue(screenshot_interval_ms)
-        confidence_pct = int(self._config.min_confidence * 100)
-        self.confidenceCard.setValue(confidence_pct)
+            # 通用參數 - 使用新組件的 setValue
+            interval_ms = int(self._config.detect_interval * 1000)
+            self.detectIntervalCard.setValue(interval_ms)
+            screenshot_interval_ms = int(getattr(self._config, 'screenshot_interval', self._config.detect_interval) * 1000)
+            self.screenshotIntervalCard.setValue(screenshot_interval_ms)
+            confidence_pct = int(self._config.min_confidence * 100)
+            self.confidenceCard.setValue(confidence_pct)
 
-        aim_parts = ["head", "body", "both"]
-        if self._config.aim_part in aim_parts:
-            self.aimPartCombo.setCurrentIndex(aim_parts.index(self._config.aim_part))
+            aim_parts = ["head", "body", "both"]
+            if self._config.aim_part in aim_parts:
+                self.aimPartCombo.setCurrentIndex(aim_parts.index(self._config.aim_part))
 
-        mouse_methods = ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]
-        if self._config.mouse_move_method in mouse_methods:
-            self.mouseMoveCombo.setCurrentIndex(mouse_methods.index(self._config.mouse_move_method))
+            mouse_methods = ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]
+            if self._config.mouse_move_method in mouse_methods:
+                self.mouseMoveCombo.setCurrentIndex(mouse_methods.index(self._config.mouse_move_method))
 
-        screenshot_methods = ["mss", "dxcam", "uvc", "ndi"]
-        screenshot_method = getattr(self._config, 'screenshot_method', 'mss')
-        if screenshot_method in screenshot_methods:
-            self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
-        self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
-        self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'dshow')))
-        self._refreshUvcResolutions()
-        resolution_text = str(getattr(self._config, 'uvc_resolution', f"{getattr(self._config, 'uvc_width', self._config.width)}x{getattr(self._config, 'uvc_height', self._config.height)}"))
-        idx = self.uvcResolutionCombo.findText(resolution_text)
-        if idx < 0:
-            self.uvcResolutionCombo.addItem(resolution_text)
+            screenshot_methods = ["mss", "dxcam", "uvc", "ndi"]
+            screenshot_method = getattr(self._config, 'screenshot_method', 'mss')
+            if screenshot_method in screenshot_methods:
+                self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
+            self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
+            self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'dshow')))
+            self._refreshUvcResolutions()
+            resolution_text = str(getattr(self._config, 'uvc_resolution', f"{getattr(self._config, 'uvc_width', self._config.width)}x{getattr(self._config, 'uvc_height', self._config.height)}"))
             idx = self.uvcResolutionCombo.findText(resolution_text)
-        if idx >= 0:
-            self.uvcResolutionCombo.setCurrentIndex(idx)
-        self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
-        self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
-        self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
-        self._refreshNdiSources()
-        ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
-        if ndi_source:
-            idx = self.ndiSourceCombo.findText(ndi_source)
             if idx < 0:
-                self.ndiSourceCombo.addItem(ndi_source)
+                self.uvcResolutionCombo.addItem(resolution_text)
+                idx = self.uvcResolutionCombo.findText(resolution_text)
+            if idx >= 0:
+                self.uvcResolutionCombo.setCurrentIndex(idx)
+            self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
+            self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
+            self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
+            self._refreshNdiSources()
+            ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
+            if ndi_source:
                 idx = self.ndiSourceCombo.findText(ndi_source)
-            if idx >= 0:
-                self.ndiSourceCombo.setCurrentIndex(idx)
-        self._updateCaptureControlsVisibility(screenshot_method)
-        self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
-        self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
-        self.idleDetectEnableCard.setChecked(getattr(self._config, 'idle_detect_enabled', True))
-        idle_ms = int(getattr(self._config, 'idle_detect_interval', 0.05) * 1000)
-        self.idleDetectIntervalCard.setValue(max(5, min(500, idle_ms)))
-        self.singleTargetCard.setChecked(getattr(self._config, 'single_target_mode', False))
+                if idx < 0:
+                    self.ndiSourceCombo.addItem(ndi_source)
+                    idx = self.ndiSourceCombo.findText(ndi_source)
+                if idx >= 0:
+                    self.ndiSourceCombo.setCurrentIndex(idx)
+            self._updateCaptureControlsVisibility(screenshot_method)
+            self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
+            self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
+            self.idleDetectEnableCard.setChecked(getattr(self._config, 'idle_detect_enabled', True))
+            idle_ms = int(getattr(self._config, 'idle_detect_interval', 0.05) * 1000)
+            self.idleDetectIntervalCard.setValue(max(5, min(500, idle_ms)))
+            self.singleTargetCard.setChecked(getattr(self._config, 'single_target_mode', False))
 
-        # 根據當前選擇的移動方式顯示/隱藏 Arduino 和 Xbox 設定
-        self._updateMethodGroupVisibility(self._config.mouse_move_method)
+            # 根據當前選擇的移動方式顯示/隱藏 Arduino 和 Xbox 設定
+            self._updateMethodGroupVisibility(self._config.mouse_move_method)
 
-        # COM 埠
-        if self._config.arduino_com_port:
-            idx = self.comPortCombo.findText(self._config.arduino_com_port)
-            if idx >= 0:
-                self.comPortCombo.setCurrentIndex(idx)
+            # COM 埠
+            if self._config.arduino_com_port:
+                idx = self.comPortCombo.findText(self._config.arduino_com_port)
+                if idx >= 0:
+                    self.comPortCombo.setCurrentIndex(idx)
 
-        # MAKCU COM 埠
-        if getattr(self._config, 'makcu_com_port', ''):
-            idx = self.makcuComPortCombo.findText(self._config.makcu_com_port)
-            if idx >= 0:
-                self.makcuComPortCombo.setCurrentIndex(idx)
+            # MAKCU COM 埠
+            if getattr(self._config, 'makcu_com_port', ''):
+                idx = self.makcuComPortCombo.findText(self._config.makcu_com_port)
+                if idx >= 0:
+                    self.makcuComPortCombo.setCurrentIndex(idx)
 
-        # PID - 使用新組件的 setValue
-        self.pidPxCard.setValue(int(self._config.pid_kp_x * 100))
-        self.pidIxCard.setValue(int(self._config.pid_ki_x * 100))
-        self.pidDxCard.setValue(int(self._config.pid_kd_x * 100))
-        self.pidPyCard.setValue(int(self._config.pid_kp_y * 100))
-        self.pidIyCard.setValue(int(self._config.pid_ki_y * 100))
-        self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
-        self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
-        self.pidYReduceDelayCard.setValue(int(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100))
+            # PID - 使用新組件的 setValue
+            self.pidPxCard.setValue(int(self._config.pid_kp_x * 100))
+            self.pidIxCard.setValue(int(self._config.pid_ki_x * 100))
+            self.pidDxCard.setValue(int(self._config.pid_kd_x * 100))
+            self.pidPyCard.setValue(int(self._config.pid_kp_y * 100))
+            self.pidIyCard.setValue(int(self._config.pid_ki_y * 100))
+            self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
+            self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
+            self.pidYReduceDelayCard.setValue(int(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100))
 
-        # 貝塞爾 - 使用新組件的 setValue
-        self.bezierEnableCard.setChecked(self._config.bezier_curve_enabled)
-        self.bezierStrengthCard.setValue(int(self._config.bezier_curve_strength * 100))
-        self.bezierStepsCard.setValue(self._config.bezier_curve_steps)
+            # 貝塞爾 - 使用新組件的 setValue
+            self.bezierEnableCard.setChecked(self._config.bezier_curve_enabled)
+            self.bezierStrengthCard.setValue(int(self._config.bezier_curve_strength * 100))
+            self.bezierStepsCard.setValue(self._config.bezier_curve_steps)
 
-        # 追蹤 - 使用新組件的 setValue
-        self.trackerEnableCard.setChecked(self._config.tracker_enabled)
-        self.trackerTimeCard.setValue(int(self._config.tracker_prediction_time * 1000))
-        self.trackerSmoothCard.setValue(int(self._config.tracker_smoothing_factor * 100))
-        self.trackerThresholdCard.setValue(int(self._config.tracker_stop_threshold))
-        self.trackerShowCard.setChecked(self._config.tracker_show_prediction)
+            # 追蹤 - 使用新組件的 setValue
+            self.trackerEnableCard.setChecked(self._config.tracker_enabled)
+            self.trackerTimeCard.setValue(int(self._config.tracker_prediction_time * 1000))
+            self.trackerSmoothCard.setValue(int(self._config.tracker_smoothing_factor * 100))
+            self.trackerThresholdCard.setValue(int(self._config.tracker_stop_threshold))
+            self.trackerShowCard.setChecked(self._config.tracker_show_prediction)
 
-        # Xbox 設定
-        self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
-        self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
-        self._updateXboxConnectionStatus()
+            # Xbox 設定
+            self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
+            self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
+            self._updateXboxConnectionStatus()
+        finally:
+            self._isLoadingConfig = False
 
     def _refreshModelList(self):
         """刷新模型列表"""
@@ -1091,6 +1098,11 @@ class AimPage(BasePage):
         selected_backend = backend_map.get(text, "auto")
         if getattr(self._config, "inference_backend", "auto") != selected_backend:
             self._config.inference_backend = selected_backend
+        if selected_backend == "cuda" and not self._isLoadingConfig:
+            has_ran = bool(getattr(self._config, "cuda_installer_ran_once", False))
+            if not has_ran:
+                if self._runLocalInstallerScript("install_cuda_local.py", "CUDA", capture_output=False):
+                    self._config.cuda_installer_ran_once = True
         self._updateInferenceBackendSubtitle()
 
     def _updateInferenceBackendSubtitle(self):
@@ -1150,10 +1162,78 @@ class AimPage(BasePage):
     def _onScreenshotMethodChanged(self, text):
         if self._config:
             self._config.screenshot_method = text
+        if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
+            has_ran = bool(getattr(self._config, "ndi_installer_ran_once", False))
+            if not has_ran:
+                if self._runLocalInstallerScript("install_cyndilib.py", "NDI"):
+                    self._config.ndi_installer_ran_once = True
         self._updateCaptureControlsVisibility(text)
         main_window = self.window()
         if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
             main_window.updateVisualsVisibilityForScreenshotMethod(text)
+
+    def _runLocalInstallerScript(self, script_name: str, feature_name: str, capture_output: bool = True) -> bool:
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        script_path = os.path.join(src_dir, script_name)
+        if not os.path.exists(script_path):
+            QMessageBox.warning(
+                self,
+                f"{feature_name} install failed",
+                f"Missing installer script:\n{script_path}",
+            )
+            return False
+
+        python_exe = self._getEmbeddedPythonExe()
+        install_cmd = [python_exe, script_path]
+        print(f"[Dependency][{feature_name}] Running local installer script: {' '.join(install_cmd)}")
+        try:
+            if capture_output:
+                result = subprocess.run(
+                    install_cmd,
+                    check=True,
+                    text=True,
+                    capture_output=True,
+                )
+                if result.stdout:
+                    print(f"[Dependency][{feature_name}][stdout]\n{result.stdout}")
+            else:
+                # Run visibly without capturing — required for installers that need
+                # UAC elevation, spawn child processes, or show their own UI (e.g. CUDA).
+                subprocess.run(
+                    install_cmd,
+                    check=True,
+                    text=True,
+                )
+            print(f"[Dependency][{feature_name}] Local installer script completed successfully.")
+            return True
+        except subprocess.CalledProcessError as exc:
+            if getattr(exc, 'stdout', None):
+                print(f"[Dependency][{feature_name}][stdout]\n{exc.stdout}")
+            if getattr(exc, 'stderr', None):
+                print(f"[Dependency][{feature_name}][stderr]\n{exc.stderr}")
+            parts = []
+            if getattr(exc, 'stderr', None):
+                parts.append(exc.stderr.strip())
+            if getattr(exc, 'stdout', None):
+                parts.append(exc.stdout.strip())
+            error_text = "\n".join(parts) if parts else str(exc)
+            QMessageBox.warning(
+                self,
+                f"{feature_name} install failed",
+                (
+                    f"Failed command: {' '.join(install_cmd)}\n\n"
+                    f"{error_text}\n\n"
+                    "Please run the installer script manually and try again."
+                ),
+            )
+            return False
+
+    def _getEmbeddedPythonExe(self) -> str:
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        python_exe = os.path.join(src_dir, "python", "python.exe")
+        if os.path.exists(python_exe):
+            return python_exe
+        return sys.executable
 
     def _onUvcDeviceChanged(self, value):
         if self._config:
