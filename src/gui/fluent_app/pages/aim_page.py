@@ -714,6 +714,68 @@ class AimPage(BasePage):
             parent=self.trackerGroup
         )
 
+        # === Anti-Detection ===
+        self.antiDetectionGroup = SettingCardGroup(t("anti_detection", "Anti-Detection"), self.scrollWidget)
+
+        self.jitterEnableCard = SwitchSettingCard(
+            FluentIcon.MOVE,
+            t("jitter_enabled", "Movement Jitter"),
+            t("jitter_enabled_desc", "Add random micro-offsets to mouse movement"),
+            parent=self.antiDetectionGroup
+        )
+
+        self.jitterStrengthCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("jitter_strength", "Jitter Strength"),
+            1, 50,
+            format_func=lambda v: f"{v / 10:.1f} px",
+            description="",
+            slider_width=160,
+            parent=self.antiDetectionGroup
+        )
+
+        self.recoilEnableCard = SwitchSettingCard(
+            FluentIcon.CARE_UP_SOLID,
+            t("recoil_compensation_enabled", "Recoil Compensation"),
+            t("recoil_compensation_desc", "Apply downward Y offset to counter weapon recoil"),
+            parent=self.antiDetectionGroup
+        )
+
+        self.recoilStrengthCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("recoil_compensation_strength", "Recoil Strength"),
+            1, 100,
+            format_func=lambda v: f"{v / 10:.1f} px",
+            description="",
+            slider_width=160,
+            parent=self.antiDetectionGroup
+        )
+
+        # === Target Priority ===
+        self.targetPriorityGroup = SettingCardGroup(t("target_priority", "Target Priority"), self.scrollWidget)
+
+        self.targetPriorityModeCombo = ComboBox()
+        self.targetPriorityModeCombo.addItems(["Distance", "Confidence", "Composite"])
+        self.targetPriorityModeCombo.setMinimumWidth(130)
+        self.targetPriorityModeCard = SettingCard(
+            FluentIcon.PEOPLE,
+            t("target_priority_mode", "Priority Mode"),
+            t("target_priority_mode_desc", "How to select the best target"),
+            self.targetPriorityGroup
+        )
+        self.targetPriorityModeCard.hBoxLayout.addWidget(self.targetPriorityModeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.targetPriorityModeCard.hBoxLayout.addSpacing(16)
+
+        self.targetPriorityWeightCard = SliderLabelCard(
+            FluentIcon.CERTIFICATE,
+            t("target_priority_confidence_weight", "Confidence Weight"),
+            0, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("target_priority_weight_desc", "Used in Composite mode only"),
+            slider_width=160,
+            parent=self.targetPriorityGroup
+        )
+
     def _initLayout(self):
         """排版所有控制項"""
         # 模型設定
@@ -838,6 +900,18 @@ class AimPage(BasePage):
         self.addContent(self.bezierGroup)
         self.addContent(self.trackerGroup)
 
+        # Anti-Detection
+        self.antiDetectionGroup.addSettingCard(self.jitterEnableCard)
+        self.antiDetectionGroup.addSettingCard(self.jitterStrengthCard)
+        self.antiDetectionGroup.addSettingCard(self.recoilEnableCard)
+        self.antiDetectionGroup.addSettingCard(self.recoilStrengthCard)
+        self.addContent(self.antiDetectionGroup)
+
+        # Target Priority
+        self.targetPriorityGroup.addSettingCard(self.targetPriorityModeCard)
+        self.targetPriorityGroup.addSettingCard(self.targetPriorityWeightCard)
+        self.addContent(self.targetPriorityGroup)
+
         self.scrollLayout.addStretch(1)
 
     def _connectSignals(self):
@@ -915,6 +989,16 @@ class AimPage(BasePage):
         self.trackerSmoothCard.valueChanged.connect(self._onTrackerSmoothChanged)
         self.trackerThresholdCard.valueChanged.connect(self._onTrackerThresholdChanged)
         self.trackerShowCard.checkedChanged.connect(self._onTrackerShowChanged)
+
+        # Anti-Detection
+        self.jitterEnableCard.checkedChanged.connect(self._onJitterEnableChanged)
+        self.jitterStrengthCard.valueChanged.connect(self._onJitterStrengthChanged)
+        self.recoilEnableCard.checkedChanged.connect(self._onRecoilEnableChanged)
+        self.recoilStrengthCard.valueChanged.connect(self._onRecoilStrengthChanged)
+
+        # Target Priority
+        self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
+        self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -1044,6 +1128,18 @@ class AimPage(BasePage):
             self.trackerSmoothCard.setValue(int(self._config.tracker_smoothing_factor * 100))
             self.trackerThresholdCard.setValue(int(self._config.tracker_stop_threshold))
             self.trackerShowCard.setChecked(self._config.tracker_show_prediction)
+
+            # Anti-Detection
+            self.jitterEnableCard.setChecked(bool(getattr(self._config, 'jitter_enabled', False)))
+            self.jitterStrengthCard.setValue(int(getattr(self._config, 'jitter_strength', 1.5) * 10))
+            self.recoilEnableCard.setChecked(bool(getattr(self._config, 'recoil_compensation_enabled', False)))
+            self.recoilStrengthCard.setValue(int(getattr(self._config, 'recoil_compensation_strength', 2.0) * 10))
+
+            # Target Priority
+            mode_map = {"distance": "Distance", "confidence": "Confidence", "composite": "Composite"}
+            mode_text = mode_map.get(str(getattr(self._config, 'target_priority_mode', 'distance')), "Distance")
+            self.targetPriorityModeCombo.setCurrentText(mode_text)
+            self.targetPriorityWeightCard.setValue(int(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100))
 
             # Xbox 設定
             self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
@@ -1628,6 +1724,30 @@ class AimPage(BasePage):
         if self._config:
             self._config.tracker_show_prediction = checked
 
+    def _onJitterEnableChanged(self, checked):
+        if self._config:
+            self._config.jitter_enabled = checked
+
+    def _onJitterStrengthChanged(self, value):
+        if self._config:
+            self._config.jitter_strength = value / 10.0
+
+    def _onRecoilEnableChanged(self, checked):
+        if self._config:
+            self._config.recoil_compensation_enabled = checked
+
+    def _onRecoilStrengthChanged(self, value):
+        if self._config:
+            self._config.recoil_compensation_strength = value / 10.0
+
+    def _onTargetPriorityModeChanged(self, text):
+        if self._config:
+            self._config.target_priority_mode = str(text).lower()
+
+    def _onTargetPriorityWeightChanged(self, value):
+        if self._config:
+            self._config.target_priority_confidence_weight = value / 100.0
+
     # === Arduino 連線回調函數 ===
     # === Arduino 連線回調函數 ===
     def _onArduinoConnectToggle(self):
@@ -1902,3 +2022,15 @@ class AimPage(BasePage):
         self.trackerSmoothCard.titleLabel.setText(t("tracker_smoothing_factor"))
         self.trackerThresholdCard.titleLabel.setText(t("tracker_stop_threshold"))
         self.trackerShowCard.titleLabel.setText(t("tracker_show_prediction"))
+
+        # Anti-Detection
+        self.antiDetectionGroup.titleLabel.setText(t("anti_detection", "Anti-Detection"))
+        self.jitterEnableCard.titleLabel.setText(t("jitter_enabled", "Movement Jitter"))
+        self.jitterStrengthCard.titleLabel.setText(t("jitter_strength", "Jitter Strength"))
+        self.recoilEnableCard.titleLabel.setText(t("recoil_compensation_enabled", "Recoil Compensation"))
+        self.recoilStrengthCard.titleLabel.setText(t("recoil_compensation_strength", "Recoil Strength"))
+
+        # Target Priority
+        self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
+        self.targetPriorityModeCard.titleLabel.setText(t("target_priority_mode", "Priority Mode"))
+        self.targetPriorityWeightCard.titleLabel.setText(t("target_priority_confidence_weight", "Confidence Weight"))
