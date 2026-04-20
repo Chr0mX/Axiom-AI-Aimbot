@@ -54,6 +54,7 @@ class Config:
         self.uvc_window_name: str = "Axiom UVC Preview"
         self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.ndi_source_name: str = ""
+        self.ndi_bandwidth: str = "highest"
         self.ndi_width: int = self.width
         self.ndi_height: int = self.height
         self.crosshairX: int = self.width // 2
@@ -253,6 +254,7 @@ class Config:
             'uvc_window_name': self.uvc_window_name,
             'uvc_preview_scale_mode': self.uvc_preview_scale_mode,
             'ndi_source_name': self.ndi_source_name,
+            'ndi_bandwidth': self.ndi_bandwidth,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
             'fov_follow_mouse': self.fov_follow_mouse,
