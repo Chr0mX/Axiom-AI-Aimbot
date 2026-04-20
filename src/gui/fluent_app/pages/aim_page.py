@@ -314,6 +314,18 @@ class AimPage(BasePage):
         self.ndiRefreshCard.hBoxLayout.addWidget(self.ndiRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.ndiRefreshCard.hBoxLayout.addSpacing(16)
 
+        self.ndiBandwidthCombo = ComboBox()
+        self.ndiBandwidthCombo.addItems(["Highest", "Lowest"])
+        self.ndiBandwidthCombo.setMinimumWidth(120)
+        self.ndiBandwidthCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            "NDI Bandwidth",
+            "Receive bandwidth for the NDI stream",
+            self.generalGroup
+        )
+        self.ndiBandwidthCard.hBoxLayout.addWidget(self.ndiBandwidthCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.ndiBandwidthCard.hBoxLayout.addSpacing(16)
+
         # Always Aim (no need to press aim key)
         self.alwaysAimCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
@@ -734,6 +746,7 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.uvcPreviewScaleCard)
         self.generalGroup.addSettingCard(self.ndiSourceCard)
         self.generalGroup.addSettingCard(self.ndiRefreshCard)
+        self.generalGroup.addSettingCard(self.ndiBandwidthCard)
         self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
@@ -855,6 +868,7 @@ class AimPage(BasePage):
         self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
+        self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
         self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
@@ -984,6 +998,8 @@ class AimPage(BasePage):
                     idx = self.ndiSourceCombo.findText(ndi_source)
                 if idx >= 0:
                     self.ndiSourceCombo.setCurrentIndex(idx)
+            ndi_bw = str(getattr(self._config, 'ndi_bandwidth', 'highest')).capitalize()
+            self.ndiBandwidthCombo.setCurrentText(ndi_bw if ndi_bw in ("Highest", "Lowest") else "Highest")
             self._updateCaptureControlsVisibility(screenshot_method)
             self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
             self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
@@ -1099,11 +1115,74 @@ class AimPage(BasePage):
         if getattr(self._config, "inference_backend", "auto") != selected_backend:
             self._config.inference_backend = selected_backend
         if selected_backend == "cuda" and not self._isLoadingConfig:
-            has_ran = bool(getattr(self._config, "cuda_installer_ran_once", False))
-            if not has_ran:
-                if self._runLocalInstallerScript("install_cuda_local.py", "CUDA", capture_output=False):
-                    self._config.cuda_installer_ran_once = True
+            self._ensureCudaInstalled()
         self._updateInferenceBackendSubtitle()
+
+    def _ensureCudaInstalled(self) -> None:
+        """Install CUDA packages if CUDAExecutionProvider is not yet available.
+
+        Because onnxruntime DLLs are locked by the running process, pip cannot
+        overwrite them in-place. The installer is therefore deferred: a batch
+        script waits for this process to exit, runs the installer, then deletes
+        itself. The application is closed so the DLLs are free to be replaced.
+        """
+        try:
+            import onnxruntime as ort
+            if "CUDAExecutionProvider" in ort.get_available_providers():
+                return  # Already installed — nothing to do.
+        except Exception:
+            pass  # Cannot check; proceed to offer install.
+
+        reply = QMessageBox.question(
+            self,
+            "CUDA Installation Required",
+            (
+                "CUDAExecutionProvider is not available.\n\n"
+                "The CUDA packages will be installed automatically after the app closes "
+                "so that locked DLLs can be replaced safely.\n\n"
+                "Reopen the application once the installer finishes.\n\n"
+                "Close the app and install now?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        python_exe = self._getEmbeddedPythonExe()
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        script_path = os.path.join(src_dir, "install_cuda_local.py")
+
+        if not os.path.exists(script_path):
+            QMessageBox.warning(self, "CUDA install failed", f"Installer not found:\n{script_path}")
+            return
+
+        current_pid = os.getpid()
+        temp_dir = os.environ.get("TEMP", os.path.expanduser("~"))
+        bat_path = os.path.join(temp_dir, "axiom_cuda_install.bat")
+        bat_content = (
+            "@echo off\n"
+            ":WAITLOOP\n"
+            f'tasklist /fi "pid eq {current_pid}" /fo csv 2>nul | find "{current_pid}" >nul\n'
+            "if not errorlevel 1 (\n"
+            "    timeout /t 1 /nobreak >nul\n"
+            "    goto WAITLOOP\n"
+            ")\n"
+            f'"{python_exe}" "{script_path}"\n'
+            'del "%~f0"\n'
+        )
+        try:
+            with open(bat_path, "w") as f:
+                f.write(bat_content)
+            subprocess.Popen(
+                ["cmd", "/c", bat_path],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "CUDA install failed", f"Could not schedule installer:\n{exc}")
+            return
+
+        QApplication.instance().quit()
 
     def _updateInferenceBackendSubtitle(self):
         if not hasattr(self, "inferenceBackendCard"):
@@ -1270,6 +1349,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.uvc_preview_scale_mode = str(text)
 
+    def _onNdiBandwidthChanged(self, text):
+        if self._config:
+            self._config.ndi_bandwidth = str(text).lower()
+
     def _onNdiSourceChanged(self, text):
         if not self._config:
             return
@@ -1356,6 +1439,7 @@ class AimPage(BasePage):
         self.uvcPreviewScaleCard.setVisible(is_uvc or is_ndi)
         self.ndiSourceCard.setVisible(is_ndi)
         self.ndiRefreshCard.setVisible(is_ndi)
+        self.ndiBandwidthCard.setVisible(is_ndi)
 
     def _onAlwaysAimChanged(self, checked):
         if self._config:
@@ -1752,6 +1836,7 @@ class AimPage(BasePage):
         self.ndiSourceCard.titleLabel.setText("NDI Stream")
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
         self.ndiRefreshBtn.setText(t("refresh"))
+        self.ndiBandwidthCard.titleLabel.setText("NDI Bandwidth")
         self.alwaysAimCard.titleLabel.setText(t("always_aim"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))

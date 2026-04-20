@@ -60,19 +60,42 @@ def ensure_paths() -> None:
 
 
 
+def is_cuda_installed() -> bool:
+    """Return True if onnxruntime-gpu with CUDAExecutionProvider is already available."""
+    result = subprocess.run(
+        [
+            str(PYTHON_EXE), "-c",
+            "import onnxruntime as ort; print('CUDAExecutionProvider' in ort.get_available_providers())",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and result.stdout.strip() == "True"
+
+
 def pip_install(args):
     cmd = [str(PYTHON_EXE), "-m", "pip", "install", "--upgrade", "--target", str(SITE_PACKAGES)] + args
     run(cmd)
 
 
+def pip_install_fresh(args):
+    """Install without --upgrade to avoid overwriting locked DLLs mid-session."""
+    cmd = [str(PYTHON_EXE), "-m", "pip", "install", "--target", str(SITE_PACKAGES)] + args
+    run(cmd)
+
+
 def install_python_packages() -> None:
     pip_install(COMMON_DEPS)
-
     pip_install(["onnxruntime-gpu[cuda,cudnn]"])
 
 
 def main() -> None:
     ensure_paths()
+
+    if is_cuda_installed():
+        log("CUDAExecutionProvider already available — skipping installation.")
+        return
+
     install_python_packages()
     log("All requested installs completed.")
 
