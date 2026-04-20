@@ -1099,11 +1099,74 @@ class AimPage(BasePage):
         if getattr(self._config, "inference_backend", "auto") != selected_backend:
             self._config.inference_backend = selected_backend
         if selected_backend == "cuda" and not self._isLoadingConfig:
-            has_ran = bool(getattr(self._config, "cuda_installer_ran_once", False))
-            if not has_ran:
-                if self._runLocalInstallerScript("install_cuda_local.py", "CUDA", capture_output=False):
-                    self._config.cuda_installer_ran_once = True
+            self._ensureCudaInstalled()
         self._updateInferenceBackendSubtitle()
+
+    def _ensureCudaInstalled(self) -> None:
+        """Install CUDA packages if CUDAExecutionProvider is not yet available.
+
+        Because onnxruntime DLLs are locked by the running process, pip cannot
+        overwrite them in-place. The installer is therefore deferred: a batch
+        script waits for this process to exit, runs the installer, then deletes
+        itself. The application is closed so the DLLs are free to be replaced.
+        """
+        try:
+            import onnxruntime as ort
+            if "CUDAExecutionProvider" in ort.get_available_providers():
+                return  # Already installed — nothing to do.
+        except Exception:
+            pass  # Cannot check; proceed to offer install.
+
+        reply = QMessageBox.question(
+            self,
+            "CUDA Installation Required",
+            (
+                "CUDAExecutionProvider is not available.\n\n"
+                "The CUDA packages will be installed automatically after the app closes "
+                "so that locked DLLs can be replaced safely.\n\n"
+                "Reopen the application once the installer finishes.\n\n"
+                "Close the app and install now?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        python_exe = self._getEmbeddedPythonExe()
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        script_path = os.path.join(src_dir, "install_cuda_local.py")
+
+        if not os.path.exists(script_path):
+            QMessageBox.warning(self, "CUDA install failed", f"Installer not found:\n{script_path}")
+            return
+
+        current_pid = os.getpid()
+        temp_dir = os.environ.get("TEMP", os.path.expanduser("~"))
+        bat_path = os.path.join(temp_dir, "axiom_cuda_install.bat")
+        bat_content = (
+            "@echo off\n"
+            ":WAITLOOP\n"
+            f'tasklist /fi "pid eq {current_pid}" /fo csv 2>nul | find "{current_pid}" >nul\n'
+            "if not errorlevel 1 (\n"
+            "    timeout /t 1 /nobreak >nul\n"
+            "    goto WAITLOOP\n"
+            ")\n"
+            f'"{python_exe}" "{script_path}"\n'
+            'del "%~f0"\n'
+        )
+        try:
+            with open(bat_path, "w") as f:
+                f.write(bat_content)
+            subprocess.Popen(
+                ["cmd", "/c", bat_path],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "CUDA install failed", f"Could not schedule installer:\n{exc}")
+            return
+
+        QApplication.instance().quit()
 
     def _updateInferenceBackendSubtitle(self):
         if not hasattr(self, "inferenceBackendCard"):
