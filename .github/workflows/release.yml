@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - GPU
+      - GPU-feat
 
   workflow_dispatch:
     inputs:
