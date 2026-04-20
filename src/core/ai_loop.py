@@ -355,7 +355,11 @@ def ai_logic_loop(
                 boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size)
 
                 if config.single_target_mode:
-                    boxes, confidences = find_closest_target(boxes, confidences, crosshair_x, crosshair_y)
+                    boxes, confidences = find_closest_target(
+                        boxes, confidences, crosshair_x, crosshair_y,
+                        priority_mode=getattr(config, 'target_priority_mode', 'distance'),
+                        confidence_weight=getattr(config, 'target_priority_confidence_weight', 0.5),
+                    )
 
                 # Runtime cache for UVC preview overlay rendering
                 config.latest_boxes = boxes
@@ -372,6 +376,7 @@ def ai_logic_loop(
                         state.cached_mouse_move_method,
                         state,
                         current_time,
+                        confidences=confidences,
                     )
                 else:
                     state.target_locked = False

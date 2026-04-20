@@ -41,23 +41,34 @@ def process_aiming(
     mouse_method: str,
     state: LoopState,
     current_time: float,
+    confidences: List[float] | None = None,
 ) -> None:
     """處理瞄準邏輯 (包含卡爾曼濾波預判和幽靈目標/貝塞爾曲線偏移)"""
 
     aim_part = config.aim_part
     head_height_ratio = config.head_height_ratio
+    config._current_confidences = confidences or []
 
     valid_targets = []
-    for box in boxes:
+    confidences = getattr(config, '_current_confidences', [])
+    for i, box in enumerate(boxes):
         target_x, target_y = calculate_aim_target(box, aim_part, head_height_ratio)
         moveX = target_x - crosshair_x
         moveY = target_y - crosshair_y
         distance_sq = moveX * moveX + moveY * moveY
-        valid_targets.append((distance_sq, target_x, target_y, box))
+        conf = confidences[i] if i < len(confidences) else 0.5
+        valid_targets.append((distance_sq, conf, target_x, target_y, box))
 
     if valid_targets:
-        valid_targets.sort(key=lambda x: x[0])
-        _, target_x, target_y, box = valid_targets[0]
+        priority_mode = str(getattr(config, 'target_priority_mode', 'distance'))
+        conf_weight = float(getattr(config, 'target_priority_confidence_weight', 0.5))
+        if priority_mode == 'confidence':
+            valid_targets.sort(key=lambda x: -(x[1]))
+        elif priority_mode == 'composite':
+            valid_targets.sort(key=lambda x: x[0] * (1.0 - x[1] * conf_weight))
+        else:
+            valid_targets.sort(key=lambda x: x[0])
+        _, _conf, target_x, target_y, box = valid_targets[0]
 
         tracker_enabled = getattr(config, 'tracker_enabled', False)
         if tracker_enabled:
@@ -136,6 +147,14 @@ def process_aiming(
                 dy = 0.0
 
         move_x, move_y = int(round(dx)), int(round(dy))
+
+        if getattr(config, 'jitter_enabled', False) and (move_x != 0 or move_y != 0):
+            j = float(getattr(config, 'jitter_strength', 1.5))
+            move_x += int(random.uniform(-j, j))
+            move_y += int(random.uniform(-j, j))
+
+        if getattr(config, 'recoil_compensation_enabled', False):
+            move_y += int(getattr(config, 'recoil_compensation_strength', 2.0))
 
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)

@@ -27,11 +27,15 @@ def build_provider_list(config) -> list:
             logger.info("Using CUDA")
     else:
         provider_map = {
-            "cuda": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            "cuda": ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
             "directml": ["DmlExecutionProvider", "CPUExecutionProvider"],
             "cpu": ["CPUExecutionProvider"],
         }
         preferred = provider_map.get(backend, ["CUDAExecutionProvider", "CPUExecutionProvider"])
+        if backend == "cuda":
+            active = [p for p in preferred if p in available]
+            used = active[0] if active else "CUDAExecutionProvider"
+            logger.info("Using %s (cuda backend)", used)
 
     filtered = [p for p in preferred if p in available]
 
