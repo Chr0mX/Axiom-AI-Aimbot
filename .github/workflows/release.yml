@@ -47,9 +47,12 @@ jobs:
           if [[ "$branch" == "GPU" ]]; then
             echo "prefix=gpu" >> "$GITHUB_OUTPUT"
             echo "release_name_prefix=Release GPU" >> "$GITHUB_OUTPUT"
-          else
+          elif  [[ "$branch" == "main" ]]; then
             echo "prefix=main" >> "$GITHUB_OUTPUT"
             echo "release_name_prefix=Release Main" >> "$GITHUB_OUTPUT"
+          elif  [[ "$branch" == "GPU-feat" ]]; then
+            echo "prefix=gpu-feat" >> "$GITHUB_OUTPUT"
+            echo "release_name_prefix=Release GPU" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout target branch
