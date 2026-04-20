@@ -7,24 +7,45 @@ import onnxruntime as ort
 
 def build_provider_list(config) -> list:
     """Build provider priority list based on user backend preference."""
+    logger = logging.getLogger(__name__)
     try:
         available = set(ort.get_available_providers())
     except Exception:
         available = {"CPUExecutionProvider"}
 
     backend = getattr(config, "inference_backend", "auto")
-    provider_map = {
-        "auto": ["CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider"],
-        "cuda": ["CUDAExecutionProvider", "CPUExecutionProvider"],
-        "directml": ["DmlExecutionProvider", "CPUExecutionProvider"],
-        "cpu": ["CPUExecutionProvider"],
-    }
-    preferred = provider_map.get(backend, provider_map["auto"])
-    filtered = [provider for provider in preferred if provider in available]
+
+    if backend == "auto":
+        if "TensorrtExecutionProvider" in available:
+            preferred = ["TensorrtExecutionProvider", "CUDAExecutionProvider"]
+            logger.info("Using TensorRT")
+        elif "DmlExecutionProvider" in available:
+            preferred = ["DmlExecutionProvider"]
+            logger.info("Using DirectML")
+        else:
+            preferred = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+            logger.info("Using CUDA")
+    else:
+        provider_map = {
+            "cuda": ["CUDAExecutionProvider", "CPUExecutionProvider"],
+            "directml": ["DmlExecutionProvider", "CPUExecutionProvider"],
+            "cpu": ["CPUExecutionProvider"],
+        }
+        preferred = provider_map.get(backend, ["CUDAExecutionProvider", "CPUExecutionProvider"])
+
+    filtered = [p for p in preferred if p in available]
 
     result = []
     for provider in filtered:
-        if provider == "CUDAExecutionProvider":
+        if provider == "TensorrtExecutionProvider":
+            result.append((
+                "TensorrtExecutionProvider",
+                {
+                    "trt_engine_cache_enable": True,
+                    "trt_fp16_enable": True,
+                },
+            ))
+        elif provider == "CUDAExecutionProvider":
             result.append((
                 "CUDAExecutionProvider",
                 {
