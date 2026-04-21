@@ -1,0 +1,57 @@
+# TensorRT backend dependencies
+#
+# Install into the embedded Python with:
+#   src\python\python.exe src\install_tensorrt_local.py
+#
+# Or manually:
+#   src\python\python.exe -m pip install -r requirements-tensorrt.txt ^
+#       --target src\python\Lib\site-packages ^
+#       --extra-index-url https://pypi.nvidia.com
+#
+# Compatibility matrix
+# ─────────────────────────────────────────────────────────────────────────────
+# CUDA toolkit : 12.x  (driver >= 525.x)
+# cuDNN        : 9.x   (bundled in nvidia-cudnn-cu12)
+# TensorRT     : 10.x  (bundled in tensorrt-cu12)
+# ORT          : >= 1.19 (required for TRT 10 EP)
+# Python       : 3.10 – 3.12
+# OS           : Windows 10/11 x64
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── ONNX Runtime (CUDA + TensorRT execution providers) ───────────────────────
+onnxruntime-gpu
+
+# ── NVIDIA CUDA runtime wheels (from standard PyPI) ──────────────────────────
+nvidia-cublas-cu12
+nvidia-cuda-runtime-cu12
+nvidia-cudnn-cu12
+nvidia-cufft-cu12
+nvidia-curand-cu12
+nvidia-cusolver-cu12
+nvidia-cusparse-cu12
+
+# ── TensorRT 10 Python bindings + DLLs (from pypi.nvidia.com) ────────────────
+# tensorrt-cu12 is a meta-package that installs:
+#   tensorrt-cu12-bindings  — Python API (import tensorrt)
+#   tensorrt-cu12-libs      — nvinfer_10.dll, nvonnxparser_10.dll, …
+--extra-index-url https://pypi.nvidia.com
+tensorrt-cu12
+
+# ── Shared inference dependencies ────────────────────────────────────────────
+numpy
+opencv-python
+mss
+dxcam; platform_system == "Windows"
+
+# ── UI ───────────────────────────────────────────────────────────────────────
+PyQt6
+PyQt6-Fluent-Widgets
+PyQt6-Frameless-Window
+
+# ── Windows / device integrations ────────────────────────────────────────────
+pywin32
+pyserial
+vgamepad
+
+# ── Test ─────────────────────────────────────────────────────────────────────
+pytest
