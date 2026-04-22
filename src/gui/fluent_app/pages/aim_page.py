@@ -734,23 +734,6 @@ class AimPage(BasePage):
             parent=self.antiDetectionGroup
         )
 
-        self.recoilEnableCard = SwitchSettingCard(
-            FluentIcon.CARE_UP_SOLID,
-            t("recoil_compensation_enabled", "Recoil Compensation"),
-            t("recoil_compensation_desc", "Apply downward Y offset to counter weapon recoil"),
-            parent=self.antiDetectionGroup
-        )
-
-        self.recoilStrengthCard = SliderLabelCard(
-            FluentIcon.SPEED_HIGH,
-            t("recoil_compensation_strength", "Recoil Strength"),
-            1, 100,
-            format_func=lambda v: f"{v / 10:.1f} px",
-            description="",
-            slider_width=160,
-            parent=self.antiDetectionGroup
-        )
-
         # === Target Priority ===
         self.targetPriorityGroup = SettingCardGroup(t("target_priority", "Target Priority"), self.scrollWidget)
 
@@ -903,8 +886,6 @@ class AimPage(BasePage):
         # Anti-Detection
         self.antiDetectionGroup.addSettingCard(self.jitterEnableCard)
         self.antiDetectionGroup.addSettingCard(self.jitterStrengthCard)
-        self.antiDetectionGroup.addSettingCard(self.recoilEnableCard)
-        self.antiDetectionGroup.addSettingCard(self.recoilStrengthCard)
         self.addContent(self.antiDetectionGroup)
 
         # Target Priority
@@ -993,8 +974,6 @@ class AimPage(BasePage):
         # Anti-Detection
         self.jitterEnableCard.checkedChanged.connect(self._onJitterEnableChanged)
         self.jitterStrengthCard.valueChanged.connect(self._onJitterStrengthChanged)
-        self.recoilEnableCard.checkedChanged.connect(self._onRecoilEnableChanged)
-        self.recoilStrengthCard.valueChanged.connect(self._onRecoilStrengthChanged)
 
         # Target Priority
         self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
@@ -1132,8 +1111,6 @@ class AimPage(BasePage):
             # Anti-Detection
             self.jitterEnableCard.setChecked(bool(getattr(self._config, 'jitter_enabled', False)))
             self.jitterStrengthCard.setValue(int(getattr(self._config, 'jitter_strength', 1.5) * 10))
-            self.recoilEnableCard.setChecked(bool(getattr(self._config, 'recoil_compensation_enabled', False)))
-            self.recoilStrengthCard.setValue(int(getattr(self._config, 'recoil_compensation_strength', 2.0) * 10))
 
             # Target Priority
             mode_map = {"distance": "Distance", "confidence": "Confidence", "composite": "Composite"}
@@ -1732,14 +1709,6 @@ class AimPage(BasePage):
         if self._config:
             self._config.jitter_strength = value / 10.0
 
-    def _onRecoilEnableChanged(self, checked):
-        if self._config:
-            self._config.recoil_compensation_enabled = checked
-
-    def _onRecoilStrengthChanged(self, value):
-        if self._config:
-            self._config.recoil_compensation_strength = value / 10.0
-
     def _onTargetPriorityModeChanged(self, text):
         if self._config:
             self._config.target_priority_mode = str(text).lower()
@@ -2027,8 +1996,6 @@ class AimPage(BasePage):
         self.antiDetectionGroup.titleLabel.setText(t("anti_detection", "Anti-Detection"))
         self.jitterEnableCard.titleLabel.setText(t("jitter_enabled", "Movement Jitter"))
         self.jitterStrengthCard.titleLabel.setText(t("jitter_strength", "Jitter Strength"))
-        self.recoilEnableCard.titleLabel.setText(t("recoil_compensation_enabled", "Recoil Compensation"))
-        self.recoilStrengthCard.titleLabel.setText(t("recoil_compensation_strength", "Recoil Strength"))
 
         # Target Priority
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
