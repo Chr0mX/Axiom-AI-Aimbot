@@ -130,11 +130,12 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
     )
 
 
-def _ndi_signature(config: Config) -> tuple[str, bool, str]:
+def _ndi_signature(config: Config) -> tuple[str, bool, str, str]:
     return (
         str(getattr(config, 'ndi_source_name', '')).strip(),
         bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
+        str(getattr(config, 'ndi_bandwidth', 'highest')).lower(),
     )
 
 
@@ -411,8 +412,12 @@ class NDICapture:
                 raise RuntimeError(f"NDI source '{self.source_name}' not found")
 
             receiver_kwargs: dict[str, Any] = {'color_format': RecvColorFormat.RGBX_RGBA}
-            if RecvBandwidth is not None and hasattr(RecvBandwidth, 'highest'):
-                receiver_kwargs['bandwidth'] = RecvBandwidth.highest
+            if RecvBandwidth is not None:
+                bw_pref = str(getattr(config, 'ndi_bandwidth', 'highest')).lower()
+                bw_value = getattr(RecvBandwidth, bw_pref, None) or getattr(RecvBandwidth, 'highest', None)
+                if bw_value is not None:
+                    receiver_kwargs['bandwidth'] = bw_value
+                    print(f'[Capture][NDI] Bandwidth set to: {bw_pref}')
             if source is not None:
                 receiver_kwargs['source'] = source
                 self._source_assigned = True

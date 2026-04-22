@@ -324,3 +324,29 @@ class PyQtOverlay(QWidget):
 
         # 繪製卡爾曼預測視覺化
         self.draw_tracker_prediction(painter)
+
+        # 繪製自訂準心
+        self._draw_crosshair(painter)
+
+    def _draw_crosshair(self, painter: QPainter) -> None:
+        """Draw a configurable crosshair dot or cross at the crosshair position."""
+        if not getattr(self.config, 'show_crosshair', False):
+            return
+        cx = int(self.config.crosshairX)
+        cy = int(self.config.crosshairY)
+        size = max(1, int(getattr(self.config, 'crosshair_size', 4)))
+        r = int(getattr(self.config, 'crosshair_color_r', 255))
+        g = int(getattr(self.config, 'crosshair_color_g', 255))
+        b = int(getattr(self.config, 'crosshair_color_b', 255))
+        color = QColor(r, g, b, 220)
+        pen = QPen(color, 1)
+        painter.setPen(pen)
+        painter.setBrush(color)
+        style = str(getattr(self.config, 'crosshair_style', 'dot'))
+        if style == 'cross':
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawLine(cx - size * 3, cy, cx + size * 3, cy)
+            painter.drawLine(cx, cy - size * 3, cx, cy + size * 3)
+        else:
+            painter.drawEllipse(cx - size, cy - size, size * 2, size * 2)
+        painter.setBrush(Qt.BrushStyle.NoBrush)

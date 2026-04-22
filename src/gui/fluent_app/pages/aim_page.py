@@ -314,6 +314,18 @@ class AimPage(BasePage):
         self.ndiRefreshCard.hBoxLayout.addWidget(self.ndiRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.ndiRefreshCard.hBoxLayout.addSpacing(16)
 
+        self.ndiBandwidthCombo = ComboBox()
+        self.ndiBandwidthCombo.addItems(["Highest", "Lowest"])
+        self.ndiBandwidthCombo.setMinimumWidth(120)
+        self.ndiBandwidthCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            "NDI Bandwidth",
+            "Receive bandwidth for the NDI stream",
+            self.generalGroup
+        )
+        self.ndiBandwidthCard.hBoxLayout.addWidget(self.ndiBandwidthCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.ndiBandwidthCard.hBoxLayout.addSpacing(16)
+
         # Always Aim (no need to press aim key)
         self.alwaysAimCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
@@ -702,6 +714,68 @@ class AimPage(BasePage):
             parent=self.trackerGroup
         )
 
+        # === Anti-Detection ===
+        self.antiDetectionGroup = SettingCardGroup(t("anti_detection", "Anti-Detection"), self.scrollWidget)
+
+        self.jitterEnableCard = SwitchSettingCard(
+            FluentIcon.MOVE,
+            t("jitter_enabled", "Movement Jitter"),
+            t("jitter_enabled_desc", "Add random micro-offsets to mouse movement"),
+            parent=self.antiDetectionGroup
+        )
+
+        self.jitterStrengthCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("jitter_strength", "Jitter Strength"),
+            1, 50,
+            format_func=lambda v: f"{v / 10:.1f} px",
+            description="",
+            slider_width=160,
+            parent=self.antiDetectionGroup
+        )
+
+        self.recoilEnableCard = SwitchSettingCard(
+            FluentIcon.CARE_UP_SOLID,
+            t("recoil_compensation_enabled", "Recoil Compensation"),
+            t("recoil_compensation_desc", "Apply downward Y offset to counter weapon recoil"),
+            parent=self.antiDetectionGroup
+        )
+
+        self.recoilStrengthCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("recoil_compensation_strength", "Recoil Strength"),
+            1, 100,
+            format_func=lambda v: f"{v / 10:.1f} px",
+            description="",
+            slider_width=160,
+            parent=self.antiDetectionGroup
+        )
+
+        # === Target Priority ===
+        self.targetPriorityGroup = SettingCardGroup(t("target_priority", "Target Priority"), self.scrollWidget)
+
+        self.targetPriorityModeCombo = ComboBox()
+        self.targetPriorityModeCombo.addItems(["Distance", "Confidence", "Composite"])
+        self.targetPriorityModeCombo.setMinimumWidth(130)
+        self.targetPriorityModeCard = SettingCard(
+            FluentIcon.PEOPLE,
+            t("target_priority_mode", "Priority Mode"),
+            t("target_priority_mode_desc", "How to select the best target"),
+            self.targetPriorityGroup
+        )
+        self.targetPriorityModeCard.hBoxLayout.addWidget(self.targetPriorityModeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.targetPriorityModeCard.hBoxLayout.addSpacing(16)
+
+        self.targetPriorityWeightCard = SliderLabelCard(
+            FluentIcon.CERTIFICATE,
+            t("target_priority_confidence_weight", "Confidence Weight"),
+            0, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("target_priority_weight_desc", "Used in Composite mode only"),
+            slider_width=160,
+            parent=self.targetPriorityGroup
+        )
+
     def _initLayout(self):
         """排版所有控制項"""
         # 模型設定
@@ -734,6 +808,7 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.uvcPreviewScaleCard)
         self.generalGroup.addSettingCard(self.ndiSourceCard)
         self.generalGroup.addSettingCard(self.ndiRefreshCard)
+        self.generalGroup.addSettingCard(self.ndiBandwidthCard)
         self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
@@ -825,6 +900,18 @@ class AimPage(BasePage):
         self.addContent(self.bezierGroup)
         self.addContent(self.trackerGroup)
 
+        # Anti-Detection
+        self.antiDetectionGroup.addSettingCard(self.jitterEnableCard)
+        self.antiDetectionGroup.addSettingCard(self.jitterStrengthCard)
+        self.antiDetectionGroup.addSettingCard(self.recoilEnableCard)
+        self.antiDetectionGroup.addSettingCard(self.recoilStrengthCard)
+        self.addContent(self.antiDetectionGroup)
+
+        # Target Priority
+        self.targetPriorityGroup.addSettingCard(self.targetPriorityModeCard)
+        self.targetPriorityGroup.addSettingCard(self.targetPriorityWeightCard)
+        self.addContent(self.targetPriorityGroup)
+
         self.scrollLayout.addStretch(1)
 
     def _connectSignals(self):
@@ -855,6 +942,7 @@ class AimPage(BasePage):
         self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
+        self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
         self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
@@ -901,6 +989,16 @@ class AimPage(BasePage):
         self.trackerSmoothCard.valueChanged.connect(self._onTrackerSmoothChanged)
         self.trackerThresholdCard.valueChanged.connect(self._onTrackerThresholdChanged)
         self.trackerShowCard.checkedChanged.connect(self._onTrackerShowChanged)
+
+        # Anti-Detection
+        self.jitterEnableCard.checkedChanged.connect(self._onJitterEnableChanged)
+        self.jitterStrengthCard.valueChanged.connect(self._onJitterStrengthChanged)
+        self.recoilEnableCard.checkedChanged.connect(self._onRecoilEnableChanged)
+        self.recoilStrengthCard.valueChanged.connect(self._onRecoilStrengthChanged)
+
+        # Target Priority
+        self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
+        self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -984,6 +1082,8 @@ class AimPage(BasePage):
                     idx = self.ndiSourceCombo.findText(ndi_source)
                 if idx >= 0:
                     self.ndiSourceCombo.setCurrentIndex(idx)
+            ndi_bw = str(getattr(self._config, 'ndi_bandwidth', 'highest')).capitalize()
+            self.ndiBandwidthCombo.setCurrentText(ndi_bw if ndi_bw in ("Highest", "Lowest") else "Highest")
             self._updateCaptureControlsVisibility(screenshot_method)
             self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
             self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
@@ -1028,6 +1128,18 @@ class AimPage(BasePage):
             self.trackerSmoothCard.setValue(int(self._config.tracker_smoothing_factor * 100))
             self.trackerThresholdCard.setValue(int(self._config.tracker_stop_threshold))
             self.trackerShowCard.setChecked(self._config.tracker_show_prediction)
+
+            # Anti-Detection
+            self.jitterEnableCard.setChecked(bool(getattr(self._config, 'jitter_enabled', False)))
+            self.jitterStrengthCard.setValue(int(getattr(self._config, 'jitter_strength', 1.5) * 10))
+            self.recoilEnableCard.setChecked(bool(getattr(self._config, 'recoil_compensation_enabled', False)))
+            self.recoilStrengthCard.setValue(int(getattr(self._config, 'recoil_compensation_strength', 2.0) * 10))
+
+            # Target Priority
+            mode_map = {"distance": "Distance", "confidence": "Confidence", "composite": "Composite"}
+            mode_text = mode_map.get(str(getattr(self._config, 'target_priority_mode', 'distance')), "Distance")
+            self.targetPriorityModeCombo.setCurrentText(mode_text)
+            self.targetPriorityWeightCard.setValue(int(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100))
 
             # Xbox 設定
             self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
@@ -1099,11 +1211,74 @@ class AimPage(BasePage):
         if getattr(self._config, "inference_backend", "auto") != selected_backend:
             self._config.inference_backend = selected_backend
         if selected_backend == "cuda" and not self._isLoadingConfig:
-            has_ran = bool(getattr(self._config, "cuda_installer_ran_once", False))
-            if not has_ran:
-                if self._runLocalInstallerScript("install_cuda_local.py", "CUDA", capture_output=False):
-                    self._config.cuda_installer_ran_once = True
+            self._ensureCudaInstalled()
         self._updateInferenceBackendSubtitle()
+
+    def _ensureCudaInstalled(self) -> None:
+        """Install CUDA packages if CUDAExecutionProvider is not yet available.
+
+        Because onnxruntime DLLs are locked by the running process, pip cannot
+        overwrite them in-place. The installer is therefore deferred: a batch
+        script waits for this process to exit, runs the installer, then deletes
+        itself. The application is closed so the DLLs are free to be replaced.
+        """
+        try:
+            import onnxruntime as ort
+            if "CUDAExecutionProvider" in ort.get_available_providers():
+                return  # Already installed — nothing to do.
+        except Exception:
+            pass  # Cannot check; proceed to offer install.
+
+        reply = QMessageBox.question(
+            self,
+            "CUDA Installation Required",
+            (
+                "CUDAExecutionProvider is not available.\n\n"
+                "The CUDA packages will be installed automatically after the app closes "
+                "so that locked DLLs can be replaced safely.\n\n"
+                "Reopen the application once the installer finishes.\n\n"
+                "Close the app and install now?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        python_exe = self._getEmbeddedPythonExe()
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        script_path = os.path.join(src_dir, "install_cuda_local.py")
+
+        if not os.path.exists(script_path):
+            QMessageBox.warning(self, "CUDA install failed", f"Installer not found:\n{script_path}")
+            return
+
+        current_pid = os.getpid()
+        temp_dir = os.environ.get("TEMP", os.path.expanduser("~"))
+        bat_path = os.path.join(temp_dir, "axiom_cuda_install.bat")
+        bat_content = (
+            "@echo off\n"
+            ":WAITLOOP\n"
+            f'tasklist /fi "pid eq {current_pid}" /fo csv 2>nul | find "{current_pid}" >nul\n'
+            "if not errorlevel 1 (\n"
+            "    timeout /t 1 /nobreak >nul\n"
+            "    goto WAITLOOP\n"
+            ")\n"
+            f'"{python_exe}" "{script_path}"\n'
+            'del "%~f0"\n'
+        )
+        try:
+            with open(bat_path, "w") as f:
+                f.write(bat_content)
+            subprocess.Popen(
+                ["cmd", "/c", bat_path],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "CUDA install failed", f"Could not schedule installer:\n{exc}")
+            return
+
+        QApplication.instance().quit()
 
     def _updateInferenceBackendSubtitle(self):
         if not hasattr(self, "inferenceBackendCard"):
@@ -1270,6 +1445,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.uvc_preview_scale_mode = str(text)
 
+    def _onNdiBandwidthChanged(self, text):
+        if self._config:
+            self._config.ndi_bandwidth = str(text).lower()
+
     def _onNdiSourceChanged(self, text):
         if not self._config:
             return
@@ -1356,6 +1535,7 @@ class AimPage(BasePage):
         self.uvcPreviewScaleCard.setVisible(is_uvc or is_ndi)
         self.ndiSourceCard.setVisible(is_ndi)
         self.ndiRefreshCard.setVisible(is_ndi)
+        self.ndiBandwidthCard.setVisible(is_ndi)
 
     def _onAlwaysAimChanged(self, checked):
         if self._config:
@@ -1543,6 +1723,30 @@ class AimPage(BasePage):
     def _onTrackerShowChanged(self, checked):
         if self._config:
             self._config.tracker_show_prediction = checked
+
+    def _onJitterEnableChanged(self, checked):
+        if self._config:
+            self._config.jitter_enabled = checked
+
+    def _onJitterStrengthChanged(self, value):
+        if self._config:
+            self._config.jitter_strength = value / 10.0
+
+    def _onRecoilEnableChanged(self, checked):
+        if self._config:
+            self._config.recoil_compensation_enabled = checked
+
+    def _onRecoilStrengthChanged(self, value):
+        if self._config:
+            self._config.recoil_compensation_strength = value / 10.0
+
+    def _onTargetPriorityModeChanged(self, text):
+        if self._config:
+            self._config.target_priority_mode = str(text).lower()
+
+    def _onTargetPriorityWeightChanged(self, value):
+        if self._config:
+            self._config.target_priority_confidence_weight = value / 100.0
 
     # === Arduino 連線回調函數 ===
     # === Arduino 連線回調函數 ===
@@ -1752,6 +1956,7 @@ class AimPage(BasePage):
         self.ndiSourceCard.titleLabel.setText("NDI Stream")
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
         self.ndiRefreshBtn.setText(t("refresh"))
+        self.ndiBandwidthCard.titleLabel.setText("NDI Bandwidth")
         self.alwaysAimCard.titleLabel.setText(t("always_aim"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
@@ -1817,3 +2022,15 @@ class AimPage(BasePage):
         self.trackerSmoothCard.titleLabel.setText(t("tracker_smoothing_factor"))
         self.trackerThresholdCard.titleLabel.setText(t("tracker_stop_threshold"))
         self.trackerShowCard.titleLabel.setText(t("tracker_show_prediction"))
+
+        # Anti-Detection
+        self.antiDetectionGroup.titleLabel.setText(t("anti_detection", "Anti-Detection"))
+        self.jitterEnableCard.titleLabel.setText(t("jitter_enabled", "Movement Jitter"))
+        self.jitterStrengthCard.titleLabel.setText(t("jitter_strength", "Jitter Strength"))
+        self.recoilEnableCard.titleLabel.setText(t("recoil_compensation_enabled", "Recoil Compensation"))
+        self.recoilStrengthCard.titleLabel.setText(t("recoil_compensation_strength", "Recoil Strength"))
+
+        # Target Priority
+        self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
+        self.targetPriorityModeCard.titleLabel.setText(t("target_priority_mode", "Priority Mode"))
+        self.targetPriorityWeightCard.titleLabel.setText(t("target_priority_confidence_weight", "Confidence Weight"))

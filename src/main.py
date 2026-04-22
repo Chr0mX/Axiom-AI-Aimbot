@@ -129,6 +129,7 @@ def _register_nvidia_dll_dirs() -> None:
 
         registered: list[str] = []
         for sp in all_site_dirs:
+            # CUDA runtime DLLs — installed by nvidia-* wheels under nvidia/<sub>/bin/
             for sub in nvidia_sub_packages:
                 bin_dir = os.path.join(sp, "nvidia", sub, "bin")
                 if not os.path.isdir(bin_dir):
@@ -141,12 +142,24 @@ def _register_nvidia_dll_dirs() -> None:
                     pass
                 registered.append(bin_dir)
 
+            # TensorRT DLLs — tensorrt-cu12-libs wheel puts nvinfer_10.dll and
+            # nvonnxparser_10.dll directly in site-packages/tensorrt_libs/ (not
+            # under nvidia/).  ORT's TensorRT EP probes for these at load time.
+            trt_libs = os.path.join(sp, "tensorrt_libs")
+            if os.path.isdir(trt_libs):
+                os.environ["PATH"] = f"{trt_libs};{os.environ.get('PATH', '')}"
+                try:
+                    os.add_dll_directory(trt_libs)
+                except (AttributeError, OSError):
+                    pass
+                registered.append(trt_libs)
+
         if registered:
             # Use print here – logger may not be initialised yet at import time
-            print(f"[CUDA] Registered {len(registered)} nvidia DLL dirs from site-packages")
+            print(f"[CUDA] Registered {len(registered)} nvidia/TRT DLL dirs from site-packages")
         else:
             print("[CUDA] Warning: no nvidia site-package bin dirs found – "
-                  "install nvidia-cublas-cu12, nvidia-cudnn-cu12, etc.")
+                  "install nvidia-cublas-cu12, nvidia-cudnn-cu12, tensorrt-cu12, etc.")
     except Exception as exc:
         print(f"[CUDA] DLL pre-registration failed: {exc}")
 
