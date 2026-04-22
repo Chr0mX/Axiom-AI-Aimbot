@@ -6,6 +6,11 @@ import sys
 import urllib.request
 from pathlib import Path
 
+# Tell session_utils (and any other ORT-dependent module) not to import or
+# initialize onnxruntime during installation — the GPU packages may be absent
+# or mid-install, which can crash the host process at the C++ level.
+os.environ["AXIOM_INSTALLING"] = "1"
+
 
 BASE_DIR = Path(__file__).resolve().parent
 LOCAL_PYTHON_DIR = BASE_DIR / "python"

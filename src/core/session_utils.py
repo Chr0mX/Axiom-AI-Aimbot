@@ -4,7 +4,22 @@
 import logging
 import os
 
-import onnxruntime as ort
+# When AXIOM_INSTALLING=1 the install scripts are running and onnxruntime may
+# not be in a usable state (CUDA DLLs absent, mid-install, etc.).  Skip all
+# ORT imports and return safe CPU-only defaults so the process does not exit.
+_INSTALLING = os.environ.get("AXIOM_INSTALLING", "0") == "1"
+
+if not _INSTALLING:
+    try:
+        import onnxruntime as ort
+        _ORT_AVAILABLE = True
+    except Exception as _ort_err:
+        logging.getLogger(__name__).warning(
+            "onnxruntime import failed, falling back to CPU: %s", _ort_err
+        )
+        _ORT_AVAILABLE = False
+else:
+    _ORT_AVAILABLE = False
 
 # Project root: src/core/session_utils.py → up two levels → project root
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +36,9 @@ def _ensure_trt_cache_dir() -> str:
 def build_provider_list(config) -> list:
     """Build ORT provider priority list based on user backend preference.
 
+    Returns ["CPUExecutionProvider"] when ORT is unavailable or when
+    AXIOM_INSTALLING=1 (installation mode) to prevent process exit.
+
     Priority order when backend == 'auto':
         TensorRT > DirectML > CUDA > CPU
 
@@ -28,6 +46,11 @@ def build_provider_list(config) -> list:
         TensorRT > CUDA > CPU  (TRT is tried first; falls back gracefully)
     """
     logger = logging.getLogger(__name__)
+
+    if not _ORT_AVAILABLE:
+        logger.warning("ORT not available (installing=%s) — using CPUExecutionProvider", _INSTALLING)
+        return ["CPUExecutionProvider"]
+
     try:
         available = set(ort.get_available_providers())
     except Exception:
@@ -69,34 +92,27 @@ def build_provider_list(config) -> list:
             result.append((
                 "TensorrtExecutionProvider",
                 {
-                    # ── Engine cache ─────────────────────────────────────────
                     # Persist the compiled engine so the 1-5 min build cost is
                     # paid only on the first run.  Subsequent launches are instant.
                     "trt_engine_cache_enable": True,
                     "trt_engine_cache_path": trt_cache,
 
-                    # ── Timing cache ─────────────────────────────────────────
                     # Reuse layer-timing data across engine rebuilds (e.g. after
                     # a model update).  Drastically reduces re-build time.
                     "trt_timing_cache_enable": True,
                     "trt_timing_cache_path": trt_cache,
 
-                    # ── Precision ────────────────────────────────────────────
                     # FP16 is native on RTX (Turing+) and roughly 2x faster than
                     # FP32 with negligible accuracy loss for YOLO detection.
                     "trt_fp16_enable": True,
 
-                    # ── Builder memory budget ────────────────────────────────
                     # 2 GiB is enough for YOLOv8-n/s.  Increase to 4 GiB for
                     # larger models (YOLOv8-m/l/x) if the build OOMs.
                     "trt_max_workspace_size": 2 * 1024 * 1024 * 1024,
 
-                    # ── Optimization level ───────────────────────────────────
                     # 3 = good balance of build time vs runtime speed (range 0-5).
-                    # Use 5 only when you can afford a multi-hour build.
                     "trt_builder_optimization_level": 3,
 
-                    # ── Auxiliary streams ────────────────────────────────────
                     # -1 = TRT manages its own CUDA streams automatically.
                     "trt_auxiliary_streams": -1,
                 },
@@ -117,8 +133,15 @@ def build_provider_list(config) -> list:
 
 
 def optimize_onnx_session(config):
-    """Create ORT SessionOptions with graph and memory optimizations."""
+    """Create ORT SessionOptions with graph and memory optimizations.
+
+    Returns None when ORT is unavailable (e.g. during installation).
+    """
     logger = logging.getLogger(__name__)
+
+    if not _ORT_AVAILABLE:
+        return None
+
     try:
         session_options = ort.SessionOptions()
         session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL

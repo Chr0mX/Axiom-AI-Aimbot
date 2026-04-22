@@ -81,6 +81,19 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Box theme selector
+        self.boxThemeCombo = ComboBox()
+        self.boxThemeCombo.addItems(["Default", "Minimal", "Neon", "Outline Only"])
+        self.boxThemeCombo.setMinimumWidth(130)
+        self.boxThemeCard = SettingCard(
+            FluentIcon.CHECKBOX,
+            t("box_theme", "Box Theme"),
+            t("box_theme_hint", "Visual style for detection boxes"),
+            self.displayGroup
+        )
+        self.boxThemeCard.hBoxLayout.addWidget(self.boxThemeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.boxThemeCard.hBoxLayout.addSpacing(16)
+
         # Status Panel Elements (Checkbox style)
         self.statusPanelElementsCard = SettingCard(
             FluentIcon.INFO,
@@ -181,6 +194,64 @@ class VisualsPage(BasePage):
             parent=self.crosshairGroup
         )
 
+        # === Tracer Line Settings ===
+        self.tracerGroup = SettingCardGroup(t("tracer_settings", "Tracer Line"), self.scrollWidget)
+
+        self.showTracerCard = SwitchSettingCard(
+            FluentIcon.ZOOM,
+            t("show_tracer", "Show Tracer Line"),
+            t("show_tracer_hint", "Draw a line from screen center to the nearest target"),
+            parent=self.tracerGroup
+        )
+
+        self.tracerThicknessCard = SliderLabelCard(
+            FluentIcon.PENCIL_INK,
+            t("tracer_thickness", "Thickness"),
+            1, 8,
+            format_func=lambda v: f"{v}px",
+            description="",
+            slider_width=160,
+            parent=self.tracerGroup
+        )
+
+        self.tracerOpacityCard = SliderLabelCard(
+            FluentIcon.TRANSPARENT,
+            t("tracer_opacity", "Opacity"),
+            0, 255,
+            format_func=lambda v: str(v),
+            description="",
+            slider_width=160,
+            parent=self.tracerGroup
+        )
+
+        self.tracerColorRCard = SliderLabelCard(
+            FluentIcon.BRUSH,
+            t("tracer_color_r", "Red"),
+            0, 255,
+            format_func=lambda v: str(v),
+            description="",
+            slider_width=160,
+            parent=self.tracerGroup
+        )
+        self.tracerColorGCard = SliderLabelCard(
+            FluentIcon.BRUSH,
+            t("tracer_color_g", "Green"),
+            0, 255,
+            format_func=lambda v: str(v),
+            description="",
+            slider_width=160,
+            parent=self.tracerGroup
+        )
+        self.tracerColorBCard = SliderLabelCard(
+            FluentIcon.BRUSH,
+            t("tracer_color_b", "Blue"),
+            0, 255,
+            format_func=lambda v: str(v),
+            description="",
+            slider_width=160,
+            parent=self.tracerGroup
+        )
+
         # === Appearance Settings ===
         self.appearanceGroup = SettingCardGroup(t("appearance_options"), self.scrollWidget)
 
@@ -211,6 +282,7 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.showBoxesCard)
         self.displayGroup.addSettingCard(self.showConfidenceCard)
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
+        self.displayGroup.addSettingCard(self.boxThemeCard)
         self.addContent(self.displayGroup)
 
         # Status panel settings
@@ -226,6 +298,15 @@ class VisualsPage(BasePage):
         self.crosshairGroup.addSettingCard(self.crosshairColorGCard)
         self.crosshairGroup.addSettingCard(self.crosshairColorBCard)
         self.addContent(self.crosshairGroup)
+
+        # Tracer line settings
+        self.tracerGroup.addSettingCard(self.showTracerCard)
+        self.tracerGroup.addSettingCard(self.tracerThicknessCard)
+        self.tracerGroup.addSettingCard(self.tracerOpacityCard)
+        self.tracerGroup.addSettingCard(self.tracerColorRCard)
+        self.tracerGroup.addSettingCard(self.tracerColorGCard)
+        self.tracerGroup.addSettingCard(self.tracerColorBCard)
+        self.addContent(self.tracerGroup)
 
         # Appearance settings
         self.appearanceGroup.addSettingCard(self.enableAcrylicCard)
@@ -259,6 +340,17 @@ class VisualsPage(BasePage):
         self.crosshairColorGCard.valueChanged.connect(self._onCrosshairColorGChanged)
         self.crosshairColorBCard.valueChanged.connect(self._onCrosshairColorBChanged)
 
+        # Box theme
+        self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
+
+        # Tracer line
+        self.showTracerCard.checkedChanged.connect(self._onShowTracerChanged)
+        self.tracerThicknessCard.valueChanged.connect(self._onTracerThicknessChanged)
+        self.tracerOpacityCard.valueChanged.connect(self._onTracerOpacityChanged)
+        self.tracerColorRCard.valueChanged.connect(self._onTracerColorRChanged)
+        self.tracerColorGCard.valueChanged.connect(self._onTracerColorGChanged)
+        self.tracerColorBCard.valueChanged.connect(self._onTracerColorBChanged)
+
         # Appearance settings
         self.enableAcrylicCard.checkedChanged.connect(self._onAcrylicEnabledChanged)
         self.windowAlphaCard.valueChanged.connect(self._onWindowAlphaChanged)
@@ -283,6 +375,19 @@ class VisualsPage(BasePage):
         self.spScreenshotMethodCheck.setChecked(getattr(self._config, 'status_panel_show_screenshot_method', True))
         self.spScreenshotFpsCheck.setChecked(getattr(self._config, 'status_panel_show_screenshot_fps', True))
         self.spDetectionFpsCheck.setChecked(getattr(self._config, 'status_panel_show_detection_fps', True))
+
+        # Box theme
+        _theme_map = {"default": "Default", "minimal": "Minimal", "neon": "Neon", "outline_only": "Outline Only"}
+        theme_text = _theme_map.get(str(getattr(self._config, 'box_theme', 'default')), "Default")
+        self.boxThemeCombo.setCurrentText(theme_text)
+
+        # Tracer line
+        self.showTracerCard.setChecked(bool(getattr(self._config, 'show_tracer', False)))
+        self.tracerThicknessCard.setValue(int(getattr(self._config, 'tracer_thickness', 1)))
+        self.tracerOpacityCard.setValue(int(getattr(self._config, 'tracer_opacity', 180)))
+        self.tracerColorRCard.setValue(int(getattr(self._config, 'tracer_color_r', 255)))
+        self.tracerColorGCard.setValue(int(getattr(self._config, 'tracer_color_g', 50)))
+        self.tracerColorBCard.setValue(int(getattr(self._config, 'tracer_color_b', 50)))
 
         # Crosshair settings
         self.showCrosshairCard.setChecked(bool(getattr(self._config, 'show_crosshair', False)))
@@ -320,6 +425,35 @@ class VisualsPage(BasePage):
     def _onShowDetectRangeChanged(self, checked):
         if self._config:
             self._config.show_detect_range = checked
+
+    def _onBoxThemeChanged(self, text):
+        if self._config:
+            _rev = {"Default": "default", "Minimal": "minimal", "Neon": "neon", "Outline Only": "outline_only"}
+            self._config.box_theme = _rev.get(str(text), "default")
+
+    def _onShowTracerChanged(self, checked):
+        if self._config:
+            self._config.show_tracer = checked
+
+    def _onTracerThicknessChanged(self, value):
+        if self._config:
+            self._config.tracer_thickness = int(value)
+
+    def _onTracerOpacityChanged(self, value):
+        if self._config:
+            self._config.tracer_opacity = int(value)
+
+    def _onTracerColorRChanged(self, value):
+        if self._config:
+            self._config.tracer_color_r = int(value)
+
+    def _onTracerColorGChanged(self, value):
+        if self._config:
+            self._config.tracer_color_g = int(value)
+
+    def _onTracerColorBChanged(self, value):
+        if self._config:
+            self._config.tracer_color_b = int(value)
 
     def _onStatusPanelAutoAimChanged(self, state):
         if self._config:
@@ -423,6 +557,18 @@ class VisualsPage(BasePage):
         self.showConfidenceCard.titleLabel.setText(t("show_confidence"))
         self.showStatusCard.titleLabel.setText(t("show_status_panel"))
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
+        self.boxThemeCard.titleLabel.setText(t("box_theme", "Box Theme"))
+        self.boxThemeCard.contentLabel.setText(t("box_theme_hint", "Visual style for detection boxes"))
+
+        # Tracer line
+        self.tracerGroup.titleLabel.setText(t("tracer_settings", "Tracer Line"))
+        self.showTracerCard.titleLabel.setText(t("show_tracer", "Show Tracer Line"))
+        self.showTracerCard.contentLabel.setText(t("show_tracer_hint", "Draw a line from screen center to the nearest target"))
+        self.tracerThicknessCard.titleLabel.setText(t("tracer_thickness", "Thickness"))
+        self.tracerOpacityCard.titleLabel.setText(t("tracer_opacity", "Opacity"))
+        self.tracerColorRCard.titleLabel.setText(t("tracer_color_r", "Red"))
+        self.tracerColorGCard.titleLabel.setText(t("tracer_color_g", "Green"))
+        self.tracerColorBCard.titleLabel.setText(t("tracer_color_b", "Blue"))
         self.statusPanelElementsCard.titleLabel.setText(t("status_panel_elements", "Status Panel Elements"))
         self.statusPanelElementsCard.contentLabel.setText(t("status_panel_elements_hint", "Choose which rows are shown in status panel"))
         self.spAutoAimCheck.setText(self._shortText("auto_aim"))

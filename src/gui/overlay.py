@@ -74,6 +74,17 @@ class OverlayColors:
             return ThemeColors.OVERLAY_TRACKER_PREDICTED.qcolor()
         return QColor(255, 0, 255, 80)
 
+_BOX_THEMES = {
+    # name → (box_pen_color, fill_brush, corner_only, glow_width)
+    # corner_only=True draws only 4 corner dots (current default behaviour)
+    # corner_only=False draws a full rectangle border
+    "default":      {"corner_only": True,  "glow": False},
+    "minimal":      {"corner_only": False, "glow": False},
+    "neon":         {"corner_only": False, "glow": True},
+    "outline_only": {"corner_only": False, "glow": False},
+}
+
+
 class PyQtOverlay(QWidget):
     def __init__(self, boxes_queue, confidences_queue, config):
         super().__init__()
@@ -154,28 +165,46 @@ class PyQtOverlay(QWidget):
             self.update()
 
     def draw_corner_box(self, painter, x1, y1, x2, y2):
-        """Draw four corner points, dynamically adjusted based on target size"""
-        # Calculate target width and height
-        width = abs(x2 - x1)
-        height = abs(y2 - y1)
-        
-        # Take the smaller dimension to calculate point size
-        box_size = min(width, height)
-        
-        # Point size is 8% of target size, min 1, max 36
+        """Draw four corner dots — used by the 'default' box theme."""
+        box_size = min(abs(x2 - x1), abs(y2 - y1))
         point_size = max(1, min(36, int(box_size * 0.08)))
-        
-        # Top-left corner point
-        painter.drawEllipse(x1 - point_size//2, y1 - point_size//2, point_size, point_size)
-        
-        # Top-right corner point
-        painter.drawEllipse(x2 - point_size//2, y1 - point_size//2, point_size, point_size)
-        
-        # Bottom-left corner point
-        painter.drawEllipse(x1 - point_size//2, y2 - point_size//2, point_size, point_size)
-        
-        # Bottom-right corner point
-        painter.drawEllipse(x2 - point_size//2, y2 - point_size//2, point_size, point_size)
+        for px, py in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
+            painter.drawEllipse(px - point_size // 2, py - point_size // 2, point_size, point_size)
+
+    def draw_themed_box(self, painter, x1, y1, x2, y2, box_color: 'QColor', theme: str):
+        """Draw a detection box using the requested visual theme.
+
+        Themes:
+            default      – four corner dots (original behaviour)
+            minimal      – thin full rectangle, no fill
+            neon         – full rectangle with a soft glow (double-draw at higher alpha)
+            outline_only – full rectangle, 1 px, no fill
+        """
+        theme_cfg = _BOX_THEMES.get(theme, _BOX_THEMES["default"])
+        corner_only = theme_cfg["corner_only"]
+        glow = theme_cfg["glow"]
+
+        if corner_only:
+            self.draw_corner_box(painter, x1, y1, x2, y2)
+            return
+
+        w = abs(x2 - x1)
+        h = abs(y2 - y1)
+
+        if glow:
+            # Outer glow pass: wider, more transparent
+            glow_color = QColor(box_color)
+            glow_color.setAlpha(max(0, box_color.alpha() // 3))
+            pen_glow = QPen(glow_color, 4, Qt.PenStyle.SolidLine)
+            painter.setPen(pen_glow)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(x1, y1, w, h)
+
+        # Main border
+        pen_main = QPen(box_color, 1 if theme == "outline_only" else 2, Qt.PenStyle.SolidLine)
+        painter.setPen(pen_main)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(x1, y1, w, h)
 
     def draw_fov_corners(self, painter, cx, cy, fov, corner_length=20):
         """Draw FOV corners
@@ -295,38 +324,69 @@ class PyQtOverlay(QWidget):
             painter.setPen(pen)
             self.draw_fov_corners(painter, cx, cy, fov)
 
-        # 繪製檢測框和置信度 - 使用主題顏色
+        # Draw detection boxes with the selected theme
         if show_boxes and self.boxes:
             box_color = OverlayColors.get_box_color()
-            pen_box = QPen(box_color, 2)
-            painter.setPen(pen_box)
-            
+            box_theme = str(getattr(self.config, 'box_theme', 'default'))
+
             show_confidence = self.config.show_confidence
             if show_confidence:
                 confidence_color = OverlayColors.get_confidence_text_color()
                 pen_text = QPen(confidence_color, 1)
                 font = QFont('Arial', 9, QFont.Weight.Bold)
                 painter.setFont(font)
-            
+
             for i, box in enumerate(self.boxes):
                 x1, y1, x2, y2 = map(int, box)
-                
-                # 使用新的角框繪製方法
-                self.draw_corner_box(painter, x1, y1, x2, y2)
-                
+
+                painter.setPen(QPen(box_color, 2))
+                self.draw_themed_box(painter, x1, y1, x2, y2, box_color, box_theme)
+
                 if show_confidence and i < len(self.confidences):
                     confidence = self.confidences[i]
                     text = f"{confidence:.0%}"
                     painter.setPen(pen_text)
-                    # 將文字移到左上角外側，並增加距離
                     painter.drawText(x1 - 20, y1 - 15, text)
-                    painter.setPen(pen_box)
+
+        # Draw tracer line from screen center to the closest detected target
+        self._draw_tracer(painter)
 
         # 繪製卡爾曼預測視覺化
         self.draw_tracker_prediction(painter)
 
         # 繪製自訂準心
         self._draw_crosshair(painter)
+
+    def _draw_tracer(self, painter: QPainter) -> None:
+        """Draw a line from the screen center to the closest detected target."""
+        if not getattr(self.config, 'show_tracer', False):
+            return
+        if not self.boxes:
+            return
+
+        cx = int(self.config.crosshairX)
+        cy = int(self.config.crosshairY)
+
+        # Pick the box closest to the crosshair
+        def _dist_sq(box):
+            bx = (box[0] + box[2]) / 2
+            by = (box[1] + box[3]) / 2
+            return (bx - cx) ** 2 + (by - cy) ** 2
+
+        closest = min(self.boxes, key=_dist_sq)
+        tx = int((closest[0] + closest[2]) / 2)
+        ty = int((closest[1] + closest[3]) / 2)
+
+        r = int(getattr(self.config, 'tracer_color_r', 255))
+        g = int(getattr(self.config, 'tracer_color_g', 50))
+        b = int(getattr(self.config, 'tracer_color_b', 50))
+        alpha = max(0, min(255, int(getattr(self.config, 'tracer_opacity', 180))))
+        thickness = max(1, int(getattr(self.config, 'tracer_thickness', 1)))
+
+        color = QColor(r, g, b, alpha)
+        pen = QPen(color, thickness, Qt.PenStyle.SolidLine)
+        painter.setPen(pen)
+        painter.drawLine(cx, cy, tx, ty)
 
     def _draw_crosshair(self, painter: QPainter) -> None:
         """Draw a configurable crosshair dot or cross at the crosshair position."""

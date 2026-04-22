@@ -115,11 +115,14 @@ def build_engine_via_trt_api(
         print("        Run: src\\python\\python.exe src\\install_tensorrt_local.py")
         return False
 
+    import time
+
     print(f"[TRT] TensorRT {trt.__version__}")
     print(f"[TRT] Source : {onnx_path}")
     print(f"[TRT] Output : {output_path}")
     print(f"[TRT] FP16   : {fp16}   Workspace: {workspace_mb} MiB")
 
+    print("[TRT] Step 1/4 — Creating builder and network...")
     logger = trt.Logger(trt.Logger.WARNING)
     builder = trt.Builder(logger)
     network = builder.create_network(
@@ -127,14 +130,16 @@ def build_engine_via_trt_api(
     )
     parser = trt.OnnxParser(network, logger)
 
+    print("[TRT] Step 2/4 — Parsing ONNX model...")
     with open(onnx_path, "rb") as f:
         if not parser.parse(f.read()):
             for i in range(parser.num_errors):
                 print(f"[TRT] Parse error {i}: {parser.get_error(i)}")
             return False
 
-    print(f"[TRT] ONNX parsed — {network.num_layers} layers")
+    print(f"[TRT] Step 2/4 — ONNX parsed — {network.num_layers} layers")
 
+    print("[TRT] Step 3/4 — Configuring builder (precision, workspace, profiles)...")
     config = builder.create_builder_config()
     config.set_memory_pool_limit(
         trt.MemoryPoolType.WORKSPACE, workspace_mb * 1024 * 1024
@@ -143,20 +148,26 @@ def build_engine_via_trt_api(
     if fp16:
         if builder.platform_has_fast_fp16:
             config.set_flag(trt.BuilderFlag.FP16)
-            print("[TRT] FP16 enabled")
+            print("[TRT]           FP16 precision enabled")
         else:
-            print("[WARN] FP16 requested but platform_has_fast_fp16=False — falling back to FP32")
+            print("[WARN]          FP16 requested but platform_has_fast_fp16=False — falling back to FP32")
 
     # Static-shape profile (required even for fixed-size networks in TRT 8+)
     profile = builder.create_optimization_profile()
     profile.set_shape(input_name, input_shape, input_shape, input_shape)
     config.add_optimization_profile(profile)
 
-    print("[TRT] Building engine — this may take 1–5 minutes...")
+    print("[TRT] Step 4/4 — Building engine — this may take 1–5 minutes...")
+    print("[TRT]           GPU is under full load. Do not close this window.")
+    t0 = time.time()
     serialized = builder.build_serialized_network(network, config)
+    elapsed = time.time() - t0
+
     if serialized is None:
         print("[TRT] build_serialized_network returned None — check for ONNX op compatibility errors above")
         return False
+
+    print(f"[TRT]           Engine built in {elapsed:.1f}s")
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "wb") as f:
@@ -228,29 +239,39 @@ def build_engine_via_ort(
         "CPUExecutionProvider",
     ]
 
-    print(f"[ORT] Loading {onnx_path} with TensorrtExecutionProvider")
-    print(f"[ORT] Cache dir : {cache_dir}")
-    print(f"[ORT] FP16      : {fp16}   Workspace: {workspace_mb} MiB")
-    print("[ORT] Building TRT engine — this may take 1–5 minutes...")
+    import time
 
+    print("[ORT] Step 1/3 — Verifying TensorrtExecutionProvider availability...")
+    print(f"[ORT]           Loading : {onnx_path}")
+    print(f"[ORT]           Cache   : {cache_dir}")
+    print(f"[ORT]           FP16    : {fp16}   Workspace: {workspace_mb} MiB")
+
+    print("[ORT] Step 2/3 — Creating ORT inference session (triggers engine build)...")
+    print("[ORT]           GPU is under full load. This may take 1–5 minutes.")
+    t0 = time.time()
     try:
         sess = ort.InferenceSession(onnx_path, providers=providers)
     except Exception as exc:
         print(f"[ERROR] InferenceSession creation failed: {exc}")
         return False
+    elapsed = time.time() - t0
+    print(f"[ORT]           Session created in {elapsed:.1f}s")
 
+    print("[ORT] Step 3/3 — Running dummy inference to validate engine...")
     # One dummy inference to confirm the engine is functional
     inp = sess.get_inputs()[0]
     shape = tuple(d if isinstance(d, int) and d > 0 else 1 for d in inp.shape)
     dummy = np.zeros(shape, dtype=np.float32)
     try:
+        t1 = time.time()
         sess.run(None, {inp.name: dummy})
+        print(f"[ORT]           Dummy inference OK ({(time.time()-t1)*1000:.1f} ms)")
     except Exception as exc:
         print(f"[WARN] Dummy inference raised an exception (engine may still be cached): {exc}")
 
     actual_provider = (sess.get_providers() or ["unknown"])[0]
-    print(f"[ORT] Active provider : {actual_provider}")
-    print(f"[ORT] Engine files written to : {cache_dir}")
+    print(f"[ORT] Active provider     : {actual_provider}")
+    print(f"[ORT] Engine files written: {cache_dir}")
 
     if actual_provider != "TensorrtExecutionProvider":
         print("[WARN] ORT fell back to a non-TRT provider.  Check CUDA/TRT installation.")
@@ -333,6 +354,21 @@ def main() -> None:
     if args.print_trtexec:
         print(trtexec_command(onnx_path, output_engine, fp16=fp16, workspace_mb=args.workspace))
         sys.exit(0)
+
+    # ── Pre-conversion warning ────────────────────────────────────────────────
+    print("=" * 60)
+    print("  WARNING: TensorRT Engine Conversion")
+    print("=" * 60)
+    print()
+    print("  This is a HEAVY, RESOURCE-INTENSIVE process.")
+    print("  - Your GPU will be under full load for 1–5 minutes.")
+    print("  - This is a ONE-TIME operation per model/GPU combination.")
+    print("  - The resulting engine is cached and reused on all future")
+    print("    app launches — subsequent starts are near-instant.")
+    print("  - Do NOT close this window during conversion.")
+    print()
+    print("=" * 60)
+    print()
 
     print(f"[CONV] Model    : {onnx_path}")
     print(f"[CONV] Output   : {output_engine if args.method == 'trt' else output_dir}")
