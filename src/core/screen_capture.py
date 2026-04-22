@@ -722,6 +722,19 @@ class NDICapture:
                         cv2.LINE_AA,
                     )
 
+        if bool(getattr(cfg, 'show_tracer_line', False)):
+            tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
+            fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
+            for box in tracer_boxes:
+                try:
+                    x1, y1, x2, y2 = [int(v) for v in box]
+                except Exception:
+                    continue
+                bx = (x1 + x2) // 2
+                by = (y1 + y2) // 2
+                if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
+                    cv2.line(frame_bgra, (cx, cy), (bx, by), (255, 255, 255, 255), 2, cv2.LINE_AA)
+
         return frame_bgra
 
     def close(self) -> None:
@@ -950,6 +963,19 @@ class UVCCapture:
                         1,
                         cv2.LINE_AA,
                     )
+
+        if bool(getattr(cfg, 'show_tracer_line', False)):
+            tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
+            fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
+            for box in tracer_boxes:
+                try:
+                    x1, y1, x2, y2 = [int(v) for v in box]
+                except Exception:
+                    continue
+                bx = (x1 + x2) // 2
+                by = (y1 + y2) // 2
+                if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
+                    cv2.line(frame_bgr, (cx, cy), (bx, by), (255, 255, 255), 2, cv2.LINE_AA)
 
         return frame_bgr
 

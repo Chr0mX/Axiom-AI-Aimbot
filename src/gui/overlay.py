@@ -77,7 +77,7 @@ class OverlayColors:
     @staticmethod
     def get_tracer_color() -> QColor:
         """Tracer line color (screen center → target)"""
-        return QColor(255, 255, 255, 120)
+        return QColor(255, 255, 255, 200)
 
 
 # Predefined box color themes (name → RGBA tuple)
@@ -170,28 +170,22 @@ class PyQtOverlay(QWidget):
             self.update()
 
     def draw_corner_box(self, painter, x1, y1, x2, y2):
-        """Draw four corner points, dynamically adjusted based on target size"""
-        # Calculate target width and height
-        width = abs(x2 - x1)
-        height = abs(y2 - y1)
-        
-        # Take the smaller dimension to calculate point size
-        box_size = min(width, height)
-        
-        # Point size is 8% of target size, min 1, max 36
-        point_size = max(1, min(36, int(box_size * 0.08)))
-        
-        # Top-left corner point
-        painter.drawEllipse(x1 - point_size//2, y1 - point_size//2, point_size, point_size)
-        
-        # Top-right corner point
-        painter.drawEllipse(x2 - point_size//2, y1 - point_size//2, point_size, point_size)
-        
-        # Bottom-left corner point
-        painter.drawEllipse(x1 - point_size//2, y2 - point_size//2, point_size, point_size)
-        
-        # Bottom-right corner point
-        painter.drawEllipse(x2 - point_size//2, y2 - point_size//2, point_size, point_size)
+        """Draw L-shaped corner brackets scaled to target size."""
+        box_size = min(abs(x2 - x1), abs(y2 - y1))
+        corner_len = max(6, min(24, int(box_size * 0.15)))
+
+        # Top-left
+        painter.drawLine(x1, y1, x1 + corner_len, y1)
+        painter.drawLine(x1, y1, x1, y1 + corner_len)
+        # Top-right
+        painter.drawLine(x2, y1, x2 - corner_len, y1)
+        painter.drawLine(x2, y1, x2, y1 + corner_len)
+        # Bottom-left
+        painter.drawLine(x1, y2, x1 + corner_len, y2)
+        painter.drawLine(x1, y2, x1, y2 - corner_len)
+        # Bottom-right
+        painter.drawLine(x2, y2, x2 - corner_len, y2)
+        painter.drawLine(x2, y2, x2, y2 - corner_len)
 
     def draw_fov_corners(self, painter, cx, cy, fov, corner_length=20):
         """Draw FOV corners
@@ -276,20 +270,23 @@ class PyQtOverlay(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def draw_tracer_lines(self, painter: QPainter) -> None:
-        """Draw lines from screen center to each detected box center."""
+        """Draw lines from screen center to each detected box bottom-center."""
         if not self.boxes:
             return
         cx = int(self.config.crosshairX)
         cy = int(self.config.crosshairY)
         tracer_color = OverlayColors.get_tracer_color()
-        pen = QPen(tracer_color, 1, Qt.PenStyle.SolidLine)
+        pen = QPen(tracer_color, 2, Qt.PenStyle.SolidLine)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
+        fov_half = int(self.config.fov_size) // 2
         for box in self.boxes:
             x1, y1, x2, y2 = map(int, box)
             bx = (x1 + x2) // 2
             by = (y1 + y2) // 2
-            painter.drawLine(cx, cy, bx, by)
+            # Only draw if box center is within FOV (already filtered, but guard here too)
+            if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
+                painter.drawLine(cx, cy, bx, by)
 
     def paintEvent(self, event):
         if getattr(self.config, 'screenshot_method', 'mss') in ('uvc', 'ndi'):
@@ -335,29 +332,25 @@ class PyQtOverlay(QWidget):
                 box_color = QColor(*theme_rgba)
             else:
                 box_color = OverlayColors.get_box_color()
-            pen_box = QPen(box_color, 2)
-            painter.setPen(pen_box)
-            
+
             show_confidence = self.config.show_confidence
             if show_confidence:
                 confidence_color = OverlayColors.get_confidence_text_color()
                 pen_text = QPen(confidence_color, 1)
                 font = QFont('Arial', 9, QFont.Weight.Bold)
                 painter.setFont(font)
-            
+
             for i, box in enumerate(self.boxes):
                 x1, y1, x2, y2 = map(int, box)
-                
-                # 使用新的角框繪製方法
+                conf = float(self.confidences[i]) if i < len(self.confidences) else 0.5
+                # Confidence-based thickness: low conf → 1px, high conf → 3px
+                thickness = max(1, min(3, 1 + round(conf * 2)))
+                painter.setPen(QPen(box_color, thickness))
                 self.draw_corner_box(painter, x1, y1, x2, y2)
-                
+
                 if show_confidence and i < len(self.confidences):
-                    confidence = self.confidences[i]
-                    text = f"{confidence:.0%}"
                     painter.setPen(pen_text)
-                    # 將文字移到左上角外側，並增加距離
-                    painter.drawText(x1 - 20, y1 - 15, text)
-                    painter.setPen(pen_box)
+                    painter.drawText(x1 - 20, y1 - 15, f"{conf:.0%}")
 
         # 繪製追蹤線（從螢幕中心到目標）
         if getattr(self.config, 'show_tracer_line', False):
