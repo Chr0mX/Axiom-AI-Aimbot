@@ -138,13 +138,15 @@ class Config:
         self.jitter_enabled: bool = False
         self.jitter_strength: float = 1.5         # Max random offset per axis (pixels)
 
-        # Anti-detection: recoil compensation
-        self.recoil_compensation_enabled: bool = False
-        self.recoil_compensation_strength: float = 2.0  # Downward Y offset per frame (pixels)
-
         # Target priority scoring
         self.target_priority_mode: str = "distance"       # "distance" | "confidence" | "composite"
         self.target_priority_confidence_weight: float = 0.5  # Weight for confidence in composite mode
+
+        # Confidence box color theme
+        self.box_color_theme: str = "default"  # "default" | "cyan" | "red" | "yellow" | "white" | "purple"
+
+        # Tracer line from screen center to detected targets
+        self.show_tracer_line: bool = False
 
         # Crosshair overlay
         self.show_crosshair: bool = False
@@ -317,11 +319,12 @@ class Config:
 
             'jitter_enabled': self.jitter_enabled,
             'jitter_strength': self.jitter_strength,
-            'recoil_compensation_enabled': self.recoil_compensation_enabled,
-            'recoil_compensation_strength': self.recoil_compensation_strength,
 
             'target_priority_mode': self.target_priority_mode,
             'target_priority_confidence_weight': self.target_priority_confidence_weight,
+
+            'box_color_theme': self.box_color_theme,
+            'show_tracer_line': self.show_tracer_line,
 
             'show_crosshair': self.show_crosshair,
             'crosshair_style': self.crosshair_style,

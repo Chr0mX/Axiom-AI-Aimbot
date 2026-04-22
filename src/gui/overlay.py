@@ -74,6 +74,22 @@ class OverlayColors:
             return ThemeColors.OVERLAY_TRACKER_PREDICTED.qcolor()
         return QColor(255, 0, 255, 80)
 
+    @staticmethod
+    def get_tracer_color() -> QColor:
+        """Tracer line color (screen center → target)"""
+        return QColor(255, 255, 255, 120)
+
+
+# Predefined box color themes (name → RGBA tuple)
+_BOX_THEMES = {
+    "default": None,          # uses ThemeColors.OVERLAY_BOX
+    "cyan":    (0, 220, 255, 220),
+    "red":     (255, 60, 60, 220),
+    "yellow":  (255, 210, 0, 220),
+    "white":   (255, 255, 255, 200),
+    "purple":  (180, 60, 255, 210),
+}
+
 class PyQtOverlay(QWidget):
     def __init__(self, boxes_queue, confidences_queue, config):
         super().__init__()
@@ -259,6 +275,22 @@ class PyQtOverlay(QWidget):
         # 重置畫刷
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
+    def draw_tracer_lines(self, painter: QPainter) -> None:
+        """Draw lines from screen center to each detected box center."""
+        if not self.boxes:
+            return
+        cx = int(self.config.crosshairX)
+        cy = int(self.config.crosshairY)
+        tracer_color = OverlayColors.get_tracer_color()
+        pen = QPen(tracer_color, 1, Qt.PenStyle.SolidLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for box in self.boxes:
+            x1, y1, x2, y2 = map(int, box)
+            bx = (x1 + x2) // 2
+            by = (y1 + y2) // 2
+            painter.drawLine(cx, cy, bx, by)
+
     def paintEvent(self, event):
         if getattr(self.config, 'screenshot_method', 'mss') in ('uvc', 'ndi'):
             return
@@ -297,7 +329,12 @@ class PyQtOverlay(QWidget):
 
         # 繪製檢測框和置信度 - 使用主題顏色
         if show_boxes and self.boxes:
-            box_color = OverlayColors.get_box_color()
+            theme_key = str(getattr(self.config, 'box_color_theme', 'default')).lower()
+            theme_rgba = _BOX_THEMES.get(theme_key)
+            if theme_rgba is not None:
+                box_color = QColor(*theme_rgba)
+            else:
+                box_color = OverlayColors.get_box_color()
             pen_box = QPen(box_color, 2)
             painter.setPen(pen_box)
             
@@ -321,6 +358,10 @@ class PyQtOverlay(QWidget):
                     # 將文字移到左上角外側，並增加距離
                     painter.drawText(x1 - 20, y1 - 15, text)
                     painter.setPen(pen_box)
+
+        # 繪製追蹤線（從螢幕中心到目標）
+        if getattr(self.config, 'show_tracer_line', False):
+            self.draw_tracer_lines(painter)
 
         # 繪製卡爾曼預測視覺化
         self.draw_tracker_prediction(painter)

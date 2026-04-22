@@ -81,6 +81,27 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Show Tracer Line
+        self.showTracerLineCard = SwitchSettingCard(
+            FluentIcon.SHARE,
+            t("show_tracer_line", "Tracer Line"),
+            t("show_tracer_line_hint", "Draw a line from screen center to each detected target"),
+            parent=self.displayGroup
+        )
+
+        # Confidence Box Color Theme
+        self.boxThemeCombo = ComboBox()
+        self.boxThemeCombo.addItems(["Default", "Cyan", "Red", "Yellow", "White", "Purple"])
+        self.boxThemeCombo.setMinimumWidth(110)
+        self.boxThemeCard = SettingCard(
+            FluentIcon.PALETTE,
+            t("box_color_theme", "Box Color Theme"),
+            t("box_color_theme_hint", "Color preset for detection boxes"),
+            self.displayGroup
+        )
+        self.boxThemeCard.hBoxLayout.addWidget(self.boxThemeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.boxThemeCard.hBoxLayout.addSpacing(16)
+
         # Status Panel Elements (Checkbox style)
         self.statusPanelElementsCard = SettingCard(
             FluentIcon.INFO,
@@ -211,6 +232,8 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.showBoxesCard)
         self.displayGroup.addSettingCard(self.showConfidenceCard)
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
+        self.displayGroup.addSettingCard(self.showTracerLineCard)
+        self.displayGroup.addSettingCard(self.boxThemeCard)
         self.addContent(self.displayGroup)
 
         # Status panel settings
@@ -243,6 +266,8 @@ class VisualsPage(BasePage):
         self.showConfidenceCard.checkedChanged.connect(self._onShowConfidenceChanged)
         self.showStatusCard.checkedChanged.connect(self._onShowStatusChanged)
         self.showDetectRangeCard.checkedChanged.connect(self._onShowDetectRangeChanged)
+        self.showTracerLineCard.checkedChanged.connect(self._onShowTracerLineChanged)
+        self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.spAutoAimCheck.stateChanged.connect(self._onStatusPanelAutoAimChanged)
         self.spModelCheck.stateChanged.connect(self._onStatusPanelModelChanged)
         self.spMouseMoveCheck.stateChanged.connect(self._onStatusPanelMouseMoveChanged)
@@ -276,6 +301,10 @@ class VisualsPage(BasePage):
         self.showConfidenceCard.setChecked(self._config.show_confidence)
         self.showStatusCard.setChecked(self._config.show_status_panel)
         self.showDetectRangeCard.setChecked(self._config.show_detect_range)
+        self.showTracerLineCard.setChecked(bool(getattr(self._config, 'show_tracer_line', False)))
+        theme_text = str(getattr(self._config, 'box_color_theme', 'default')).capitalize()
+        _valid_themes = ("Default", "Cyan", "Red", "Yellow", "White", "Purple")
+        self.boxThemeCombo.setCurrentText(theme_text if theme_text in _valid_themes else "Default")
         self.spAutoAimCheck.setChecked(getattr(self._config, 'status_panel_show_auto_aim', True))
         self.spModelCheck.setChecked(getattr(self._config, 'status_panel_show_model', True))
         self.spMouseMoveCheck.setChecked(getattr(self._config, 'status_panel_show_mouse_move', True))
@@ -320,6 +349,14 @@ class VisualsPage(BasePage):
     def _onShowDetectRangeChanged(self, checked):
         if self._config:
             self._config.show_detect_range = checked
+
+    def _onShowTracerLineChanged(self, checked):
+        if self._config:
+            self._config.show_tracer_line = checked
+
+    def _onBoxThemeChanged(self, text):
+        if self._config:
+            self._config.box_color_theme = str(text).lower()
 
     def _onStatusPanelAutoAimChanged(self, state):
         if self._config:
@@ -423,6 +460,10 @@ class VisualsPage(BasePage):
         self.showConfidenceCard.titleLabel.setText(t("show_confidence"))
         self.showStatusCard.titleLabel.setText(t("show_status_panel"))
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
+        self.showTracerLineCard.titleLabel.setText(t("show_tracer_line", "Tracer Line"))
+        self.showTracerLineCard.contentLabel.setText(t("show_tracer_line_hint", "Draw a line from screen center to each detected target"))
+        self.boxThemeCard.titleLabel.setText(t("box_color_theme", "Box Color Theme"))
+        self.boxThemeCard.contentLabel.setText(t("box_color_theme_hint", "Color preset for detection boxes"))
         self.statusPanelElementsCard.titleLabel.setText(t("status_panel_elements", "Status Panel Elements"))
         self.statusPanelElementsCard.contentLabel.setText(t("status_panel_elements_hint", "Choose which rows are shown in status panel"))
         self.spAutoAimCheck.setText(self._shortText("auto_aim"))
