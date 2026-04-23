@@ -153,9 +153,6 @@ def process_aiming(
             move_x += int(random.uniform(-j, j))
             move_y += int(random.uniform(-j, j))
 
-        if getattr(config, 'recoil_compensation_enabled', False):
-            move_y += int(getattr(config, 'recoil_compensation_strength', 2.0))
-
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)
     else:

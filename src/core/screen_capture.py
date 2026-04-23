@@ -697,6 +697,16 @@ class NDICapture:
             boxes = list(getattr(cfg, 'latest_boxes', []) or [])
             confidences = list(getattr(cfg, 'latest_confidences', []) or [])
             show_conf = bool(getattr(cfg, 'show_confidence', True))
+            # BGRA colors per theme (B, G, R, A)
+            _theme_bgra = {
+                'cyan':   (255, 220, 0, 255),
+                'red':    (60, 60, 255, 255),
+                'yellow': (0, 210, 255, 255),
+                'white':  (255, 255, 255, 255),
+                'purple': (255, 60, 180, 255),
+            }
+            theme_key = str(getattr(cfg, 'box_color_theme', 'default')).lower()
+            box_color_bgra = _theme_bgra.get(theme_key, (0, 255, 0, 255))
             for i, box in enumerate(boxes):
                 try:
                     x1, y1, x2, y2 = [int(v) for v in box]
@@ -708,12 +718,21 @@ class NDICapture:
                 y1 = max(0, min(h - 1, y1))
                 x2 = max(0, min(w - 1, x2))
                 y2 = max(0, min(h - 1, y2))
-                cv2.rectangle(frame_bgra, (x1, y1), (x2, y2), (0, 255, 0, 255), 2, cv2.LINE_AA)
+                conf = float(confidences[i]) if i < len(confidences) else 0.5
+                thickness = max(1, min(3, 1 + round(conf * 2)))
+                corner_len = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
+                cv2.line(frame_bgra, (x1, y1), (x1 + corner_len, y1), box_color_bgra, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner_len), box_color_bgra, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y1), (x2 - corner_len, y1), box_color_bgra, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner_len), box_color_bgra, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y2), (x1 + corner_len, y2), box_color_bgra, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner_len), box_color_bgra, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y2), (x2 - corner_len, y2), box_color_bgra, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner_len), box_color_bgra, thickness, cv2.LINE_AA)
                 if show_conf and i < len(confidences):
-                    conf = float(confidences[i]) * 100.0
                     cv2.putText(
                         frame_bgra,
-                        f"{conf:.0f}%",
+                        f"{conf * 100:.0f}%",
                         (max(0, x1 - 5), max(15, y1 - 8)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
@@ -721,6 +740,19 @@ class NDICapture:
                         1,
                         cv2.LINE_AA,
                     )
+
+        if bool(getattr(cfg, 'show_tracer_line', False)):
+            tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
+            fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
+            for box in tracer_boxes:
+                try:
+                    x1, y1, x2, y2 = [int(v) for v in box]
+                except Exception:
+                    continue
+                bx = (x1 + x2) // 2
+                by = (y1 + y2) // 2
+                if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
+                    cv2.line(frame_bgra, (cx, cy), (bx, by), (255, 255, 255, 255), 2, cv2.LINE_AA)
 
         return frame_bgra
 
@@ -926,6 +958,16 @@ class UVCCapture:
             boxes = list(getattr(cfg, 'latest_boxes', []) or [])
             confidences = list(getattr(cfg, 'latest_confidences', []) or [])
             show_conf = bool(getattr(cfg, 'show_confidence', True))
+            # BGR colors per theme (B, G, R)
+            _theme_bgr = {
+                'cyan':   (255, 220, 0),
+                'red':    (60, 60, 255),
+                'yellow': (0, 210, 255),
+                'white':  (255, 255, 255),
+                'purple': (255, 60, 180),
+            }
+            theme_key = str(getattr(cfg, 'box_color_theme', 'default')).lower()
+            box_color_bgr = _theme_bgr.get(theme_key, (0, 255, 0))
             for i, box in enumerate(boxes):
                 try:
                     x1, y1, x2, y2 = [int(v) for v in box]
@@ -937,12 +979,21 @@ class UVCCapture:
                 y1 = max(0, min(h - 1, y1))
                 x2 = max(0, min(w - 1, x2))
                 y2 = max(0, min(h - 1, y2))
-                cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2, cv2.LINE_AA)
+                conf = float(confidences[i]) if i < len(confidences) else 0.5
+                thickness = max(1, min(3, 1 + round(conf * 2)))
+                corner_len = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
+                cv2.line(frame_bgr, (x1, y1), (x1 + corner_len, y1), box_color_bgr, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner_len), box_color_bgr, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y1), (x2 - corner_len, y1), box_color_bgr, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner_len), box_color_bgr, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y2), (x1 + corner_len, y2), box_color_bgr, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner_len), box_color_bgr, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y2), (x2 - corner_len, y2), box_color_bgr, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner_len), box_color_bgr, thickness, cv2.LINE_AA)
                 if show_conf and i < len(confidences):
-                    conf = float(confidences[i]) * 100.0
                     cv2.putText(
                         frame_bgr,
-                        f"{conf:.0f}%",
+                        f"{conf * 100:.0f}%",
                         (max(0, x1 - 5), max(15, y1 - 8)),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.5,
@@ -950,6 +1001,19 @@ class UVCCapture:
                         1,
                         cv2.LINE_AA,
                     )
+
+        if bool(getattr(cfg, 'show_tracer_line', False)):
+            tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
+            fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
+            for box in tracer_boxes:
+                try:
+                    x1, y1, x2, y2 = [int(v) for v in box]
+                except Exception:
+                    continue
+                bx = (x1 + x2) // 2
+                by = (y1 + y2) // 2
+                if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
+                    cv2.line(frame_bgr, (cx, cy), (bx, by), (255, 255, 255), 2, cv2.LINE_AA)
 
         return frame_bgr
 
