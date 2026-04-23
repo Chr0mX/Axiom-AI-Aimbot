@@ -232,6 +232,13 @@ class Config:
         self.detection_frame_count: int = 0
         self.latest_boxes: List[List[float]] = []
         self.latest_confidences: List[float] = []
+
+        # Runtime-only flags — never persisted to config.json
+        # Set to True to pause inference without stopping threads or closing UI
+        self.inference_paused: bool = False
+        # Nominal FPS of the active capture source (UVC/NDI reports this;
+        # screen capture uses monitor refresh rate or measured rate)
+        self.source_nominal_fps: float = 0.0
     
     def to_dict(self) -> Dict[str, Any]:
         """將可儲存的配置轉為字典"""

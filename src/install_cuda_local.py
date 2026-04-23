@@ -86,17 +86,56 @@ def pip_install_fresh(args):
 
 def install_python_packages() -> None:
     pip_install(COMMON_DEPS)
-    pip_install(["onnxruntime-gpu[cuda,cudnn]"])
+    # Use pip_install_fresh (no --upgrade) so pip does not try to overwrite
+    # already-loaded DLLs if somehow called mid-session.  Fresh installs will
+    # still download the GPU wheel; only re-installs skip the overwrite.
+    pip_install_fresh(["onnxruntime-gpu[cuda,cudnn]"])
+
+
+def prompt_tensorrt() -> bool:
+    """Ask the user whether to also install TensorRT.
+
+    Returns True if the user answers yes.
+    """
+    try:
+        answer = input(
+            "\nDo you also want to install TensorRT for maximum GPU performance? (yes/no): "
+        ).strip().lower()
+        return answer in ("yes", "y")
+    except EOFError:
+        return False
+
+
+def install_tensorrt() -> None:
+    """Delegate to install_tensorrt_local.py for TRT packages."""
+    trt_script = os.path.join(os.path.dirname(__file__), "install_tensorrt_local.py")
+    if not os.path.exists(trt_script):
+        warn("install_tensorrt_local.py not found — skipping TensorRT install.")
+        return
+    log("Running TensorRT installer...")
+    import subprocess
+    result = subprocess.run([str(PYTHON_EXE), trt_script], check=False)
+    if result.returncode != 0:
+        warn("TensorRT installer returned a non-zero exit code. Check output above.")
+    else:
+        log("TensorRT installation completed.")
 
 
 def main() -> None:
     ensure_paths()
 
     if is_cuda_installed():
-        log("CUDAExecutionProvider already available — skipping installation.")
-        return
+        log("CUDAExecutionProvider already available — skipping CUDA installation.")
+    else:
+        install_python_packages()
+        log("CUDA packages installed.")
 
-    install_python_packages()
+    # Always offer TensorRT after a successful (or pre-existing) CUDA install.
+    if prompt_tensorrt():
+        install_tensorrt()
+    else:
+        log("Skipping TensorRT installation.")
+
     log("All requested installs completed.")
 
 
