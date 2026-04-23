@@ -34,6 +34,20 @@ class OtherPage(BasePage):
     def _initWidgets(self):
         """初始化所有控制項"""
 
+        # === Application Settings ===
+        self.appSettingsGroup = SettingCardGroup(t("app_settings", "Application"), self.scrollWidget)
+
+        self.languageBtn = PushButton(t("change_language", "Change Language"))
+        self.languageBtn.setIcon(FluentIcon.LANGUAGE)
+        self.languageCard = SettingCard(
+            FluentIcon.LANGUAGE,
+            t("language_settings", "Language"),
+            "",
+            self.appSettingsGroup
+        )
+        self.languageCard.hBoxLayout.addWidget(self.languageBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.languageCard.hBoxLayout.addSpacing(16)
+
         # === 程式控制 ===
         self.programGroup = SettingCardGroup(t("program_control"), self.scrollWidget)
 
@@ -80,6 +94,10 @@ class OtherPage(BasePage):
     
     def _initLayout(self):
         """排版所有控制項"""
+        # Application settings
+        self.appSettingsGroup.addSettingCard(self.languageCard)
+        self.addContent(self.appSettingsGroup)
+
         # 程式控制
         self.programGroup.addSettingCard(self.showConsoleCard)
         self.programGroup.addSettingCard(self.exitSaveCard)
@@ -111,6 +129,9 @@ class OtherPage(BasePage):
     
     def _connectSignals(self):
         """連接信號"""
+        # Language
+        self.languageBtn.clicked.connect(self._onChangeLanguage)
+
         # 程式控制
         self.showConsoleCard.checkedChanged.connect(self._onShowConsoleChanged)
         self.exitSaveBtn.clicked.connect(self._onExitSave)
@@ -128,6 +149,18 @@ class OtherPage(BasePage):
         self.showConsoleCard.setChecked(self._config.show_console)
     
     # === 回調函數 ===
+    def _onChangeLanguage(self):
+        try:
+            from ..components.language_dialog import LanguageDialog
+            from ..language_manager import getLanguageManager
+            mgr = getLanguageManager()
+            current = mgr.currentLanguage
+            dlg = LanguageDialog(current, parent=self)
+            dlg.languageChanged.connect(mgr.setLanguage)
+            dlg.exec()
+        except Exception as e:
+            print(f"[Language] Failed to open language dialog: {e}")
+
     def _onShowConsoleChanged(self, checked):
         if self._config:
             self._config.show_console = checked
@@ -167,6 +200,9 @@ class OtherPage(BasePage):
         super().retranslateUi()
 
         # 群組標題
+        self.appSettingsGroup.titleLabel.setText(t("app_settings", "Application"))
+        self.languageCard.titleLabel.setText(t("language_settings", "Language"))
+        self.languageBtn.setText(t("change_language", "Change Language"))
         self.programGroup.titleLabel.setText(t("program_control"))
 
         # 程式控制

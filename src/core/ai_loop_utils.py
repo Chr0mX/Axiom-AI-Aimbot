@@ -111,31 +111,41 @@ def find_closest_target(
     confidences: List[float],
     crosshair_x: int,
     crosshair_y: int,
+    priority_mode: str = "distance",
+    confidence_weight: float = 0.5,
 ) -> Tuple[List[List[float]], List[float]]:
-    """單目標模式 - 只保留離準心最近的一個目標"""
+    """Single-target mode — keep the one target that wins the priority scoring."""
 
     if not boxes:
         return [], []
 
-    closest_box = None
-    min_distance_sq = float('inf')
-    closest_confidence = 0.5
+    best_box = None
+    best_conf = 0.5
+    best_score = float('inf')
 
     for i, box in enumerate(boxes):
         abs_x1, abs_y1, abs_x2, abs_y2 = box
-        box_center_x = (abs_x1 + abs_x2) * 0.5
-        box_center_y = (abs_y1 + abs_y2) * 0.5
-        dx = box_center_x - crosshair_x
-        dy = box_center_y - crosshair_y
+        cx = (abs_x1 + abs_x2) * 0.5
+        cy = (abs_y1 + abs_y2) * 0.5
+        dx = cx - crosshair_x
+        dy = cy - crosshair_y
         distance_sq = dx * dx + dy * dy
+        conf = confidences[i] if i < len(confidences) else 0.5
 
-        if distance_sq < min_distance_sq:
-            min_distance_sq = distance_sq
-            closest_box = box
-            closest_confidence = confidences[i] if i < len(confidences) else 0.5
+        if priority_mode == 'confidence':
+            score = 1.0 - conf
+        elif priority_mode == 'composite':
+            score = distance_sq * (1.0 - conf * confidence_weight)
+        else:
+            score = distance_sq
 
-    if closest_box:
-        return [closest_box], [closest_confidence]
+        if score < best_score:
+            best_score = score
+            best_box = box
+            best_conf = conf
+
+    if best_box:
+        return [best_box], [best_conf]
     return [], []
 
 

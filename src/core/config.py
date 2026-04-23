@@ -70,7 +70,7 @@ class Config:
         
         # ONNX model related settings
         self.model_input_size: int = 640
-        self.model_path: str = os.path.join('Model', 'Roblox_8n.onnx')
+        self.model_path: str = os.path.join('Model', 'ApexLegendsOrbeet_15k.onnx')
         self.current_provider: str = "DmlExecutionProvider"
         self.inference_backend: str = "auto"
         self.ndi_installer_ran_once: bool = False
@@ -95,10 +95,10 @@ class Config:
         # Aim curve smoothing (Bezier)
         self.bezier_curve_enabled: bool = False # 是否啟用貝茲曲線平滑
         self.bezier_curve_strength: float = 0.35  # 0~1, larger curve is more obvious
-        self.bezier_curve_steps: int = 4          # More segments = smoother (>=2)
+        self.bezier_curve_steps: int = 7          # More segments = smoother (>=2)
 
         # Smart tracking prediction settings (replaces Kalman) 
-        self.tracker_enabled: bool = False           # Enable smart tracking prediction
+        self.tracker_enabled: bool = True           # Enable smart tracking prediction
         self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
         self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
         self.tracker_stop_threshold: float = 10.0    # Low speed zeroing threshold (pixels/sec)
@@ -134,6 +134,28 @@ class Config:
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能
         self.aim_y_reduce_delay: float = 0.6      # 按下瞄準鍵後多久開始歸零 (秒)
 
+        # Anti-detection: human-like movement jitter
+        self.jitter_enabled: bool = False
+        self.jitter_strength: float = 1.5         # Max random offset per axis (pixels)
+
+        # Target priority scoring
+        self.target_priority_mode: str = "distance"       # "distance" | "confidence" | "composite"
+        self.target_priority_confidence_weight: float = 0.5  # Weight for confidence in composite mode
+
+        # Confidence box color theme
+        self.box_color_theme: str = "default"  # "default" | "cyan" | "red" | "yellow" | "white" | "purple"
+
+        # Tracer line from screen center to detected targets
+        self.show_tracer_line: bool = False
+
+        # Crosshair overlay
+        self.show_crosshair: bool = False
+        self.crosshair_style: str = "dot"         # "dot" | "cross"
+        self.crosshair_color_r: int = 255
+        self.crosshair_color_g: int = 255
+        self.crosshair_color_b: int = 255
+        self.crosshair_size: int = 4
+
         # 滑鼠控制方式
         self.mouse_move_method: str = "mouse_event"  # 滑鼠移動方式（預設使用安全的 mouse_event）
         self.mouse_click_method: str = "mouse_event" # 滑鼠點擊方式
@@ -150,10 +172,10 @@ class Config:
         # - detect_interval: 進入瞄準/需要即時反應時的間隔
         # - screenshot_interval: 螢幕截圖間隔（獨立於偵測間隔）
         # - idle_detect_interval: 未瞄準但 keep_detecting=True 時的間隔（降低占用）
-        self.detect_interval: float = 0.02       # 秒，預設 20ms
+        self.detect_interval: float = 0.01       # 秒，預設 10ms
         self.screenshot_interval: float = 0.01   # 秒，預設 10ms
         self.idle_detect_interval: float = 0.05  # 秒，預設 50ms
-        self.idle_detect_enabled: bool = True     # 是否啟用未瞄準時降低偵測頻率
+        self.idle_detect_enabled: bool = False     # 是否啟用未瞄準時降低偵測頻率
         self.aim_toggle_key: int = 45       # Insert 鍵
         self.auto_fire_key2: int = 0x04     # 滑鼠中鍵
         
@@ -167,21 +189,21 @@ class Config:
         # 保持檢測功能
         self.keep_detecting: bool = True   # 啟用保持檢測
         self.always_aim: bool = False      # 不按瞄準鍵也執行自動瞄準
-        self.fov_follow_mouse: bool = True # FOV 跟隨鼠標
+        self.fov_follow_mouse: bool = False # FOV 跟隨鼠標
 
         # 顯示開關
         self.show_fov: bool = True
         self.show_boxes: bool = True
-        self.show_detect_range: bool = False
+        self.show_detect_range: bool = True
         self.show_status_panel: bool = True
         self.status_panel_show_auto_aim: bool = True
         self.status_panel_show_model: bool = True
-        self.status_panel_show_mouse_move: bool = True
-        self.status_panel_show_mouse_click: bool = True
+        self.status_panel_show_mouse_move: bool = False
+        self.status_panel_show_mouse_click: bool = False
         self.status_panel_show_screenshot_method: bool = True
         self.status_panel_show_screenshot_fps: bool = True
         self.status_panel_show_detection_fps: bool = True
-        self.show_console: bool = False  # 終端視窗
+        self.show_console: bool = True  # 終端視窗
 
         # 主題設定
         self.dark_mode: bool = False  # 深色主題
@@ -294,6 +316,22 @@ class Config:
             'bezier_curve_enabled': self.bezier_curve_enabled,
             'bezier_curve_strength': self.bezier_curve_strength,
             'bezier_curve_steps': self.bezier_curve_steps,
+
+            'jitter_enabled': self.jitter_enabled,
+            'jitter_strength': self.jitter_strength,
+
+            'target_priority_mode': self.target_priority_mode,
+            'target_priority_confidence_weight': self.target_priority_confidence_weight,
+
+            'box_color_theme': self.box_color_theme,
+            'show_tracer_line': self.show_tracer_line,
+
+            'show_crosshair': self.show_crosshair,
+            'crosshair_style': self.crosshair_style,
+            'crosshair_color_r': self.crosshair_color_r,
+            'crosshair_color_g': self.crosshair_color_g,
+            'crosshair_color_b': self.crosshair_color_b,
+            'crosshair_size': self.crosshair_size,
             'disclaimer_agreed': self.disclaimer_agreed,
             'first_run_complete': self.first_run_complete,
 

@@ -5,7 +5,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QGridLayout, QSizePolicy, QWidget
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, SettingCard,
-    FluentIcon, CheckBox
+    FluentIcon, CheckBox, ComboBox
 )
 from ..components.slider_spin_card import SliderLabelCard
 
@@ -81,6 +81,27 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Show Tracer Line
+        self.showTracerLineCard = SwitchSettingCard(
+            FluentIcon.SHARE,
+            t("show_tracer_line", "Tracer Line"),
+            t("show_tracer_line_hint", "Draw a line from screen center to each detected target"),
+            parent=self.displayGroup
+        )
+
+        # Confidence Box Color Theme
+        self.boxThemeCombo = ComboBox()
+        self.boxThemeCombo.addItems(["Default", "Cyan", "Red", "Yellow", "White", "Purple"])
+        self.boxThemeCombo.setMinimumWidth(110)
+        self.boxThemeCard = SettingCard(
+            FluentIcon.PALETTE,
+            t("box_color_theme", "Box Color Theme"),
+            t("box_color_theme_hint", "Color preset for detection boxes"),
+            self.displayGroup
+        )
+        self.boxThemeCard.hBoxLayout.addWidget(self.boxThemeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.boxThemeCard.hBoxLayout.addSpacing(16)
+
         # Status Panel Elements (Checkbox style)
         self.statusPanelElementsCard = SettingCard(
             FluentIcon.INFO,
@@ -121,6 +142,66 @@ class VisualsPage(BasePage):
         self.statusPanelElementsCard.hBoxLayout.addWidget(self.statusPanelElementsWidget, 0, Qt.AlignmentFlag.AlignRight)
         self.statusPanelElementsCard.hBoxLayout.addSpacing(16)
 
+        # === Crosshair Settings ===
+        self.crosshairGroup = SettingCardGroup(t("crosshair_settings", "Crosshair"), self.scrollWidget)
+
+        self.showCrosshairCard = SwitchSettingCard(
+            FluentIcon.ZOOM,
+            t("show_crosshair_overlay", "Show Crosshair"),
+            "",
+            parent=self.crosshairGroup
+        )
+
+        self.crosshairStyleCombo = ComboBox()
+        self.crosshairStyleCombo.addItems(["Dot", "Cross"])
+        self.crosshairStyleCombo.setMinimumWidth(100)
+        self.crosshairStyleCard = SettingCard(
+            FluentIcon.VIEW,
+            t("crosshair_style", "Crosshair Style"),
+            "",
+            self.crosshairGroup
+        )
+        self.crosshairStyleCard.hBoxLayout.addWidget(self.crosshairStyleCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.crosshairStyleCard.hBoxLayout.addSpacing(16)
+
+        self.crosshairSizeCard = SliderLabelCard(
+            FluentIcon.ZOOM_IN,
+            t("crosshair_size", "Crosshair Size"),
+            1, 20,
+            format_func=lambda v: f"{v}px",
+            description="",
+            slider_width=160,
+            parent=self.crosshairGroup
+        )
+
+        self.crosshairColorRCard = SliderLabelCard(
+            FluentIcon.BRUSH,
+            t("crosshair_color_r", "Red"),
+            0, 255,
+            format_func=lambda v: str(v),
+            description="",
+            slider_width=160,
+            parent=self.crosshairGroup
+        )
+        self.crosshairColorGCard = SliderLabelCard(
+            FluentIcon.BRUSH,
+            t("crosshair_color_g", "Green"),
+            0, 255,
+            format_func=lambda v: str(v),
+            description="",
+            slider_width=160,
+            parent=self.crosshairGroup
+        )
+        self.crosshairColorBCard = SliderLabelCard(
+            FluentIcon.BRUSH,
+            t("crosshair_color_b", "Blue"),
+            0, 255,
+            format_func=lambda v: str(v),
+            description="",
+            slider_width=160,
+            parent=self.crosshairGroup
+        )
+
         # === Appearance Settings ===
         self.appearanceGroup = SettingCardGroup(t("appearance_options"), self.scrollWidget)
 
@@ -151,12 +232,23 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.showBoxesCard)
         self.displayGroup.addSettingCard(self.showConfidenceCard)
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
+        self.displayGroup.addSettingCard(self.showTracerLineCard)
+        self.displayGroup.addSettingCard(self.boxThemeCard)
         self.addContent(self.displayGroup)
 
         # Status panel settings
         self.statusPanelGroup.addSettingCard(self.showStatusCard)
         self.statusPanelGroup.addSettingCard(self.statusPanelElementsCard)
         self.addContent(self.statusPanelGroup)
+
+        # Crosshair settings
+        self.crosshairGroup.addSettingCard(self.showCrosshairCard)
+        self.crosshairGroup.addSettingCard(self.crosshairStyleCard)
+        self.crosshairGroup.addSettingCard(self.crosshairSizeCard)
+        self.crosshairGroup.addSettingCard(self.crosshairColorRCard)
+        self.crosshairGroup.addSettingCard(self.crosshairColorGCard)
+        self.crosshairGroup.addSettingCard(self.crosshairColorBCard)
+        self.addContent(self.crosshairGroup)
 
         # Appearance settings
         self.appearanceGroup.addSettingCard(self.enableAcrylicCard)
@@ -174,6 +266,8 @@ class VisualsPage(BasePage):
         self.showConfidenceCard.checkedChanged.connect(self._onShowConfidenceChanged)
         self.showStatusCard.checkedChanged.connect(self._onShowStatusChanged)
         self.showDetectRangeCard.checkedChanged.connect(self._onShowDetectRangeChanged)
+        self.showTracerLineCard.checkedChanged.connect(self._onShowTracerLineChanged)
+        self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.spAutoAimCheck.stateChanged.connect(self._onStatusPanelAutoAimChanged)
         self.spModelCheck.stateChanged.connect(self._onStatusPanelModelChanged)
         self.spMouseMoveCheck.stateChanged.connect(self._onStatusPanelMouseMoveChanged)
@@ -181,6 +275,14 @@ class VisualsPage(BasePage):
         self.spScreenshotMethodCheck.stateChanged.connect(self._onStatusPanelScreenshotMethodChanged)
         self.spScreenshotFpsCheck.stateChanged.connect(self._onStatusPanelScreenshotFpsChanged)
         self.spDetectionFpsCheck.stateChanged.connect(self._onStatusPanelDetectionFpsChanged)
+
+        # Crosshair settings
+        self.showCrosshairCard.checkedChanged.connect(self._onShowCrosshairChanged)
+        self.crosshairStyleCombo.currentTextChanged.connect(self._onCrosshairStyleChanged)
+        self.crosshairSizeCard.valueChanged.connect(self._onCrosshairSizeChanged)
+        self.crosshairColorRCard.valueChanged.connect(self._onCrosshairColorRChanged)
+        self.crosshairColorGCard.valueChanged.connect(self._onCrosshairColorGChanged)
+        self.crosshairColorBCard.valueChanged.connect(self._onCrosshairColorBChanged)
 
         # Appearance settings
         self.enableAcrylicCard.checkedChanged.connect(self._onAcrylicEnabledChanged)
@@ -199,6 +301,10 @@ class VisualsPage(BasePage):
         self.showConfidenceCard.setChecked(self._config.show_confidence)
         self.showStatusCard.setChecked(self._config.show_status_panel)
         self.showDetectRangeCard.setChecked(self._config.show_detect_range)
+        self.showTracerLineCard.setChecked(bool(getattr(self._config, 'show_tracer_line', False)))
+        theme_text = str(getattr(self._config, 'box_color_theme', 'default')).capitalize()
+        _valid_themes = ("Default", "Cyan", "Red", "Yellow", "White", "Purple")
+        self.boxThemeCombo.setCurrentText(theme_text if theme_text in _valid_themes else "Default")
         self.spAutoAimCheck.setChecked(getattr(self._config, 'status_panel_show_auto_aim', True))
         self.spModelCheck.setChecked(getattr(self._config, 'status_panel_show_model', True))
         self.spMouseMoveCheck.setChecked(getattr(self._config, 'status_panel_show_mouse_move', True))
@@ -206,6 +312,15 @@ class VisualsPage(BasePage):
         self.spScreenshotMethodCheck.setChecked(getattr(self._config, 'status_panel_show_screenshot_method', True))
         self.spScreenshotFpsCheck.setChecked(getattr(self._config, 'status_panel_show_screenshot_fps', True))
         self.spDetectionFpsCheck.setChecked(getattr(self._config, 'status_panel_show_detection_fps', True))
+
+        # Crosshair settings
+        self.showCrosshairCard.setChecked(bool(getattr(self._config, 'show_crosshair', False)))
+        style = str(getattr(self._config, 'crosshair_style', 'dot')).capitalize()
+        self.crosshairStyleCombo.setCurrentText(style if style in ("Dot", "Cross") else "Dot")
+        self.crosshairSizeCard.setValue(int(getattr(self._config, 'crosshair_size', 4)))
+        self.crosshairColorRCard.setValue(int(getattr(self._config, 'crosshair_color_r', 255)))
+        self.crosshairColorGCard.setValue(int(getattr(self._config, 'crosshair_color_g', 255)))
+        self.crosshairColorBCard.setValue(int(getattr(self._config, 'crosshair_color_b', 255)))
 
         # Appearance settings
         self.enableAcrylicCard.setChecked(self._config.enable_acrylic)
@@ -235,6 +350,14 @@ class VisualsPage(BasePage):
         if self._config:
             self._config.show_detect_range = checked
 
+    def _onShowTracerLineChanged(self, checked):
+        if self._config:
+            self._config.show_tracer_line = checked
+
+    def _onBoxThemeChanged(self, text):
+        if self._config:
+            self._config.box_color_theme = str(text).lower()
+
     def _onStatusPanelAutoAimChanged(self, state):
         if self._config:
             self._config.status_panel_show_auto_aim = bool(state)
@@ -262,6 +385,30 @@ class VisualsPage(BasePage):
     def _onStatusPanelDetectionFpsChanged(self, state):
         if self._config:
             self._config.status_panel_show_detection_fps = bool(state)
+
+    def _onShowCrosshairChanged(self, checked):
+        if self._config:
+            self._config.show_crosshair = checked
+
+    def _onCrosshairStyleChanged(self, text):
+        if self._config:
+            self._config.crosshair_style = str(text).lower()
+
+    def _onCrosshairSizeChanged(self, value):
+        if self._config:
+            self._config.crosshair_size = int(value)
+
+    def _onCrosshairColorRChanged(self, value):
+        if self._config:
+            self._config.crosshair_color_r = int(value)
+
+    def _onCrosshairColorGChanged(self, value):
+        if self._config:
+            self._config.crosshair_color_g = int(value)
+
+    def _onCrosshairColorBChanged(self, value):
+        if self._config:
+            self._config.crosshair_color_b = int(value)
 
     def _onAcrylicEnabledChanged(self, checked):
         if self._config:
@@ -313,6 +460,10 @@ class VisualsPage(BasePage):
         self.showConfidenceCard.titleLabel.setText(t("show_confidence"))
         self.showStatusCard.titleLabel.setText(t("show_status_panel"))
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
+        self.showTracerLineCard.titleLabel.setText(t("show_tracer_line", "Tracer Line"))
+        self.showTracerLineCard.contentLabel.setText(t("show_tracer_line_hint", "Draw a line from screen center to each detected target"))
+        self.boxThemeCard.titleLabel.setText(t("box_color_theme", "Box Color Theme"))
+        self.boxThemeCard.contentLabel.setText(t("box_color_theme_hint", "Color preset for detection boxes"))
         self.statusPanelElementsCard.titleLabel.setText(t("status_panel_elements", "Status Panel Elements"))
         self.statusPanelElementsCard.contentLabel.setText(t("status_panel_elements_hint", "Choose which rows are shown in status panel"))
         self.spAutoAimCheck.setText(self._shortText("auto_aim"))
@@ -322,6 +473,15 @@ class VisualsPage(BasePage):
         self.spScreenshotMethodCheck.setText(self._shortText("screenshot_method"))
         self.spScreenshotFpsCheck.setText(t("status_panel_screenshot_fps", "Screenshot FPS"))
         self.spDetectionFpsCheck.setText(t("status_panel_detection_fps", "Detection FPS"))
+
+        # Crosshair settings
+        self.crosshairGroup.titleLabel.setText(t("crosshair_settings", "Crosshair"))
+        self.showCrosshairCard.titleLabel.setText(t("show_crosshair_overlay", "Show Crosshair"))
+        self.crosshairStyleCard.titleLabel.setText(t("crosshair_style", "Crosshair Style"))
+        self.crosshairSizeCard.titleLabel.setText(t("crosshair_size", "Crosshair Size"))
+        self.crosshairColorRCard.titleLabel.setText(t("crosshair_color_r", "Red"))
+        self.crosshairColorGCard.titleLabel.setText(t("crosshair_color_g", "Green"))
+        self.crosshairColorBCard.titleLabel.setText(t("crosshair_color_b", "Blue"))
 
         # 外觀設定
         self.appearanceGroup.titleLabel.setText(t("appearance_options"))
