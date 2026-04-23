@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import json
 import os
 from typing import List, Dict, Any
+
+from .humanization import HumanizationConfig
 
 
 def _get_screen_size() -> tuple[int, int]:
@@ -239,6 +242,9 @@ class Config:
         # Nominal FPS of the active capture source (UVC/NDI reports this;
         # screen capture uses monitor refresh rate or measured rate)
         self.source_nominal_fps: float = 0.0
+
+        # Humanization post-processing layer (operates only on final dx/dy output)
+        self.humanization: HumanizationConfig = HumanizationConfig()
     
     def to_dict(self) -> Dict[str, Any]:
         """將可儲存的配置轉為字典"""
@@ -353,12 +359,20 @@ class Config:
             'enable_acrylic': self.enable_acrylic,
             'acrylic_window_alpha': self.acrylic_window_alpha,
             'acrylic_element_alpha': self.acrylic_element_alpha,
+
+            'humanization': dataclasses.asdict(self.humanization),
         }
     
     def from_dict(self, data: Dict[str, Any]) -> None:
         """從字典載入配置"""
         for key, value in data.items():
-            if hasattr(self, key):
+            if key == 'humanization' and isinstance(value, dict):
+                # Update the dataclass fields in-place rather than replacing the object,
+                # so unknown/future keys in the JSON are ignored gracefully.
+                for hk, hv in value.items():
+                    if hasattr(self.humanization, hk):
+                        setattr(self.humanization, hk, hv)
+            elif hasattr(self, key):
                 setattr(self, key, value)
 
 
