@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -628,6 +629,21 @@ class NDICapture:
             self.config.ndi_width = frame_w
             self.config.ndi_height = frame_h
 
+        # Update nominal FPS from frame metadata when available.
+        _frame_fps: float = 0.0
+        for _attr in ('frame_rate', 'framerate', 'fps', 'video_fps'):
+            _v = getattr(frame_obj, _attr, None)
+            if isinstance(_v, (int, float)) and float(_v) > 0:
+                _frame_fps = float(_v)
+                break
+        if _frame_fps <= 0:
+            _num = getattr(frame_obj, 'frame_rate_N', None)
+            _den = getattr(frame_obj, 'frame_rate_D', None)
+            if isinstance(_num, (int, float)) and isinstance(_den, (int, float)) and float(_den) > 0:
+                _frame_fps = float(_num) / float(_den)
+        if _frame_fps > 0:
+            self.config.source_nominal_fps = _frame_fps
+
         if region is not None:
             left = max(0, int(region.get('left', 0)))
             top = max(0, int(region.get('top', 0)))
@@ -849,24 +865,28 @@ class UVCCapture:
         if not self.cap.isOpened():
             raise RuntimeError(f'UVC device open failed: index={device_index}')
 
+        # FOURCC must be set before resolution/FPS so the driver switches codec first.
+        try:
+            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        except Exception:
+            pass
         if width > 0:
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         if height > 0:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         if fps > 0:
             self.cap.set(cv2.CAP_PROP_FPS, fps)
-        try:
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        except Exception:
-            pass
-        self.preview_width = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) or width or 1))
-        self.preview_height = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or height or 1))
-        self.preview_fps = max(1, int(self.cap.get(cv2.CAP_PROP_FPS) or fps or 1))
-        # Keep capture queue short to reduce latency.
+        # Keep the driver queue shallow so grab() always returns the newest frame.
         try:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except Exception:
             pass
+
+        self.preview_width = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) or width or 1))
+        self.preview_height = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or height or 1))
+        self.preview_fps = max(1, int(self.cap.get(cv2.CAP_PROP_FPS) or fps or 1))
+        # Publish nominal FPS so the status panel can display it.
+        config.source_nominal_fps = float(self.preview_fps)
 
         if self.show_window:
             try:
@@ -875,15 +895,36 @@ class UVCCapture:
             except Exception:
                 pass
 
+        # --- Non-blocking reader thread ---
+        # cap.read() blocks up to one frame period (e.g. 16 ms at 60 fps).
+        # A background thread continuously reads into _latest_frame so that
+        # grab() can return the newest frame without blocking the inference loop.
+        self._latest_frame_lock = threading.Lock()
+        self._latest_frame_bgr: np.ndarray | None = None
+        self._reader_stop = threading.Event()
+        self._reader_thread = threading.Thread(
+            target=self._reader_worker, name='UVCReader', daemon=True
+        )
+        self._reader_thread.start()
+
+    def _reader_worker(self) -> None:
+        while not self._reader_stop.is_set():
+            ok, frame = self.cap.read()
+            if ok and frame is not None:
+                with self._latest_frame_lock:
+                    self._latest_frame_bgr = frame
+
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
 
-        UVC preview always renders on the full capture frame so the preview
-        window remains independent from the AI detection crop region.
+        Always returns the most recent frame captured by the reader thread
+        without blocking the caller.  UVC preview renders on the full frame
+        so the preview window is independent of the AI detection crop region.
         """
 
-        ok, frame_bgr = self.cap.read()
-        if not ok or frame_bgr is None:
+        with self._latest_frame_lock:
+            frame_bgr = self._latest_frame_bgr
+        if frame_bgr is None:
             return None
 
         full_frame_bgr = frame_bgr
@@ -1021,6 +1062,9 @@ class UVCCapture:
         return _render_preview_frame(self.window_name, self.preview_scale_mode, frame_bgr)
 
     def close(self) -> None:
+        self._reader_stop.set()
+        if self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1.0)
         if self.cap is not None:
             try:
                 self.cap.release()
@@ -1033,6 +1077,23 @@ class UVCCapture:
                 pass
 
 
+def _get_monitor_refresh_rate() -> int:
+    """Return the primary monitor refresh rate in Hz, or 0 on failure."""
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hdc = user32.GetDC(None)
+        if hdc:
+            gdi32 = ctypes.windll.gdi32
+            VREFRESH = 116  # GetDeviceCaps constant
+            rate = gdi32.GetDeviceCaps(hdc, VREFRESH)
+            user32.ReleaseDC(None, hdc)
+            return max(0, int(rate))
+    except Exception:
+        pass
+    return 0
+
+
 def _warn_once(key: str, message: str) -> None:
     """Print warning once per process to avoid log flooding."""
 
@@ -1042,7 +1103,7 @@ def _warn_once(key: str, message: str) -> None:
     print(message)
 
 
-def _initialize_dxcam_capture() -> Any | None:
+def _initialize_dxcam_capture(config: Any | None = None) -> Any | None:
     """Initialize dxcam backend, return None when unavailable."""
 
     try:
@@ -1055,7 +1116,12 @@ def _initialize_dxcam_capture() -> Any | None:
         return None
 
     try:
-        return dxcam.create(output_color='BGRA')
+        cam = dxcam.create(output_color='BGRA')
+        if cam is not None and config is not None:
+            _refresh = _get_monitor_refresh_rate()
+            if _refresh > 0:
+                config.source_nominal_fps = float(_refresh)
+        return cam
     except Exception as exc:
         _warn_once(
             'dxcam_create_error',
@@ -1096,7 +1162,7 @@ def initialize_screen_capture(config: Config) -> Any:
 
     screenshot_method = getattr(config, 'screenshot_method', 'mss')
     if screenshot_method == 'dxcam':
-        dxcam_capture = _initialize_dxcam_capture()
+        dxcam_capture = _initialize_dxcam_capture(config)
         if dxcam_capture is not None:
             print('[Capture] DXcam backend initialized successfully (BGRA output).')
             return dxcam_capture
@@ -1132,6 +1198,12 @@ def initialize_screen_capture(config: Config) -> Any:
     except Exception as exc:
         print(f'[Capture] MSS initialization failed with "{exc}".')
         raise
+
+    # For screen capture backends, report the primary monitor refresh rate as
+    # the nominal source FPS so the status panel has a useful reference value.
+    _refresh = _get_monitor_refresh_rate()
+    if _refresh > 0:
+        config.source_nominal_fps = float(_refresh)
 
     print('[Capture] MSS backend initialized successfully.')
     return mss_capture

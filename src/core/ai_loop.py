@@ -24,6 +24,7 @@ from .ai_loop_utils import (
     update_queues,
 )
 from .inference import PIDController, non_max_suppression, postprocess_outputs, preprocess_image
+from .session_utils import inference_controller
 from .screen_capture import (
     _cleanup_capture,
     _detect_active_capture_method,
@@ -257,6 +258,21 @@ def ai_logic_loop(
     try:
         while config.Running:
             try:
+                # ── Cooperative pause / stop check ───────────────────────────
+                # config.inference_paused is a simple flag that UI code can set
+                # before running an installer.  inference_controller provides an
+                # event-based alternative usable from non-config code paths.
+                if getattr(config, 'inference_paused', False) or inference_controller.should_pause:
+                    if not inference_controller.wait_while_paused(check_interval=0.05):
+                        break  # stop was requested while waiting
+                    # Re-check the config flag after unpausing
+                    if getattr(config, 'inference_paused', False):
+                        time.sleep(0.05)
+                        continue
+
+                if inference_controller.should_stop:
+                    break
+
                 loop_start = time.perf_counter()
                 current_time = time.time()
 
@@ -327,7 +343,11 @@ def ai_logic_loop(
                 last_detection_run_time = now_detect
 
                 t0 = time.perf_counter()
-                input_tensor = preprocess_image(latest_frame, config.model_input_size)
+                # preprocess_image now returns letterbox metadata so
+                # postprocess_outputs can undo the padding correctly.
+                input_tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
+                    latest_frame, config.model_input_size
+                )
                 t1 = time.perf_counter()
                 t2 = t3 = t4 = None
 
@@ -343,6 +363,9 @@ def ai_logic_loop(
                         config.min_confidence,
                         latest_region['left'],
                         latest_region['top'],
+                        letterbox_scale=lb_scale,
+                        letterbox_pad_x=lb_pad_x,
+                        letterbox_pad_y=lb_pad_y,
                     )
                     boxes, confidences = non_max_suppression(boxes, confidences)
                     t4 = time.perf_counter()
