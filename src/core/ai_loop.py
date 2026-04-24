@@ -402,7 +402,6 @@ def ai_logic_loop(
                         confidences=confidences,
                     )
                 else:
-                    state.target_locked = False
                     config.tracker_has_prediction = False
                     pid_x.reset()
                     pid_y.reset()
