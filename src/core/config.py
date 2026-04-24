@@ -98,7 +98,7 @@ class Config:
         self.bezier_curve_steps: int = 7          # More segments = smoother (>=2)
 
         # Smart tracking prediction settings (replaces Kalman) 
-        self.tracker_enabled: bool = True           # Enable smart tracking prediction
+        self.tracker_enabled: bool = False          # SmartTracker removed; kept for config compatibility
         self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
         self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
         self.tracker_stop_threshold: float = 10.0    # Low speed zeroing threshold (pixels/sec)
