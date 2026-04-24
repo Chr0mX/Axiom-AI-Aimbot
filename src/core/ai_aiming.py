@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
+from .ai_loop_utils import EMAFilter
 from .humanization import apply_humanization
 from .inference import PIDController
 
@@ -42,6 +43,7 @@ def process_aiming(
     state: LoopState,
     current_time: float,
     confidences: List[float] | None = None,
+    ema_filter: Optional[EMAFilter] = None,
 ) -> None:
     """Aiming logic: direct detection coordinates → PID → mouse move.
 
@@ -74,6 +76,12 @@ def process_aiming(
         else:
             valid_targets.sort(key=lambda x: x[0])
         _, _conf, target_x, target_y, _box = valid_targets[0]
+
+        # EMA positional smoothing: applied after target selection, before PID.
+        # alpha=1.0 → no smoothing (pass-through). Configurable via config.ema_alpha.
+        if ema_filter is not None:
+            ema_filter.alpha = float(getattr(config, 'ema_alpha', 0.5))
+            target_x, target_y = ema_filter.update(target_x, target_y)
 
         # No prediction or smoothing — use raw detection coordinates directly.
         config.tracker_has_prediction = False
@@ -111,5 +119,7 @@ def process_aiming(
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)
     else:
+        if ema_filter is not None:
+            ema_filter.reset()
         pid_x.reset()
         pid_y.reset()

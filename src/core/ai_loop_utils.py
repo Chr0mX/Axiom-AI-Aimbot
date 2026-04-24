@@ -149,6 +149,34 @@ def find_closest_target(
     return [], []
 
 
+class EMAFilter:
+    """Exponential Moving Average filter for positional smoothing of the selected target.
+
+    Applied after target selection and before PID — smooths the aim-point
+    coordinate without touching velocity prediction or the PID state itself.
+    alpha=1.0 means no smoothing (pass-through); alpha close to 0 means very
+    heavy smoothing.  Configurable at runtime via config.ema_alpha.
+    """
+
+    def __init__(self, alpha: float = 0.5) -> None:
+        self.alpha: float = alpha
+        self._cx: float | None = None
+        self._cy: float | None = None
+
+    def update(self, cx: float, cy: float) -> Tuple[float, float]:
+        if self._cx is None:
+            self._cx, self._cy = cx, cy
+        else:
+            a = self.alpha
+            self._cx = a * cx + (1.0 - a) * self._cx
+            self._cy = a * cy + (1.0 - a) * self._cy
+        return self._cx, self._cy  # type: ignore[return-value]
+
+    def reset(self) -> None:
+        self._cx = None
+        self._cy = None
+
+
 def update_queues(
     overlay_boxes_queue: queue.Queue,
     overlay_confidences_queue: queue.Queue,
