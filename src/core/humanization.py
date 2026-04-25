@@ -5,7 +5,7 @@ Operates ONLY on the final (dx, dy) deltas before mouse injection.
 Zero effect on detection, PID state, coordinate mapping, or any feedback path.
 
 Pipeline position:
-    PID output (dx, dy) → apply_humanization() → int(round()) → send_mouse_move()
+    PID output (dx, dy) → apply_humanization() → [apply_bezier_movement()] → send_mouse_move()
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass
@@ -88,9 +88,25 @@ class HumanizationConfig:
     micro_stutter_min: float = 0.65         # lower bound of stutter factor
     micro_stutter_max: float = 0.90         # upper bound of stutter factor
 
+    # ── Speed Multiplier ──────────────────────────────────────────────────────
+    # Master scale applied to (dx, dy) before all other effects.
+    # 1.0 = no change; 0.5 = half speed; 2.0 = double speed.
+    # Useful for fine-tuning overall movement speed without touching PID.
+    speed_multiplier: float = 1.0
+
+    # ── Bezier Curve Movement ─────────────────────────────────────────────────
+    # Shapes each PID delta into a curved multi-step path for natural motion.
+    # Generates `bezier_steps` intermediate sub-moves along a quadratic Bezier
+    # curve whose control point is offset perpendicularly and randomised.
+    # Sub-moves sum to the original (dx, dy) displacement.
+    bezier_enabled: bool = False
+    bezier_curvature: float = 0.35    # 0 = straight line, 1 = extreme curve
+    bezier_randomness: float = 0.20   # random jitter on the control point (0–1)
+    bezier_steps: int = 5             # number of intermediate sub-moves (≥ 2)
+
 
 # ---------------------------------------------------------------------------
-# Public API
+# Public API — primary humanization entry point
 # ---------------------------------------------------------------------------
 
 def apply_humanization(
@@ -124,10 +140,17 @@ def apply_humanization(
     if intensity == 0.0:
         return dx, dy
 
+    # ── Speed Multiplier ──────────────────────────────────────────────────────
+    # Applied first so all downstream effects see the scaled magnitude.
+    m = float(cfg.speed_multiplier)
+    if m != 1.0:
+        dx *= m
+        dy *= m
+
     magnitude = math.hypot(dx, dy)
 
     # ── Feature 4 · Speed shaping ─────────────────────────────────────────────
-    # Applied first so downstream noise features see the shaped magnitude.
+    # Applied early so downstream noise features see the shaped magnitude.
     # Only the scalar is altered; direction vector (dx/mag, dy/mag) is preserved.
     if cfg.speed_shaping_enabled and magnitude > 0.0:
         # Blend low_factor toward 1.0 as intensity decreases.
@@ -185,6 +208,100 @@ def apply_humanization(
             return None
 
     return dx, dy
+
+
+# ---------------------------------------------------------------------------
+# Bezier curve movement generator
+# ---------------------------------------------------------------------------
+
+def apply_bezier_movement(
+    dx: float,
+    dy: float,
+    cfg: HumanizationConfig,
+) -> List[Tuple[float, float]]:
+    """
+    Shape a PID movement delta into a curved Bezier path.
+
+    Generates `cfg.bezier_steps` incremental sub-moves from (0, 0) to (dx, dy)
+    along a quadratic Bezier curve.  The control point is placed perpendicular
+    to the movement vector and randomised for natural-looking, imperfect motion.
+
+    Quadratic Bezier:
+        B(t) = (1-t)² P0 + 2(1-t)t P1 + t² P2
+        P0 = (0, 0)          — current cursor offset
+        P2 = (dx, dy)        — target cursor offset
+        P1 = midpoint + perpendicular_offset + random_jitter
+
+    Sub-moves are the first-differences of sampled Bezier points, so they
+    sum exactly to (dx, dy) at floating-point precision before rounding.
+
+    Args:
+        dx, dy : Post-humanization PID delta (float, pre-rounding).
+        cfg    : HumanizationConfig instance.
+
+    Returns:
+        List of (sub_dx, sub_dy) increments.
+        Falls back to [(dx, dy)] when:
+          - bezier is disabled
+          - movement is too small to curve meaningfully (< 2 px)
+          - steps < 2
+    """
+    if not cfg.bezier_enabled:
+        return [(dx, dy)]
+
+    steps = max(2, cfg.bezier_steps)
+    length = math.hypot(dx, dy)
+
+    # Skip curving for very small movements — rounding makes it pointless
+    if length < 2.0:
+        return [(dx, dy)]
+
+    # ── Build control point ───────────────────────────────────────────────────
+    # Midpoint of the straight path
+    mid_x = dx * 0.5
+    mid_y = dy * 0.5
+
+    # Perpendicular unit vector (rotated 90° CCW): (-dy/len, dx/len)
+    perp_x = -dy / length
+    perp_y = dx / length
+
+    # Base perpendicular offset scaled by curvature and path length
+    curvature = max(0.0, min(1.0, cfg.bezier_curvature))
+    base_offset = curvature * length * 0.5
+
+    # Random signed jitter on the control point for imperfect, human-like curves
+    randomness = max(0.0, min(1.0, cfg.bezier_randomness))
+    jitter = random.uniform(-randomness, randomness) * base_offset
+
+    # Randomly flip the perpendicular direction so curves vary left/right
+    side = 1.0 if random.random() < 0.5 else -1.0
+    total_offset = (base_offset + jitter) * side
+
+    p1_x = mid_x + perp_x * total_offset
+    p1_y = mid_y + perp_y * total_offset
+
+    # ── Sample the Bezier curve ───────────────────────────────────────────────
+    # Evaluate n+1 points at t ∈ {0, 1/n, 2/n, …, 1}
+    # P0 = (0,0), P1 = control, P2 = (dx, dy)
+    n = steps
+    points: List[Tuple[float, float]] = []
+    for i in range(n + 1):
+        t = i / n
+        one_minus_t = 1.0 - t
+        # Quadratic Bezier evaluation
+        bx = one_minus_t * one_minus_t * 0.0 + 2.0 * one_minus_t * t * p1_x + t * t * dx
+        by = one_minus_t * one_minus_t * 0.0 + 2.0 * one_minus_t * t * p1_y + t * t * dy
+        points.append((bx, by))
+
+    # ── Convert sampled points to incremental moves ───────────────────────────
+    # Each move is the delta between consecutive Bezier points
+    sub_moves: List[Tuple[float, float]] = []
+    for i in range(1, len(points)):
+        sub_dx = points[i][0] - points[i - 1][0]
+        sub_dy = points[i][1] - points[i - 1][1]
+        sub_moves.append((sub_dx, sub_dy))
+
+    return sub_moves
 
 
 # ---------------------------------------------------------------------------

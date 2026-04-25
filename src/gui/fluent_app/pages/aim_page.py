@@ -759,6 +759,71 @@ class AimPage(BasePage):
             parent=self.targetPriorityGroup
         )
 
+        # === Humanization Settings ===
+        self.humanizationGroup = SettingCardGroup(
+            t("humanization_settings", "Humanization Settings"), self.scrollWidget
+        )
+
+        # Toggle: Enable Smart Tracking (EMA-based position smoother)
+        self.smartTrackerEnableCard = SwitchSettingCard(
+            FluentIcon.RINGER,
+            t("smart_tracker_enable", "Enable Smart Tracking"),
+            t("smart_tracker_enable_desc", "EMA position smoother between detection and PID"),
+            parent=self.humanizationGroup
+        )
+
+        # Slider: Smoothing Strength (EMA alpha — 1=no smoothing, 0=maximum)
+        self.smoothingStrengthCard = SliderLabelCard(
+            FluentIcon.SPEED_MEDIUM,
+            t("smoothing_strength", "Smoothing Strength"),
+            1, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("smoothing_strength_desc", "EMA alpha: 100% = no smoothing, lower = smoother"),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        # Toggle: Enable Bezier Movement
+        self.bezierMovementEnableCard = SwitchSettingCard(
+            FluentIcon.CALORIES,
+            t("bezier_movement_enable", "Enable Bezier Movement"),
+            t("bezier_movement_enable_desc", "Curve mouse path for natural, human-like motion"),
+            parent=self.humanizationGroup
+        )
+
+        # Slider: Bezier Curvature (0=linear, 100=extreme curve)
+        self.bezierCurvatureCard = SliderLabelCard(
+            FluentIcon.MIX_VOLUMES,
+            t("bezier_curvature", "Bezier Curvature"),
+            0, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("bezier_curvature_desc", "0% = straight, higher = more curved"),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        # Slider: Randomness / Jitter on control point
+        self.bezierRandomnessCard = SliderLabelCard(
+            FluentIcon.MOVE,
+            t("bezier_randomness", "Randomness / Jitter"),
+            0, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("bezier_randomness_desc", "Random offset on Bezier control point"),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        # Slider: Movement Speed Multiplier (50%–200%)
+        self.speedMultiplierCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("speed_multiplier", "Movement Speed Multiplier"),
+            50, 200,
+            format_func=lambda v: f"{v}%",
+            description=t("speed_multiplier_desc", "Scale overall movement speed (100% = default)"),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
     def _initLayout(self):
         """排版所有控制項"""
         # 模型設定
@@ -893,6 +958,15 @@ class AimPage(BasePage):
         self.targetPriorityGroup.addSettingCard(self.targetPriorityWeightCard)
         self.addContent(self.targetPriorityGroup)
 
+        # Humanization Settings
+        self.humanizationGroup.addSettingCard(self.smartTrackerEnableCard)
+        self.humanizationGroup.addSettingCard(self.smoothingStrengthCard)
+        self.humanizationGroup.addSettingCard(self.bezierMovementEnableCard)
+        self.humanizationGroup.addSettingCard(self.bezierCurvatureCard)
+        self.humanizationGroup.addSettingCard(self.bezierRandomnessCard)
+        self.humanizationGroup.addSettingCard(self.speedMultiplierCard)
+        self.addContent(self.humanizationGroup)
+
         self.scrollLayout.addStretch(1)
 
     def _connectSignals(self):
@@ -978,6 +1052,14 @@ class AimPage(BasePage):
         # Target Priority
         self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
         self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
+
+        # Humanization Settings
+        self.smartTrackerEnableCard.checkedChanged.connect(self._onSmartTrackerEnableChanged)
+        self.smoothingStrengthCard.valueChanged.connect(self._onSmoothingStrengthChanged)
+        self.bezierMovementEnableCard.checkedChanged.connect(self._onBezierMovementEnableChanged)
+        self.bezierCurvatureCard.valueChanged.connect(self._onBezierCurvatureChanged)
+        self.bezierRandomnessCard.valueChanged.connect(self._onBezierRandomnessChanged)
+        self.speedMultiplierCard.valueChanged.connect(self._onSpeedMultiplierChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -1122,6 +1204,23 @@ class AimPage(BasePage):
             self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
             self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
             self._updateXboxConnectionStatus()
+
+            # Humanization Settings
+            self.smartTrackerEnableCard.setChecked(bool(getattr(self._config, 'smart_tracker_enabled', False)))
+            # Smoothing strength maps smart_tracker_alpha (0–1) to slider (1–100)
+            alpha = float(getattr(self._config, 'smart_tracker_alpha', 0.6))
+            self.smoothingStrengthCard.setValue(max(1, min(100, int(alpha * 100))))
+            _hcfg = getattr(self._config, 'humanization', None)
+            if _hcfg is not None:
+                self.bezierMovementEnableCard.setChecked(bool(getattr(_hcfg, 'bezier_enabled', False)))
+                self.bezierCurvatureCard.setValue(int(getattr(_hcfg, 'bezier_curvature', 0.35) * 100))
+                self.bezierRandomnessCard.setValue(int(getattr(_hcfg, 'bezier_randomness', 0.20) * 100))
+                self.speedMultiplierCard.setValue(int(getattr(_hcfg, 'speed_multiplier', 1.0) * 100))
+            else:
+                self.bezierMovementEnableCard.setChecked(False)
+                self.bezierCurvatureCard.setValue(35)
+                self.bezierRandomnessCard.setValue(20)
+                self.speedMultiplierCard.setValue(100)
         finally:
             self._isLoadingConfig = False
 
@@ -1779,6 +1878,42 @@ class AimPage(BasePage):
         if self._config:
             self._config.target_priority_confidence_weight = value / 100.0
 
+    # === Humanization Settings callbacks ===
+
+    def _onSmartTrackerEnableChanged(self, checked):
+        if self._config:
+            self._config.smart_tracker_enabled = bool(checked)
+
+    def _onSmoothingStrengthChanged(self, value):
+        """Slider 1–100 maps to smart_tracker_alpha 0.01–1.0."""
+        if self._config:
+            self._config.smart_tracker_alpha = max(0.01, min(1.0, value / 100.0))
+
+    def _onBezierMovementEnableChanged(self, checked):
+        if self._config:
+            _hcfg = getattr(self._config, 'humanization', None)
+            if _hcfg is not None:
+                _hcfg.bezier_enabled = bool(checked)
+
+    def _onBezierCurvatureChanged(self, value):
+        if self._config:
+            _hcfg = getattr(self._config, 'humanization', None)
+            if _hcfg is not None:
+                _hcfg.bezier_curvature = max(0.0, min(1.0, value / 100.0))
+
+    def _onBezierRandomnessChanged(self, value):
+        if self._config:
+            _hcfg = getattr(self._config, 'humanization', None)
+            if _hcfg is not None:
+                _hcfg.bezier_randomness = max(0.0, min(1.0, value / 100.0))
+
+    def _onSpeedMultiplierChanged(self, value):
+        """Slider 50–200 maps to speed_multiplier 0.5–2.0."""
+        if self._config:
+            _hcfg = getattr(self._config, 'humanization', None)
+            if _hcfg is not None:
+                _hcfg.speed_multiplier = max(0.5, min(2.0, value / 100.0))
+
     # === Arduino 連線回調函數 ===
     # === Arduino 連線回調函數 ===
     def _onArduinoConnectToggle(self):
@@ -2063,3 +2198,12 @@ class AimPage(BasePage):
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
         self.targetPriorityModeCard.titleLabel.setText(t("target_priority_mode", "Priority Mode"))
         self.targetPriorityWeightCard.titleLabel.setText(t("target_priority_confidence_weight", "Confidence Weight"))
+
+        # Humanization Settings
+        self.humanizationGroup.titleLabel.setText(t("humanization_settings", "Humanization Settings"))
+        self.smartTrackerEnableCard.titleLabel.setText(t("smart_tracker_enable", "Enable Smart Tracking"))
+        self.smoothingStrengthCard.titleLabel.setText(t("smoothing_strength", "Smoothing Strength"))
+        self.bezierMovementEnableCard.titleLabel.setText(t("bezier_movement_enable", "Enable Bezier Movement"))
+        self.bezierCurvatureCard.titleLabel.setText(t("bezier_curvature", "Bezier Curvature"))
+        self.bezierRandomnessCard.titleLabel.setText(t("bezier_randomness", "Randomness / Jitter"))
+        self.speedMultiplierCard.titleLabel.setText(t("speed_multiplier", "Movement Speed Multiplier"))

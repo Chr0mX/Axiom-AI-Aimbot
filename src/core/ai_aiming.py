@@ -7,8 +7,9 @@ from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
 from .ai_loop_utils import EMAFilter
-from .humanization import apply_humanization
+from .humanization import apply_bezier_movement, apply_humanization
 from .inference import PIDController
+from .smart_tracker import SmartTracker
 
 if TYPE_CHECKING:
     from .config import Config
@@ -44,12 +45,14 @@ def process_aiming(
     current_time: float,
     confidences: List[float] | None = None,
     ema_filter: Optional[EMAFilter] = None,
+    smart_tracker: Optional[SmartTracker] = None,
 ) -> None:
-    """Aiming logic: direct detection coordinates → PID → mouse move.
+    """Aiming pipeline:
+        Detection → SmartTracker EMA → EMAFilter → PID → Humanization → Bezier → Mouse
 
-    SmartTracker (velocity prediction) and Bezier-curve offset have been
-    removed. The cursor moves to the raw detection coordinate each frame
-    with no temporal smoothing or path interpolation.
+    SmartTracker (when enabled) smooths the raw detection coordinate before PID.
+    Bezier movement (when enabled) curves the output delta into multiple sub-steps
+    for natural, human-like motion.
     """
 
     aim_part = config.aim_part
@@ -77,13 +80,21 @@ def process_aiming(
             valid_targets.sort(key=lambda x: x[0])
         _, _conf, target_x, target_y, _box = valid_targets[0]
 
-        # EMA positional smoothing: applied after target selection, before PID.
+        # ── SmartTracker: EMA smoothing of raw target position ────────────────
+        # Reduces detection-frame jitter before PID sees the error.
+        # alpha=1.0 → pass-through; lower alpha → heavier smoothing.
+        if smart_tracker is not None and getattr(config, 'smart_tracker_enabled', False):
+            smart_tracker.alpha = float(getattr(config, 'smart_tracker_alpha', 0.6))
+            smart_tracker.velocity_dampen = bool(getattr(config, 'smart_tracker_velocity_dampen', False))
+            target_x, target_y = smart_tracker.update(target_x, target_y)
+
+        # ── EMAFilter: secondary positional smoothing (alpha from config) ─────
+        # Applied after SmartTracker so both can be used together.
         # alpha=1.0 → no smoothing (pass-through). Configurable via config.ema_alpha.
         if ema_filter is not None:
-            ema_filter.alpha = float(getattr(config, 'ema_alpha', 0.5))
+            ema_filter.alpha = float(getattr(config, 'ema_alpha', 0.8))
             target_x, target_y = ema_filter.update(target_x, target_y)
 
-        # No prediction or smoothing — use raw detection coordinates directly.
         config.tracker_has_prediction = False
 
         errorX = target_x - crosshair_x
@@ -91,15 +102,16 @@ def process_aiming(
 
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
 
+        # Y-axis recoil reduction: gradually zero vertical movement after aiming
         if getattr(config, 'aim_y_reduce_enabled', False) and state.aiming_start_time > 0:
             aim_duration = current_time - state.aiming_start_time
             delay = getattr(config, 'aim_y_reduce_delay', 0.6)
-
             if aim_duration > delay:
                 dy = 0.0
 
-        # Apply humanization layer (post-PID, pre-rounding, pre-injection).
-        # Operates only on dx/dy; never touches PID state or coordinate space.
+        # ── Humanization: post-PID delta shaping ─────────────────────────────
+        # Operates only on (dx, dy); never touches PID state or coordinate space.
+        # Applies speed_multiplier, speed shaping, jitter, stutter, etc.
         _hcfg = getattr(config, 'humanization', None)
         if _hcfg is not None and _hcfg.enabled:
             _result = apply_humanization(dx, dy, _hcfg)
@@ -109,16 +121,32 @@ def process_aiming(
                 return
             dx, dy = _result
 
-        move_x, move_y = int(round(dx)), int(round(dy))
-
-        if getattr(config, 'jitter_enabled', False) and (move_x != 0 or move_y != 0):
+        # Legacy jitter (independent of humanization layer)
+        if getattr(config, 'jitter_enabled', False) and (dx != 0 or dy != 0):
             j = float(getattr(config, 'jitter_strength', 1.5))
-            move_x += int(random.uniform(-j, j))
-            move_y += int(random.uniform(-j, j))
+            dx += random.uniform(-j, j)
+            dy += random.uniform(-j, j)
 
-        if move_x != 0 or move_y != 0:
-            send_mouse_move(move_x, move_y, method=mouse_method)
+        # ── Bezier movement: curve the output path into sub-steps ─────────────
+        # Generates multiple incremental moves along a quadratic Bezier curve
+        # with a randomised control point for smooth, human-like motion.
+        # Each sub-move is rounded and injected individually.
+        if _hcfg is not None and _hcfg.bezier_enabled:
+            sub_moves = apply_bezier_movement(dx, dy, _hcfg)
+            for sub_dx, sub_dy in sub_moves:
+                ix = int(round(sub_dx))
+                iy = int(round(sub_dy))
+                if ix != 0 or iy != 0:
+                    send_mouse_move(ix, iy, method=mouse_method)
+        else:
+            move_x, move_y = int(round(dx)), int(round(dy))
+            if move_x != 0 or move_y != 0:
+                send_mouse_move(move_x, move_y, method=mouse_method)
+
     else:
+        # No targets — reset all stateful components
+        if smart_tracker is not None:
+            smart_tracker.reset()
         if ema_filter is not None:
             ema_filter.reset()
         pid_x.reset()
