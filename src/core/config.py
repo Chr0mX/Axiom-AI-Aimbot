@@ -100,12 +100,20 @@ class Config:
         self.bezier_curve_strength: float = 0.35  # 0~1, larger curve is more obvious
         self.bezier_curve_steps: int = 7          # More segments = smoother (>=2)
 
-        # Smart tracking prediction settings (replaces Kalman) 
+        # Smart tracking prediction settings (replaces Kalman)
         self.tracker_enabled: bool = False          # SmartTracker removed; kept for config compatibility
         self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
         self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
         self.tracker_stop_threshold: float = 10.0    # Low speed zeroing threshold (pixels/sec)
         self.tracker_show_prediction: bool = True    # Show prediction visualization
+
+        # EMA positional filter (applied after target selection, before PID)
+        self.ema_alpha: float = 0.8              # 1.0 = no smoothing, lower = more smoothing
+
+        # Lightweight SmartTracker — EMA-based position smoother (new implementation)
+        self.smart_tracker_enabled: bool = False
+        self.smart_tracker_alpha: float = 0.6         # EMA alpha for SmartTracker (0 < alpha ≤ 1)
+        self.smart_tracker_velocity_dampen: bool = False  # Light dampening for fast-moving targets
 
         # Tracker prediction data (updated by ai_loop, read by overlay)
         self.tracker_predicted_x: float = 0.0        # Predicted X coordinate
@@ -353,6 +361,11 @@ class Config:
             'tracker_smoothing_factor': self.tracker_smoothing_factor,
             'tracker_stop_threshold': self.tracker_stop_threshold,
             'tracker_show_prediction': self.tracker_show_prediction,
+
+            'ema_alpha': self.ema_alpha,
+            'smart_tracker_enabled': self.smart_tracker_enabled,
+            'smart_tracker_alpha': self.smart_tracker_alpha,
+            'smart_tracker_velocity_dampen': self.smart_tracker_velocity_dampen,
 
             'dark_mode': self.dark_mode,
 
