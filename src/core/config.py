@@ -251,6 +251,16 @@ class Config:
         # screen capture uses monitor refresh rate or measured rate)
         self.source_nominal_fps: float = 0.0
 
+        # Live telemetry metrics (runtime-only, not persisted, written by ai_loop)
+        self.telemetry_latency_ms: float = 0.0
+        self.telemetry_avg_latency_ms: float = 0.0
+        self.telemetry_p95_latency_ms: float = 0.0
+        self.telemetry_frame_age_ms: float = 0.0
+        self.telemetry_infer_time_ms: float = 0.0
+        self.telemetry_avg_infer_time_ms: float = 0.0
+        self.telemetry_drop_rate: float = 0.0
+        self.telemetry_jitter: str = "Low"
+
         # Humanization post-processing layer (operates only on final dx/dy output)
         self.humanization: HumanizationConfig = HumanizationConfig()
     

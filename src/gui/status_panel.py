@@ -572,10 +572,32 @@ class StatusPanel(QWidget):
         # 10. 狀態行 - Source FPS (nominal rate reported by the source device)
         self.source_fps_row = StatusRow(get_text('status_panel_source_fps', 'Source FPS'))
 
+        # 11. 效能分隔線
+        self.telemetry_separator = QFrame()
+        self.telemetry_separator.setFrameShape(QFrame.Shape.HLine)
+        self.telemetry_separator.setFrameShadow(QFrame.Shadow.Plain)
+        self.telemetry_separator.setFixedHeight(1)
+        self.telemetry_separator.setObjectName("separator")
+
+        # 12. 遙測行 - end-to-end latency (current + avg + p95)
+        self.latency_row = StatusRow(get_text('status_panel_latency', 'Latency'))
+
+        # 13. 遙測行 - frame age when inference runs
+        self.frame_age_row = StatusRow(get_text('status_panel_frame_age', 'Frame Age'))
+
+        # 14. 遙測行 - per-frame GPU inference time
+        self.infer_time_row = StatusRow(get_text('status_panel_infer_time', 'Infer Time'))
+
+        # 15. 遙測行 - latency/inference-time jitter level
+        self.jitter_row = StatusRow(get_text('status_panel_jitter', 'Jitter'))
+
+        # 16. 遙測行 - frame overwrite / drop rate
+        self.drop_rate_row = StatusRow(get_text('status_panel_drop_rate', 'Drop Rate'))
+
         # 加入容器
         self.container_layout.addLayout(self.header_layout)
         self.container_layout.addWidget(self.separator)
-        self.container_layout.addSpacing(2) 
+        self.container_layout.addSpacing(2)
         self.container_layout.addWidget(self.aim_row)
         self.container_layout.addWidget(self.model_row)
         self.container_layout.addWidget(self.mouse_row)
@@ -584,6 +606,12 @@ class StatusPanel(QWidget):
         self.container_layout.addWidget(self.source_fps_row)
         self.container_layout.addWidget(self.screenshot_fps_row)
         self.container_layout.addWidget(self.detection_fps_row)
+        self.container_layout.addWidget(self.telemetry_separator)
+        self.container_layout.addWidget(self.latency_row)
+        self.container_layout.addWidget(self.frame_age_row)
+        self.container_layout.addWidget(self.infer_time_row)
+        self.container_layout.addWidget(self.jitter_row)
+        self.container_layout.addWidget(self.drop_rate_row)
         self.container_layout.addStretch()
 
         self.main_layout.addWidget(self.container)
@@ -907,8 +935,47 @@ class StatusPanel(QWidget):
             self.screenshot_fps_row.set_value(f"{screenshot_fps:.1f}")
             self.detection_fps_row.set_value(f"{detection_fps:.1f}")
 
-        self.screenshot_fps_row.label.setText(get_text('status_panel_screenshot_fps', 'Screenshot FPS'))
-        self.detection_fps_row.label.setText(get_text('status_panel_detection_fps', 'Detection FPS'))
+        self.screenshot_fps_row.label.setText(get_text('status_panel_capture_fps', 'Capture FPS'))
+        self.detection_fps_row.label.setText(get_text('status_panel_inference_fps', 'Inference FPS'))
+
+        # ── Telemetry section ─────────────────────────────────────────────────
+        self.latency_row.label.setText(get_text('status_panel_latency', 'Latency'))
+        self.frame_age_row.label.setText(get_text('status_panel_frame_age', 'Frame Age'))
+        self.infer_time_row.label.setText(get_text('status_panel_infer_time', 'Infer Time'))
+        self.jitter_row.label.setText(get_text('status_panel_jitter', 'Jitter'))
+        self.drop_rate_row.label.setText(get_text('status_panel_drop_rate', 'Drop Rate'))
+
+        _lat_ms = float(getattr(self.config, 'telemetry_latency_ms', 0.0))
+        _avg_lat = float(getattr(self.config, 'telemetry_avg_latency_ms', 0.0))
+        _p95_lat = float(getattr(self.config, 'telemetry_p95_latency_ms', 0.0))
+        _age_ms = float(getattr(self.config, 'telemetry_frame_age_ms', 0.0))
+        _inf_ms = float(getattr(self.config, 'telemetry_infer_time_ms', 0.0))
+        _avg_inf = float(getattr(self.config, 'telemetry_avg_infer_time_ms', 0.0))
+        _drop_pct = float(getattr(self.config, 'telemetry_drop_rate', 0.0))
+        _jitter = str(getattr(self.config, 'telemetry_jitter', 'Low'))
+
+        if _avg_lat > 0:
+            self.latency_row.set_value(
+                f"{_lat_ms:.0f} ms  (avg {_avg_lat:.0f} / p95 {_p95_lat:.0f})"
+            )
+        else:
+            self.latency_row.set_value("—")
+
+        self.frame_age_row.set_value(f"{_age_ms:.1f} ms" if _avg_lat > 0 else "—")
+
+        if _avg_inf > 0:
+            self.infer_time_row.set_value(f"{_inf_ms:.1f} ms  (avg {_avg_inf:.1f})")
+        else:
+            self.infer_time_row.set_value("—")
+
+        _jitter_colors = {
+            "Low":  FluentColors.to_css_rgba(FluentColors.get_success_color()),
+            "Med":  "rgba(255, 165, 0, 1.0)",
+            "High": FluentColors.to_css_rgba(FluentColors.get_error_color()),
+        }
+        self.jitter_row.set_value(_jitter, _jitter_colors.get(_jitter))
+
+        self.drop_rate_row.set_value(f"{_drop_pct:.1f}%")
 
     def _auto_nudge_panel(self):
         """每 5 秒水平位移 1px，方向在右/左之間交替"""
