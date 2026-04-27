@@ -865,6 +865,14 @@ class UVCCapture:
         if not self.cap.isOpened():
             raise RuntimeError(f'UVC device open failed: index={device_index}')
 
+        # Minimise driver queue depth first so subsequent property changes don't
+        # race with buffered frames.  Some backends (dshow) require this before
+        # format negotiation; others silently ignore it — hence the try/except.
+        try:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+
         # FOURCC must be set before resolution/FPS so the driver switches codec first.
         try:
             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
@@ -876,11 +884,6 @@ class UVCCapture:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         if fps > 0:
             self.cap.set(cv2.CAP_PROP_FPS, fps)
-        # Keep the driver queue shallow so grab() always returns the newest frame.
-        try:
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
 
         self.preview_width = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) or width or 1))
         self.preview_height = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or height or 1))
@@ -908,11 +911,19 @@ class UVCCapture:
         self._reader_thread.start()
 
     def _reader_worker(self) -> None:
+        import time as _time
         while not self._reader_stop.is_set():
             ok, frame = self.cap.read()
             if ok and frame is not None:
+                # Store an independent copy so grab() callers can't race with
+                # OpenCV backends that reuse the same internal buffer.
+                frame = frame.copy()
                 with self._latest_frame_lock:
                     self._latest_frame_bgr = frame
+            else:
+                # cap.read() failed (disconnected / format error): yield the
+                # CPU rather than spinning and burning 100% of a core.
+                _time.sleep(0.001)
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
