@@ -25,6 +25,7 @@ from .ai_loop_utils import (
     update_queues,
 )
 from .inference import PIDController, non_max_suppression, postprocess_outputs, preprocess_image
+from .mot_tracker import MOTTracker
 from .session_utils import inference_controller
 from .screen_capture import (
     _cleanup_capture,
@@ -242,6 +243,17 @@ def ai_logic_loop(
 
     pid_x = PIDController(config.pid_kp_x, config.pid_ki_x, config.pid_kd_x)
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
+
+    mot_tracker = MOTTracker(
+        min_hits=getattr(config, 'mot_min_hits', 2),
+        max_age=getattr(config, 'mot_max_age', 8),
+        lambda_motion=getattr(config, 'mot_lambda_motion', 0.45),
+        lambda_iou=getattr(config, 'mot_lambda_iou', 0.25),
+        lambda_sig=getattr(config, 'mot_lambda_sig', 0.30),
+        iou_min=getattr(config, 'mot_iou_min', 0.05),
+        sig_gate=getattr(config, 'mot_sig_gate', 0.70),
+    )
+    _prev_mot_enabled = False
 
     state = LoopState(cached_mouse_move_method=config.mouse_move_method)
     current_model_path = config.model_path
@@ -472,6 +484,22 @@ def ai_logic_loop(
                     print(f"ONNX 推理錯誤: {e}")
                     continue
 
+                # MOT: replace raw NMS boxes with identity-aware tracked boxes.
+                # Confirmed tracks output Kalman-predicted positions during occlusion.
+                mot_enabled = getattr(config, 'mot_enabled', False)
+                if mot_enabled != _prev_mot_enabled:
+                    mot_tracker.reset()
+                    _prev_mot_enabled = mot_enabled
+                if mot_enabled:
+                    mot_tracker.min_hits = int(getattr(config, 'mot_min_hits', 2))
+                    mot_tracker.max_age = int(getattr(config, 'mot_max_age', 8))
+                    mot_tracker.lambda_motion = float(getattr(config, 'mot_lambda_motion', 0.45))
+                    mot_tracker.lambda_iou = float(getattr(config, 'mot_lambda_iou', 0.25))
+                    mot_tracker.lambda_sig = float(getattr(config, 'mot_lambda_sig', 0.30))
+                    mot_tracker.iou_min = float(getattr(config, 'mot_iou_min', 0.05))
+                    mot_tracker.sig_gate = float(getattr(config, 'mot_sig_gate', 0.70))
+                    boxes, confidences = mot_tracker.update(boxes, confidences, current_time)
+
                 boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size)
 
                 if config.single_target_mode:
@@ -502,6 +530,7 @@ def ai_logic_loop(
                     config.tracker_has_prediction = False
                     pid_x.reset()
                     pid_y.reset()
+                    mot_tracker.reset()
 
                 update_queues(
                     overlay_boxes_queue,
