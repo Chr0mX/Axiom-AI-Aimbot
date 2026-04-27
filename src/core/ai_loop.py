@@ -15,7 +15,6 @@ from win_utils import is_key_pressed
 from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
 from .ai_loop_utils import (
-    EMAFilter,
     calculate_detection_region,
     clear_queues,
     filter_boxes_by_fov,
@@ -24,7 +23,6 @@ from .ai_loop_utils import (
     update_crosshair_position,
     update_queues,
 )
-from .smart_tracker import SmartTracker
 from .inference import PIDController, non_max_suppression, postprocess_outputs, preprocess_image
 from .session_utils import inference_controller
 from .screen_capture import (
@@ -157,8 +155,6 @@ def ai_logic_loop(
 
     pid_x = PIDController(config.pid_kp_x, config.pid_ki_x, config.pid_kd_x)
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
-    ema_filter = EMAFilter(alpha=float(getattr(config, 'ema_alpha', 0.8)))
-    smart_tracker = SmartTracker(alpha=float(getattr(config, 'smart_tracker_alpha', 0.6)))
 
     state = LoopState(cached_mouse_move_method=config.mouse_move_method)
     current_model_path = config.model_path
@@ -404,15 +400,11 @@ def ai_logic_loop(
                         state,
                         current_time,
                         confidences=confidences,
-                        ema_filter=ema_filter,
-                        smart_tracker=smart_tracker,
                     )
                 else:
                     config.tracker_has_prediction = False
                     pid_x.reset()
                     pid_y.reset()
-                    ema_filter.reset()
-                    smart_tracker.reset()
 
                 update_queues(
                     overlay_boxes_queue,
