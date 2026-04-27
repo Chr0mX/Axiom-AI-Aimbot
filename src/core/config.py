@@ -115,6 +115,16 @@ class Config:
         self.smart_tracker_alpha: float = 0.6         # EMA alpha for SmartTracker (0 < alpha ≤ 1)
         self.smart_tracker_velocity_dampen: bool = False  # Light dampening for fast-moving targets
 
+        # Multi-Object Tracking (MOT) — Kalman + Hungarian + identity signature
+        self.mot_enabled: bool = False
+        self.mot_min_hits: int = 2          # detections before track is confirmed
+        self.mot_max_age: int = 8           # predict-only frames before track deletion
+        self.mot_lambda_motion: float = 0.45   # Mahalanobis weight in cost matrix
+        self.mot_lambda_iou: float = 0.25      # IoU weight in cost matrix
+        self.mot_lambda_sig: float = 0.30      # identity signature weight in cost matrix
+        self.mot_iou_min: float = 0.05         # IoU gate: pairs below this are invalid
+        self.mot_sig_gate: float = 0.70        # signature gate: pairs above this are invalid
+
         # Tracker prediction data (updated by ai_loop, read by overlay)
         self.tracker_predicted_x: float = 0.0        # Predicted X coordinate
         self.tracker_predicted_y: float = 0.0        # Predicted Y coordinate
@@ -376,6 +386,15 @@ class Config:
             'smart_tracker_enabled': self.smart_tracker_enabled,
             'smart_tracker_alpha': self.smart_tracker_alpha,
             'smart_tracker_velocity_dampen': self.smart_tracker_velocity_dampen,
+
+            'mot_enabled': self.mot_enabled,
+            'mot_min_hits': self.mot_min_hits,
+            'mot_max_age': self.mot_max_age,
+            'mot_lambda_motion': self.mot_lambda_motion,
+            'mot_lambda_iou': self.mot_lambda_iou,
+            'mot_lambda_sig': self.mot_lambda_sig,
+            'mot_iou_min': self.mot_iou_min,
+            'mot_sig_gate': self.mot_sig_gate,
 
             'dark_mode': self.dark_mode,
 
