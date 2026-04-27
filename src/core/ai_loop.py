@@ -8,6 +8,7 @@ import queue
 import threading
 import time
 import traceback
+from collections import deque
 from typing import TYPE_CHECKING
 
 from win_utils import is_key_pressed
@@ -141,6 +142,92 @@ def _set_windows_timer_resolution_1ms(enable: bool) -> bool:
         return False
 
 
+class _TelemetryState:
+    """Rolling-window telemetry for latency, inference time, frame age, and drop rate.
+
+    Records per-frame metrics and exports aggregated values to config attributes
+    every 100 ms, keeping overhead negligible even at high inference rates.
+    """
+
+    _WINDOW = 200  # rolling window size (frames)
+
+    def __init__(self) -> None:
+        self._latencies: deque = deque(maxlen=self._WINDOW)
+        self._infer_times: deque = deque(maxlen=self._WINDOW)
+        self._frame_ages: deque = deque(maxlen=self._WINDOW)
+        self._last_seq: int = 0
+        self._total_inferred: int = 0
+        self._total_dropped: int = 0
+        self._last_export: float = 0.0
+
+    def record(
+        self,
+        latency_ms: float,
+        infer_ms: float,
+        frame_age_ms: float,
+        capture_seq: int,
+    ) -> None:
+        """Record one inference iteration's metrics."""
+        self._latencies.append(latency_ms)
+        self._infer_times.append(infer_ms)
+        self._frame_ages.append(frame_age_ms)
+        # Frames captured since our last read, minus the one we just consumed.
+        dropped = max(0, capture_seq - self._last_seq - 1)
+        self._total_dropped += dropped
+        self._total_inferred += 1
+        self._last_seq = capture_seq
+
+    @staticmethod
+    def _p95(data: object) -> float:
+        if not data:
+            return 0.0
+        s = sorted(data)  # type: ignore[call-overload]
+        return s[min(int(len(s) * 0.95), len(s) - 1)]
+
+    @staticmethod
+    def _jitter_label(data: object) -> str:
+        """Coefficient of variation mapped to Low / Med / High."""
+        if len(data) < 2:  # type: ignore[arg-type]
+            return "Low"
+        mean = sum(data) / len(data)  # type: ignore[arg-type]
+        if mean <= 0:
+            return "Low"
+        variance = sum((x - mean) ** 2 for x in data) / len(data)  # type: ignore[arg-type]
+        cv = (variance ** 0.5) / mean
+        if cv < 0.15:
+            return "Low"
+        return "Med" if cv < 0.35 else "High"
+
+    def export(self, config: object) -> None:
+        """Write aggregated metrics to config attributes. Rate-limited to ~10 Hz."""
+        now = time.perf_counter()
+        if now - self._last_export < 0.1:
+            return
+        self._last_export = now
+
+        if self._latencies:
+            config.telemetry_latency_ms = self._latencies[-1]  # type: ignore[attr-defined]
+            config.telemetry_avg_latency_ms = sum(self._latencies) / len(self._latencies)  # type: ignore[attr-defined]
+            config.telemetry_p95_latency_ms = self._p95(self._latencies)  # type: ignore[attr-defined]
+
+        if self._frame_ages:
+            config.telemetry_frame_age_ms = self._frame_ages[-1]  # type: ignore[attr-defined]
+
+        if self._infer_times:
+            config.telemetry_infer_time_ms = self._infer_times[-1]  # type: ignore[attr-defined]
+            config.telemetry_avg_infer_time_ms = sum(self._infer_times) / len(self._infer_times)  # type: ignore[attr-defined]
+
+        lat_j = self._jitter_label(self._latencies)
+        inf_j = self._jitter_label(self._infer_times)
+        order = ("Low", "Med", "High")
+        config.telemetry_jitter = order[max(order.index(lat_j), order.index(inf_j))]  # type: ignore[attr-defined]
+
+        total = self._total_inferred + self._total_dropped
+        config.telemetry_drop_rate = (  # type: ignore[attr-defined]
+            (self._total_dropped / total * 100.0) if total > 0 else 0.0
+        )
+
+
 def ai_logic_loop(
     config: Config,
     model: ort.InferenceSession,
@@ -168,6 +255,12 @@ def ai_logic_loop(
     ema_post = 0.0
     last_stats_print = time.perf_counter()
     last_detection_run_time = 0.0
+
+    # Telemetry: rolling-window performance metrics exported to config attributes
+    _telemetry = _TelemetryState()
+    # Per-iteration capture metadata read inside the capture_lock block
+    _frame_capture_time: float = 0.0
+    _frame_seq: int = 0
 
     capture_lock = threading.Lock()
     capture_stop_event = threading.Event()
@@ -243,6 +336,8 @@ def ai_logic_loop(
                 with capture_lock:
                     capture_state['latest_frame'] = captured_frame
                     capture_state['latest_region'] = target_region
+                    capture_state['latest_frame_time'] = time.perf_counter()
+                    capture_state['capture_seq'] = capture_state.get('capture_seq', 0) + 1
 
                 config.last_screenshot_time = time.time()
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
@@ -320,6 +415,8 @@ def ai_logic_loop(
                     capture_state['target_region'] = region
                     latest_frame = capture_state.get('latest_frame')
                     latest_region = capture_state.get('latest_region')
+                    _frame_capture_time = float(capture_state.get('latest_frame_time', 0.0))
+                    _frame_seq = int(capture_state.get('capture_seq', 0))
 
                 if latest_frame is None or latest_region is None:
                     _sleep_precise(0.001)
@@ -437,6 +534,16 @@ def ai_logic_loop(
                             f"interval={desired_interval*1000:.0f}ms"
                         )
                         last_stats_print = now
+
+                # Telemetry: record this iteration and periodically export to config.
+                # t2/t3 are guaranteed non-None here (inference exceptions do `continue`).
+                _telemetry.record(
+                    latency_ms=(time.perf_counter() - loop_start) * 1000.0,
+                    infer_ms=(t3 - t2) * 1000.0,  # type: ignore[operator]
+                    frame_age_ms=(t0 - _frame_capture_time) * 1000.0 if _frame_capture_time > 0.0 else 0.0,
+                    capture_seq=_frame_seq,
+                )
+                _telemetry.export(config)
 
             except Exception as e:
                 print(f"[AI Loop Error] {e}")
