@@ -242,6 +242,7 @@ class StatusPanel(QWidget):
         self._last_fps_calc_time = 0.0
         self._last_screenshot_frame_count = 0
         self._last_detection_frame_count = 0
+        self._last_capture_fps: float = 0.0
 
         # 初次設置樣式
         self._apply_panel_size()
@@ -896,24 +897,6 @@ class StatusPanel(QWidget):
         self.screenshot_row.label.setText(get_text('screenshot_method'))
         self.screenshot_row.set_value(disp_screenshot, screenshot_color)
 
-        # 更新 Source FPS (nominal rate from device/monitor) ──────────────────
-        source_method = str(getattr(self.config, 'screenshot_method', 'mss')).lower()
-        nominal_fps = float(getattr(self.config, 'source_nominal_fps', 0.0))
-
-        _source_label_map = {
-            'uvc':   get_text('status_panel_source_fps_uvc',    'UVC Source FPS'),
-            'ndi':   get_text('status_panel_source_fps_ndi',    'NDI Source FPS'),
-            'dxcam': get_text('status_panel_source_fps_screen', 'Monitor Refresh'),
-            'mss':   get_text('status_panel_source_fps_screen', 'Monitor Refresh'),
-        }
-        source_fps_label = _source_label_map.get(source_method,
-                           get_text('status_panel_source_fps', 'Source FPS'))
-        self.source_fps_row.label.setText(source_fps_label)
-        if nominal_fps > 0:
-            self.source_fps_row.set_value(f"{nominal_fps:.0f} Hz")
-        else:
-            self.source_fps_row.set_value("—")
-
         # 更新 Screenshot/Detection FPS ────────────────────────────────────────
         now = time.perf_counter()
         screenshot_count = int(getattr(self.config, 'screenshot_frame_count', 0))
@@ -928,12 +911,40 @@ class StatusPanel(QWidget):
             screenshot_fps = max(0.0, (screenshot_count - self._last_screenshot_frame_count) / elapsed)
             detection_fps = max(0.0, (detection_count - self._last_detection_frame_count) / elapsed)
 
+            self._last_capture_fps = screenshot_fps  # used by source_fps_row for UVC/NDI
             self._last_fps_calc_time = now
             self._last_screenshot_frame_count = screenshot_count
             self._last_detection_frame_count = detection_count
 
             self.screenshot_fps_row.set_value(f"{screenshot_fps:.1f}")
             self.detection_fps_row.set_value(f"{detection_fps:.1f}")
+
+        # 更新 Source FPS ──────────────────────────────────────────────────────
+        # Desktop (dxcam/mss): show monitor refresh rate in Hz (static hardware value).
+        # UVC/NDI: show measured frame rate so the display reflects actual throughput.
+        source_method = str(getattr(self.config, 'screenshot_method', 'mss')).lower()
+        nominal_fps = float(getattr(self.config, 'source_nominal_fps', 0.0))
+
+        _source_label_map = {
+            'uvc':   get_text('status_panel_source_fps_uvc',    'UVC Source FPS'),
+            'ndi':   get_text('status_panel_source_fps_ndi',    'NDI Source FPS'),
+            'dxcam': get_text('status_panel_source_fps_screen', 'Monitor Refresh'),
+            'mss':   get_text('status_panel_source_fps_screen', 'Monitor Refresh'),
+        }
+        source_fps_label = _source_label_map.get(source_method,
+                           get_text('status_panel_source_fps', 'Source FPS'))
+        self.source_fps_row.label.setText(source_fps_label)
+
+        if source_method in ('uvc', 'ndi'):
+            if self._last_capture_fps > 0.0:
+                self.source_fps_row.set_value(f"{self._last_capture_fps:.1f} fps")
+            else:
+                self.source_fps_row.set_value("—")
+        else:
+            if nominal_fps > 0:
+                self.source_fps_row.set_value(f"{nominal_fps:.0f} Hz")
+            else:
+                self.source_fps_row.set_value("—")
 
         self.screenshot_fps_row.label.setText(get_text('status_panel_capture_fps', 'Capture FPS'))
         self.detection_fps_row.label.setText(get_text('status_panel_inference_fps', 'Inference FPS'))
