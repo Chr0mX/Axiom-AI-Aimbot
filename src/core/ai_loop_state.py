@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from .smart_tracker import SmartTracker
 
 
 @dataclass
@@ -18,3 +20,4 @@ class LoopState:
     method_check_interval: float = 2.0
 
     aiming_start_time: float = 0.0
+    smart_tracker: SmartTracker = field(default_factory=SmartTracker)
