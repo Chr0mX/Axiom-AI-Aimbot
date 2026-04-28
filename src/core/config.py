@@ -95,18 +95,6 @@ class Config:
         # Single target mode
         self.single_target_mode: bool = True  # 啟用單一目標模式（只瞄準置信度最高的目標）
         
-        # Aim curve smoothing (Bezier)
-        self.bezier_curve_enabled: bool = False # 是否啟用貝茲曲線平滑
-        self.bezier_curve_strength: float = 0.35  # 0~1, larger curve is more obvious
-        self.bezier_curve_steps: int = 7          # More segments = smoother (>=2)
-
-        # Smart tracking prediction settings (replaces Kalman)
-        self.tracker_enabled: bool = False          # SmartTracker removed; kept for config compatibility
-        self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
-        self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
-        self.tracker_stop_threshold: float = 10.0    # Low speed zeroing threshold (pixels/sec)
-        self.tracker_show_prediction: bool = True    # Show prediction visualization
-
         # EMA positional filter (applied after target selection, before PID)
         self.ema_alpha: float = 0.8              # 1.0 = no smoothing, lower = more smoothing
 
@@ -344,10 +332,6 @@ class Config:
             'xbox_auto_connect': self.xbox_auto_connect,
             'show_console': self.show_console,
 
-            'bezier_curve_enabled': self.bezier_curve_enabled,
-            'bezier_curve_strength': self.bezier_curve_strength,
-            'bezier_curve_steps': self.bezier_curve_steps,
-
             'jitter_enabled': self.jitter_enabled,
             'jitter_strength': self.jitter_strength,
 
@@ -365,12 +349,6 @@ class Config:
             'crosshair_size': self.crosshair_size,
             'disclaimer_agreed': self.disclaimer_agreed,
             'first_run_complete': self.first_run_complete,
-
-            'tracker_enabled': self.tracker_enabled,
-            'tracker_prediction_time': self.tracker_prediction_time,
-            'tracker_smoothing_factor': self.tracker_smoothing_factor,
-            'tracker_stop_threshold': self.tracker_stop_threshold,
-            'tracker_show_prediction': self.tracker_show_prediction,
 
             'ema_alpha': self.ema_alpha,
             'smart_tracker_enabled': self.smart_tracker_enabled,

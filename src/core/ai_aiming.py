@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, List, Tuple
 from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
-from .humanization import apply_humanization
+from .humanization import apply_bezier_movement, apply_humanization
 from .inference import PIDController
 
 if TYPE_CHECKING:
@@ -72,6 +72,15 @@ def process_aiming(
 
         config.tracker_has_prediction = False
 
+        # SmartTracker: EMA position smoothing between detection and PID
+        if getattr(config, 'smart_tracker_enabled', False):
+            _st = state.smart_tracker
+            _st.alpha = float(getattr(config, 'smart_tracker_alpha', 0.6))
+            _st.velocity_dampen = bool(getattr(config, 'smart_tracker_velocity_dampen', False))
+            target_x, target_y = _st.update(target_x, target_y)
+        else:
+            state.smart_tracker.reset()
+
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
 
@@ -102,11 +111,19 @@ def process_aiming(
             dx += random.uniform(-j, j)
             dy += random.uniform(-j, j)
 
-        move_x, move_y = int(round(dx)), int(round(dy))
-        if move_x != 0 or move_y != 0:
-            send_mouse_move(move_x, move_y, method=mouse_method)
+        # Bezier curve movement: shape the path into curved sub-moves.
+        if _hcfg is not None and _hcfg.enabled and _hcfg.bezier_enabled and (dx != 0 or dy != 0):
+            for sub_dx, sub_dy in apply_bezier_movement(dx, dy, _hcfg):
+                mx, my = int(round(sub_dx)), int(round(sub_dy))
+                if mx != 0 or my != 0:
+                    send_mouse_move(mx, my, method=mouse_method)
+        else:
+            move_x, move_y = int(round(dx)), int(round(dy))
+            if move_x != 0 or move_y != 0:
+                send_mouse_move(move_x, move_y, method=mouse_method)
 
     else:
-        # No targets — reset PID state
+        # No targets — reset PID state and SmartTracker EMA
         pid_x.reset()
         pid_y.reset()
+        state.smart_tracker.reset()

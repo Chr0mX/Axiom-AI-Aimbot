@@ -54,27 +54,6 @@ class OverlayColors:
         return QColor(0, 140, 255, 90)
     
     @staticmethod
-    def get_tracker_line_color() -> QColor:
-        """Tracker line color"""
-        if HAS_THEME_COLORS:
-            return ThemeColors.OVERLAY_TRACKER_LINE.qcolor()
-        return QColor(255, 255, 255, 50)
-    
-    @staticmethod
-    def get_tracker_current_color() -> QColor:
-        """Current observation position color"""
-        if HAS_THEME_COLORS:
-            return ThemeColors.OVERLAY_TRACKER_CURRENT.qcolor()
-        return QColor(0, 255, 255, 60)
-    
-    @staticmethod
-    def get_tracker_predicted_color() -> QColor:
-        """Predicted position color"""
-        if HAS_THEME_COLORS:
-            return ThemeColors.OVERLAY_TRACKER_PREDICTED.qcolor()
-        return QColor(255, 0, 255, 80)
-
-    @staticmethod
     def get_tracer_color() -> QColor:
         """Tracer line color (screen center → target)"""
         return QColor(255, 255, 255, 200)
@@ -220,55 +199,6 @@ class PyQtOverlay(QWidget):
         painter.drawLine(x2, y2, x2 - corner_length, y2)  # 水平線
         painter.drawLine(x2, y2, x2, y2 - corner_length)  # 垂直線
 
-    def draw_tracker_prediction(self, painter):
-        """繪製智慧追蹤預測視覺化"""
-        tracker_enabled = getattr(self.config, 'tracker_enabled', False)
-        show_prediction = getattr(self.config, 'tracker_show_prediction', True)
-        has_prediction = getattr(self.config, 'tracker_has_prediction', False)
-        
-        if not tracker_enabled or not show_prediction or not has_prediction:
-            return
-        
-        # 取得座標
-        current_x = getattr(self.config, 'tracker_current_x', 0)
-        current_y = getattr(self.config, 'tracker_current_y', 0)
-        predicted_x = getattr(self.config, 'tracker_predicted_x', 0)
-        predicted_y = getattr(self.config, 'tracker_predicted_y', 0)
-        
-        # 如果座標無效，跳過
-        if current_x == 0 and current_y == 0:
-            return
-        
-        cx, cy = int(current_x), int(current_y)
-        px, py = int(predicted_x), int(predicted_y)
-        
-        # 繪製連線（從觀測點到預測點）- 使用主題顏色
-        line_color = OverlayColors.get_tracker_line_color()
-        pen_line = QPen(line_color, 1, Qt.PenStyle.DotLine)
-        painter.setPen(pen_line)
-        painter.drawLine(cx, cy, px, py)
-        
-        # 繪製當前觀測位置 - 使用主題顏色
-        current_color = OverlayColors.get_tracker_current_color()
-        pen_current = QPen(current_color, 2)
-        painter.setPen(pen_current)
-        current_fill = QColor(current_color)
-        current_fill.setAlpha(current_color.alpha() // 2)
-        painter.setBrush(current_fill)
-        painter.drawEllipse(cx - 2, cy - 2, 4, 4)
-        
-        # 繪製預測位置 - 使用主題顏色
-        predicted_color = OverlayColors.get_tracker_predicted_color()
-        pen_predicted = QPen(predicted_color, 2)
-        painter.setPen(pen_predicted)
-        predicted_fill = QColor(predicted_color)
-        predicted_fill.setAlpha(predicted_color.alpha() // 2)
-        painter.setBrush(predicted_fill)
-        painter.drawEllipse(px - 3, py - 3, 6, 6)
-        
-        # 重置畫刷
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-
     def draw_tracer_lines(self, painter: QPainter) -> None:
         """Draw lines from screen center to each detected box bottom-center."""
         if not self.boxes:
@@ -355,9 +285,6 @@ class PyQtOverlay(QWidget):
         # 繪製追蹤線（從螢幕中心到目標）
         if getattr(self.config, 'show_tracer_line', False):
             self.draw_tracer_lines(painter)
-
-        # 繪製卡爾曼預測視覺化
-        self.draw_tracker_prediction(painter)
 
         # 繪製自訂準心
         self._draw_crosshair(painter)
