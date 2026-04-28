@@ -637,83 +637,6 @@ class AimPage(BasePage):
             parent=self.pidGroup
         )
 
-        # === 貝塞爾曲線 ===
-        self.bezierGroup = SettingCardGroup(t("bezier_curve"), self.scrollWidget)
-
-        # 啟用開關
-        self.bezierEnableCard = SwitchSettingCard(
-            FluentIcon.CALORIES,
-            t("bezier_curve_enable"),
-            "",
-            parent=self.bezierGroup
-        )
-
-        # 曲線彎曲程度 - 使用 SliderLabelCard
-        self.bezierStrengthCard = SliderLabelCard(
-            FluentIcon.MIX_VOLUMES,
-            t("bezier_curve_strength"),
-            0, 100,
-            format_func=lambda v: f"{v}%",
-            parent=self.bezierGroup
-        )
-
-        # 曲線分段數 - 使用 SliderLabelCard
-        self.bezierStepsCard = SliderLabelCard(
-            FluentIcon.MORE,
-            t("bezier_curve_steps"),
-            2, 20,
-            format_func=lambda v: str(v),
-            parent=self.bezierGroup
-        )
-
-        # === 智慧追蹤 ===
-        self.trackerGroup = SettingCardGroup(t("tracker_prediction"), self.scrollWidget)
-
-        # 啟用開關
-        self.trackerEnableCard = SwitchSettingCard(
-            FluentIcon.RINGER,
-            t("tracker_enable"),
-            "",
-            parent=self.trackerGroup
-        )
-
-        # 預判時間 - 使用 SliderLabelCard
-        self.trackerTimeCard = SliderLabelCard(
-            FluentIcon.HISTORY,
-            t("tracker_prediction_time"),
-            0, 100,
-            format_func=lambda v: f"{v} ms",
-            label_width=50,
-            parent=self.trackerGroup
-        )
-
-        # 速度平滑係數 - 使用 SliderLabelCard
-        self.trackerSmoothCard = SliderLabelCard(
-            FluentIcon.SPEED_MEDIUM,
-            t("tracker_smoothing_factor"),
-            0, 100,
-            format_func=lambda v: f"{v}%",
-            parent=self.trackerGroup
-        )
-
-        # 靜止判定速度 - 使用 SliderLabelCard
-        self.trackerThresholdCard = SliderLabelCard(
-            FluentIcon.STOP_WATCH,
-            t("tracker_stop_threshold"),
-            0, 100,
-            format_func=lambda v: f"{v} px/s",
-            label_width=55,
-            parent=self.trackerGroup
-        )
-
-        # 顯示預判視覺化
-        self.trackerShowCard = SwitchSettingCard(
-            FluentIcon.VIEW,
-            t("tracker_show_prediction"),
-            "",
-            parent=self.trackerGroup
-        )
-
         # === Anti-Detection ===
         self.antiDetectionGroup = SettingCardGroup(t("anti_detection", "Anti-Detection"), self.scrollWidget)
 
@@ -931,22 +854,8 @@ class AimPage(BasePage):
         self.pidGroup.vBoxLayout.addWidget(pivotWidget)
         self.pidGroup.vBoxLayout.addWidget(self.pidStackedWidget)
 
-        # 貝塞爾曲線
-        self.bezierGroup.addSettingCard(self.bezierEnableCard)
-        self.bezierGroup.addSettingCard(self.bezierStrengthCard)
-        self.bezierGroup.addSettingCard(self.bezierStepsCard)
-
-        # 智慧追蹤
-        self.trackerGroup.addSettingCard(self.trackerEnableCard)
-        self.trackerGroup.addSettingCard(self.trackerTimeCard)
-        self.trackerGroup.addSettingCard(self.trackerSmoothCard)
-        self.trackerGroup.addSettingCard(self.trackerThresholdCard)
-        self.trackerGroup.addSettingCard(self.trackerShowCard)
-
         # 將進階設定添加到摺疊區域
         self.addContent(self.pidGroup)
-        self.addContent(self.bezierGroup)
-        self.addContent(self.trackerGroup)
 
         # Anti-Detection
         self.antiDetectionGroup.addSettingCard(self.jitterEnableCard)
@@ -1032,18 +941,6 @@ class AimPage(BasePage):
         self.pidDyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kd_y', v))
         self.pidYReduceEnableCard.checkedChanged.connect(lambda checked: self._onPidChanged('aim_y_reduce_enabled', checked, is_bool=True))
         self.pidYReduceDelayCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_delay', v))
-
-        # 貝塞爾 - 使用新組件的 valueChanged 信號
-        self.bezierEnableCard.checkedChanged.connect(self._onBezierEnableChanged)
-        self.bezierStrengthCard.valueChanged.connect(self._onBezierStrengthChanged)
-        self.bezierStepsCard.valueChanged.connect(self._onBezierStepsChanged)
-
-        # 追蹤 - 使用新組件的 valueChanged 信號
-        self.trackerEnableCard.checkedChanged.connect(self._onTrackerEnableChanged)
-        self.trackerTimeCard.valueChanged.connect(self._onTrackerTimeChanged)
-        self.trackerSmoothCard.valueChanged.connect(self._onTrackerSmoothChanged)
-        self.trackerThresholdCard.valueChanged.connect(self._onTrackerThresholdChanged)
-        self.trackerShowCard.checkedChanged.connect(self._onTrackerShowChanged)
 
         # Anti-Detection
         self.jitterEnableCard.checkedChanged.connect(self._onJitterEnableChanged)
@@ -1177,18 +1074,6 @@ class AimPage(BasePage):
             self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
             self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
             self.pidYReduceDelayCard.setValue(int(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100))
-
-            # 貝塞爾 - 使用新組件的 setValue
-            self.bezierEnableCard.setChecked(self._config.bezier_curve_enabled)
-            self.bezierStrengthCard.setValue(int(self._config.bezier_curve_strength * 100))
-            self.bezierStepsCard.setValue(self._config.bezier_curve_steps)
-
-            # 追蹤 - 使用新組件的 setValue
-            self.trackerEnableCard.setChecked(self._config.tracker_enabled)
-            self.trackerTimeCard.setValue(int(self._config.tracker_prediction_time * 1000))
-            self.trackerSmoothCard.setValue(int(self._config.tracker_smoothing_factor * 100))
-            self.trackerThresholdCard.setValue(int(self._config.tracker_stop_threshold))
-            self.trackerShowCard.setChecked(self._config.tracker_show_prediction)
 
             # Anti-Detection
             self.jitterEnableCard.setChecked(bool(getattr(self._config, 'jitter_enabled', False)))
@@ -1830,38 +1715,6 @@ class AimPage(BasePage):
                 float_val = value / 100.0
                 setattr(self._config, attr, float_val)
 
-    def _onBezierEnableChanged(self, checked):
-        if self._config:
-            self._config.bezier_curve_enabled = checked
-
-    def _onBezierStrengthChanged(self, value):
-        if self._config:
-            self._config.bezier_curve_strength = value / 100.0
-
-    def _onBezierStepsChanged(self, value):
-        if self._config:
-            self._config.bezier_curve_steps = value
-
-    def _onTrackerEnableChanged(self, checked):
-        if self._config:
-            self._config.tracker_enabled = checked
-
-    def _onTrackerTimeChanged(self, value):
-        if self._config:
-            self._config.tracker_prediction_time = value / 1000.0
-
-    def _onTrackerSmoothChanged(self, value):
-        if self._config:
-            self._config.tracker_smoothing_factor = value / 100.0
-
-    def _onTrackerThresholdChanged(self, value):
-        if self._config:
-            self._config.tracker_stop_threshold = float(value)
-
-    def _onTrackerShowChanged(self, checked):
-        if self._config:
-            self._config.tracker_show_prediction = checked
-
     def _onJitterEnableChanged(self, checked):
         if self._config:
             self._config.jitter_enabled = checked
@@ -2088,8 +1941,6 @@ class AimPage(BasePage):
         self.fovGroup.titleLabel.setText(t("fov_and_detect_range"))
         self.generalGroup.titleLabel.setText(t("general_params"))
         self.pidGroup.titleLabel.setText(t("aim_speed_pid"))
-        self.bezierGroup.titleLabel.setText(t("bezier_curve"))
-        self.trackerGroup.titleLabel.setText(t("tracker_prediction"))
 
         # 模型設定
         self.modelCard.titleLabel.setText(t("model"))
@@ -2176,18 +2027,6 @@ class AimPage(BasePage):
         self.pidDyCard.titleLabel.setText(t("stability_suppression_d"))
         self.pidYReduceEnableCard.titleLabel.setText(t("aim_y_reduce_enable"))
         self.pidYReduceDelayCard.titleLabel.setText(t("aim_y_reduce_delay"))
-
-        # 貝塞爾
-        self.bezierEnableCard.titleLabel.setText(t("bezier_curve_enable"))
-        self.bezierStrengthCard.titleLabel.setText(t("bezier_curve_strength"))
-        self.bezierStepsCard.titleLabel.setText(t("bezier_curve_steps"))
-
-        # 追蹤
-        self.trackerEnableCard.titleLabel.setText(t("tracker_enable"))
-        self.trackerTimeCard.titleLabel.setText(t("tracker_prediction_time"))
-        self.trackerSmoothCard.titleLabel.setText(t("tracker_smoothing_factor"))
-        self.trackerThresholdCard.titleLabel.setText(t("tracker_stop_threshold"))
-        self.trackerShowCard.titleLabel.setText(t("tracker_show_prediction"))
 
         # Anti-Detection
         self.antiDetectionGroup.titleLabel.setText(t("anti_detection", "Anti-Detection"))

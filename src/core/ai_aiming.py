@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, List, Tuple
 from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
-from .humanization import HumanizationConfig, apply_bezier_movement, apply_humanization
+from .humanization import apply_bezier_movement, apply_humanization
 from .inference import PIDController
 
 if TYPE_CHECKING:
@@ -112,20 +112,8 @@ def process_aiming(
             dy += random.uniform(-j, j)
 
         # Bezier curve movement: shape the path into curved sub-moves.
-        # Humanization bezier takes priority; legacy bezier_curve_* is a fallback.
-        _bezier_cfg: HumanizationConfig | None = None
-        if _hcfg is not None and _hcfg.enabled and _hcfg.bezier_enabled:
-            _bezier_cfg = _hcfg
-        elif getattr(config, 'bezier_curve_enabled', False):
-            _bezier_cfg = HumanizationConfig(
-                bezier_enabled=True,
-                bezier_curvature=float(getattr(config, 'bezier_curve_strength', 0.35)),
-                bezier_randomness=0.20,
-                bezier_steps=int(getattr(config, 'bezier_curve_steps', 7)),
-            )
-
-        if _bezier_cfg is not None and (dx != 0 or dy != 0):
-            for sub_dx, sub_dy in apply_bezier_movement(dx, dy, _bezier_cfg):
+        if _hcfg is not None and _hcfg.enabled and _hcfg.bezier_enabled and (dx != 0 or dy != 0):
+            for sub_dx, sub_dy in apply_bezier_movement(dx, dy, _hcfg):
                 mx, my = int(round(sub_dx)), int(round(sub_dy))
                 if mx != 0 or my != 0:
                     send_mouse_move(mx, my, method=mouse_method)
