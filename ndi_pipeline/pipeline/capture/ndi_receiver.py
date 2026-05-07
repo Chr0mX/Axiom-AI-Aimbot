@@ -6,37 +6,180 @@ from typing import Any
 
 import numpy as np
 
-from src.core.screen_capture import (
-    NDICapture,
-    _extract_ndi_source_name,
-    _find_ndi_source_by_name,
-    _load_cyndilib_symbols,
-    _wait_for_receiver_connection,
-)
-
 from ..config_loader import PipelineConfig
 
 log = logging.getLogger(__name__)
 
-# Reconnect back-off delays (seconds): 1, 2, 4, 8, 16, 16, ...
 _BACKOFF = [1.0, 2.0, 4.0, 8.0, 16.0]
-_MAX_CYCLES = 3  # raise RuntimeError after this many full back-off cycles
+_MAX_ATTEMPTS = 3 * len(_BACKOFF)  # ~90s total before RuntimeError
 
+
+# ---------------------------------------------------------------------------
+# Cyndilib helpers — embedded to avoid importing src/core/screen_capture.py,
+# which has a hard top-level `import mss` that is not required for NDI.
+# These functions are pure cyndilib / numpy logic with no extra dependencies.
+# ---------------------------------------------------------------------------
+
+def _load_cyndilib_symbols() -> dict[str, Any]:
+    try:
+        from cyndilib.finder import Finder  # type: ignore[import-not-found]
+        from cyndilib.receiver import ReceiveFrameType, Receiver  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("cyndilib is not installed") from exc
+
+    RecvColorFormat: Any
+    RecvBandwidth: Any = None
+    try:
+        from cyndilib.wrapper.ndi_recv import (  # type: ignore[import-not-found]
+            RecvBandwidth as _RB,
+            RecvColorFormat as _RCF,
+        )
+        RecvColorFormat, RecvBandwidth = _RCF, _RB
+    except ImportError:
+        from cyndilib.wrapper import RecvColorFormat as _RCF  # type: ignore[import-not-found]
+        RecvColorFormat = _RCF
+
+    VideoFrameSync: Any = None
+    VideoRecvFrame: Any = None
+    try:
+        from cyndilib.video_frame import VideoFrameSync as _VFS  # type: ignore[import-not-found]
+        VideoFrameSync = _VFS
+    except ImportError:
+        try:
+            from cyndilib import VideoRecvFrame as _VRF  # type: ignore[import-not-found]
+            VideoRecvFrame = _VRF
+        except ImportError:
+            pass
+
+    return {
+        "Finder": Finder,
+        "Receiver": Receiver,
+        "ReceiveFrameType": ReceiveFrameType,
+        "RecvColorFormat": RecvColorFormat,
+        "RecvBandwidth": RecvBandwidth,
+        "VideoFrameSync": VideoFrameSync,
+        "VideoRecvFrame": VideoRecvFrame,
+    }
+
+
+def _extract_ndi_source_name(source: Any) -> str:
+    if isinstance(source, str):
+        return source.strip()
+    for attr in ("name", "source_name", "stream_name", "url"):
+        v = getattr(source, attr, None)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    try:
+        return str(source).strip()
+    except Exception:
+        return ""
+
+
+def _extract_ndi_stream_name(source: Any) -> str:
+    for attr in ("stream_name", "ndi_name", "stream", "source_name", "name"):
+        v = getattr(source, attr, None)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def _find_ndi_source_by_name(finder: Any, target_name: str) -> Any | None:
+    target = str(target_name or "").strip()
+    if not target:
+        return None
+    t_lo = target.lower()
+    try:
+        s = finder.get_source(target)
+        if s is not None:
+            return s
+    except Exception:
+        pass
+    try:
+        for s in finder:
+            full = _extract_ndi_source_name(s).lower()
+            stream = _extract_ndi_stream_name(s).lower()
+            if t_lo in {full, stream} or full.endswith(f"({t_lo})") or stream.endswith(f"({t_lo})"):
+                return s
+    except Exception:
+        pass
+    return None
+
+
+def _wait_for_receiver_connection(
+    receiver: Any,
+    frame_sync: Any | None,
+    video_frame_sync: Any | None,
+    receive_fn: Any | None,
+    receive_video_flag: Any | None,
+    attempts: int = 30,
+    interval_seconds: float = 0.1,
+) -> bool:
+    for _ in range(max(1, int(attempts))):
+        try:
+            if receiver.is_connected():
+                if frame_sync is not None and video_frame_sync is not None:
+                    frame_sync.capture_video()
+                    if int(getattr(video_frame_sync, "xres", 0) or 0) > 0:
+                        return True
+                elif callable(receive_fn) and receive_video_flag is not None:
+                    result = receive_fn(receive_video_flag, 100)
+                    if result & receive_video_flag:
+                        return True
+                else:
+                    return True
+        except Exception:
+            pass
+        time.sleep(interval_seconds)
+    return False
+
+
+def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
+    import cv2  # lazy import — cv2 is in requirements.txt
+
+    if hasattr(frame, "get_array"):
+        try:
+            raw = frame.get_array()
+            w = int(getattr(frame, "xres", 0) or 0)
+            h = int(getattr(frame, "yres", 0) or 0)
+            if w <= 0 or h <= 0:
+                return None
+            arr = np.asarray(raw, dtype=np.uint8)
+            expected = w * h * 4
+            if arr.size < expected:
+                return None
+            return cv2.cvtColor(arr[:expected].reshape(h, w, 4), cv2.COLOR_RGBA2BGRA)
+        except Exception:
+            return None
+
+    w, h = frame.get_resolution()
+    if w <= 0 or h <= 0:
+        return None
+    raw = frame.get_array()
+    if raw is None:
+        return None
+    raw = np.asarray(raw, dtype=np.uint8)
+    expected = w * h * 4
+    if raw.size < expected:
+        return None
+    return cv2.cvtColor(raw[:expected].reshape(h, w, 4), cv2.COLOR_RGBA2BGRA)
+
+
+# ---------------------------------------------------------------------------
+# Receiver
+# ---------------------------------------------------------------------------
 
 class NDIHeadlessReceiver:
     """Headless NDI frame receiver using cyndilib.
 
-    Wraps the cyndilib Finder + Receiver pattern from NDICapture but strips
-    all GUI / Config / overlay dependencies.  Exposes a single grab() call
-    that returns a full-resolution BGRA ndarray or None on a transient miss.
-    Reconnect is handled transparently inside grab().
+    Self-contained — does not import from src/core/screen_capture.py.
+    Exposes grab() → BGRA ndarray or None on transient miss.
+    Reconnect with exponential back-off is handled transparently.
     """
 
     def __init__(self, cfg: PipelineConfig) -> None:
-        self._cfg = cfg
         self._source_name = cfg.ndi_source_name.strip()
 
-        symbols = _load_cyndilib_symbols()  # raises RuntimeError if not installed
+        symbols = _load_cyndilib_symbols()
         self._Finder = symbols["Finder"]
         self._ReceiveFrameType = symbols["ReceiveFrameType"]
         Receiver = symbols["Receiver"]
@@ -45,17 +188,13 @@ class NDIHeadlessReceiver:
         VideoFrameSync = symbols["VideoFrameSync"]
         VideoRecvFrame = symbols["VideoRecvFrame"]
 
-        self._VideoFrameSync_cls = VideoFrameSync
-        self._VideoRecvFrame_cls = VideoRecvFrame
-
         self._finder: Any | None = None
-        self._receiver: Any | None = None
         self._video_frame_sync: Any | None = None
         self._video_frame: Any | None = None
         self._source_assigned = False
-        self._last_frame: np.ndarray | None = None
+        self._reconnect_failures = 0
+        self._last_reconnect_attempt = 0.0
 
-        # Build receiver kwargs
         recv_kwargs: dict[str, Any] = {"color_format": RecvColorFormat.RGBX_RGBA}
         if RecvBandwidth is not None:
             bw = getattr(RecvBandwidth, "highest", None)
@@ -65,13 +204,11 @@ class NDIHeadlessReceiver:
         source = self._resolve_source()
         if self._source_name and source is None:
             raise RuntimeError(f"NDI source '{self._source_name}' not found on network")
-
         if source is not None:
             recv_kwargs["source"] = source
 
         self._receiver = Receiver(**recv_kwargs)
 
-        # Attach video frame object
         if VideoFrameSync is not None and getattr(self._receiver, "frame_sync", None) is not None:
             self._video_frame_sync = VideoFrameSync()
             self._receiver.frame_sync.set_video_frame(self._video_frame_sync)
@@ -102,12 +239,6 @@ class NDIHeadlessReceiver:
             raise RuntimeError("Failed to connect to NDI source — check DistroAV on main PC")
 
         log.info("[NDI] Receiver connected and ready")
-        self._reconnect_failures = 0
-        self._last_reconnect_attempt = 0.0
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
 
     def grab(self) -> np.ndarray | None:
         """Return latest BGRA frame (H, W, 4) or None on a transient miss."""
@@ -134,29 +265,18 @@ class NDIHeadlessReceiver:
                 return None
             frame_obj = getattr(self._receiver, "video_frame", None) or self._video_frame
 
-        frame = NDICapture._bgra_from_cyndilib_frame(frame_obj)
-        if frame is None:
-            return None
-
-        self._last_frame = frame
-        self._reconnect_failures = 0
+        frame = _bgra_from_cyndilib_frame(frame_obj)
+        if frame is not None:
+            self._reconnect_failures = 0
         return frame
 
     def close(self) -> None:
-        try:
-            if self._receiver is not None:
-                self._receiver.close()
-        except Exception:
-            pass
-        try:
-            if self._finder is not None:
-                self._finder.close()
-        except Exception:
-            pass
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
+        for obj in (self._receiver, self._finder):
+            try:
+                if obj is not None:
+                    obj.close()
+            except Exception:
+                pass
 
     def _resolve_source(self) -> Any | None:
         if not self._source_name:
@@ -181,7 +301,6 @@ class NDIHeadlessReceiver:
             source = _find_ndi_source_by_name(finder, self._source_name)
             if source is not None:
                 return source
-
         return None
 
     def _assign_first_available_source(self) -> None:
@@ -207,7 +326,7 @@ class NDIHeadlessReceiver:
                 finder.wait_for_sources(timeout=0.5)
             log.debug("[NDI] Waiting for source discovery (attempt %d/10)...", attempt + 1)
 
-        log.warning("[NDI] No sources discovered within timeout")
+        log.warning("[NDI] No NDI sources discovered within timeout")
 
     def _attempt_reconnect(self) -> None:
         now = time.monotonic()
@@ -218,13 +337,12 @@ class NDIHeadlessReceiver:
         self._last_reconnect_attempt = now
         self._reconnect_failures += 1
 
-        if self._reconnect_failures > _MAX_CYCLES * len(_BACKOFF):
+        if self._reconnect_failures > _MAX_ATTEMPTS:
             raise RuntimeError(
-                "[NDI] Persistent disconnect — failed to reconnect after "
-                f"{self._reconnect_failures} attempts"
+                f"[NDI] Persistent disconnect after {self._reconnect_failures} reconnect attempts"
             )
 
-        log.warning("[NDI] Disconnected. Reconnect attempt %d...", self._reconnect_failures)
+        log.warning("[NDI] Disconnected — reconnect attempt %d...", self._reconnect_failures)
 
         source = self._resolve_source()
         if source is None and not self._source_name:
