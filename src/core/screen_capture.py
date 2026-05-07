@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import TYPE_CHECKING, Any
@@ -834,6 +835,56 @@ def list_supported_uvc_resolutions(
     return sorted(supported, key=lambda item: (item[0] * item[1], item[0]))
 
 
+class _UVCPreviewThread(threading.Thread):
+    """Dedicated thread that refreshes the UVC preview window at a fixed rate.
+
+    Decouples preview FPS from the inference loop. The reader thread fills
+    _frame_ref[0] at the camera's native FPS; this thread presents it to the
+    screen independently so the preview always runs at ~target_fps regardless
+    of how fast (or slow) the AI inference loop is.
+    """
+
+    def __init__(
+        self,
+        window_name: str,
+        scale_mode: str,
+        frame_lock: threading.Lock,
+        frame_ref: list,
+        stop_event: threading.Event,
+        draw_overlay_fn,
+        region_ref: list,
+        target_fps: int = 60,
+    ) -> None:
+        super().__init__(daemon=True, name='UVCPreview')
+        self._window_name   = window_name
+        self._scale_mode    = scale_mode
+        self._lock          = frame_lock
+        self._frame_ref     = frame_ref      # list[np.ndarray | None]
+        self._stop          = stop_event
+        self._draw_overlay  = draw_overlay_fn
+        self._region_ref    = region_ref     # list[dict | None]
+        self._interval      = 1.0 / max(1, target_fps)
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            t0 = time.perf_counter()
+            with self._lock:
+                frame = self._frame_ref[0]
+            if frame is not None:
+                try:
+                    region   = self._region_ref[0]
+                    preview  = self._draw_overlay(frame.copy(), region)
+                    rendered = _render_preview_frame(
+                        self._window_name, self._scale_mode, preview)
+                    cv2.imshow(self._window_name, rendered)
+                    cv2.waitKey(1)
+                except Exception:
+                    pass
+            remaining = self._interval - (time.perf_counter() - t0)
+            if remaining > 0.001:
+                time.sleep(remaining)
+
+
 class UVCCapture:
     """OpenCV VideoCapture backend for UVC capture cards/cameras."""
 
@@ -888,6 +939,22 @@ class UVCCapture:
         # Publish nominal FPS so the status panel can display it.
         config.source_nominal_fps = float(self.preview_fps)
 
+        # Verify FOURCC was actually accepted by the driver.  Without MJPEG,
+        # 1080p raw (YUY2) requires ~237 MB/s — beyond USB 2.0 bandwidth — so
+        # the driver silently throttles to 5–15 fps with no error raised.
+        actual_fourcc_int = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+        expected_fourcc   = cv2.VideoWriter_fourcc(*'MJPG')
+        self.is_mjpeg = (actual_fourcc_int == expected_fourcc)
+        if not self.is_mjpeg:
+            actual_str = ''.join(
+                chr((actual_fourcc_int >> i) & 0xFF) for i in [0, 8, 16, 24]
+            ).strip('\x00') or 'unknown'
+            logging.getLogger(__name__).warning(
+                "[UVC] FOURCC MJPG not accepted by driver (got '%s'). "
+                "At 1080p this limits FPS to <30. Switch backend to 'msmf'.",
+                actual_str,
+            )
+
         if self.show_window:
             try:
                 cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
@@ -897,22 +964,40 @@ class UVCCapture:
 
         # --- Non-blocking reader thread ---
         # cap.read() blocks up to one frame period (e.g. 16 ms at 60 fps).
-        # A background thread continuously reads into _latest_frame so that
+        # A background thread continuously reads into _latest_frame_ref so that
         # grab() can return the newest frame without blocking the inference loop.
         self._latest_frame_lock = threading.Lock()
-        self._latest_frame_bgr: np.ndarray | None = None
+        self._latest_frame_ref: list = [None]   # list[np.ndarray | None]
+        self._region_ref: list = [None]         # list[dict | None]
         self._reader_stop = threading.Event()
         self._reader_thread = threading.Thread(
             target=self._reader_worker, name='UVCReader', daemon=True
         )
         self._reader_thread.start()
 
+        # --- Dedicated preview thread ---
+        # Renders the preview window at the camera's native FPS independently
+        # of the inference loop, so cv2.imshow/waitKey never stall grab().
+        self._preview_thread: _UVCPreviewThread | None = None
+        if self.show_window:
+            self._preview_thread = _UVCPreviewThread(
+                window_name=self.window_name,
+                scale_mode=self.preview_scale_mode,
+                frame_lock=self._latest_frame_lock,
+                frame_ref=self._latest_frame_ref,
+                stop_event=self._reader_stop,
+                draw_overlay_fn=self._draw_overlay,
+                region_ref=self._region_ref,
+                target_fps=self.preview_fps,
+            )
+            self._preview_thread.start()
+
     def _reader_worker(self) -> None:
         while not self._reader_stop.is_set():
             ok, frame = self.cap.read()
             if ok and frame is not None:
                 with self._latest_frame_lock:
-                    self._latest_frame_bgr = frame
+                    self._latest_frame_ref[0] = frame
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
@@ -923,20 +1008,13 @@ class UVCCapture:
         """
 
         with self._latest_frame_lock:
-            frame_bgr = self._latest_frame_bgr
+            frame_bgr = self._latest_frame_ref[0]
         if frame_bgr is None:
             return None
 
-        full_frame_bgr = frame_bgr
-
-        if self.show_window:
-            try:
-                preview_frame = self._draw_overlay(full_frame_bgr.copy(), region)
-                render_frame = self._render_preview_frame(preview_frame)
-                cv2.imshow(self.window_name, render_frame)
-                cv2.waitKey(1)
-            except Exception:
-                pass
+        # Let the preview thread know the current detection region so its
+        # overlay stays in sync without requiring an extra lock or callback.
+        self._region_ref[0] = region
 
         if region is not None:
             frame_h, frame_w = frame_bgr.shape[:2]
@@ -1063,6 +1141,8 @@ class UVCCapture:
 
     def close(self) -> None:
         self._reader_stop.set()
+        if self._preview_thread is not None and self._preview_thread.is_alive():
+            self._preview_thread.join(timeout=1.0)
         if self._reader_thread.is_alive():
             self._reader_thread.join(timeout=1.0)
         if self.cap is not None:

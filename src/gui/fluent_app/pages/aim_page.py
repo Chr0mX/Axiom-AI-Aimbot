@@ -262,12 +262,12 @@ class AimPage(BasePage):
         )
 
         self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["dshow", "msmf", "auto", "any"])
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto", "any"])
         self.uvcCaptureMethodCombo.setMinimumWidth(140)
         self.uvcCaptureMethodCard = SettingCard(
             FluentIcon.CAMERA,
             "UVC Capture Method",
-            "Select OpenCV capture backend",
+            "msmf recommended for 1080p60 on Windows 10/11",
             self.generalGroup
         )
         self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
@@ -1190,7 +1190,7 @@ class AimPage(BasePage):
             if screenshot_method in screenshot_methods:
                 self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
             self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
-            self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'dshow')))
+            self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
             self._refreshUvcResolutions()
             resolution_text = str(getattr(self._config, 'uvc_resolution', f"{getattr(self._config, 'uvc_width', self._config.width)}x{getattr(self._config, 'uvc_height', self._config.height)}"))
             idx = self.uvcResolutionCombo.findText(resolution_text)
@@ -1678,7 +1678,7 @@ class AimPage(BasePage):
             from core.screen_capture import list_supported_uvc_resolutions
             resolutions = list_supported_uvc_resolutions(
                 int(getattr(self._config, 'uvc_device_index', 0)),
-                str(getattr(self._config, 'uvc_capture_method', 'dshow')),
+                str(getattr(self._config, 'uvc_capture_method', 'msmf')),
             )
         except Exception:
             resolutions = []

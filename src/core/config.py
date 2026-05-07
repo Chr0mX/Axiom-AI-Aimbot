@@ -51,7 +51,7 @@ class Config:
         self.uvc_width: int = self.width
         self.uvc_height: int = self.height
         self.uvc_fps: int = 60
-        self.uvc_capture_method: str = "dshow"
+        self.uvc_capture_method: str = "msmf"
         self.uvc_resolution: str = f"{self.uvc_width}x{self.uvc_height}"
         self.uvc_show_window: bool = True
         self.uvc_window_name: str = "Axiom UVC Preview"
