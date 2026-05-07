@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from ..config_loader import PipelineConfig
+from core.ndi_config_loader import PipelineConfig
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def _wait_for_receiver_connection(
 
 
 def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
-    import cv2  # lazy import — cv2 is in requirements.txt
+    import cv2  # lazy import — cv2 is in requirements-ndi.txt
 
     if hasattr(frame, "get_array"):
         try:
@@ -171,7 +171,7 @@ def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
 class NDIHeadlessReceiver:
     """Headless NDI frame receiver using cyndilib.
 
-    Self-contained — does not import from src/core/screen_capture.py.
+    Self-contained — does not import from screen_capture.py.
     Exposes grab() → BGRA ndarray or None on transient miss.
     Reconnect with exponential back-off is handled transparently.
     """

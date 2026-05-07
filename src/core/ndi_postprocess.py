@@ -4,9 +4,8 @@ from typing import Any
 
 import numpy as np
 
-from src.core.inference import non_max_suppression, postprocess_outputs
-
-from ..config_loader import PipelineConfig
+from core.inference import non_max_suppression, postprocess_outputs
+from core.ndi_config_loader import PipelineConfig
 
 
 # Inlined from src/core/ai_aiming.py — avoids pulling in the full win_utils

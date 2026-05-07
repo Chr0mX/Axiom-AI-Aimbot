@@ -1,7 +1,7 @@
 """NDI CV Bot Pipeline — headless entry point.
 
-Usage:
-    python ndi_pipeline/main.py [--config ndi_pipeline/config.yaml]
+Usage (from project root):
+    src\\python\\python.exe src\\main_ndi.py [--config src\\config_ndi.yaml]
 
 Runs on the inference PC (GTX 1650).  No GUI, no imshow.
 """
@@ -10,27 +10,26 @@ from __future__ import annotations
 
 import argparse
 import logging
+import logging.handlers
 import os
 import signal
 import sys
 import time
 
-# Allow 'from src.core...' imports when running from the project root or
-# from within ndi_pipeline/.
+# src/ is added to sys.path automatically when run as src\main_ndi.py,
+# but add it explicitly for direct invocation from the project root.
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(_THIS_DIR)
-for _p in (_PROJECT_ROOT, _THIS_DIR):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
 
-from pipeline.config_loader import PipelineConfig, load_config
-from pipeline.capture.ndi_receiver import NDIHeadlessReceiver
-from pipeline.preprocess.frame_crop import FrameCropper
-from pipeline.inference.trt_engine import TRTEngine, TRTEngineError
-from pipeline.inference.onnx_fallback import OnnxFallback, OnnxCudaError
-from pipeline.inference.postprocess import Postprocessor
-from pipeline.output.makcu_serial import MakcuSerial
-from pipeline.utils.logging_config import setup_logging
+from core.logging_config import setup_logging
+from core.ndi_config_loader import PipelineConfig, load_config
+from core.ndi_receiver import NDIHeadlessReceiver
+from core.frame_crop import FrameCropper
+from core.trt_engine import TRTEngine, TRTEngineError
+from core.onnx_fallback import OnnxFallback, OnnxCudaError
+from core.ndi_postprocess import Postprocessor
+from win_utils.makcu_serial import MakcuSerial
 
 log = logging.getLogger(__name__)
 
@@ -39,8 +38,8 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="NDI CV Bot Pipeline")
     p.add_argument(
         "--config",
-        default=os.path.join(_THIS_DIR, "config.yaml"),
-        help="Path to config.yaml (default: ndi_pipeline/config.yaml)",
+        default=os.path.join(_THIS_DIR, "config_ndi.yaml"),
+        help="Path to config_ndi.yaml (default: src/config_ndi.yaml)",
     )
     p.add_argument("--log-file", default=None, help="Optional log file path")
     p.add_argument("--log-level", default="INFO", help="Logging level (default: INFO)")
@@ -69,7 +68,19 @@ def _build_engine(cfg: PipelineConfig):
 
 def main() -> None:
     args = _parse_args()
-    setup_logging(level=args.log_level, log_file=args.log_file)
+    setup_logging(level=args.log_level)
+
+    # Optional rotating log file
+    if args.log_file:
+        os.makedirs(os.path.dirname(os.path.abspath(args.log_file)), exist_ok=True)
+        fh = logging.handlers.RotatingFileHandler(
+            args.log_file, maxBytes=10 * 1024 * 1024, backupCount=3, encoding="utf-8"
+        )
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logging.getLogger().addHandler(fh)
 
     log.info("=" * 60)
     log.info("NDI CV Bot Pipeline starting")

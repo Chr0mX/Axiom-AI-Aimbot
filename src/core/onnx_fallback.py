@@ -5,7 +5,7 @@ import os
 
 import numpy as np
 
-from ..config_loader import PipelineConfig
+from core.ndi_config_loader import PipelineConfig
 
 log = logging.getLogger(__name__)
 
@@ -35,8 +35,9 @@ class OnnxFallback:
                 "Install onnxruntime-gpu and ensure CUDA drivers are present."
             )
 
+        # __file__ is src/core/onnx_fallback.py → 3 dirnames = project root
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        model_path = os.path.normpath(os.path.join(project_root, "..", cfg.model_path))
+        model_path = os.path.normpath(os.path.join(project_root, cfg.model_path))
         if not os.path.exists(model_path):
             raise OnnxCudaError(f"ONNX model not found: {model_path}")
 

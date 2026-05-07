@@ -9,7 +9,7 @@ from typing import Optional
 
 import serial  # type: ignore[import-not-found]
 
-from ..config_loader import PipelineConfig
+from core.ndi_config_loader import PipelineConfig
 
 log = logging.getLogger(__name__)
 

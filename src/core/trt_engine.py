@@ -6,9 +6,8 @@ from typing import Any
 
 import numpy as np
 
-from src.core.convert_to_engine import build_engine_via_trt_api
-
-from ..config_loader import PipelineConfig
+from core.convert_to_engine import build_engine_via_trt_api
+from core.ndi_config_loader import PipelineConfig
 
 log = logging.getLogger(__name__)
 
@@ -36,11 +35,10 @@ class TRTEngine:
         self._trt = trt
         self._cuda = cuda
 
-        # Resolve paths
+        # __file__ is src/core/trt_engine.py → 3 dirnames = project root
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        onnx_path = os.path.join(project_root, "..", cfg.model_path)
-        onnx_path = os.path.normpath(onnx_path)
-        cache_dir = os.path.normpath(os.path.join(project_root, "..", cfg.trt_cache_dir))
+        onnx_path = os.path.normpath(os.path.join(project_root, cfg.model_path))
+        cache_dir = os.path.normpath(os.path.join(project_root, cfg.trt_cache_dir))
         os.makedirs(cache_dir, exist_ok=True)
 
         model_stem = os.path.splitext(os.path.basename(cfg.model_path))[0]

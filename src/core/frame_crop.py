@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from src.core.inference import preprocess_image
-
-from ..config_loader import PipelineConfig
+from core.inference import preprocess_image
+from core.ndi_config_loader import PipelineConfig
 
 
 class FrameCropper:

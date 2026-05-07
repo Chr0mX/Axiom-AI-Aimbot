@@ -32,6 +32,6 @@ config/*.json
 .coverage
 htmlcov/
 
-# NDI pipeline TensorRT engine cache (GPU-architecture-specific, not portable)
-ndi_pipeline/trt_cache/*.engine
-ndi_pipeline/trt_cache/*.cache
+# TensorRT engine cache (GPU-architecture-specific, not portable)
+src/trt_cache/*.engine
+src/trt_cache/*.cache

@@ -13,7 +13,7 @@ class PipelineConfig:
     crop_size: int = 960
     model_input_size: int = 640
     model_path: str = "Model/apex_8n.onnx"
-    trt_cache_dir: str = "ndi_pipeline/trt_cache"
+    trt_cache_dir: str = "src/trt_cache"
     trt_workspace_mb: int = 2048
     confidence_threshold: float = 0.20
     nms_iou_threshold: float = 0.45
@@ -52,8 +52,8 @@ class PipelineConfig:
             raise ValueError(f"aim_part must be 'head' or 'body', got '{self.aim_part}'")
 
 
-def load_config(path: str = "ndi_pipeline/config.yaml") -> PipelineConfig:
-    """Load config.yaml and return a validated PipelineConfig."""
+def load_config(path: str = "src/config_ndi.yaml") -> PipelineConfig:
+    """Load config_ndi.yaml and return a validated PipelineConfig."""
     abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):
         raise FileNotFoundError(f"Config file not found: {abs_path}")
