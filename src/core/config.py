@@ -164,6 +164,8 @@ class Config:
         self.mouse_click_method: str = "mouse_event" # 滑鼠點擊方式
         self.arduino_com_port: str = ""              # Arduino Leonardo COM 埠
         self.makcu_com_port: str = ""                  # MAKCU KM Host COM 埠
+        self.makcu_baud_rate: int = 115200           # MAKCU 串列傳輸速率（支援 115200/500000/1000000/2000000/4000000）
+        self.arduino_baud_rate: int = 115200         # Arduino 串列傳輸速率
 
         # Xbox 360 虛擬手把設定
         self.xbox_sensitivity: float = 1.0          # 手把靈敏度 (0.1~5.0)
@@ -219,6 +221,26 @@ class Config:
         # 優化：性能相關設置
         self.performance_mode: bool = True  # 預設啟用性能模式
         self.max_queue_size: int = 1        # 減少隊列大小，降低延遲
+
+        # TensorRT FP16 加速（需要 NVIDIA GPU 及 TensorRT 安裝）
+        self.trt_fp16_enabled: bool = False
+
+        # CUDA IO Binding 零拷貝推理（僅 CUDA provider 有效）
+        self.cuda_io_binding_enabled: bool = False
+
+        # 幀跳過：像素差分閾值，靜態畫面時跳過推理
+        self.frame_skip_enabled: bool = False
+        self.frame_skip_threshold: float = 2.0
+
+        # EMA 瞄準點平滑（在 PID 前平滑目標座標）
+        self.ema_enabled: bool = False
+        self.ema_alpha: float = 0.7  # 1.0=原始，0.3=強平滑
+
+        # 速度預測瞄準（基於歷史位置估算目標未來位置）
+        self.prediction_enabled: bool = False
+        self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
+        self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
+        self.prediction_history_len: int = 3         # 歷史點數量
 
         # 延遲/性能統計（預設關閉，避免輸出干擾）
         self.enable_latency_stats: bool = False
@@ -321,10 +343,24 @@ class Config:
             'mouse_click_method': self.mouse_click_method,
             'arduino_com_port': self.arduino_com_port,
             'makcu_com_port': self.makcu_com_port,
+            'makcu_baud_rate': self.makcu_baud_rate,
+            'arduino_baud_rate': self.arduino_baud_rate,
             'xbox_sensitivity': self.xbox_sensitivity,
             'xbox_deadzone': self.xbox_deadzone,
             'xbox_auto_connect': self.xbox_auto_connect,
             'show_console': self.show_console,
+
+            'trt_fp16_enabled': self.trt_fp16_enabled,
+            'cuda_io_binding_enabled': self.cuda_io_binding_enabled,
+            'frame_skip_enabled': self.frame_skip_enabled,
+            'frame_skip_threshold': self.frame_skip_threshold,
+
+            'ema_enabled': self.ema_enabled,
+            'ema_alpha': self.ema_alpha,
+            'prediction_enabled': self.prediction_enabled,
+            'prediction_horizon_ms': self.prediction_horizon_ms,
+            'prediction_max_velocity': self.prediction_max_velocity,
+            'prediction_history_len': self.prediction_history_len,
 
             'bezier_curve_enabled': self.bezier_curve_enabled,
             'bezier_curve_strength': self.bezier_curve_strength,

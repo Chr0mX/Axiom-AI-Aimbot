@@ -18,3 +18,8 @@ class LoopState:
     method_check_interval: float = 2.0
 
     aiming_start_time: float = 0.0
+
+    # EMA smoothing state — running average of the aim-point coordinates.
+    # Reset to 0.0 when aiming starts; converges to the target on the first frame.
+    smooth_x: float = 0.0
+    smooth_y: float = 0.0

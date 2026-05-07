@@ -389,6 +389,19 @@ class AimPage(BasePage):
         self.comPortCard.hBoxLayout.addWidget(self.comRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.comPortCard.hBoxLayout.addSpacing(16)
 
+        # Arduino Baud Rate
+        self.arduinoBaudCombo = ComboBox()
+        self.arduinoBaudCombo.addItems(["115200", "500000", "1000000", "2000000", "4000000"])
+        self.arduinoBaudCombo.setMinimumWidth(120)
+        self.arduinoBaudCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("arduino_baud_rate", "Baud Rate"),
+            t("arduino_baud_rate_desc", "⚠ Must match the baud rate in your Arduino sketch"),
+            self.arduinoGroup
+        )
+        self.arduinoBaudCard.hBoxLayout.addWidget(self.arduinoBaudCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.arduinoBaudCard.hBoxLayout.addSpacing(16)
+
         # 連線狀態
         self._isArduinoConnected = False
         self.connectionLabel = BodyLabel(t("disconnected"))
@@ -495,6 +508,19 @@ class AimPage(BasePage):
         )
         self.makcuConnectionCard.hBoxLayout.addWidget(self.makcuConnectionLabel, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuConnectionCard.hBoxLayout.addSpacing(16)
+
+        # MAKCU Baud Rate
+        self.makcuBaudCombo = ComboBox()
+        self.makcuBaudCombo.addItems(["115200", "500000", "1000000", "2000000", "4000000"])
+        self.makcuBaudCombo.setMinimumWidth(120)
+        self.makcuBaudCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("makcu_baud_rate", "Baud Rate"),
+            t("makcu_baud_rate_desc", "⚠ Verify your USB-serial chip (CH340/CP2102/FTDI) supports the selected rate"),
+            self.makcuGroup
+        )
+        self.makcuBaudCard.hBoxLayout.addWidget(self.makcuBaudCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuBaudCard.hBoxLayout.addSpacing(16)
 
         # MAKCU 連線/斷線按鈕
         self.makcuConnectBtn = PushButton(t("makcu_connect"))
@@ -759,6 +785,94 @@ class AimPage(BasePage):
             parent=self.targetPriorityGroup
         )
 
+        # === Inference Performance ===
+        self.inferPerfGroup = SettingCardGroup(t("inference_performance", "Inference Performance"), self.scrollWidget)
+
+        self.trtFp16Card = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("trt_fp16_enabled", "TensorRT FP16"),
+            t("trt_fp16_desc", "Enable TensorRT FP16 precision (~2x faster on RTX). Engine built on first model load (~30s)."),
+            parent=self.inferPerfGroup
+        )
+
+        self.cudaIoBindingCard = SwitchSettingCard(
+            FluentIcon.COPY,
+            t("cuda_io_binding", "CUDA IO Binding"),
+            t("cuda_io_binding_desc", "Zero-copy GPU inference. Effective only with CUDA or TensorRT backend."),
+            parent=self.inferPerfGroup
+        )
+
+        self.frameSkipCard = SwitchSettingCard(
+            FluentIcon.SPEED_MEDIUM,
+            t("frame_skip_enabled", "Frame Skip Gate"),
+            t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."),
+            parent=self.inferPerfGroup
+        )
+
+        self.frameSkipThresholdCard = SliderLabelCard(
+            FluentIcon.ALIGNMENT,
+            t("frame_skip_threshold", "Skip Threshold"),
+            5, 100,
+            format_func=lambda v: f"{v / 10:.1f}",
+            description=t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"),
+            slider_width=160,
+            parent=self.inferPerfGroup
+        )
+
+        # === Target Tracking ===
+        self.trackingGroup = SettingCardGroup(t("target_tracking", "Target Tracking"), self.scrollWidget)
+
+        self.emaEnableCard = SwitchSettingCard(
+            FluentIcon.SPEED_MEDIUM,
+            t("ema_enabled", "EMA Smoothing"),
+            t("ema_desc", "Exponential moving average on aim-point coordinates before PID. Reduces jitter."),
+            parent=self.trackingGroup
+        )
+
+        self.emaAlphaCard = SliderLabelCard(
+            FluentIcon.MIX_VOLUMES,
+            t("ema_alpha", "EMA Alpha"),
+            30, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("ema_alpha_desc", "1.0 = raw (no smoothing), 0.30 = heavy smoothing"),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        self.predictionEnableCard = SwitchSettingCard(
+            FluentIcon.RINGER,
+            t("prediction_enabled", "Velocity Prediction"),
+            t("prediction_desc", "Extrapolate target position forward by the prediction horizon."),
+            parent=self.trackingGroup
+        )
+
+        self.predictionHorizonCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("prediction_horizon", "Prediction Horizon"),
+            5, 50,
+            format_func=lambda v: f"{v} ms",
+            label_width=55,
+            parent=self.trackingGroup
+        )
+
+        self.predictionMaxVelCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("prediction_max_velocity", "Max Velocity Cap"),
+            300, 3000,
+            format_func=lambda v: f"{v} px/s",
+            label_width=70,
+            description=t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"),
+            parent=self.trackingGroup
+        )
+
+        self.predictionHistoryCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("prediction_history", "History Frames"),
+            2, 6,
+            format_func=lambda v: str(v),
+            parent=self.trackingGroup
+        )
+
     def _initLayout(self):
         """排版所有控制項"""
         # 模型設定
@@ -801,6 +915,7 @@ class AimPage(BasePage):
 
         # Arduino 設定（在滑鼠移動方式下方）
         self.arduinoGroup.addSettingCard(self.comPortCard)
+        self.arduinoGroup.addSettingCard(self.arduinoBaudCard)
         self.arduinoGroup.addSettingCard(self.connectionCard)
         self.arduinoGroup.addSettingCard(self.arduinoConnectCard)
         self.arduinoGroup.addSettingCard(self.guideCard)
@@ -813,6 +928,7 @@ class AimPage(BasePage):
 
         # MAKCU 設定（在 Arduino 設定下方）
         self.makcuGroup.addSettingCard(self.makcuComPortCard)
+        self.makcuGroup.addSettingCard(self.makcuBaudCard)
         self.makcuGroup.addSettingCard(self.makcuConnectionCard)
         self.makcuGroup.addSettingCard(self.makcuConnectCard)
         self.addContent(self.makcuGroup)
@@ -892,6 +1008,22 @@ class AimPage(BasePage):
         self.targetPriorityGroup.addSettingCard(self.targetPriorityModeCard)
         self.targetPriorityGroup.addSettingCard(self.targetPriorityWeightCard)
         self.addContent(self.targetPriorityGroup)
+
+        # Inference Performance
+        self.inferPerfGroup.addSettingCard(self.trtFp16Card)
+        self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
+        self.inferPerfGroup.addSettingCard(self.frameSkipCard)
+        self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
+        self.addContent(self.inferPerfGroup)
+
+        # Target Tracking
+        self.trackingGroup.addSettingCard(self.emaEnableCard)
+        self.trackingGroup.addSettingCard(self.emaAlphaCard)
+        self.trackingGroup.addSettingCard(self.predictionEnableCard)
+        self.trackingGroup.addSettingCard(self.predictionHorizonCard)
+        self.trackingGroup.addSettingCard(self.predictionMaxVelCard)
+        self.trackingGroup.addSettingCard(self.predictionHistoryCard)
+        self.addContent(self.trackingGroup)
 
         self.scrollLayout.addStretch(1)
 
@@ -978,6 +1110,24 @@ class AimPage(BasePage):
         # Target Priority
         self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
         self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
+
+        # Baud rates
+        self.makcuBaudCombo.currentTextChanged.connect(self._onMakcuBaudChanged)
+        self.arduinoBaudCombo.currentTextChanged.connect(self._onArduinoBaudChanged)
+
+        # Inference Performance
+        self.trtFp16Card.checkedChanged.connect(self._onTrtFp16Changed)
+        self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
+        self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
+        self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
+
+        # Target Tracking
+        self.emaEnableCard.checkedChanged.connect(self._onEmaEnableChanged)
+        self.emaAlphaCard.valueChanged.connect(self._onEmaAlphaChanged)
+        self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
+        self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
+        self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
+        self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -1122,6 +1272,31 @@ class AimPage(BasePage):
             self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
             self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
             self._updateXboxConnectionStatus()
+
+            # Baud rates
+            makcu_baud = str(getattr(self._config, 'makcu_baud_rate', 115200))
+            if self.makcuBaudCombo.findText(makcu_baud) < 0:
+                makcu_baud = "115200"
+            self.makcuBaudCombo.setCurrentText(makcu_baud)
+
+            arduino_baud = str(getattr(self._config, 'arduino_baud_rate', 115200))
+            if self.arduinoBaudCombo.findText(arduino_baud) < 0:
+                arduino_baud = "115200"
+            self.arduinoBaudCombo.setCurrentText(arduino_baud)
+
+            # Inference Performance
+            self.trtFp16Card.setChecked(bool(getattr(self._config, 'trt_fp16_enabled', False)))
+            self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
+            self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
+            self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
+
+            # Target Tracking
+            self.emaEnableCard.setChecked(bool(getattr(self._config, 'ema_enabled', False)))
+            self.emaAlphaCard.setValue(int(getattr(self._config, 'ema_alpha', 0.7) * 100))
+            self.predictionEnableCard.setChecked(bool(getattr(self._config, 'prediction_enabled', False)))
+            self.predictionHorizonCard.setValue(int(getattr(self._config, 'prediction_horizon_ms', 10.0)))
+            self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
+            self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
         finally:
             self._isLoadingConfig = False
 
@@ -1853,7 +2028,8 @@ class AimPage(BasePage):
                         t("no_com_port")
                     )
                     return
-                success = connect_makcu(com_port)
+                baud = int(getattr(self._config, 'makcu_baud_rate', 115200)) if self._config else 115200
+                success = connect_makcu(com_port, baud)
                 if not success:
                     QMessageBox.warning(
                         self, t("config_error"),
@@ -1943,6 +2119,66 @@ class AimPage(BasePage):
         except ImportError:
             self.xboxConnectionLabel.setText("vgamepad N/A")
             self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+
+    # === Baud Rate Callbacks ===
+
+    def _onMakcuBaudChanged(self, text):
+        if self._config and not self._isLoadingConfig:
+            try:
+                self._config.makcu_baud_rate = int(text)
+            except ValueError:
+                pass
+
+    def _onArduinoBaudChanged(self, text):
+        if self._config and not self._isLoadingConfig:
+            try:
+                self._config.arduino_baud_rate = int(text)
+            except ValueError:
+                pass
+
+    # === Inference Performance Callbacks ===
+
+    def _onTrtFp16Changed(self, checked):
+        if self._config:
+            self._config.trt_fp16_enabled = bool(checked)
+
+    def _onCudaIoBindingChanged(self, checked):
+        if self._config:
+            self._config.cuda_io_binding_enabled = bool(checked)
+
+    def _onFrameSkipChanged(self, checked):
+        if self._config:
+            self._config.frame_skip_enabled = bool(checked)
+
+    def _onFrameSkipThresholdChanged(self, value):
+        if self._config:
+            self._config.frame_skip_threshold = value / 10.0
+
+    # === Target Tracking Callbacks ===
+
+    def _onEmaEnableChanged(self, checked):
+        if self._config:
+            self._config.ema_enabled = bool(checked)
+
+    def _onEmaAlphaChanged(self, value):
+        if self._config:
+            self._config.ema_alpha = value / 100.0
+
+    def _onPredictionEnableChanged(self, checked):
+        if self._config:
+            self._config.prediction_enabled = bool(checked)
+
+    def _onPredictionHorizonChanged(self, value):
+        if self._config:
+            self._config.prediction_horizon_ms = float(value)
+
+    def _onPredictionMaxVelChanged(self, value):
+        if self._config:
+            self._config.prediction_max_velocity = float(value)
+
+    def _onPredictionHistoryChanged(self, value):
+        if self._config:
+            self._config.prediction_history_len = int(value)
 
     def retranslateUi(self):
         """刷新翻譯"""

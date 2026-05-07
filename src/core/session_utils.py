@@ -138,6 +138,7 @@ def build_provider_list(config) -> list:
     result: list = []
     for provider in filtered:
         if provider == "TensorrtExecutionProvider":
+            fp16_enabled = bool(getattr(config, 'trt_fp16_enabled', True))
             result.append((
                 "TensorrtExecutionProvider",
                 {
@@ -156,7 +157,8 @@ def build_provider_list(config) -> list:
                     # ── Precision ────────────────────────────────────────────
                     # FP16 is native on RTX (Turing+) and roughly 2x faster than
                     # FP32 with negligible accuracy loss for YOLO detection.
-                    "trt_fp16_enable": True,
+                    # Controlled by config.trt_fp16_enabled.
+                    "trt_fp16_enable": fp16_enabled,
 
                     # ── Builder memory budget ────────────────────────────────
                     # 2 GiB is enough for YOLOv8-n/s.  Increase to 4 GiB for

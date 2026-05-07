@@ -12,9 +12,9 @@ import types
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
-    QAbstractSlider, QDialog, QFrame, QHBoxLayout,
-    QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider, QStackedWidget,
-    QVBoxLayout, QWidget,
+    QAbstractSlider, QDialog, QFileDialog, QFrame, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSlider,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 try:
@@ -296,12 +296,13 @@ class SetupWizard(QDialog):
     setupComplete = pyqtSignal()
 
     # 步驟常數
-    STEP_WELCOME  = 0
-    STEP_LANGUAGE = 1
-    STEP_THEME    = 2
-    STEP_ACRYLIC  = 3
-    STEP_DONE     = 4
-    TOTAL_STEPS   = 5
+    STEP_WELCOME      = 0
+    STEP_LANGUAGE     = 1
+    STEP_THEME        = 2
+    STEP_ACRYLIC      = 3
+    STEP_PERFORMANCE  = 4
+    STEP_DONE         = 5
+    TOTAL_STEPS       = 6
 
     def __init__(self, config, parent=None):
         super().__init__(parent)
@@ -373,6 +374,7 @@ class SetupWizard(QDialog):
             self._buildLanguagePage(),
             self._buildThemePage(),
             self._buildAcrylicPage(),
+            self._buildPerformancePage(),
             self._buildDonePage(),
         ]
         for p in self._pages:
@@ -564,6 +566,176 @@ class SetupWizard(QDialog):
 
         return w
 
+    def _buildPerformancePage(self) -> QWidget:
+        w = QWidget()
+        ly = QVBoxLayout(w)
+        ly.setAlignment(Qt.AlignmentFlag.AlignTop)
+        ly.setSpacing(14)
+
+        self._lbl_perf_title = _lbl("", 18, bold=True)
+        self._lbl_perf_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ly.addWidget(self._lbl_perf_title)
+
+        self._lbl_perf_sub = _lbl("", 12)
+        self._lbl_perf_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ly.addWidget(self._lbl_perf_sub)
+
+        ly.addSpacing(10)
+
+        # ── Model Path ────────────────────────────────────────
+        self._lbl_perf_model = _lbl("", 11)
+        ly.addWidget(self._lbl_perf_model)
+
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
+
+        self._edit_model_path = QLineEdit()
+        self._edit_model_path.setText(getattr(self._config, 'model_path', 'Model/ApexLegendsOrbeet_15k.onnx'))
+        self._edit_model_path.textChanged.connect(self._onModelPathChanged)
+        model_row.addWidget(self._edit_model_path, 1)
+
+        self._btn_browse_model = QPushButton("...")
+        self._btn_browse_model.setFixedWidth(36)
+        self._btn_browse_model.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_browse_model.clicked.connect(self._onBrowseModel)
+        model_row.addWidget(self._btn_browse_model)
+
+        ly.addLayout(model_row)
+
+        ly.addSpacing(6)
+
+        # ── Model Input Size ──────────────────────────────────
+        size_row = QHBoxLayout()
+        size_row.setSpacing(12)
+
+        self._lbl_perf_size = _lbl("", 11)
+        self._lbl_perf_size.setFixedWidth(200)
+        size_row.addWidget(self._lbl_perf_size)
+
+        if _HAS_FLUENT:
+            self._combo_input_size = ComboBox()
+        else:
+            from PyQt6.QtWidgets import QComboBox
+            self._combo_input_size = QComboBox()  # type: ignore[assignment]
+
+        for s in ["320", "480", "640"]:
+            self._combo_input_size.addItem(s)
+
+        cur_size = str(getattr(self._config, 'model_input_size', 640))
+        idx = self._combo_input_size.findText(cur_size)
+        self._combo_input_size.setCurrentIndex(idx if idx >= 0 else 2)
+        self._combo_input_size.currentTextChanged.connect(self._onModelInputSizeChanged)
+
+        size_row.addWidget(self._combo_input_size)
+        size_row.addStretch()
+        ly.addLayout(size_row)
+
+        ly.addSpacing(6)
+
+        # ── TRT FP16 ──────────────────────────────────────────
+        trt_row = QHBoxLayout()
+        trt_row.setSpacing(12)
+
+        if _HAS_FLUENT:
+            self._sw_trt_fp16 = SwitchButton()
+        else:
+            from PyQt6.QtWidgets import QCheckBox
+            self._sw_trt_fp16 = QCheckBox()  # type: ignore[assignment]
+
+        self._sw_trt_fp16.setChecked(getattr(self._config, 'trt_fp16_enabled', False))
+        self._sw_trt_fp16.checkedChanged.connect(self._onTrtFp16Toggle)
+        trt_row.addWidget(self._sw_trt_fp16)
+
+        trt_text = QVBoxLayout()
+        trt_text.setSpacing(2)
+        self._lbl_perf_trt = _lbl("", 11, bold=True)
+        self._lbl_perf_trt_hint = _lbl("", 9, color="#888888")
+        trt_text.addWidget(self._lbl_perf_trt)
+        trt_text.addWidget(self._lbl_perf_trt_hint)
+        trt_row.addLayout(trt_text)
+        trt_row.addStretch()
+        ly.addLayout(trt_row)
+
+        ly.addSpacing(6)
+
+        # ── EMA Smoothing ─────────────────────────────────────
+        ema_row = QHBoxLayout()
+        ema_row.setSpacing(12)
+
+        if _HAS_FLUENT:
+            self._sw_ema = SwitchButton()
+        else:
+            from PyQt6.QtWidgets import QCheckBox
+            self._sw_ema = QCheckBox()  # type: ignore[assignment]
+
+        self._sw_ema.setChecked(getattr(self._config, 'ema_enabled', False))
+        self._sw_ema.checkedChanged.connect(self._onEmaToggle)
+        ema_row.addWidget(self._sw_ema)
+
+        ema_text = QVBoxLayout()
+        ema_text.setSpacing(2)
+        self._lbl_perf_ema = _lbl("", 11, bold=True)
+        self._lbl_perf_ema_hint = _lbl("", 9, color="#888888")
+        ema_text.addWidget(self._lbl_perf_ema)
+        ema_text.addWidget(self._lbl_perf_ema_hint)
+        ema_row.addLayout(ema_text)
+        ema_row.addStretch()
+        ly.addLayout(ema_row)
+
+        ly.addSpacing(6)
+
+        # ── Velocity Prediction ───────────────────────────────
+        pred_row = QHBoxLayout()
+        pred_row.setSpacing(12)
+
+        if _HAS_FLUENT:
+            self._sw_prediction = SwitchButton()
+        else:
+            from PyQt6.QtWidgets import QCheckBox
+            self._sw_prediction = QCheckBox()  # type: ignore[assignment]
+
+        self._sw_prediction.setChecked(getattr(self._config, 'prediction_enabled', False))
+        self._sw_prediction.checkedChanged.connect(self._onPredictionToggle)
+        pred_row.addWidget(self._sw_prediction)
+
+        pred_text = QVBoxLayout()
+        pred_text.setSpacing(2)
+        self._lbl_perf_pred = _lbl("", 11, bold=True)
+        self._lbl_perf_pred_hint = _lbl("", 9, color="#888888")
+        pred_text.addWidget(self._lbl_perf_pred)
+        pred_text.addWidget(self._lbl_perf_pred_hint)
+        pred_row.addLayout(pred_text)
+        pred_row.addStretch()
+        ly.addLayout(pred_row)
+
+        return w
+
+    # ── Performance Page Handlers ─────────────────────────
+
+    def _onModelPathChanged(self, text: str):
+        self._config.model_path = text
+
+    def _onBrowseModel(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Model", "", "ONNX Models (*.onnx);;All Files (*)")
+        if path:
+            self._edit_model_path.setText(path)
+
+    def _onModelInputSizeChanged(self, text: str):
+        try:
+            self._config.model_input_size = int(text)
+        except ValueError:
+            pass
+
+    def _onTrtFp16Toggle(self, checked: bool):
+        self._config.trt_fp16_enabled = checked
+
+    def _onEmaToggle(self, checked: bool):
+        self._config.ema_enabled = checked
+
+    def _onPredictionToggle(self, checked: bool):
+        self._config.prediction_enabled = checked
+
     def _buildDonePage(self) -> QWidget:
         w = QWidget()
         ly = QVBoxLayout(w)
@@ -693,6 +865,32 @@ class SetupWizard(QDialog):
             lm.get("enable_acrylic_hint", "Only available on Windows 11"))
         self._lbl_opacity.setText(
             lm.get("wizard_acrylic_opacity", "Window Opacity"))
+
+        # Performance
+        self._lbl_perf_title.setText(
+            lm.get("wizard_perf_title", "Performance Settings"))
+        self._lbl_perf_sub.setText(
+            lm.get("wizard_perf_subtitle",
+                   "Configure inference and tracking options. These can be changed later in the Aim tab."))
+        self._lbl_perf_model.setText(
+            lm.get("wizard_perf_model_path", "Model Path"))
+        self._lbl_perf_size.setText(
+            lm.get("wizard_perf_input_size", "Model Input Size (px)"))
+        self._lbl_perf_trt.setText(
+            lm.get("wizard_perf_trt", "TensorRT FP16"))
+        self._lbl_perf_trt_hint.setText(
+            lm.get("wizard_perf_trt_hint",
+                   "Requires NVIDIA GPU — builds engine on first run (~30 s)"))
+        self._lbl_perf_ema.setText(
+            lm.get("wizard_perf_ema", "EMA Aim Smoothing"))
+        self._lbl_perf_ema_hint.setText(
+            lm.get("wizard_perf_ema_hint",
+                   "Reduces jitter by smoothing the aim point each frame"))
+        self._lbl_perf_pred.setText(
+            lm.get("wizard_perf_pred", "Velocity Prediction"))
+        self._lbl_perf_pred_hint.setText(
+            lm.get("wizard_perf_pred_hint",
+                   "Extrapolates target position to compensate for detection latency"))
 
         # Done
         self._lbl_done_title.setText(
