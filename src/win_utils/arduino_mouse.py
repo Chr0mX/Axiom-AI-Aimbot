@@ -57,13 +57,16 @@ class ArduinoMouse:
                 self._connected = False
 
             try:
-                self._serial = serial.Serial(com_port, baud_rate, timeout=0.1)
+                actual_baud = self._open_serial(com_port, baud_rate)
+                if actual_baud is None:
+                    self._connected = False
+                    return False
                 self._com_port = com_port
-                self._baud_rate = baud_rate
+                self._baud_rate = actual_baud
                 self._connected = True
                 # Wait for Arduino to restart (Leonardo automatically restarts on connection)
                 time.sleep(2)
-                print(f"[Arduino] Successfully connected to {com_port}")
+                print(f"[Arduino] Successfully connected to {com_port} @ {actual_baud} baud")
                 return True
             except serial.SerialException as e:
                 print(f"[Arduino] Connection failed: {e}")
@@ -73,6 +76,27 @@ class ArduinoMouse:
                 print(f"[Arduino] Error occurred during connection: {e}")
                 self._connected = False
                 return False
+
+    def _open_serial(self, com_port: str, baud_rate: int) -> int | None:
+        """Open serial port at requested baud rate, falling back to 115200 on failure.
+
+        Returns the actual baud rate used, or None if the port could not be opened.
+        """
+        try:
+            self._serial = serial.Serial(com_port, baud_rate, timeout=0.1)
+            return baud_rate
+        except serial.SerialException:
+            if baud_rate == 115200:
+                raise
+            print(
+                f"[Arduino] ⚠ {baud_rate} baud failed — falling back to 115200. "
+                "Verify your Arduino firmware supports the requested baud rate."
+            )
+            try:
+                self._serial = serial.Serial(com_port, 115200, timeout=0.1)
+                return 115200
+            except serial.SerialException:
+                return None
 
     def disconnect(self):
         """Disconnect"""

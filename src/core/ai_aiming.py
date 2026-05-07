@@ -1,16 +1,36 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, List, Tuple
+import time
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
 from .humanization import apply_humanization
 from .inference import PIDController
+from .target_predictor import VelocityPredictor
 
 if TYPE_CHECKING:
     from .config import Config
+
+# Module-level predictor singleton — shared across process_aiming calls.
+_predictor: Optional[VelocityPredictor] = None
+
+
+def _get_predictor(config: Config) -> VelocityPredictor:
+    """Return (and lazily create/reconfigure) the module-level VelocityPredictor."""
+    global _predictor
+    history_len = int(getattr(config, 'prediction_history_len', 3))
+    max_vel = float(getattr(config, 'prediction_max_velocity', 1200.0))
+    if _predictor is None:
+        _predictor = VelocityPredictor(history_len=history_len, max_velocity_px_per_s=max_vel)
+    else:
+        _predictor._max_velocity = max_vel
+        _predictor._history = type(_predictor._history)(
+            _predictor._history, maxlen=history_len
+        )
+    return _predictor
 
 
 def calculate_aim_target(box: List[float], aim_part: str, head_height_ratio: float) -> Tuple[float, float]:
@@ -75,8 +95,33 @@ def process_aiming(
             valid_targets.sort(key=lambda x: x[0])
         _, _conf, target_x, target_y, _box = valid_targets[0]
 
-        # No prediction or smoothing — use raw detection coordinates directly.
-        config.tracker_has_prediction = False
+        # --- Velocity prediction (optional) ---
+        if getattr(config, 'prediction_enabled', False):
+            predictor = _get_predictor(config)
+            horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
+            target_x, target_y = predictor.update(target_x, target_y, time.perf_counter(), horizon_s)
+            config.tracker_has_prediction = True
+        else:
+            config.tracker_has_prediction = False
+            if _predictor is not None:
+                _predictor.reset()
+
+        # --- EMA aim-point smoothing (optional) ---
+        # Smooths the target coordinate before feeding to PID, reducing jitter
+        # without introducing the drift risk of full Kalman filtering.
+        if getattr(config, 'ema_enabled', False):
+            alpha = float(getattr(config, 'ema_alpha', 0.7))
+            if state.smooth_x == 0.0 and state.smooth_y == 0.0:
+                # Bootstrap on first frame so the aim doesn't spring from (0, 0).
+                state.smooth_x = target_x
+                state.smooth_y = target_y
+            else:
+                state.smooth_x = alpha * target_x + (1.0 - alpha) * state.smooth_x
+                state.smooth_y = alpha * target_y + (1.0 - alpha) * state.smooth_y
+            target_x, target_y = state.smooth_x, state.smooth_y
+        else:
+            state.smooth_x = 0.0
+            state.smooth_y = 0.0
 
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
