@@ -257,6 +257,8 @@ class StatusPanel(QWidget):
         self.screenshot_row.setVisible(getattr(self.config, 'status_panel_show_screenshot_method', True))
         self.screenshot_fps_row.setVisible(getattr(self.config, 'status_panel_show_screenshot_fps', True))
         self.detection_fps_row.setVisible(getattr(self.config, 'status_panel_show_detection_fps', True))
+        # Source FPS row is always shown when screenshot method row is shown
+        self.source_fps_row.setVisible(getattr(self.config, 'status_panel_show_screenshot_method', True))
 
     def _apply_panel_size(self):
         """依據當前模式套用面板尺寸"""
@@ -561,11 +563,14 @@ class StatusPanel(QWidget):
         # 7. 狀態行 - 截圖方式
         self.screenshot_row = StatusRow(get_text('screenshot_method'))
 
-        # 8. 狀態行 - 截圖 FPS
+        # 8. 狀態行 - 截圖 FPS (measured capture rate)
         self.screenshot_fps_row = StatusRow(get_text('status_panel_screenshot_fps', 'Screenshot FPS'))
 
         # 9. 狀態行 - 偵測 FPS
         self.detection_fps_row = StatusRow(get_text('status_panel_detection_fps', 'Detection FPS'))
+
+        # 10. 狀態行 - Source FPS (nominal rate reported by the source device)
+        self.source_fps_row = StatusRow(get_text('status_panel_source_fps', 'Source FPS'))
 
         # 加入容器
         self.container_layout.addLayout(self.header_layout)
@@ -576,6 +581,7 @@ class StatusPanel(QWidget):
         self.container_layout.addWidget(self.mouse_row)
         self.container_layout.addWidget(self.mouse_click_row)
         self.container_layout.addWidget(self.screenshot_row)
+        self.container_layout.addWidget(self.source_fps_row)
         self.container_layout.addWidget(self.screenshot_fps_row)
         self.container_layout.addWidget(self.detection_fps_row)
         self.container_layout.addStretch()
@@ -862,7 +868,25 @@ class StatusPanel(QWidget):
         self.screenshot_row.label.setText(get_text('screenshot_method'))
         self.screenshot_row.set_value(disp_screenshot, screenshot_color)
 
-        # 更新 Screenshot/Detection FPS
+        # 更新 Source FPS (nominal rate from device/monitor) ──────────────────
+        source_method = str(getattr(self.config, 'screenshot_method', 'mss')).lower()
+        nominal_fps = float(getattr(self.config, 'source_nominal_fps', 0.0))
+
+        _source_label_map = {
+            'uvc':   get_text('status_panel_source_fps_uvc',    'UVC Source FPS'),
+            'ndi':   get_text('status_panel_source_fps_ndi',    'NDI Source FPS'),
+            'dxcam': get_text('status_panel_source_fps_screen', 'Monitor Refresh'),
+            'mss':   get_text('status_panel_source_fps_screen', 'Monitor Refresh'),
+        }
+        source_fps_label = _source_label_map.get(source_method,
+                           get_text('status_panel_source_fps', 'Source FPS'))
+        self.source_fps_row.label.setText(source_fps_label)
+        if nominal_fps > 0:
+            self.source_fps_row.set_value(f"{nominal_fps:.0f} Hz")
+        else:
+            self.source_fps_row.set_value("—")
+
+        # 更新 Screenshot/Detection FPS ────────────────────────────────────────
         now = time.perf_counter()
         screenshot_count = int(getattr(self.config, 'screenshot_frame_count', 0))
         detection_count = int(getattr(self.config, 'detection_frame_count', 0))

@@ -217,6 +217,56 @@ from gui.disclaimer_dialog import DisclaimerDialog
 ai_thread: Optional[threading.Thread] = None
 auto_fire_thread: Optional[threading.Thread] = None
 
+# Shared inference controller — lets the GUI pause/stop inference without
+# killing the UI or closing the application.
+from core.session_utils import inference_controller as _inference_controller
+
+def stop_ai_threads(config: "Config", join_timeout: float = 3.0) -> None:
+    """Stop AI inference and auto-fire threads without closing the application.
+
+    Safe to call from the GUI (e.g. before a CUDA installer runs in a worker
+    thread).  The UI remains responsive because this only touches background
+    daemon threads.
+
+    After this call:
+    - config.Running is False
+    - Both AI threads have been joined (or timed out)
+    - The ONNX session held by the AI thread goes out of scope and will be
+      garbage-collected, releasing its GPU/CPU resources.
+    """
+    global ai_thread, auto_fire_thread
+
+    config.Running = False
+    _inference_controller.request_stop()
+
+    if ai_thread is not None and ai_thread.is_alive():
+        ai_thread.join(timeout=join_timeout)
+        if ai_thread.is_alive():
+            logger.warning("AI thread did not stop within %.1fs", join_timeout)
+
+    if auto_fire_thread is not None and auto_fire_thread.is_alive():
+        auto_fire_thread.join(timeout=join_timeout)
+
+    _inference_controller.clear_stop()
+
+
+def pause_ai_inference(config: "Config") -> None:
+    """Pause AI inference cooperatively without stopping threads.
+
+    The inference loop will sleep on its next iteration.  Call
+    resume_ai_inference() to continue.  Prefer stop_ai_threads() when you
+    need to release GPU resources (e.g. before a CUDA upgrade install).
+    """
+    config.inference_paused = True
+    _inference_controller.pause()
+
+
+def resume_ai_inference(config: "Config") -> None:
+    """Resume AI inference after a pause_ai_inference() call."""
+    config.inference_paused = False
+    _inference_controller.resume()
+
+
 def start_ai_threads(
     config: Config,
     overlay_boxes_queue: queue.Queue,

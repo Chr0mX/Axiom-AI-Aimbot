@@ -83,86 +83,138 @@ class PIDController:
             return 0.5 + (kp - 0.5) * 3.0
 
 
-def preprocess_image(image: npt.NDArray[np.uint8], model_input_size: int) -> npt.NDArray[np.float32]:
-    """
-    Preprocess image to fit ONNX model
-    
+def preprocess_image(
+    image: npt.NDArray[np.uint8],
+    model_input_size: int,
+) -> Tuple[npt.NDArray[np.float32], float, int, int]:
+    """Preprocess image for ONNX inference using letterboxing.
+
+    Letterboxing (uniform scale + grey padding) preserves the original aspect
+    ratio instead of stretching the image.  This is critical for Y-axis
+    accuracy: a non-square capture region (e.g. at a screen edge) used to be
+    distorted when resized to the square model input, causing the model to
+    predict bounding box heights that were systematically off.  With
+    letterboxing the model always sees correctly-proportioned content.
+
     Args:
-        image: Input image (BGR format)
-        model_input_size: Model input size
-        
+        image: Input frame (BGR or BGRA).
+        model_input_size: Square side length expected by the ONNX model (e.g. 640).
+
     Returns:
-        Preprocessed tensor [1, 3, H, W]
+        (blob, scale, pad_x, pad_y) where
+        - blob    : float32 tensor [1, 3, H, W] ready for model.run()
+        - scale   : uniform scale factor applied (original → resized)
+        - pad_x   : horizontal padding added to each side (pixels)
+        - pad_y   : vertical   padding added to each side (pixels)
+
+        Pass scale / pad_x / pad_y to postprocess_outputs() so it can
+        reverse the letterbox transform and recover screen coordinates.
     """
-    # Optimization 1: Use cvtColor to handle BGRA -> BGR
-    # This is faster than numpy slicing (image[:, :, :3]) and directly produces contiguous memory
     if image.ndim == 3 and image.shape[2] == 4:
         image = cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
 
-    # 優化 2: 顯式調整大小並使用 INTER_NEAREST (最近鄰插值)
-    # 當從小圖 (如 222) 放大到大圖 (如 640) 時，預設的線性插值非常耗時
-    # INTER_NEAREST 速度極快，能大幅降低 pre-process 時間
-    if image.shape[0] != model_input_size or image.shape[1] != model_input_size:
-        image = cv2.resize(image, (model_input_size, model_input_size), interpolation=cv2.INTER_NEAREST)
+    h, w = image.shape[:2]
 
-    # blob: [1, 3, H, W] float32
-    # 因為已經 resize 過，這裡的 resize 動作會被跳過或開銷極小
+    # Fast path: image is already the right square size (common for screen
+    # capture with detection_size == model_input_size).
+    if h == model_input_size and w == model_input_size:
+        blob = cv2.dnn.blobFromImage(
+            image,
+            scalefactor=1.0 / 255.0,
+            size=(model_input_size, model_input_size),
+            swapRB=True,
+            crop=False,
+        )
+        return np.ascontiguousarray(blob, dtype=np.float32), 1.0, 0, 0
+
+    # Uniform scale so the longer side fits in model_input_size.
+    scale = min(model_input_size / w, model_input_size / h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+    # Centre the resized image on a grey canvas (114 = YOLO default fill).
+    pad_x = (model_input_size - new_w) // 2
+    pad_y = (model_input_size - new_h) // 2
+    canvas = np.full((model_input_size, model_input_size, 3), 114, dtype=np.uint8)
+    canvas[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
+
     blob = cv2.dnn.blobFromImage(
-        image,
+        canvas,
         scalefactor=1.0 / 255.0,
         size=(model_input_size, model_input_size),
         swapRB=True,
         crop=False,
     )
-
-    # 確保連續記憶體布局（避免某些後端額外拷貝）
-    return np.ascontiguousarray(blob, dtype=np.float32)
+    return np.ascontiguousarray(blob, dtype=np.float32), scale, pad_x, pad_y
 
 
 def postprocess_outputs(
-    outputs: List[Any], 
-    original_width: int, 
-    original_height: int, 
-    model_input_size: int, 
-    min_confidence: float, 
-    offset_x: int = 0, 
-    offset_y: int = 0
+    outputs: List[Any],
+    original_width: int,
+    original_height: int,
+    model_input_size: int,
+    min_confidence: float,
+    offset_x: int = 0,
+    offset_y: int = 0,
+    letterbox_scale: float = 1.0,
+    letterbox_pad_x: int = 0,
+    letterbox_pad_y: int = 0,
 ) -> Tuple[List[List[float]], List[float]]:
-    """
-    後處理 ONNX 模型輸出
-    
+    """Post-process ONNX model output into screen-space bounding boxes.
+
+    Y-axis fix
+    ----------
+    When preprocess_image() uses letterboxing the model predictions are in
+    letterboxed coordinate space.  We must reverse the letterbox transform
+    (remove padding, divide by scale) before mapping to original image space.
+    Without this step, Y-axis coordinates were systematically shifted whenever
+    the capture region was non-square (e.g. when the crosshair is near a screen
+    edge), causing accurate X tracking but inaccurate Y tracking.
+
     Args:
-        outputs: 模型輸出
-        original_width: 原始圖像寬度
-        original_height: 原始圖像高度
-        model_input_size: 模型輸入尺寸
-        min_confidence: 最小置信度閾值
-        offset_x: X 軸偏移
-        offset_y: Y 軸偏移
-        
+        outputs:          Raw ONNX model outputs.
+        original_width:   Width of the captured region (pixels).
+        original_height:  Height of the captured region (pixels).
+        model_input_size: Square side the model was run at (e.g. 640).
+        min_confidence:   Detection confidence threshold (0–1).
+        offset_x:         Region left edge in screen coordinates.
+        offset_y:         Region top  edge in screen coordinates.
+        letterbox_scale:  Scale returned by preprocess_image().
+        letterbox_pad_x:  Horizontal padding returned by preprocess_image().
+        letterbox_pad_y:  Vertical   padding returned by preprocess_image().
+
     Returns:
-        (boxes, confidences) 元組
+        (boxes, confidences) with boxes as [[x1, y1, x2, y2], …] in absolute
+        screen coordinates.
     """
     predictions = outputs[0][0].T
-    
-    # 向量化過濾：先篩選高置信度的檢測
+
     conf_mask = predictions[:, 4] >= min_confidence
     filtered_predictions = predictions[conf_mask]
-    
+
     if len(filtered_predictions) == 0:
         return [], []
-    
-    # 向量化計算邊界框
-    scale_x = original_width / model_input_size
-    scale_y = original_height / model_input_size
-    
-    cx, cy, w, h = (filtered_predictions[:, 0], filtered_predictions[:, 1], 
-                    filtered_predictions[:, 2], filtered_predictions[:, 3])
-    
-    x1 = (cx - w / 2) * scale_x + offset_x
-    y1 = (cy - h / 2) * scale_y + offset_y
-    x2 = (cx + w / 2) * scale_x + offset_x
-    y2 = (cy + h / 2) * scale_y + offset_y
+
+    cx = filtered_predictions[:, 0]
+    cy = filtered_predictions[:, 1]
+    w  = filtered_predictions[:, 2]
+    h  = filtered_predictions[:, 3]
+
+    # Reverse letterbox: remove padding offsets then undo the uniform scale.
+    # This maps model-space coordinates back to original-capture-space coordinates.
+    inv_scale = 1.0 / letterbox_scale if letterbox_scale > 0 else 1.0
+    cx = (cx - letterbox_pad_x) * inv_scale
+    cy = (cy - letterbox_pad_y) * inv_scale
+    w  = w  * inv_scale
+    h  = h  * inv_scale
+
+    # Map from capture-region space to absolute screen space.
+    x1 = cx - w / 2 + offset_x
+    y1 = cy - h / 2 + offset_y
+    x2 = cx + w / 2 + offset_x
+    y2 = cy + h / 2 + offset_y
 
     boxes = np.stack([x1, y1, x2, y2], axis=1).tolist()
     confidences = filtered_predictions[:, 4].tolist()

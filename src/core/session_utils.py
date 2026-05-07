@@ -3,8 +3,80 @@
 
 import logging
 import os
+import threading
+import time
 
 import onnxruntime as ort
+
+
+class InferenceController:
+    """Thread-safe pause/stop controller for the AI inference loop.
+
+    Use pause() / resume() to temporarily halt inference without killing threads
+    or destroying the ONNX session — useful for in-app operations that need the
+    GPU free (e.g. driver updates, lightweight config reloads).
+
+    Use request_stop() to signal a full shutdown; the loop exits cooperatively on
+    its next iteration.
+
+    Event semantics
+    ---------------
+    _pause_event  SET   → loop should sleep (paused)
+                  CLEAR → loop should run  (normal)
+    _stop_event   SET   → loop should exit
+                  CLEAR → loop should keep running
+    """
+
+    def __init__(self) -> None:
+        self._pause_event: threading.Event = threading.Event()
+        self._stop_event: threading.Event = threading.Event()
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def pause(self) -> None:
+        """Signal the inference loop to pause on its next iteration."""
+        self._pause_event.set()
+
+    def resume(self) -> None:
+        """Clear the pause signal so the inference loop resumes."""
+        self._pause_event.clear()
+
+    def request_stop(self) -> None:
+        """Signal the inference loop to exit cleanly."""
+        self._stop_event.set()
+        self._pause_event.clear()  # unblock wait_while_paused so thread can exit
+
+    def clear_stop(self) -> None:
+        """Reset the stop flag (e.g. before restarting a loop)."""
+        self._stop_event.clear()
+
+    # ── State queries ─────────────────────────────────────────────────────────
+
+    @property
+    def should_pause(self) -> bool:
+        return self._pause_event.is_set()
+
+    @property
+    def should_stop(self) -> bool:
+        return self._stop_event.is_set()
+
+    # ── Blocking helper for use inside the inference loop ─────────────────────
+
+    def wait_while_paused(self, check_interval: float = 0.05) -> bool:
+        """Block the calling thread while paused.
+
+        Returns True if the loop should continue, False if a stop was requested
+        while waiting (caller should exit the loop in that case).
+        """
+        while self._pause_event.is_set():
+            if self._stop_event.is_set():
+                return False
+            time.sleep(check_interval)
+        return not self._stop_event.is_set()
+
+
+# Module-level singleton — imported by ai_loop and main to share state.
+inference_controller = InferenceController()
 
 # Project root: src/core/session_utils.py → up two levels → project root
 _MODULE_DIR = os.path.dirname(os.path.abspath(__file__))

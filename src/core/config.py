@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import json
 import os
 from typing import List, Dict, Any
+
+from .humanization import HumanizationConfig
 
 
 def _get_screen_size() -> tuple[int, int]:
@@ -98,7 +101,7 @@ class Config:
         self.bezier_curve_steps: int = 7          # More segments = smoother (>=2)
 
         # Smart tracking prediction settings (replaces Kalman) 
-        self.tracker_enabled: bool = True           # Enable smart tracking prediction
+        self.tracker_enabled: bool = False          # SmartTracker removed; kept for config compatibility
         self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
         self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
         self.tracker_stop_threshold: float = 10.0    # Low speed zeroing threshold (pixels/sec)
@@ -232,6 +235,16 @@ class Config:
         self.detection_frame_count: int = 0
         self.latest_boxes: List[List[float]] = []
         self.latest_confidences: List[float] = []
+
+        # Runtime-only flags — never persisted to config.json
+        # Set to True to pause inference without stopping threads or closing UI
+        self.inference_paused: bool = False
+        # Nominal FPS of the active capture source (UVC/NDI reports this;
+        # screen capture uses monitor refresh rate or measured rate)
+        self.source_nominal_fps: float = 0.0
+
+        # Humanization post-processing layer (operates only on final dx/dy output)
+        self.humanization: HumanizationConfig = HumanizationConfig()
     
     def to_dict(self) -> Dict[str, Any]:
         """將可儲存的配置轉為字典"""
@@ -346,12 +359,20 @@ class Config:
             'enable_acrylic': self.enable_acrylic,
             'acrylic_window_alpha': self.acrylic_window_alpha,
             'acrylic_element_alpha': self.acrylic_element_alpha,
+
+            'humanization': dataclasses.asdict(self.humanization),
         }
     
     def from_dict(self, data: Dict[str, Any]) -> None:
         """從字典載入配置"""
         for key, value in data.items():
-            if hasattr(self, key):
+            if key == 'humanization' and isinstance(value, dict):
+                # Update the dataclass fields in-place rather than replacing the object,
+                # so unknown/future keys in the JSON are ignored gracefully.
+                for hk, hv in value.items():
+                    if hasattr(self.humanization, hk):
+                        setattr(self.humanization, hk, hv)
+            elif hasattr(self, key):
                 setattr(self, key, value)
 
 
