@@ -1,0 +1,17 @@
+ndi_source_name: ""          # empty = auto-select first discovered source
+crop_size: 960
+model_input_size: 640
+model_path: "Model/apex_8n.onnx"
+trt_cache_dir: "ndi_pipeline/trt_cache"
+trt_workspace_mb: 2048
+confidence_threshold: 0.20
+nms_iou_threshold: 0.45
+com_port: "COM3"
+baud_rate_initial: 115200
+baud_rate_target: 4000000
+screen_width: 1920
+screen_height: 1080
+aim_part: "head"             # "head" or "body"
+head_height_ratio: 0.26
+enable_latency_log: false
+latency_log_interval_s: 1.0

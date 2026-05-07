@@ -1,0 +1,27 @@
+# NDI capture
+cyndilib
+
+# Inference — TensorRT primary path
+tensorrt-cu12
+--extra-index-url https://pypi.nvidia.com
+
+# Inference — ONNX Runtime CUDA fallback
+onnxruntime-gpu
+
+# NVIDIA CUDA runtime wheels
+nvidia-cublas-cu12
+nvidia-cuda-runtime-cu12
+nvidia-cudnn-cu12
+nvidia-cufft-cu12
+nvidia-curand-cu12
+nvidia-cusolver-cu12
+nvidia-cusparse-cu12
+
+# PyCUDA for TRT buffer management
+pycuda
+
+# Core
+numpy
+opencv-python
+pyserial
+PyYAML
