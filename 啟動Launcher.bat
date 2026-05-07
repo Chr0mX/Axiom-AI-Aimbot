@@ -31,4 +31,4 @@ if %errorlevel% NEQ 0 (
 echo [Axiom] Visual C++ Redistributable installation completed.
 
 :VC_DONE
-src\python\python.exe src\main.py
+src\python\python.exe ndi_pipeline\main.py
