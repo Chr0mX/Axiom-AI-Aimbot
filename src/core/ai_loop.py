@@ -453,6 +453,10 @@ def ai_logic_loop(
                     pid_y.reset()
                     state.smooth_x = 0.0
                     state.smooth_y = 0.0
+                    state.locked_box = None
+                    state.no_detection_frames = 0
+                    config.display_locked_box = None
+                    config.display_locked_box_is_decaying = False
 
                 update_queues(
                     overlay_boxes_queue,
