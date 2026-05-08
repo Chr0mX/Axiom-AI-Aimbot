@@ -242,6 +242,15 @@ class Config:
         self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
         self.prediction_history_len: int = 3         # 歷史點數量
 
+        # 目標鎖定（Sticky Lock）
+        self.sticky_lock_enabled: bool = False
+        self.lock_decay_frames: int = 15       # 鎖定目標消失後維持的幀數
+        self.lock_iou_threshold: float = 0.3   # 視為同一目標的最低 IoU
+
+        # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
+        self.display_locked_box: list | None = None
+        self.display_locked_box_is_decaying: bool = False
+
         # 延遲/性能統計（預設關閉，避免輸出干擾）
         self.enable_latency_stats: bool = False
         self.latency_stats_interval: float = 1.0  # 秒
@@ -361,6 +370,10 @@ class Config:
             'prediction_horizon_ms': self.prediction_horizon_ms,
             'prediction_max_velocity': self.prediction_max_velocity,
             'prediction_history_len': self.prediction_history_len,
+
+            'sticky_lock_enabled': self.sticky_lock_enabled,
+            'lock_decay_frames': self.lock_decay_frames,
+            'lock_iou_threshold': self.lock_iou_threshold,
 
             'bezier_curve_enabled': self.bezier_curve_enabled,
             'bezier_curve_strength': self.bezier_curve_strength,

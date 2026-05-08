@@ -511,12 +511,12 @@ class AimPage(BasePage):
 
         # MAKCU Baud Rate
         self.makcuBaudCombo = ComboBox()
-        self.makcuBaudCombo.addItems(["115200", "500000", "1000000", "2000000", "4000000"])
+        self.makcuBaudCombo.addItems(["115200", "4000000"])
         self.makcuBaudCombo.setMinimumWidth(120)
         self.makcuBaudCard = SettingCard(
             FluentIcon.SPEED_HIGH,
             t("makcu_baud_rate", "Baud Rate"),
-            t("makcu_baud_rate_desc", "⚠ Verify your USB-serial chip (CH340/CP2102/FTDI) supports the selected rate"),
+            t("makcu_baud_rate_desc", "4000000 = 4 Mbaud — ~35× faster than default, lowest serial latency"),
             self.makcuGroup
         )
         self.makcuBaudCard.hBoxLayout.addWidget(self.makcuBaudCombo, 0, Qt.AlignmentFlag.AlignRight)
@@ -873,6 +873,33 @@ class AimPage(BasePage):
             parent=self.trackingGroup
         )
 
+        self.stickyLockCard = SwitchSettingCard(
+            FluentIcon.PIN,
+            t("sticky_lock_enabled", "Sticky Target Lock"),
+            t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."),
+            parent=self.trackingGroup
+        )
+
+        self.lockDecayCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("lock_decay_frames", "Lock Decay Frames"),
+            3, 60,
+            format_func=lambda v: f"{v} fr",
+            description=t("lock_decay_desc", "Frames to hold aim after target is lost before releasing the lock"),
+            label_width=55,
+            parent=self.trackingGroup
+        )
+
+        self.lockIouCard = SliderLabelCard(
+            FluentIcon.ZOOM_IN,
+            t("lock_iou_threshold", "IoU Match Threshold"),
+            10, 70,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("lock_iou_desc", "Minimum overlap required to match the same target across frames"),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
     def _initLayout(self):
         """排版所有控制項"""
         # 模型設定
@@ -1023,6 +1050,9 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.predictionHorizonCard)
         self.trackingGroup.addSettingCard(self.predictionMaxVelCard)
         self.trackingGroup.addSettingCard(self.predictionHistoryCard)
+        self.trackingGroup.addSettingCard(self.stickyLockCard)
+        self.trackingGroup.addSettingCard(self.lockDecayCard)
+        self.trackingGroup.addSettingCard(self.lockIouCard)
         self.addContent(self.trackingGroup)
 
         self.scrollLayout.addStretch(1)
@@ -1128,6 +1158,9 @@ class AimPage(BasePage):
         self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
         self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
         self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
+        self.stickyLockCard.checkedChanged.connect(self._onStickyLockChanged)
+        self.lockDecayCard.valueChanged.connect(self._onLockDecayChanged)
+        self.lockIouCard.valueChanged.connect(self._onLockIouChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -1297,6 +1330,9 @@ class AimPage(BasePage):
             self.predictionHorizonCard.setValue(int(getattr(self._config, 'prediction_horizon_ms', 10.0)))
             self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
             self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
+            self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
+            self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
+            self.lockIouCard.setValue(int(getattr(self._config, 'lock_iou_threshold', 0.3) * 100))
         finally:
             self._isLoadingConfig = False
 
@@ -2179,6 +2215,18 @@ class AimPage(BasePage):
     def _onPredictionHistoryChanged(self, value):
         if self._config:
             self._config.prediction_history_len = int(value)
+
+    def _onStickyLockChanged(self, checked):
+        if self._config:
+            self._config.sticky_lock_enabled = bool(checked)
+
+    def _onLockDecayChanged(self, value):
+        if self._config:
+            self._config.lock_decay_frames = int(value)
+
+    def _onLockIouChanged(self, value):
+        if self._config:
+            self._config.lock_iou_threshold = value / 100.0
 
     def retranslateUi(self):
         """刷新翻譯"""

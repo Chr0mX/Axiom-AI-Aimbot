@@ -14,6 +14,16 @@ from .target_predictor import VelocityPredictor
 if TYPE_CHECKING:
     from .config import Config
 
+def _box_iou(a: List[float], b: List[float]) -> float:
+    """Intersection over Union for two [x1, y1, x2, y2] boxes."""
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    if inter == 0.0:
+        return 0.0
+    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+
+
 # Module-level predictor singleton — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
 
@@ -93,7 +103,27 @@ def process_aiming(
             valid_targets.sort(key=lambda x: x[0] * (1.0 - x[1] * conf_weight))
         else:
             valid_targets.sort(key=lambda x: x[0])
-        _, _conf, target_x, target_y, _box = valid_targets[0]
+
+        # --- Sticky target lock (optional) ---
+        # When enabled, prefer the previously locked target over a new closest one,
+        # preventing aim from snapping to a different target mid-track.
+        sticky = getattr(config, 'sticky_lock_enabled', False)
+        selected = valid_targets[0]
+        if sticky and state.locked_box is not None:
+            iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
+            best_item, best_iou = None, 0.0
+            for item in valid_targets:
+                iou = _box_iou(state.locked_box, item[4])
+                if iou > best_iou:
+                    best_iou, best_item = iou, item
+            if best_iou >= iou_thresh and best_item is not None:
+                selected = best_item
+        _, _conf, target_x, target_y, selected_box = selected
+        if sticky:
+            state.locked_box = selected_box
+            state.no_detection_frames = 0
+            config.display_locked_box = list(selected_box)
+            config.display_locked_box_is_decaying = False
 
         # --- Velocity prediction (optional) ---
         if getattr(config, 'prediction_enabled', False):
@@ -156,5 +186,18 @@ def process_aiming(
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)
     else:
+        sticky = getattr(config, 'sticky_lock_enabled', False)
+        if sticky and state.locked_box is not None:
+            decay = int(getattr(config, 'lock_decay_frames', 15))
+            state.no_detection_frames += 1
+            config.display_locked_box_is_decaying = True
+            if state.no_detection_frames < decay:
+                # Hold aim — PID keeps last error; no mouse move this frame
+                return
+            # Decay expired — clear lock and reset
+            state.locked_box = None
+            state.no_detection_frames = 0
+            config.display_locked_box = None
+            config.display_locked_box_is_decaying = False
         pid_x.reset()
         pid_y.reset()

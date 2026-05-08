@@ -46,6 +46,7 @@ class MakcuMouse:
     CMD_LEFT_UP = "km.left(0)\r\n"
     CMD_ECHO_OFF = "km.echo(0)\r\n"
     CMD_VERSION = "km.version()\r\n"
+    CMD_BAUD_4M = b"km.baud(4000000)\r\n"
 
     def __init__(self):
         self._serial: Optional[serial.Serial] = None
@@ -55,17 +56,18 @@ class MakcuMouse:
         self._baud_rate: int = 115200
 
     def connect(self, com_port: str, baud_rate: int = 115200) -> bool:
-        """Connect to MAKCU device
+        """Connect to MAKCU device.
 
-        Args:
-            com_port: COM port (e.g., 'COM3')
-            baud_rate: Baud rate, default 115200 (MAKCU default)
-
-        Returns:
-            Whether the connection was successful
+        MAKCU supports only 115200 and 4000000 baud.  We always open at 115200
+        first (the device's startup rate), perform the handshake, then if the
+        caller requested 4 Mbaud we send km.baud(4000000), close and reopen at
+        4 Mbaud.
         """
+        # Normalise: accept only the two supported rates
+        target_baud = 4_000_000 if baud_rate == 4_000_000 else 115200
+
         with self._lock:
-            # Close old connection
+            # Close existing connection
             if self._serial and self._serial.is_open:
                 try:
                     self._serial.close()
@@ -74,88 +76,80 @@ class MakcuMouse:
                 self._connected = False
 
             try:
-                actual_baud = self._open_serial(com_port, baud_rate)
-                if actual_baud is None:
+                # Always open at 115200 — the device's startup/default rate
+                if not self._open_serial(com_port):
                     self._connected = False
                     return False
 
                 self._com_port = com_port
-                self._baud_rate = actual_baud
 
-                # MAKCU doesn't reset on connection (unlike Arduino Leonardo),
-                # so we can start sending commands immediately.
-                # Brief settle time for serial port.
+                # Brief settle time
                 time.sleep(0.1)
-
-                # Clear old data in the buffer
                 self._serial.reset_input_buffer()
 
-                # Send version command to verify it's a real MAKCU device
+                # Verify device with version command
                 self._serial.write(self.CMD_VERSION.encode('ascii'))
-                time.sleep(0.1)  # Wait for a response
+                time.sleep(0.1)
 
-                # Check if device responded
                 if self._serial.in_waiting == 0:
-                    logger.error(f"[MAKCU] Handshake failed on {com_port}: No response from device.")
-                    print(f"[MAKCU] Handshake failed on {com_port}: No response from device.")
+                    logger.error("[MAKCU] Handshake failed on %s: no response.", com_port)
+                    print(f"[MAKCU] Handshake failed on {com_port}: no response from device.")
                     self._serial.close()
                     self._connected = False
                     return False
 
-                # Read out the version info
                 version_info = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore').strip()
-                logger.info(f"[MAKCU] Device info: {version_info}")
+                logger.info("[MAKCU] Device info: %s", version_info)
                 print(f"[MAKCU] Device responded: {version_info}")
 
                 # Disable echo to reduce serial traffic
                 self._serial.write(self.CMD_ECHO_OFF.encode('ascii'))
-                # Flush any pending response
                 time.sleep(0.05)
                 self._serial.reset_input_buffer()
 
+                # Switch to 4 Mbaud if requested
+                if target_baud == 4_000_000:
+                    self._serial.write(self.CMD_BAUD_4M)
+                    self._serial.flush()
+                    time.sleep(0.05)       # device applies new rate
+                    self._serial.close()
+                    time.sleep(0.02)       # OS releases port
+                    self._serial = serial.Serial(
+                        com_port, 4_000_000, timeout=0.1, write_timeout=0.005)
+                    time.sleep(0.05)       # port settle
+                    self._serial.reset_input_buffer()
+                    logger.info("[MAKCU] Switched to 4 Mbaud on %s", com_port)
+                    print(f"[MAKCU] Switched to 4 Mbaud on {com_port}")
+
+                self._baud_rate = target_baud
                 self._connected = True
-                logger.info(f"[MAKCU] Successfully connected to {com_port} @ {actual_baud} baud")
-                print(f"[MAKCU] Successfully connected to {com_port} @ {actual_baud} baud")
+                logger.info("[MAKCU] Connected to %s @ %d baud", com_port, target_baud)
+                print(f"[MAKCU] Successfully connected to {com_port} @ {target_baud} baud")
                 return True
+
             except serial.SerialException as e:
-                logger.error(f"[MAKCU] Connection failed: {e}")
+                logger.error("[MAKCU] Connection failed: %s", e)
                 print(f"[MAKCU] Connection failed: {e}")
                 self._connected = False
                 return False
             except Exception as e:
-                logger.error(f"[MAKCU] Error occurred during connection: {e}")
-                print(f"[MAKCU] Error occurred during connection: {e}")
+                logger.error("[MAKCU] Error during connection: %s", e)
+                print(f"[MAKCU] Error during connection: {e}")
                 self._connected = False
                 return False
 
-    def _open_serial(self, com_port: str, baud_rate: int) -> int | None:
-        """Open serial port at requested baud rate, falling back to 115200 on failure.
+    def _open_serial(self, com_port: str) -> bool:
+        """Open serial port at 115200 (MAKCU startup rate).
 
-        Returns the actual baud rate used, or None if the port could not be opened.
+        Returns True on success, False on failure.
         """
         try:
-            self._serial = serial.Serial(
-                com_port, baud_rate, timeout=0.1, write_timeout=0.005
-            )
-            return baud_rate
-        except serial.SerialException:
-            if baud_rate == 115200:
-                raise  # already at fallback, propagate
-            logger.warning(
-                f"[MAKCU] {baud_rate} baud not supported on {com_port} — "
-                "retrying at 115200. Verify your USB-serial chip supports the requested rate."
-            )
-            print(
-                f"[MAKCU] ⚠ {baud_rate} baud failed — falling back to 115200. "
-                "Verify your chip (CH340/CP2102/FTDI) supports the requested baud rate."
-            )
-            try:
-                self._serial = serial.Serial(
-                    com_port, 115200, timeout=0.1, write_timeout=0.005
-                )
-                return 115200
-            except serial.SerialException:
-                return None
+            self._serial = serial.Serial(com_port, 115200, timeout=0.1, write_timeout=0.005)
+            return True
+        except serial.SerialException as e:
+            logger.error("[MAKCU] Cannot open %s: %s", com_port, e)
+            print(f"[MAKCU] Cannot open {com_port}: {e}")
+            return False
 
     def disconnect(self):
         """Disconnect from MAKCU device"""

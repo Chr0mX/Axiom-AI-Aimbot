@@ -465,12 +465,28 @@ class NDICapture:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
         print('[Capture][NDI] Receiver connected and video stream is ready.')
 
+        # Shared refs for the preview thread — grab() writes, thread reads
+        self._ndi_frame_lock: threading.Lock = threading.Lock()
+        self._ndi_frame_ref: list = [None]    # list[np.ndarray | None]
+        self._ndi_region_ref: list = [None]
+        self._ndi_stop: threading.Event = threading.Event()
+
+        self._ndi_preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
-            try:
-                cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-                print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
-            except Exception:
-                pass
+            self._ndi_preview_thread = _UVCPreviewThread(
+                window_name=self.window_name,
+                scale_mode=self.preview_scale_mode,
+                frame_lock=self._ndi_frame_lock,
+                frame_ref=self._ndi_frame_ref,
+                stop_event=self._ndi_stop,
+                draw_overlay_fn=self._draw_overlay,
+                region_ref=self._ndi_region_ref,
+                target_fps=60,
+                preview_width=self.preview_width or 1920,
+                preview_height=self.preview_height or 1080,
+            )
+            self._ndi_preview_thread.start()
+            print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
 
     def _resolve_source(self) -> Any | None:
         if not self.source_name:
@@ -657,13 +673,10 @@ class NDICapture:
             frame = frame[top:bottom, left:right]
 
         if self.show_window:
-            try:
-                preview = self._draw_overlay(full_frame.copy(), region)
-                render_frame = _render_preview_frame(self.window_name, self.preview_scale_mode, preview)
-                cv2.imshow(self.window_name, render_frame)
-                cv2.waitKey(1)
-            except Exception:
-                pass
+            # Feed the preview thread — it draws overlays and calls imshow independently
+            with self._ndi_frame_lock:
+                self._ndi_frame_ref[0] = full_frame
+            self._ndi_region_ref[0] = region
 
         if frame.ndim == 3 and frame.shape[2] == 4:
             return frame
@@ -771,6 +784,16 @@ class NDICapture:
                 if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
                     cv2.line(frame_bgra, (cx, cy), (bx, by), (255, 255, 255, 255), 2, cv2.LINE_AA)
 
+        decay_box = getattr(cfg, 'display_locked_box', None)
+        if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
+            try:
+                x1, y1, x2, y2 = [int(v) for v in decay_box]
+                x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
+                x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
+                cv2.rectangle(frame_bgra, (x1, y1), (x2, y2), (0, 140, 255, 255), 1, cv2.LINE_AA)
+            except Exception:
+                pass
+
         return frame_bgra
 
     def close(self) -> None:
@@ -791,11 +814,12 @@ class NDICapture:
                         method()
                     except Exception:
                         pass
-        if self.show_window:
-            try:
-                cv2.destroyWindow(self.window_name)
-            except Exception:
-                pass
+        # Stop the preview thread; it destroys the window on exit
+        if getattr(self, '_ndi_stop', None) is not None:
+            self._ndi_stop.set()
+        pt = getattr(self, '_ndi_preview_thread', None)
+        if pt is not None and pt.is_alive():
+            pt.join(timeout=1.0)
 
 
 def list_supported_uvc_resolutions(
@@ -854,18 +878,29 @@ class _UVCPreviewThread(threading.Thread):
         draw_overlay_fn,
         region_ref: list,
         target_fps: int = 60,
+        preview_width: int = 1920,
+        preview_height: int = 1080,
     ) -> None:
         super().__init__(daemon=True, name='UVCPreview')
-        self._window_name   = window_name
-        self._scale_mode    = scale_mode
-        self._lock          = frame_lock
-        self._frame_ref     = frame_ref      # list[np.ndarray | None]
-        self._stop          = stop_event
-        self._draw_overlay  = draw_overlay_fn
-        self._region_ref    = region_ref     # list[dict | None]
-        self._interval      = 1.0 / max(1, target_fps)
+        self._window_name    = window_name
+        self._scale_mode     = scale_mode
+        self._lock           = frame_lock
+        self._frame_ref      = frame_ref      # list[np.ndarray | None]
+        self._stop           = stop_event
+        self._draw_overlay   = draw_overlay_fn
+        self._region_ref     = region_ref     # list[dict | None]
+        self._interval       = 1.0 / max(1, target_fps)
+        self._preview_width  = preview_width
+        self._preview_height = preview_height
 
     def run(self) -> None:
+        # All OpenCV GUI operations for this window must happen on this thread.
+        try:
+            cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
+        except Exception:
+            pass
+
         while not self._stop.is_set():
             t0 = time.perf_counter()
             with self._lock:
@@ -883,6 +918,11 @@ class _UVCPreviewThread(threading.Thread):
             remaining = self._interval - (time.perf_counter() - t0)
             if remaining > 0.001:
                 time.sleep(remaining)
+
+        try:
+            cv2.destroyWindow(self._window_name)
+        except Exception:
+            pass
 
 
 class UVCCapture:
@@ -955,13 +995,6 @@ class UVCCapture:
                 actual_str,
             )
 
-        if self.show_window:
-            try:
-                cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
-                cv2.resizeWindow(self.window_name, self.preview_width, self.preview_height)
-            except Exception:
-                pass
-
         # --- Non-blocking reader thread ---
         # cap.read() blocks up to one frame period (e.g. 16 ms at 60 fps).
         # A background thread continuously reads into _latest_frame_ref so that
@@ -976,8 +1009,9 @@ class UVCCapture:
         self._reader_thread.start()
 
         # --- Dedicated preview thread ---
-        # Renders the preview window at the camera's native FPS independently
-        # of the inference loop, so cv2.imshow/waitKey never stall grab().
+        # Renders the preview window (background + overlays) at camera FPS,
+        # fully decoupled from inference. namedWindow/imshow/destroyWindow all
+        # run on this thread so OpenCV's GUI-thread affinity requirement is met.
         self._preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
             self._preview_thread = _UVCPreviewThread(
@@ -989,6 +1023,8 @@ class UVCCapture:
                 draw_overlay_fn=self._draw_overlay,
                 region_ref=self._region_ref,
                 target_fps=self.preview_fps,
+                preview_width=self.preview_width,
+                preview_height=self.preview_height,
             )
             self._preview_thread.start()
 
@@ -1134,6 +1170,20 @@ class UVCCapture:
                 if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
                     cv2.line(frame_bgr, (cx, cy), (bx, by), (255, 255, 255), 2, cv2.LINE_AA)
 
+        # Locked-target decay box — drawn when sticky lock is holding position
+        # after detection was lost, so the user sees a visual indicator.
+        decay_box = getattr(cfg, 'display_locked_box', None)
+        if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
+            try:
+                x1, y1, x2, y2 = [int(v) for v in decay_box]
+                x1 = max(0, min(w - 1, x1))
+                y1 = max(0, min(h - 1, y1))
+                x2 = max(0, min(w - 1, x2))
+                y2 = max(0, min(h - 1, y2))
+                cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (0, 140, 255), 1, cv2.LINE_AA)
+            except Exception:
+                pass
+
         return frame_bgr
 
     def _render_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
@@ -1150,11 +1200,7 @@ class UVCCapture:
                 self.cap.release()
             except Exception:
                 pass
-        if self.show_window:
-            try:
-                cv2.destroyWindow(self.window_name)
-            except Exception:
-                pass
+        # destroyWindow is handled by the preview thread's run() exit path
 
 
 def _get_monitor_refresh_rate() -> int:
