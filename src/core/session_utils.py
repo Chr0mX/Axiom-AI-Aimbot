@@ -3,8 +3,58 @@
 
 import logging
 import os
+import sys
 import threading
 import time
+
+# ── DLL pre-registration ──────────────────────────────────────────────────────
+# TensorRT pip wheels (tensorrt-cu12-libs, nvidia-*-cu12) install their DLLs
+# under site-packages but do NOT add themselves to PATH.  Without this,
+# onnxruntime_providers_tensorrt.dll fails to load with "nvinfer_10.dll missing"
+# even when TRT IS installed.  Register every known wheel DLL directory before
+# the first import of onnxruntime so the loader can find them.
+
+def _register_trt_dll_dirs() -> None:
+    """Add TensorRT and CUDA pip-wheel DLL directories to PATH (Windows only)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import site
+        site_dirs: list = list(site.getsitepackages())
+        try:
+            site_dirs.append(site.getusersitepackages())
+        except (AttributeError, NotImplementedError):
+            pass
+
+        _CUDA_SUBS = (
+            "cuda_runtime", "cublas", "cudnn",
+            "cufft", "curand", "cusolver", "cusparse",
+        )
+        for sp in site_dirs:
+            # tensorrt-cu12-libs wheel
+            trt_libs = os.path.join(sp, "tensorrt_libs")
+            if os.path.isdir(trt_libs):
+                os.environ["PATH"] = f"{trt_libs};{os.environ.get('PATH', '')}"
+                try:
+                    os.add_dll_directory(trt_libs)
+                except (AttributeError, OSError):
+                    pass
+            # nvidia-*-cu12 wheels
+            for sub in _CUDA_SUBS:
+                bin_dir = os.path.join(sp, "nvidia", sub, "bin")
+                if os.path.isdir(bin_dir):
+                    os.environ["PATH"] = f"{bin_dir};{os.environ.get('PATH', '')}"
+                    try:
+                        os.add_dll_directory(bin_dir)
+                    except (AttributeError, OSError):
+                        pass
+    except Exception:
+        pass  # never crash the app over a PATH tweak
+
+
+_register_trt_dll_dirs()
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 import onnxruntime as ort
 
