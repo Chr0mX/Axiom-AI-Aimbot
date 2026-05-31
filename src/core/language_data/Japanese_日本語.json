@@ -121,6 +121,7 @@
     "tab_aim_control": "エイムアシスト",
     "tab_auto_features": "トリガーボット",
     "tab_config_management": "コンフィグ",
+    "tab_convert": "TensorRT 変換",
     "tab_display": "ビジュアル",
     "tab_keys": "キーバインド",
     "tab_program_control": "その他",

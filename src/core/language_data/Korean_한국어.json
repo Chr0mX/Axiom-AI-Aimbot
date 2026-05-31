@@ -121,6 +121,7 @@
     "tab_aim_control": "에임 어시스트",
     "tab_auto_features": "트리거봇",
     "tab_config_management": "구성",
+    "tab_convert": "TensorRT 변환",
     "tab_display": "비주얼",
     "tab_keys": "키 바인딩",
     "tab_program_control": "기타",
