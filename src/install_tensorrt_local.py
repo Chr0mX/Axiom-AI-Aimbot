@@ -33,7 +33,12 @@ SITE_PACKAGES = LOCAL_PYTHON_DIR / "Lib" / "site-packages"
 # tensorrt-cu12 is a meta-package that pulls in:
 #   tensorrt-cu12-bindings  (Python API)
 #   tensorrt-cu12-libs      (nvinfer_10.dll, nvonnxparser_10.dll, …)
-TENSORRT_PACKAGES = ["tensorrt-cu12"]
+#
+# IMPORTANT: pinned to <11.  onnxruntime-gpu (built against TensorRT 10) links
+# nvinfer_10.dll.  TensorRT 11 ships nvinfer_11.dll instead, which makes the ORT
+# TensorRT EP fail to load with "nvinfer_10.dll missing".  Keep this at 10.x
+# until the bundled onnxruntime-gpu is rebuilt against TRT 11.
+TENSORRT_PACKAGES = ["tensorrt-cu12<11"]
 
 # onnxruntime-gpu and its CUDA runtime wheels.
 # These come from the standard PyPI index.

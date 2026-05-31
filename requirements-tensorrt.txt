@@ -34,8 +34,11 @@ nvidia-cusparse-cu12
 # tensorrt-cu12 is a meta-package that installs:
 #   tensorrt-cu12-bindings  — Python API (import tensorrt)
 #   tensorrt-cu12-libs      — nvinfer_10.dll, nvonnxparser_10.dll, …
+# Pinned to <11: onnxruntime-gpu is built against TensorRT 10 and links
+# nvinfer_10.dll. TensorRT 11 ships nvinfer_11.dll, which makes the ORT
+# TensorRT EP fail with "nvinfer_10.dll missing".
 --extra-index-url https://pypi.nvidia.com
-tensorrt-cu12
+tensorrt-cu12<11
 
 # ── Shared inference dependencies ────────────────────────────────────────────
 numpy
