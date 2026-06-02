@@ -1,47 +1,44 @@
-"""Install TensorRT Python bindings and onnxruntime-gpu into the embedded Python.
+"""Install TensorRT Python bindings and onnxruntime-gpu.
 
-Usage (from project root):
+Packages are written to:
+    %LOCALAPPDATA%\\Packages\\AxiomAI
+
+This location survives app reinstalls and is isolated from other Python
+environments on the machine.  Axiom picks the packages up at startup via
+sys.path injection in session_utils.py.
+
+Usage (from project root, any Python ≥ 3.10):
+    python src\\install_tensorrt_local.py
+    -- or --
     src\\python\\python.exe src\\install_tensorrt_local.py
 
-What it does:
-  1. Verifies the embedded Python at src/python/python.exe
-  2. Installs onnxruntime-gpu (CUDA 12 wheels) if not already present
-  3. Installs tensorrt-cu12 (bindings + DLLs) from pypi.nvidia.com
-  4. Verifies TensorrtExecutionProvider appears in ort.get_available_providers()
-
 Compatibility:
-  - CUDA 12.x toolkit (driver >= 525.x)
-  - cuDNN 9.x (bundled in nvidia-cudnn-cu12 wheel)
-  - TensorRT 10.x (bundled in tensorrt-cu12 wheel)
-  - onnxruntime-gpu >= 1.19 (required for TRT 10 EP)
+  CUDA 12.x toolkit  (driver >= 525.x)
+  cuDNN 9.x          (bundled in nvidia-cudnn-cu12)
+  TensorRT 10.x      (tensorrt-cu12 < 11)
+  onnxruntime-gpu    >= 1.19
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+# ── Install target ────────────────────────────────────────────────────────────
+_LOCALAPPDATA = os.environ.get("LOCALAPPDATA", "")
+if not _LOCALAPPDATA:
+    print("[ERROR] LOCALAPPDATA environment variable is not set.", file=sys.stderr)
+    sys.exit(1)
 
-BASE_DIR = Path(__file__).resolve().parent
-LOCAL_PYTHON_DIR = BASE_DIR / "python"
-PYTHON_EXE = LOCAL_PYTHON_DIR / "python.exe"
-SITE_PACKAGES = LOCAL_PYTHON_DIR / "Lib" / "site-packages"
+PACKAGES_DIR = Path(_LOCALAPPDATA) / "Packages" / "AxiomAI"
 
-# ── Package lists ────────────────────────────────────────────────────────────
-# TensorRT 10.x for CUDA 12 — hosted on pypi.nvidia.com
-# tensorrt-cu12 is a meta-package that pulls in:
-#   tensorrt-cu12-bindings  (Python API)
-#   tensorrt-cu12-libs      (nvinfer_10.dll, nvonnxparser_10.dll, …)
-#
-# IMPORTANT: pinned to <11.  onnxruntime-gpu (built against TensorRT 10) links
-# nvinfer_10.dll.  TensorRT 11 ships nvinfer_11.dll instead, which makes the ORT
-# TensorRT EP fail to load with "nvinfer_10.dll missing".  Keep this at 10.x
-# until the bundled onnxruntime-gpu is rebuilt against TRT 11.
+# ── Package lists ─────────────────────────────────────────────────────────────
+# TensorRT 10.x for CUDA 12.  Pinned to <11 because onnxruntime-gpu links
+# nvinfer_10.dll; TensorRT 11 ships nvinfer_11.dll instead, breaking the EP.
 TENSORRT_PACKAGES = ["tensorrt-cu12<11"]
 
-# onnxruntime-gpu and its CUDA runtime wheels.
-# These come from the standard PyPI index.
 ONNXRUNTIME_GPU_PACKAGES = [
     "onnxruntime-gpu",
     "nvidia-cublas-cu12",
@@ -62,7 +59,8 @@ COMMON_DEPS = [
     "coloredlogs",
 ]
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+
+# ── Output helpers ────────────────────────────────────────────────────────────
 
 def log(msg: str) -> None:
     print(f"[INFO] {msg}")
@@ -89,49 +87,57 @@ def fail(msg: str, code: int = 1) -> None:
     sys.exit(code)
 
 
+# ── Subprocess helpers ────────────────────────────────────────────────────────
+
 def run(cmd: list) -> None:
     display = " ".join(f'"{c}"' if " " in str(c) else str(c) for c in cmd)
     log(f"Running: {display}")
     subprocess.run(cmd, check=True)
 
 
-def _query_embedded(snippet: str) -> str:
-    """Run a Python snippet in the embedded interpreter and return stdout."""
+def _run_check(snippet: str) -> str:
+    """Run a Python snippet with PACKAGES_DIR injected into sys.path."""
+    inject = (
+        f"import sys; sys.path.insert(0, {str(PACKAGES_DIR)!r}); "
+        + snippet
+    )
     result = subprocess.run(
-        [str(PYTHON_EXE), "-c", snippet],
+        [sys.executable, "-c", inject],
         capture_output=True,
         text=True,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-# ── Detection ────────────────────────────────────────────────────────────────
+# ── Detection ─────────────────────────────────────────────────────────────────
 
 def is_cuda_available() -> bool:
-    out = _query_embedded(
-        "import onnxruntime as ort; print('CUDAExecutionProvider' in ort.get_available_providers())"
+    out = _run_check(
+        "import onnxruntime as ort; "
+        "print('CUDAExecutionProvider' in ort.get_available_providers())"
     )
     return out == "True"
 
 
 def is_tensorrt_available() -> bool:
-    out = _query_embedded(
-        "import onnxruntime as ort; print('TensorrtExecutionProvider' in ort.get_available_providers())"
+    out = _run_check(
+        "import onnxruntime as ort; "
+        "print('TensorrtExecutionProvider' in ort.get_available_providers())"
     )
     return out == "True"
 
 
 def is_tensorrt_importable() -> bool:
-    out = _query_embedded("import tensorrt; print(tensorrt.__version__)")
+    out = _run_check("import tensorrt; print(tensorrt.__version__)")
     return bool(out)
 
 
-# ── Installation ─────────────────────────────────────────────────────────────
+# ── Installation ──────────────────────────────────────────────────────────────
 
 def _pip(packages: list, upgrade: bool = True) -> None:
     cmd = [
-        str(PYTHON_EXE), "-m", "pip", "install",
-        "--target", str(SITE_PACKAGES),
+        sys.executable, "-m", "pip", "install",
+        "--target", str(PACKAGES_DIR),
         "--extra-index-url", "https://pypi.nvidia.com",
     ]
     if upgrade:
@@ -147,12 +153,11 @@ def install_onnxruntime_gpu() -> None:
 
 
 def install_tensorrt() -> None:
-    log("Installing TensorRT Python bindings (tensorrt-cu12)...")
-    # Use --no-upgrade to avoid re-downloading large DLL wheels if already present
+    log("Installing TensorRT Python bindings (tensorrt-cu12 < 11)...")
     _pip(TENSORRT_PACKAGES, upgrade=False)
 
 
-# ── Verification ─────────────────────────────────────────────────────────────
+# ── Verification ──────────────────────────────────────────────────────────────
 
 def verify_installation() -> None:
     log("Verifying installation...")
@@ -171,10 +176,10 @@ def verify_installation() -> None:
     if not all_ok:
         warn("")
         warn("One or more components are missing. Common causes:")
-        warn("  1. CUDA 12.x toolkit is not installed on this system")
-        warn("  2. GPU driver is outdated — need >= 525.x for CUDA 12")
+        warn("  1. CUDA 12.x toolkit is not installed (driver >= 525.x required)")
+        warn("  2. GPU does not support TensorRT (requires Volta / Turing / Ampere / Ada+)")
         warn("  3. Network error downloading from pypi.nvidia.com")
-        warn("  4. GPU does not support TensorRT (requires Volta / Turing / Ampere / Ada+)")
+        warn("  4. Axiom has not been restarted since installation")
     else:
         log("All TensorRT components installed successfully.")
 
@@ -182,30 +187,27 @@ def verify_installation() -> None:
 def print_next_steps() -> None:
     log("")
     log("=== Next Steps ===")
-    log("1. Set inference_backend = 'cuda' in the app (enables TRT > CUDA fallback)")
-    log("2. On first inference the TRT engine is built — allow 1-5 minutes")
-    log("3. Subsequent runs load the cached engine from trt_cache/ instantly")
-    log("4. To pre-build the engine without starting the full app, run:")
-    log("   src\\python\\python.exe src\\core\\convert_to_engine.py --model Model\\Roblox_8n.onnx")
+    log(f"1. Packages installed to: {PACKAGES_DIR}")
+    log("2. Restart Axiom — session_utils.py will add the above path to sys.path")
+    log("3. Set inference_backend = 'cuda' in the app (enables TRT > CUDA fallback)")
+    log("4. On first inference the TRT engine is built — allow 1-5 minutes")
+    log("5. Subsequent runs load the cached engine from trt_cache/ instantly")
     log("")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def ensure_paths() -> None:
-    if not PYTHON_EXE.exists():
-        fail(
-            f"Embedded Python not found: {PYTHON_EXE}\n"
-            "       Run the main installer first to set up src/python."
-        )
-    SITE_PACKAGES.mkdir(parents=True, exist_ok=True)
+def ensure_packages_dir() -> None:
+    try:
+        PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        fail(f"Cannot create packages directory {PACKAGES_DIR}: {e}")
+    log(f"Install target  : {PACKAGES_DIR}")
 
 
 def main() -> None:
-    ensure_paths()
-
-    log(f"Embedded Python : {PYTHON_EXE}")
-    log(f"Site-packages   : {SITE_PACKAGES}")
+    ensure_packages_dir()
+    log(f"Python          : {sys.executable}")
     log("")
 
     if is_tensorrt_available():
@@ -214,7 +216,7 @@ def main() -> None:
         return
 
     if not is_cuda_available():
-        log("onnxruntime-gpu not yet installed. Installing CUDA packages first...")
+        log("onnxruntime-gpu not detected. Installing CUDA packages first...")
         install_onnxruntime_gpu()
     else:
         log("CUDAExecutionProvider already available — skipping onnxruntime-gpu.")

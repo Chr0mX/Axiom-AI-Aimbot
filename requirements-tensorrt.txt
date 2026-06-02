@@ -1,11 +1,11 @@
 # TensorRT backend dependencies
 #
-# Install into the embedded Python with:
-#   src\python\python.exe src\install_tensorrt_local.py
+# Recommended — use the installer (writes to %LOCALAPPDATA%\Packages\AxiomAI):
+#   python src\install_tensorrt_local.py
 #
 # Or manually:
-#   src\python\python.exe -m pip install -r requirements-tensorrt.txt ^
-#       --target src\python\Lib\site-packages ^
+#   pip install -r requirements-tensorrt.txt ^
+#       --target "%LOCALAPPDATA%\Packages\AxiomAI" ^
 #       --extra-index-url https://pypi.nvidia.com
 #
 # Compatibility matrix
