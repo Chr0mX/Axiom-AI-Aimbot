@@ -121,6 +121,7 @@
     "tab_aim_control": "瞄準輔助",
     "tab_auto_features": "自動扳機",
     "tab_config_management": "參數",
+    "tab_convert": "TensorRT 轉換",
     "tab_display": "視覺",
     "tab_keys": "按鍵綁定",
     "tab_program_control": "其他",

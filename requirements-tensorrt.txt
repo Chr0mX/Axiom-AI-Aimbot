@@ -1,11 +1,11 @@
 # TensorRT backend dependencies
 #
-# Install into the embedded Python with:
-#   src\python\python.exe src\install_tensorrt_local.py
+# Recommended — use the installer (writes to %LOCALAPPDATA%\Packages\AxiomAI):
+#   python src\install_tensorrt_local.py
 #
 # Or manually:
-#   src\python\python.exe -m pip install -r requirements-tensorrt.txt ^
-#       --target src\python\Lib\site-packages ^
+#   pip install -r requirements-tensorrt.txt ^
+#       --target "%LOCALAPPDATA%\Packages\AxiomAI" ^
 #       --extra-index-url https://pypi.nvidia.com
 #
 # Compatibility matrix
@@ -34,8 +34,11 @@ nvidia-cusparse-cu12
 # tensorrt-cu12 is a meta-package that installs:
 #   tensorrt-cu12-bindings  — Python API (import tensorrt)
 #   tensorrt-cu12-libs      — nvinfer_10.dll, nvonnxparser_10.dll, …
+# Pinned to <11: onnxruntime-gpu is built against TensorRT 10 and links
+# nvinfer_10.dll. TensorRT 11 ships nvinfer_11.dll, which makes the ORT
+# TensorRT EP fail with "nvinfer_10.dll missing".
 --extra-index-url https://pypi.nvidia.com
-tensorrt-cu12
+tensorrt-cu12<11
 
 # ── Shared inference dependencies ────────────────────────────────────────────
 numpy

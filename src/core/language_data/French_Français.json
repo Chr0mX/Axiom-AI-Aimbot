@@ -121,6 +121,7 @@
     "tab_aim_control": "Aide à la visée",
     "tab_auto_features": "Triggerbot",
     "tab_config_management": "Configs",
+    "tab_convert": "TensorRT",
     "tab_display": "Visuels",
     "tab_keys": "Raccourcis",
     "tab_program_control": "Autre",

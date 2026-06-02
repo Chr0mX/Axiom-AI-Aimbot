@@ -2,6 +2,7 @@
 """其他設定頁面 - 關於資訊"""
 
 import os
+import sys
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
 from PyQt6.QtGui import QDesktopServices, QIcon
@@ -70,6 +71,41 @@ class OtherPage(BasePage):
         self.exitSaveCard.hBoxLayout.addWidget(self.exitSaveBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.exitSaveCard.hBoxLayout.addSpacing(16)
 
+        # === TensorRT Environment ===
+        self.trtGroup = SettingCardGroup(t("trt_env", "TensorRT Environment"), self.scrollWidget)
+
+        self.trtRecheckBtn = PushButton(t("trt_recheck", "Re-check"))
+        self.trtRecheckBtn.setIcon(FluentIcon.SYNC)
+        self.trtStatusCard = SettingCard(
+            FluentIcon.IOT,
+            t("trt_status", "TensorRT Status"),
+            t("trt_checking", "Checking…"),
+            self.trtGroup,
+        )
+        self.trtStatusCard.hBoxLayout.addWidget(self.trtRecheckBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.trtStatusCard.hBoxLayout.addSpacing(16)
+
+        self.trtVersionCard = SettingCard(
+            FluentIcon.INFO,
+            t("trt_version", "TensorRT Version"),
+            "—",
+            self.trtGroup,
+        )
+
+        self.trtLibsCard = SettingCard(
+            FluentIcon.FOLDER,
+            t("trt_libs_path", "TensorRT DLL Path"),
+            "—",
+            self.trtGroup,
+        )
+
+        self.trtCacheCard = SettingCard(
+            FluentIcon.FOLDER,
+            t("trt_cache_path", "Engine Cache Path"),
+            "—",
+            self.trtGroup,
+        )
+
         # === 關於內容（無群組標題）===
         self.aboutTitle = SubtitleLabel(t("about_title"))
         self.aboutSubtitle = CaptionLabel(t("about_subtitle"))
@@ -103,6 +139,13 @@ class OtherPage(BasePage):
         self.programGroup.addSettingCard(self.exitSaveCard)
         self.addContent(self.programGroup)
 
+        # TensorRT Environment
+        self.trtGroup.addSettingCard(self.trtStatusCard)
+        self.trtGroup.addSettingCard(self.trtVersionCard)
+        self.trtGroup.addSettingCard(self.trtLibsCard)
+        self.trtGroup.addSettingCard(self.trtCacheCard)
+        self.addContent(self.trtGroup)
+
         # 關於區塊的內容（無群組標題）
         aboutWidget = QWidget()
         aboutWidget.setStyleSheet("background: transparent;")
@@ -135,6 +178,10 @@ class OtherPage(BasePage):
         # 程式控制
         self.showConsoleCard.checkedChanged.connect(self._onShowConsoleChanged)
         self.exitSaveBtn.clicked.connect(self._onExitSave)
+
+        # TensorRT 環境檢查
+        self.trtRecheckBtn.clicked.connect(self._checkTensorRT)
+        self._checkTensorRT()
 
         # 社群按鈕
         self.discordBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")))
@@ -185,6 +232,71 @@ class OtherPage(BasePage):
             # 關閉視窗
             window.close()
     
+    def _findTrtDllPath(self):
+        """Locate the TensorRT inference DLL (nvinfer*) from pip-wheel installs."""
+        try:
+            import site
+            site_dirs = list(site.getsitepackages())
+            try:
+                site_dirs.append(site.getusersitepackages())
+            except (AttributeError, NotImplementedError):
+                pass
+            for sp in site_dirs:
+                trt_libs = os.path.join(sp, "tensorrt_libs")
+                if os.path.isdir(trt_libs):
+                    for name in os.listdir(trt_libs):
+                        low = name.lower()
+                        if low.startswith("nvinfer") and low.endswith(".dll"):
+                            return os.path.join(trt_libs, name)
+                    return trt_libs
+        except Exception:
+            pass
+        return None
+
+    def _checkTensorRT(self):
+        """Check whether TensorRT is installed and usable, then update the cards."""
+        # ONNX Runtime provider availability
+        provider_ok = False
+        try:
+            import onnxruntime as ort
+            provider_ok = "TensorrtExecutionProvider" in ort.get_available_providers()
+        except Exception:
+            provider_ok = False
+
+        # tensorrt python package + version
+        trt_version = None
+        try:
+            import tensorrt as trt  # noqa: F401
+            trt_version = getattr(trt, "__version__", "unknown")
+        except Exception:
+            trt_version = None
+
+        dll_path = self._findTrtDllPath()
+        installed = provider_ok and (dll_path is not None)
+
+        if installed:
+            self.trtStatusCard.contentLabel.setText(
+                t("trt_installed", "✓ Installed — TensorrtExecutionProvider available"))
+            self.trtStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        elif provider_ok and dll_path is None:
+            self.trtStatusCard.contentLabel.setText(
+                t("trt_provider_no_dll",
+                  "⚠ Provider present but TensorRT DLLs not found — install tensorrt-cu12 wheels"))
+            self.trtStatusCard.contentLabel.setStyleSheet("color: #e67e22;")
+        else:
+            self.trtStatusCard.contentLabel.setText(
+                t("trt_not_installed", "✗ Not installed — falls back to CUDA/CPU"))
+            self.trtStatusCard.contentLabel.setStyleSheet("color: #e74c3c;")
+
+        self.trtVersionCard.contentLabel.setText(trt_version or "—")
+        self.trtLibsCard.contentLabel.setText(dll_path or t("trt_not_found", "Not found"))
+
+        # Engine cache directory path
+        project_root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        cache_dir = os.path.join(project_root, "trt_cache")
+        self.trtCacheCard.contentLabel.setText(cache_dir)
+
     def _updateDiscordIcon(self):
         """根據當前主題更新 Discord 圖標顏色"""
         if isDarkTheme():
@@ -209,6 +321,15 @@ class OtherPage(BasePage):
         self.showConsoleCard.titleLabel.setText(t("show_console"))
         self.exitSaveCard.titleLabel.setText(t("exit_and_save"))
         self.exitSaveBtn.setText(t("exit_and_save"))
+
+        # TensorRT 環境
+        self.trtGroup.titleLabel.setText(t("trt_env", "TensorRT Environment"))
+        self.trtStatusCard.titleLabel.setText(t("trt_status", "TensorRT Status"))
+        self.trtVersionCard.titleLabel.setText(t("trt_version", "TensorRT Version"))
+        self.trtLibsCard.titleLabel.setText(t("trt_libs_path", "TensorRT DLL Path"))
+        self.trtCacheCard.titleLabel.setText(t("trt_cache_path", "Engine Cache Path"))
+        self.trtRecheckBtn.setText(t("trt_recheck", "Re-check"))
+        self._checkTensorRT()
 
         # 關於內容
         self.aboutTitle.setText(t("about_title"))
