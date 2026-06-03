@@ -1,7 +1,7 @@
 """Install TensorRT Python bindings and onnxruntime-gpu.
 
 Packages are written to:
-    %LOCALAPPDATA%\\Packages\\AxiomAI
+    %LOCALAPPDATA%\\AxiomAI\\site-packages
 
 This location survives app reinstalls and is isolated from other Python
 environments on the machine.  Axiom picks the packages up at startup via
@@ -13,10 +13,17 @@ Usage (from project root, any Python ≥ 3.10):
     src\\python\\python.exe src\\install_tensorrt_local.py
 
 Compatibility:
-  CUDA 12.x toolkit  (driver >= 525.x)
-  cuDNN 9.x          (bundled in nvidia-cudnn-cu12)
-  TensorRT 10.x      (tensorrt-cu12 < 11)
-  onnxruntime-gpu    >= 1.19
+  CUDA 12.x toolkit      (driver >= 525.x)
+  cuDNN 9.x              (bundled in nvidia-cudnn-cu12)
+  TensorRT 10.x DLLs     (tensorrt_cu12_libs < 11)
+  TensorRT Python API    (tensorrt_cu12_bindings < 11, Python ≤ 3.12 only)
+  onnxruntime-gpu        >= 1.19
+
+Note on Python 3.13+:
+  NVIDIA does not ship tensorrt_cu12_bindings wheels for Python ≥ 3.13.
+  The TensorRT DLLs (tensorrt_cu12_libs) are still installed — they are
+  all that onnxruntime-gpu needs to activate TensorrtExecutionProvider.
+  Only the `import tensorrt` Python API will be unavailable.
 """
 
 from __future__ import annotations
@@ -32,12 +39,30 @@ if not _LOCALAPPDATA:
     print("[ERROR] LOCALAPPDATA environment variable is not set.", file=sys.stderr)
     sys.exit(1)
 
-PACKAGES_DIR = Path(_LOCALAPPDATA) / "Packages" / "AxiomAI"
+PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 
-# ── Package lists ─────────────────────────────────────────────────────────────
-# TensorRT 10.x for CUDA 12.  Pinned to <11 because onnxruntime-gpu links
-# nvinfer_10.dll; TensorRT 11 ships nvinfer_11.dll instead, breaking the EP.
-TENSORRT_PACKAGES = ["tensorrt-cu12<11"]
+# ── TensorRT sub-package strategy ────────────────────────────────────────────
+# The tensorrt-cu12 meta-package builds its wheel by internally pip-installing
+# tensorrt_cu12_libs + tensorrt_cu12_bindings.  The bindings only ship
+# pre-built wheels for Python ≤ 3.12 — on Python 3.13+ the meta-package build
+# fails.  Install the two sub-packages directly instead:
+#   tensorrt_cu12_libs    — nvinfer_10.dll, nvonnxparser_10.dll, … (any Python)
+#   tensorrt_cu12_bindings — `import tensorrt` Python API  (Python ≤ 3.12 only)
+# ORT's TensorrtExecutionProvider only needs the DLLs — the Python bindings are
+# optional and only used for `tensorrt.__version__` reporting.
+
+_PY_VER = sys.version_info[:2]
+_BINDINGS_SUPPORTED = _PY_VER <= (3, 12)
+
+TENSORRT_PACKAGES = ["tensorrt_cu12_libs<11"]
+if _BINDINGS_SUPPORTED:
+    TENSORRT_PACKAGES.append("tensorrt_cu12_bindings<11")
+else:
+    print(
+        f"[INFO] Python {_PY_VER[0]}.{_PY_VER[1]} detected — "
+        "tensorrt_cu12_bindings is not available for Python > 3.12. "
+        "Only the TensorRT DLLs will be installed (ORT TRT EP still works)."
+    )
 
 ONNXRUNTIME_GPU_PACKAGES = [
     "onnxruntime-gpu",
@@ -128,6 +153,9 @@ def is_tensorrt_available() -> bool:
 
 
 def is_tensorrt_importable() -> bool:
+    if not _BINDINGS_SUPPORTED:
+        # Bindings don't ship for Python > 3.12 — treat as optional/not-applicable.
+        return True
     out = _run_check("import tensorrt; print(tensorrt.__version__)")
     return bool(out)
 
@@ -153,7 +181,8 @@ def install_onnxruntime_gpu() -> None:
 
 
 def install_tensorrt() -> None:
-    log("Installing TensorRT Python bindings (tensorrt-cu12 < 11)...")
+    pkgs = ", ".join(TENSORRT_PACKAGES)
+    log(f"Installing TensorRT packages: {pkgs}")
     _pip(TENSORRT_PACKAGES, upgrade=False)
 
 
@@ -161,27 +190,36 @@ def install_tensorrt() -> None:
 
 def verify_installation() -> None:
     log("Verifying installation...")
+    bindings_label = (
+        "tensorrt Python package"
+        if _BINDINGS_SUPPORTED
+        else "tensorrt Python package (N/A on Python > 3.12 — DLLs sufficient)"
+    )
     checks = [
-        ("CUDAExecutionProvider",     is_cuda_available),
-        ("TensorrtExecutionProvider", is_tensorrt_available),
-        ("tensorrt Python package",   is_tensorrt_importable),
+        ("CUDAExecutionProvider",     is_cuda_available,      True),
+        ("TensorrtExecutionProvider", is_tensorrt_available,  True),
+        (bindings_label,              is_tensorrt_importable, _BINDINGS_SUPPORTED),
     ]
     all_ok = True
-    for name, fn in checks:
+    for name, fn, required in checks:
         ok = fn()
-        log(f"  {'[OK]' if ok else '[MISSING]'} {name}")
-        if not ok:
+        if ok:
+            log(f"  [OK]      {name}")
+        elif required:
+            log(f"  [MISSING] {name}")
             all_ok = False
+        else:
+            log(f"  [SKIP]    {name}")
 
     if not all_ok:
         warn("")
-        warn("One or more components are missing. Common causes:")
+        warn("One or more required components are missing. Common causes:")
         warn("  1. CUDA 12.x toolkit is not installed (driver >= 525.x required)")
         warn("  2. GPU does not support TensorRT (requires Volta / Turing / Ampere / Ada+)")
         warn("  3. Network error downloading from pypi.nvidia.com")
         warn("  4. Axiom has not been restarted since installation")
     else:
-        log("All TensorRT components installed successfully.")
+        log("TensorRT installation complete.")
 
 
 def print_next_steps() -> None:
