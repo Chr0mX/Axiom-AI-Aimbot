@@ -244,5 +244,7 @@
     "crosshair_size": "Crosshair Size",
     "crosshair_color_r": "Red",
     "crosshair_color_g": "Green",
-    "crosshair_color_b": "Blue"
+    "crosshair_color_b": "Blue",
+    "preview_crop_label": "Show Detection Crop",
+    "preview_crop_desc": "Preview window shows only the AI detection region"
 }

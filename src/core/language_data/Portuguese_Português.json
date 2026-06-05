@@ -185,5 +185,7 @@
     "crosshair_size": "Tamanho da mira",
     "crosshair_color_r": "Vermelho",
     "crosshair_color_g": "Verde",
-    "crosshair_color_b": "Azul"
+    "crosshair_color_b": "Azul",
+    "preview_crop_label": "Mostrar área de detecção",
+    "preview_crop_desc": "A janela de pré-visualização mostra apenas a área de detecção de IA"
 }

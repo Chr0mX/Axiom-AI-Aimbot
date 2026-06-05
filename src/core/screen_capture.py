@@ -484,6 +484,7 @@ class NDICapture:
                 target_fps=60,
                 preview_width=self.preview_width or 1920,
                 preview_height=self.preview_height or 1080,
+                config=self.config,
             )
             self._ndi_preview_thread.start()
             print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
@@ -880,6 +881,7 @@ class _UVCPreviewThread(threading.Thread):
         target_fps: int = 60,
         preview_width: int = 1920,
         preview_height: int = 1080,
+        config=None,
     ) -> None:
         super().__init__(daemon=True, name='UVCPreview')
         self._window_name    = window_name
@@ -892,6 +894,7 @@ class _UVCPreviewThread(threading.Thread):
         self._interval       = 1.0 / max(1, target_fps)
         self._preview_width  = preview_width
         self._preview_height = preview_height
+        self._config         = config
 
     def run(self) -> None:
         # All OpenCV GUI operations for this window must happen on this thread.
@@ -907,8 +910,21 @@ class _UVCPreviewThread(threading.Thread):
                 frame = self._frame_ref[0]
             if frame is not None:
                 try:
-                    region   = self._region_ref[0]
-                    preview  = self._draw_overlay(frame.copy(), region)
+                    region  = self._region_ref[0]
+                    preview = self._draw_overlay(frame.copy(), region)
+
+                    # Crop to detection region when requested so the user sees
+                    # exactly what the model infers on.
+                    if region is not None and getattr(self._config, 'preview_crop_to_detection', False):
+                        _l = max(0, int(region.get('left', 0)))
+                        _t = max(0, int(region.get('top', 0)))
+                        _w = max(1, int(region.get('width', preview.shape[1])))
+                        _h = max(1, int(region.get('height', preview.shape[0])))
+                        _r = min(preview.shape[1], _l + _w)
+                        _b = min(preview.shape[0], _t + _h)
+                        if _r > _l and _b > _t:
+                            preview = preview[_t:_b, _l:_r]
+
                     rendered = _render_preview_frame(
                         self._window_name, self._scale_mode, preview)
                     cv2.imshow(self._window_name, rendered)
@@ -1025,6 +1041,7 @@ class UVCCapture:
                 target_fps=self.preview_fps,
                 preview_width=self.preview_width,
                 preview_height=self.preview_height,
+                config=self.config,
             )
             self._preview_thread.start()
 

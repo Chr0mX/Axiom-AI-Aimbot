@@ -194,5 +194,7 @@
     "crosshair_size": "조준선 크기",
     "crosshair_color_r": "빨강",
     "crosshair_color_g": "초록",
-    "crosshair_color_b": "파랑"
+    "crosshair_color_b": "파랑",
+    "preview_crop_label": "감지 영역 표시",
+    "preview_crop_desc": "미리보기 창에 AI 감지 영역만 표시"
 }
