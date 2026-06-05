@@ -196,5 +196,11 @@
     "crosshair_color_g": "초록",
     "crosshair_color_b": "파랑",
     "preview_crop_label": "감지 영역 표시",
-    "preview_crop_desc": "미리보기 창에 AI 감지 영역만 표시"
+    "preview_crop_desc": "미리보기 창에 AI 감지 영역만 표시",
+    "auto_match_fps_label": "FPS 자동 맞춤",
+    "auto_match_fps_desc": "부드러운 프레임 동기화를 위해 스크린샷 속도를 추론 간격에 고정",
+    "model_input_size_label": "모델 입력 크기",
+    "model_input_size_desc": "AI 모델에 입력되는 해상도 (낮을수록 추론 빠름, 세부 정보 감소)",
+    "skip_letterbox_label": "레터박스 리사이즈 건너뛰기",
+    "skip_letterbox_desc": "패딩된 레터박스 대신 최근접 이웃 직접 리사이즈 (정사각형 캡처에 더 빠름)"
 }

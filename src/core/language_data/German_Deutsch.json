@@ -196,5 +196,11 @@
     "crosshair_color_g": "Grün",
     "crosshair_color_b": "Blau",
     "preview_crop_label": "Erkennungsbereich anzeigen",
-    "preview_crop_desc": "Vorschaufenster zeigt nur den KI-Erkennungsbereich"
+    "preview_crop_desc": "Vorschaufenster zeigt nur den KI-Erkennungsbereich",
+    "auto_match_fps_label": "FPS automatisch anpassen",
+    "auto_match_fps_desc": "Screenshot-Rate auf Inferenzintervall sperren für flüssige Frame-Synchronisierung",
+    "model_input_size_label": "Modell-Eingabegröße",
+    "model_input_size_desc": "Auflösung, die dem KI-Modell zugeführt wird (niedriger = schnellere Inferenz, weniger Detail)",
+    "skip_letterbox_label": "Letterbox-Skalierung überspringen",
+    "skip_letterbox_desc": "Direkte Nächster-Nachbar-Skalierung statt gepolstertem Letterbox (schneller für quadratische Aufnahmen)"
 }

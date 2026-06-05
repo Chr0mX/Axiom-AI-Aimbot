@@ -215,7 +215,10 @@ def ai_logic_loop(
 
         try:
             while config.Running and not capture_stop_event.is_set():
-                screenshot_interval = max(0.001, float(getattr(config, 'screenshot_interval', config.detect_interval)))
+                if getattr(config, 'auto_match_fps', False):
+                    screenshot_interval = max(0.001, float(config.detect_interval))
+                else:
+                    screenshot_interval = max(0.001, float(getattr(config, 'screenshot_interval', config.detect_interval)))
                 should_use_high_res_timer = screenshot_interval <= 0.002
 
                 if should_use_high_res_timer and not high_res_timer_enabled:
@@ -385,7 +388,8 @@ def ai_logic_loop(
                 # preprocess_image now returns letterbox metadata so
                 # postprocess_outputs can undo the padding correctly.
                 input_tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
-                    latest_frame, config.model_input_size
+                    latest_frame, config.model_input_size,
+                    fast_resize=getattr(config, 'skip_letterbox', False),
                 )
                 t1 = time.perf_counter()
                 t2 = t3 = t4 = None
