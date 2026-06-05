@@ -281,7 +281,7 @@ class AimPage(BasePage):
         )
 
         self.previewCropCard = SwitchSettingCard(
-            FluentIcon.CROP,
+            FluentIcon.ZOOM_IN,
             t("preview_crop_label"),
             t("preview_crop_desc"),
             parent=self.generalGroup
