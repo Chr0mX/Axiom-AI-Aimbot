@@ -280,6 +280,13 @@ class AimPage(BasePage):
             parent=self.generalGroup
         )
 
+        self.previewCropCard = SwitchSettingCard(
+            FluentIcon.CROP,
+            t("preview_crop_label"),
+            t("preview_crop_desc"),
+            parent=self.generalGroup
+        )
+
         self.uvcPreviewScaleCombo = ComboBox()
         self.uvcPreviewScaleCombo.addItems(["scale_to_fit", "scale_to_canvas", "fit_to_screen"])
         self.uvcPreviewScaleCombo.setMinimumWidth(170)
@@ -929,6 +936,7 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.uvcFpsCard)
         self.generalGroup.addSettingCard(self.uvcCaptureMethodCard)
         self.generalGroup.addSettingCard(self.uvcPreviewCard)
+        self.generalGroup.addSettingCard(self.previewCropCard)
         self.generalGroup.addSettingCard(self.uvcPreviewScaleCard)
         self.generalGroup.addSettingCard(self.ndiSourceCard)
         self.generalGroup.addSettingCard(self.ndiRefreshCard)
@@ -1082,6 +1090,7 @@ class AimPage(BasePage):
         self.uvcFpsCard.valueChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
+        self.previewCropCard.checkedChanged.connect(self._onPreviewCropChanged)
         self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
@@ -1234,6 +1243,7 @@ class AimPage(BasePage):
                 self.uvcResolutionCombo.setCurrentIndex(idx)
             self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
             self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
+            self.previewCropCard.setChecked(bool(getattr(self._config, 'preview_crop_to_detection', False)))
             self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
             self._refreshNdiSources()
             ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
@@ -1691,6 +1701,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.uvc_show_window = bool(checked)
 
+    def _onPreviewCropChanged(self, checked):
+        if self._config:
+            self._config.preview_crop_to_detection = bool(checked)
+
     def _onUvcPreviewScaleModeChanged(self, text):
         if self._config:
             self._config.uvc_preview_scale_mode = str(text)
@@ -1782,6 +1796,7 @@ class AimPage(BasePage):
         self.uvcFpsCard.setVisible(is_uvc)
         self.uvcCaptureMethodCard.setVisible(is_uvc)
         self.uvcPreviewCard.setVisible(is_uvc or is_ndi)
+        self.previewCropCard.setVisible(is_uvc or is_ndi)
         self.uvcPreviewScaleCard.setVisible(is_uvc or is_ndi)
         self.ndiSourceCard.setVisible(is_ndi)
         self.ndiRefreshCard.setVisible(is_ndi)
@@ -2267,6 +2282,8 @@ class AimPage(BasePage):
         self.uvcFpsCard.titleLabel.setText("UVC FPS")
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
         self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
+        self.previewCropCard.titleLabel.setText(t("preview_crop_label"))
+        self.previewCropCard.contentLabel.setText(t("preview_crop_desc"))
         self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
         self.ndiSourceCard.titleLabel.setText("NDI Stream")
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")

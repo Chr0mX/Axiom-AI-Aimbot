@@ -244,5 +244,7 @@
     "crosshair_size": "準心大小",
     "crosshair_color_r": "紅",
     "crosshair_color_g": "綠",
-    "crosshair_color_b": "藍"
+    "crosshair_color_b": "藍",
+    "preview_crop_label": "顯示偵測裁切",
+    "preview_crop_desc": "預覽視窗只顯示 AI 偵測區域"
 }

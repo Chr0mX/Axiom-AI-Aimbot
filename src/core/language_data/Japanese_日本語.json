@@ -194,5 +194,7 @@
     "crosshair_size": "クロスヘアサイズ",
     "crosshair_color_r": "赤",
     "crosshair_color_g": "緑",
-    "crosshair_color_b": "青"
+    "crosshair_color_b": "青",
+    "preview_crop_label": "検出範囲を表示",
+    "preview_crop_desc": "プレビューウィンドウにAI検出領域のみを表示"
 }

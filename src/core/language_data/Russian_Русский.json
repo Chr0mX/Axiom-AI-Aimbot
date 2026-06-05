@@ -194,5 +194,7 @@
     "crosshair_size": "Размер прицела",
     "crosshair_color_r": "Красный",
     "crosshair_color_g": "Зелёный",
-    "crosshair_color_b": "Синий"
+    "crosshair_color_b": "Синий",
+    "preview_crop_label": "Показать область обнаружения",
+    "preview_crop_desc": "Окно предпросмотра показывает только область обнаружения ИИ"
 }

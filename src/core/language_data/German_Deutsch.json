@@ -194,5 +194,7 @@
     "crosshair_size": "Fadenkreuz-Größe",
     "crosshair_color_r": "Rot",
     "crosshair_color_g": "Grün",
-    "crosshair_color_b": "Blau"
+    "crosshair_color_b": "Blau",
+    "preview_crop_label": "Erkennungsbereich anzeigen",
+    "preview_crop_desc": "Vorschaufenster zeigt nur den KI-Erkennungsbereich"
 }

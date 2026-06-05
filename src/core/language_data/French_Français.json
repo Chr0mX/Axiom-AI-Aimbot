@@ -185,5 +185,7 @@
     "crosshair_size": "Taille du réticule",
     "crosshair_color_r": "Rouge",
     "crosshair_color_g": "Vert",
-    "crosshair_color_b": "Bleu"
+    "crosshair_color_b": "Bleu",
+    "preview_crop_label": "Afficher la zone de détection",
+    "preview_crop_desc": "La fenêtre d'aperçu n'affiche que la zone de détection IA"
 }

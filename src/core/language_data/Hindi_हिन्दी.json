@@ -185,5 +185,7 @@
     "crosshair_size": "क्रॉसहेयर साइज",
     "crosshair_color_r": "लाल",
     "crosshair_color_g": "हरा",
-    "crosshair_color_b": "नीला"
+    "crosshair_color_b": "नीला",
+    "preview_crop_label": "डिटेक्शन क्रॉप दिखाएं",
+    "preview_crop_desc": "प्रीव्यू विंडो केवल AI डिटेक्शन क्षेत्र दिखाती है"
 }
