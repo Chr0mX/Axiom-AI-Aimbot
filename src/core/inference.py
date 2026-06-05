@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple, Any
+from typing import Dict, List, Tuple, Any
 
 import cv2
 import numpy as np
 import numpy.typing as npt
+
+# Pre-allocated letterbox canvases keyed by model_input_size.
+# Reused across frames to eliminate per-frame np.full() allocation.
+_canvas_cache: Dict[int, npt.NDArray[np.uint8]] = {}
 
 
 class PIDController:
@@ -137,7 +141,12 @@ def preprocess_image(
     # Centre the resized image on a grey canvas (114 = YOLO default fill).
     pad_x = (model_input_size - new_w) // 2
     pad_y = (model_input_size - new_h) // 2
-    canvas = np.full((model_input_size, model_input_size, 3), 114, dtype=np.uint8)
+    if model_input_size not in _canvas_cache:
+        _canvas_cache[model_input_size] = np.full(
+            (model_input_size, model_input_size, 3), 114, dtype=np.uint8
+        )
+    canvas = _canvas_cache[model_input_size]
+    canvas[:] = 114
     canvas[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
 
     blob = cv2.dnn.blobFromImage(
@@ -240,7 +249,10 @@ def non_max_suppression(
     """
     if len(boxes) == 0:
         return [], []
-    
+
+    if len(boxes) == 1:
+        return boxes, confidences
+
     boxes_arr = np.array(boxes)
     confidences_arr = np.array(confidences)
     areas = (boxes_arr[:, 2] - boxes_arr[:, 0]) * (boxes_arr[:, 3] - boxes_arr[:, 1])

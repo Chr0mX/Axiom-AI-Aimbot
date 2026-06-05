@@ -3,8 +3,76 @@
 
 import logging
 import os
+import sys
 import threading
 import time
+
+# ── AppData packages path ─────────────────────────────────────────────────────
+# install_tensorrt_local.py writes packages to %LOCALAPPDATA%\Packages\AxiomAI.
+# Add that directory to sys.path before any package imports so Python finds them.
+
+def _inject_axiom_packages() -> None:
+    _localappdata = os.environ.get("LOCALAPPDATA", "")
+    if not _localappdata:
+        return
+    pkg_dir = os.path.join(_localappdata, "AxiomAI", "site-packages")
+    if os.path.isdir(pkg_dir) and pkg_dir not in sys.path:
+        sys.path.insert(0, pkg_dir)
+
+
+_inject_axiom_packages()
+
+# ── DLL pre-registration ──────────────────────────────────────────────────────
+# TensorRT pip wheels install DLLs under their package dir but do NOT add
+# themselves to PATH.  Without this, onnxruntime_providers_tensorrt.dll fails
+# with "nvinfer_10.dll missing" even when TRT is installed.  Register every
+# known DLL directory before the first import of onnxruntime.
+
+def _register_trt_dll_dirs() -> None:
+    """Add TensorRT and CUDA pip-wheel DLL dirs to PATH/add_dll_directory (Windows only)."""
+    if sys.platform != "win32":
+        return
+    try:
+        # Collect all candidate package roots: standard site-packages + AxiomAI AppData dir
+        import site
+        site_dirs: list = list(site.getsitepackages())
+        try:
+            site_dirs.append(site.getusersitepackages())
+        except (AttributeError, NotImplementedError):
+            pass
+        _localappdata = os.environ.get("LOCALAPPDATA", "")
+        if _localappdata:
+            axiom_pkg = os.path.join(_localappdata, "AxiomAI", "site-packages")
+            if os.path.isdir(axiom_pkg):
+                site_dirs.append(axiom_pkg)
+
+        _CUDA_SUBS = (
+            "cuda_runtime", "cublas", "cudnn",
+            "cufft", "curand", "cusolver", "cusparse",
+        )
+
+        def _add(path: str) -> None:
+            os.environ["PATH"] = f"{path};{os.environ.get('PATH', '')}"
+            try:
+                os.add_dll_directory(path)
+            except (AttributeError, OSError):
+                pass
+
+        for sp in site_dirs:
+            trt_libs = os.path.join(sp, "tensorrt_libs")
+            if os.path.isdir(trt_libs):
+                _add(trt_libs)
+            for sub in _CUDA_SUBS:
+                bin_dir = os.path.join(sp, "nvidia", sub, "bin")
+                if os.path.isdir(bin_dir):
+                    _add(bin_dir)
+    except Exception:
+        pass  # never crash the app over a PATH tweak
+
+
+_register_trt_dll_dirs()
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 import onnxruntime as ort
 
@@ -138,6 +206,7 @@ def build_provider_list(config) -> list:
     result: list = []
     for provider in filtered:
         if provider == "TensorrtExecutionProvider":
+            fp16_enabled = bool(getattr(config, 'trt_fp16_enabled', True))
             result.append((
                 "TensorrtExecutionProvider",
                 {
@@ -156,7 +225,8 @@ def build_provider_list(config) -> list:
                     # ── Precision ────────────────────────────────────────────
                     # FP16 is native on RTX (Turing+) and roughly 2x faster than
                     # FP32 with negligible accuracy loss for YOLO detection.
-                    "trt_fp16_enable": True,
+                    # Controlled by config.trt_fp16_enabled.
+                    "trt_fp16_enable": fp16_enabled,
 
                     # ── Builder memory budget ────────────────────────────────
                     # 2 GiB is enough for YOLOv8-n/s.  Increase to 4 GiB for

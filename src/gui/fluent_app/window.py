@@ -17,6 +17,7 @@ from .pages.trigger_page import TriggerPage
 from .pages.configs_page import ConfigsPage
 from .pages.keys_page import KeysPage
 from .pages.other_page import OtherPage
+from .pages.convert_page import ConvertPage
 from .components.language_dialog import LanguageDialog
 from .language_manager import getLanguageManager, t
 from .theme_colors import ThemeColors, get_color
@@ -110,14 +111,16 @@ class AxiomWindow(FluentWindow):
         self.triggerInterface = TriggerPage(self)   # tab_auto_features
         self.keysInterface = KeysPage(self)         # tab_keys
         self.configInterface = ConfigsPage(self)    # tab_config_management
+        self.convertInterface = ConvertPage(self)   # tab_convert
         self.otherInterface = OtherPage(self)       # tab_program_control
-        
+
 
         self.displayInterface.setObjectName("displayInterface")
         self.aimInterface.setObjectName("aimInterface")
         self.triggerInterface.setObjectName("triggerInterface")
         self.keysInterface.setObjectName("keysInterface")
         self.configInterface.setObjectName("configInterface")
+        self.convertInterface.setObjectName("convertInterface")
         self.otherInterface.setObjectName("otherInterface")
 
         # 調整導航欄寬度
@@ -283,8 +286,8 @@ class AxiomWindow(FluentWindow):
         self._config = config
         pages = [
             self.displayInterface, self.aimInterface,
-            self.triggerInterface, self.keysInterface, 
-            self.configInterface, self.otherInterface
+            self.triggerInterface, self.keysInterface,
+            self.configInterface, self.convertInterface, self.otherInterface
         ]
         for page in pages:
             if hasattr(page, 'setConfig'):
@@ -352,7 +355,9 @@ class AxiomWindow(FluentWindow):
         self.nav_display = self.addSubInterface(self.displayInterface, QIcon(os.path.join(self.base_path, "assets", "eye.svg")), t("tab_display"))
 
         self.nav_config = self.addSubInterface(self.configInterface, QIcon(os.path.join(self.base_path, "assets", "save.svg")), t("tab_config_management"))
-        
+
+        self.nav_convert = self.addSubInterface(self.convertInterface, FluentIcon.SPEED_HIGH, t("tab_convert"))
+
         self.nav_other = self.addSubInterface(self.otherInterface, FluentIcon.APPLICATION, t("tab_program_control"))
 
 
@@ -701,6 +706,7 @@ class AxiomWindow(FluentWindow):
         if hasattr(self, 'nav_trigger'): self.nav_trigger.setText(t("tab_auto_features"))
         if hasattr(self, 'nav_keys'): self.nav_keys.setText(t("tab_keys"))
         if hasattr(self, 'nav_config'): self.nav_config.setText(t("tab_config_management"))
+        if hasattr(self, 'nav_convert'): self.nav_convert.setText(t("tab_convert"))
         if hasattr(self, 'nav_other'): self.nav_other.setText(t("tab_program_control"))
         
         # Update bottom navigation
@@ -714,9 +720,9 @@ class AxiomWindow(FluentWindow):
         pages = [
             self.displayInterface, self.aimInterface,
             self.triggerInterface, self.keysInterface, self.configInterface,
-            self.otherInterface
+            self.convertInterface, self.otherInterface
         ]
-        
+
         for page in pages:
             if hasattr(page, 'retranslateUi'):
                 page.retranslateUi()

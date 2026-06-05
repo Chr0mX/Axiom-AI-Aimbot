@@ -1,7 +1,7 @@
 <div align="center">
 
 [![GitHub stars](https://img.shields.io/github/stars/iishong0w0/Axiom-AI-Aimbot?style=social)](https://github.com/iishong0w0/Axiom-AI-Aimbot/stargazers)
-![Version](https://img.shields.io/badge/Version-6.1-green.svg)
+![Version](https://img.shields.io/badge/Version-6.2-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![License](https://img.shields.io/badge/License-PolyForm--Noncommercial%201.0.0-blueviolet.svg)
 ![GitHub last commit](https://img.shields.io/github/last-commit/iishong0w0/Axiom-AI-Aimbot)

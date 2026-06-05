@@ -10,6 +10,8 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from win_utils import is_key_pressed
 
 from .ai_aiming import process_aiming
@@ -157,6 +159,25 @@ def ai_logic_loop(
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
 
     state = LoopState(cached_mouse_move_method=config.mouse_move_method)
+    _last_skip_frame: list = [None]  # stores last frame used for pixel-diff gate
+
+    # CUDA IO binding — set up once per model session to avoid repeated
+    # host→device copies.  Recreated on model hot-swap.
+    _io_binding: list = [None]
+
+    def _setup_io_binding(m) -> object | None:
+        if not getattr(config, 'cuda_io_binding_enabled', False):
+            return None
+        providers = m.get_providers() if hasattr(m, 'get_providers') else []
+        if not any('CUDA' in p or 'Tensorrt' in p for p in providers):
+            return None
+        try:
+            return m.io_binding()
+        except Exception:
+            return None
+
+    _io_binding[0] = _setup_io_binding(model)
+
     current_model_path = config.model_path
     current_backend = str(getattr(config, "inference_backend", "auto")).lower()
     current_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
@@ -276,6 +297,7 @@ def ai_logic_loop(
                 loop_start = time.perf_counter()
                 current_time = time.time()
 
+                prev_model = model
                 model, current_model_path, input_name, current_backend, current_dml_fallback = _try_hot_swap_model(
                     config,
                     model,
@@ -283,6 +305,8 @@ def ai_logic_loop(
                     current_backend,
                     current_dml_fallback,
                 )
+                if model is not prev_model:
+                    _io_binding[0] = _setup_io_binding(model)
 
                 if current_time - state.last_pid_update > state.pid_check_interval:
                     pid_x.Kp, pid_x.Ki, pid_x.Kd = config.pid_kp_x, config.pid_ki_x, config.pid_kd_x
@@ -342,18 +366,45 @@ def ai_logic_loop(
                     continue
                 last_detection_run_time = now_detect
 
+                # Frame skip gate: skip inference when the capture region
+                # hasn't changed significantly (e.g. static background).
+                # Compare BGR channels only — alpha is always 255 in BGRA frames,
+                # so including it deflates the mean diff by 25% and causes nearly
+                # every frame to be skipped when motion is borderline.
+                if getattr(config, 'frame_skip_enabled', False) and _last_skip_frame[0] is not None:
+                    _a, _b = latest_frame, _last_skip_frame[0]
+                    if _a.shape == _b.shape:
+                        _diff = np.mean(np.abs(
+                            _a[..., :3].astype(np.int16) - _b[..., :3].astype(np.int16)
+                        ))
+                        if _diff < float(getattr(config, 'frame_skip_threshold', 2.0)):
+                            continue  # reuse last boxes; no inference this frame
+                _last_skip_frame[0] = latest_frame
+
                 t0 = time.perf_counter()
                 # preprocess_image now returns letterbox metadata so
                 # postprocess_outputs can undo the padding correctly.
                 input_tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
-                    latest_frame, config.model_input_size
+                    latest_frame, config.model_input_size,
                 )
                 t1 = time.perf_counter()
                 t2 = t3 = t4 = None
 
                 try:
                     t2 = time.perf_counter()
-                    outputs = model.run(None, {input_name: input_tensor})
+                    iob = _io_binding[0]
+                    if iob is not None:
+                        try:
+                            iob.bind_cpu_input(input_name, input_tensor)
+                            for out in model.get_outputs():
+                                iob.bind_output(out.name)
+                            model.run_with_iobinding(iob)
+                            outputs = iob.copy_outputs_to_cpu()
+                        except Exception:
+                            _io_binding[0] = None
+                            outputs = model.run(None, {input_name: input_tensor})
+                    else:
+                        outputs = model.run(None, {input_name: input_tensor})
                     t3 = time.perf_counter()
                     boxes, confidences = postprocess_outputs(
                         outputs,
@@ -405,6 +456,12 @@ def ai_logic_loop(
                     config.tracker_has_prediction = False
                     pid_x.reset()
                     pid_y.reset()
+                    state.smooth_x = 0.0
+                    state.smooth_y = 0.0
+                    state.locked_box = None
+                    state.no_detection_frames = 0
+                    config.display_locked_box = None
+                    config.display_locked_box_is_decaying = False
 
                 update_queues(
                     overlay_boxes_queue,

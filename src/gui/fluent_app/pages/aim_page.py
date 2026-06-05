@@ -262,12 +262,12 @@ class AimPage(BasePage):
         )
 
         self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["dshow", "msmf", "auto", "any"])
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto", "any"])
         self.uvcCaptureMethodCombo.setMinimumWidth(140)
         self.uvcCaptureMethodCard = SettingCard(
             FluentIcon.CAMERA,
             "UVC Capture Method",
-            "Select OpenCV capture backend",
+            "msmf recommended for 1080p60 on Windows 10/11",
             self.generalGroup
         )
         self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
@@ -277,6 +277,13 @@ class AimPage(BasePage):
             FluentIcon.VIEW,
             "Capture Preview Window",
             "",
+            parent=self.generalGroup
+        )
+
+        self.previewCropCard = SwitchSettingCard(
+            FluentIcon.ZOOM_IN,
+            t("preview_crop_label"),
+            t("preview_crop_desc"),
             parent=self.generalGroup
         )
 
@@ -389,6 +396,19 @@ class AimPage(BasePage):
         self.comPortCard.hBoxLayout.addWidget(self.comRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.comPortCard.hBoxLayout.addSpacing(16)
 
+        # Arduino Baud Rate
+        self.arduinoBaudCombo = ComboBox()
+        self.arduinoBaudCombo.addItems(["115200", "500000", "1000000", "2000000", "4000000"])
+        self.arduinoBaudCombo.setMinimumWidth(120)
+        self.arduinoBaudCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("arduino_baud_rate", "Baud Rate"),
+            t("arduino_baud_rate_desc", "⚠ Must match the baud rate in your Arduino sketch"),
+            self.arduinoGroup
+        )
+        self.arduinoBaudCard.hBoxLayout.addWidget(self.arduinoBaudCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.arduinoBaudCard.hBoxLayout.addSpacing(16)
+
         # 連線狀態
         self._isArduinoConnected = False
         self.connectionLabel = BodyLabel(t("disconnected"))
@@ -495,6 +515,19 @@ class AimPage(BasePage):
         )
         self.makcuConnectionCard.hBoxLayout.addWidget(self.makcuConnectionLabel, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuConnectionCard.hBoxLayout.addSpacing(16)
+
+        # MAKCU Baud Rate
+        self.makcuBaudCombo = ComboBox()
+        self.makcuBaudCombo.addItems(["115200", "4000000"])
+        self.makcuBaudCombo.setMinimumWidth(120)
+        self.makcuBaudCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("makcu_baud_rate", "Baud Rate"),
+            t("makcu_baud_rate_desc", "4000000 = 4 Mbaud — ~35× faster than default, lowest serial latency"),
+            self.makcuGroup
+        )
+        self.makcuBaudCard.hBoxLayout.addWidget(self.makcuBaudCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuBaudCard.hBoxLayout.addSpacing(16)
 
         # MAKCU 連線/斷線按鈕
         self.makcuConnectBtn = PushButton(t("makcu_connect"))
@@ -759,6 +792,189 @@ class AimPage(BasePage):
             parent=self.targetPriorityGroup
         )
 
+        # === Inference Performance ===
+        self.inferPerfGroup = SettingCardGroup(t("inference_performance", "Inference Performance"), self.scrollWidget)
+
+        self.trtFp16Card = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("trt_fp16_enabled", "TensorRT FP16"),
+            t("trt_fp16_desc", "Enable TensorRT FP16 precision (~2x faster on RTX). Engine built on first model load (~30s)."),
+            parent=self.inferPerfGroup
+        )
+
+        self.cudaIoBindingCard = SwitchSettingCard(
+            FluentIcon.COPY,
+            t("cuda_io_binding", "CUDA IO Binding"),
+            t("cuda_io_binding_desc", "Zero-copy GPU inference. Effective only with CUDA or TensorRT backend."),
+            parent=self.inferPerfGroup
+        )
+
+        self.frameSkipCard = SwitchSettingCard(
+            FluentIcon.SPEED_MEDIUM,
+            t("frame_skip_enabled", "Frame Skip Gate"),
+            t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."),
+            parent=self.inferPerfGroup
+        )
+
+        self.frameSkipThresholdCard = SliderLabelCard(
+            FluentIcon.ALIGNMENT,
+            t("frame_skip_threshold", "Skip Threshold"),
+            5, 100,
+            format_func=lambda v: f"{v / 10:.1f}",
+            description=t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"),
+            slider_width=160,
+            parent=self.inferPerfGroup
+        )
+
+        # === Target Tracking ===
+        self.trackingGroup = SettingCardGroup(t("target_tracking", "Target Tracking"), self.scrollWidget)
+
+        self.emaEnableCard = SwitchSettingCard(
+            FluentIcon.SPEED_MEDIUM,
+            t("ema_enabled", "EMA Smoothing"),
+            t("ema_desc", "Exponential moving average on aim-point coordinates before PID. Reduces jitter."),
+            parent=self.trackingGroup
+        )
+
+        self.emaAlphaCard = SliderLabelCard(
+            FluentIcon.MIX_VOLUMES,
+            t("ema_alpha", "EMA Alpha"),
+            30, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("ema_alpha_desc", "1.0 = raw (no smoothing), 0.30 = heavy smoothing"),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        self.predictionEnableCard = SwitchSettingCard(
+            FluentIcon.RINGER,
+            t("prediction_enabled", "Velocity Prediction"),
+            t("prediction_desc", "Extrapolate target position forward by the prediction horizon."),
+            parent=self.trackingGroup
+        )
+
+        self.predictionHorizonCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("prediction_horizon", "Prediction Horizon"),
+            5, 50,
+            format_func=lambda v: f"{v} ms",
+            label_width=55,
+            parent=self.trackingGroup
+        )
+
+        self.predictionMaxVelCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("prediction_max_velocity", "Max Velocity Cap"),
+            300, 3000,
+            format_func=lambda v: f"{v} px/s",
+            label_width=70,
+            description=t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"),
+            parent=self.trackingGroup
+        )
+
+        self.predictionHistoryCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("prediction_history", "History Frames"),
+            2, 6,
+            format_func=lambda v: str(v),
+            parent=self.trackingGroup
+        )
+
+        self.stickyLockCard = SwitchSettingCard(
+            FluentIcon.PIN,
+            t("sticky_lock_enabled", "Sticky Target Lock"),
+            t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."),
+            parent=self.trackingGroup
+        )
+
+        self.lockDecayCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("lock_decay_frames", "Lock Decay Frames"),
+            3, 60,
+            format_func=lambda v: f"{v} fr",
+            description=t("lock_decay_desc", "Frames to hold aim after target is lost before releasing the lock"),
+            label_width=55,
+            parent=self.trackingGroup
+        )
+
+        self.lockIouCard = SliderLabelCard(
+            FluentIcon.ZOOM_IN,
+            t("lock_iou_threshold", "IoU Match Threshold"),
+            10, 70,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("lock_iou_desc", "Minimum overlap required to match the same target across frames"),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        self.kalmanEnableCard = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("kalman_enabled_label", "Kalman Filter"),
+            t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing. Mutually exclusive with EMA."),
+            parent=self.trackingGroup
+        )
+
+        self.kalmanProcessNoiseCard = SliderLabelCard(
+            FluentIcon.MOVE,
+            t("kalman_process_noise_label", "Process Noise"),
+            1, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("kalman_noise_desc", "Lower = smoother but slower to react"),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        self.kalmanMeasNoiseCard = SliderLabelCard(
+            FluentIcon.ALIGNMENT,
+            t("kalman_meas_noise_label", "Measurement Noise"),
+            1, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("kalman_noise_desc", "Lower = reacts faster but noisier"),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        # Smart Jitter cards
+        self.smartJitterEnableCard = SwitchSettingCard(
+            FluentIcon.MOVE,
+            t("smart_jitter_label", "Smart Jitter"),
+            t("smart_jitter_desc", "Add jitter when target box is small (far targets). Fires while shooting."),
+            parent=self.antiDetectionGroup
+        )
+
+        self.smartJitterLmbCard = SwitchSettingCard(
+            FluentIcon.FINGERPRINT,
+            t("smart_jitter_lmb_label", "Only While Shooting (LMB Held)"),
+            t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"),
+            parent=self.antiDetectionGroup
+        )
+
+        self.smartJitterLevelCombo = ComboBox()
+        self.smartJitterLevelCombo.addItems([
+            t("smart_jitter_level_low", "Low (±1 px)"),
+            t("smart_jitter_level_med", "Medium (±3 px)"),
+            t("smart_jitter_level_high", "High (±6 px)"),
+        ])
+        self.smartJitterLevelCombo.setMinimumWidth(140)
+        self.smartJitterLevelCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("smart_jitter_level_label", "Jitter Strength"),
+            "",
+            self.antiDetectionGroup
+        )
+        self.smartJitterLevelCard.hBoxLayout.addWidget(self.smartJitterLevelCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.smartJitterLevelCard.hBoxLayout.addSpacing(16)
+
+        self.smartJitterThreshCard = SliderLabelCard(
+            FluentIcon.ZOOM_OUT,
+            t("smart_jitter_threshold_label", "Box Size Threshold"),
+            1, 50,
+            format_func=lambda v: f"{v}%",
+            description=t("smart_jitter_threshold_desc", "Jitter fires when box height < this % of detection range"),
+            slider_width=160,
+            parent=self.antiDetectionGroup
+        )
+
     def _initLayout(self):
         """排版所有控制項"""
         # 模型設定
@@ -788,6 +1004,7 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.uvcFpsCard)
         self.generalGroup.addSettingCard(self.uvcCaptureMethodCard)
         self.generalGroup.addSettingCard(self.uvcPreviewCard)
+        self.generalGroup.addSettingCard(self.previewCropCard)
         self.generalGroup.addSettingCard(self.uvcPreviewScaleCard)
         self.generalGroup.addSettingCard(self.ndiSourceCard)
         self.generalGroup.addSettingCard(self.ndiRefreshCard)
@@ -801,6 +1018,7 @@ class AimPage(BasePage):
 
         # Arduino 設定（在滑鼠移動方式下方）
         self.arduinoGroup.addSettingCard(self.comPortCard)
+        self.arduinoGroup.addSettingCard(self.arduinoBaudCard)
         self.arduinoGroup.addSettingCard(self.connectionCard)
         self.arduinoGroup.addSettingCard(self.arduinoConnectCard)
         self.arduinoGroup.addSettingCard(self.guideCard)
@@ -813,6 +1031,7 @@ class AimPage(BasePage):
 
         # MAKCU 設定（在 Arduino 設定下方）
         self.makcuGroup.addSettingCard(self.makcuComPortCard)
+        self.makcuGroup.addSettingCard(self.makcuBaudCard)
         self.makcuGroup.addSettingCard(self.makcuConnectionCard)
         self.makcuGroup.addSettingCard(self.makcuConnectCard)
         self.addContent(self.makcuGroup)
@@ -886,12 +1105,38 @@ class AimPage(BasePage):
         # Anti-Detection
         self.antiDetectionGroup.addSettingCard(self.jitterEnableCard)
         self.antiDetectionGroup.addSettingCard(self.jitterStrengthCard)
+        self.antiDetectionGroup.addSettingCard(self.smartJitterEnableCard)
+        self.antiDetectionGroup.addSettingCard(self.smartJitterLmbCard)
+        self.antiDetectionGroup.addSettingCard(self.smartJitterLevelCard)
+        self.antiDetectionGroup.addSettingCard(self.smartJitterThreshCard)
         self.addContent(self.antiDetectionGroup)
 
         # Target Priority
         self.targetPriorityGroup.addSettingCard(self.targetPriorityModeCard)
         self.targetPriorityGroup.addSettingCard(self.targetPriorityWeightCard)
         self.addContent(self.targetPriorityGroup)
+
+        # Inference Performance
+        self.inferPerfGroup.addSettingCard(self.trtFp16Card)
+        self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
+        self.inferPerfGroup.addSettingCard(self.frameSkipCard)
+        self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
+        self.addContent(self.inferPerfGroup)
+
+        # Target Tracking
+        self.trackingGroup.addSettingCard(self.emaEnableCard)
+        self.trackingGroup.addSettingCard(self.emaAlphaCard)
+        self.trackingGroup.addSettingCard(self.predictionEnableCard)
+        self.trackingGroup.addSettingCard(self.predictionHorizonCard)
+        self.trackingGroup.addSettingCard(self.predictionMaxVelCard)
+        self.trackingGroup.addSettingCard(self.predictionHistoryCard)
+        self.trackingGroup.addSettingCard(self.stickyLockCard)
+        self.trackingGroup.addSettingCard(self.lockDecayCard)
+        self.trackingGroup.addSettingCard(self.lockIouCard)
+        self.trackingGroup.addSettingCard(self.kalmanEnableCard)
+        self.trackingGroup.addSettingCard(self.kalmanProcessNoiseCard)
+        self.trackingGroup.addSettingCard(self.kalmanMeasNoiseCard)
+        self.addContent(self.trackingGroup)
 
         self.scrollLayout.addStretch(1)
 
@@ -920,6 +1165,7 @@ class AimPage(BasePage):
         self.uvcFpsCard.valueChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
+        self.previewCropCard.checkedChanged.connect(self._onPreviewCropChanged)
         self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
@@ -978,6 +1224,38 @@ class AimPage(BasePage):
         # Target Priority
         self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
         self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
+
+        # Baud rates
+        self.makcuBaudCombo.currentTextChanged.connect(self._onMakcuBaudChanged)
+        self.arduinoBaudCombo.currentTextChanged.connect(self._onArduinoBaudChanged)
+
+        # Inference Performance
+        self.trtFp16Card.checkedChanged.connect(self._onTrtFp16Changed)
+        self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
+        self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
+        self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
+
+        # Target Tracking
+        self.emaEnableCard.checkedChanged.connect(self._onEmaEnableChanged)
+        self.emaAlphaCard.valueChanged.connect(self._onEmaAlphaChanged)
+        self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
+        self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
+        self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
+        self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
+        self.stickyLockCard.checkedChanged.connect(self._onStickyLockChanged)
+        self.lockDecayCard.valueChanged.connect(self._onLockDecayChanged)
+        self.lockIouCard.valueChanged.connect(self._onLockIouChanged)
+
+        # Kalman
+        self.kalmanEnableCard.checkedChanged.connect(self._onKalmanEnableChanged)
+        self.kalmanProcessNoiseCard.valueChanged.connect(self._onKalmanProcessNoiseChanged)
+        self.kalmanMeasNoiseCard.valueChanged.connect(self._onKalmanMeasNoiseChanged)
+
+        # Smart Jitter
+        self.smartJitterEnableCard.checkedChanged.connect(self._onSmartJitterEnableChanged)
+        self.smartJitterLmbCard.checkedChanged.connect(self._onSmartJitterLmbChanged)
+        self.smartJitterLevelCombo.currentIndexChanged.connect(self._onSmartJitterLevelChanged)
+        self.smartJitterThreshCard.valueChanged.connect(self._onSmartJitterThreshChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -1040,7 +1318,7 @@ class AimPage(BasePage):
             if screenshot_method in screenshot_methods:
                 self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
             self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
-            self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'dshow')))
+            self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
             self._refreshUvcResolutions()
             resolution_text = str(getattr(self._config, 'uvc_resolution', f"{getattr(self._config, 'uvc_width', self._config.width)}x{getattr(self._config, 'uvc_height', self._config.height)}"))
             idx = self.uvcResolutionCombo.findText(resolution_text)
@@ -1051,6 +1329,7 @@ class AimPage(BasePage):
                 self.uvcResolutionCombo.setCurrentIndex(idx)
             self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
             self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
+            self.previewCropCard.setChecked(bool(getattr(self._config, 'preview_crop_to_detection', False)))
             self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
             self._refreshNdiSources()
             ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
@@ -1122,6 +1401,60 @@ class AimPage(BasePage):
             self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
             self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
             self._updateXboxConnectionStatus()
+
+            # Baud rates
+            makcu_baud = str(getattr(self._config, 'makcu_baud_rate', 115200))
+            if self.makcuBaudCombo.findText(makcu_baud) < 0:
+                makcu_baud = "115200"
+            self.makcuBaudCombo.setCurrentText(makcu_baud)
+
+            arduino_baud = str(getattr(self._config, 'arduino_baud_rate', 115200))
+            if self.arduinoBaudCombo.findText(arduino_baud) < 0:
+                arduino_baud = "115200"
+            self.arduinoBaudCombo.setCurrentText(arduino_baud)
+
+            # Inference Performance
+            self.trtFp16Card.setChecked(bool(getattr(self._config, 'trt_fp16_enabled', False)))
+            self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
+            self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
+            self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
+
+            # Target Tracking
+            self.emaEnableCard.setChecked(bool(getattr(self._config, 'ema_enabled', False)))
+            self.emaAlphaCard.setValue(int(getattr(self._config, 'ema_alpha', 0.7) * 100))
+            self.predictionEnableCard.setChecked(bool(getattr(self._config, 'prediction_enabled', False)))
+            self.predictionHorizonCard.setValue(int(getattr(self._config, 'prediction_horizon_ms', 10.0)))
+            self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
+            self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
+            self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
+            self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
+            self.lockIouCard.setValue(int(getattr(self._config, 'lock_iou_threshold', 0.3) * 100))
+
+            # Kalman
+            kalman_on = bool(getattr(self._config, 'kalman_enabled', False))
+            self.kalmanEnableCard.setChecked(kalman_on)
+            self.kalmanProcessNoiseCard.setValue(int(getattr(self._config, 'kalman_process_noise', 0.01) * 100))
+            self.kalmanMeasNoiseCard.setValue(int(getattr(self._config, 'kalman_measurement_noise', 0.1) * 100))
+            self.kalmanProcessNoiseCard.setEnabled(kalman_on)
+            self.kalmanMeasNoiseCard.setEnabled(kalman_on)
+            # Mutual exclusion: grey out EMA when Kalman is on
+            self.emaEnableCard.setEnabled(not kalman_on)
+            self.emaAlphaCard.setEnabled(not kalman_on and bool(getattr(self._config, 'ema_enabled', False)))
+            if kalman_on:
+                self.emaEnableCard.setChecked(False)
+                if self._config:
+                    self._config.ema_enabled = False
+
+            # Smart Jitter
+            sj_on = bool(getattr(self._config, 'smart_jitter_enabled', False))
+            self.smartJitterEnableCard.setChecked(sj_on)
+            self.smartJitterLmbCard.setChecked(bool(getattr(self._config, 'smart_jitter_lmb_gate', True)))
+            sj_level = int(getattr(self._config, 'smart_jitter_level', 1))
+            self.smartJitterLevelCombo.setCurrentIndex(max(0, min(2, sj_level - 1)))
+            self.smartJitterThreshCard.setValue(int(getattr(self._config, 'smart_jitter_box_threshold_pct', 15.0)))
+            self.smartJitterLmbCard.setEnabled(sj_on)
+            self.smartJitterLevelCard.setEnabled(sj_on)
+            self.smartJitterThreshCard.setEnabled(sj_on)
         finally:
             self._isLoadingConfig = False
 
@@ -1480,6 +1813,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.uvc_show_window = bool(checked)
 
+    def _onPreviewCropChanged(self, checked):
+        if self._config:
+            self._config.preview_crop_to_detection = bool(checked)
+
     def _onUvcPreviewScaleModeChanged(self, text):
         if self._config:
             self._config.uvc_preview_scale_mode = str(text)
@@ -1503,7 +1840,7 @@ class AimPage(BasePage):
             from core.screen_capture import list_supported_uvc_resolutions
             resolutions = list_supported_uvc_resolutions(
                 int(getattr(self._config, 'uvc_device_index', 0)),
-                str(getattr(self._config, 'uvc_capture_method', 'dshow')),
+                str(getattr(self._config, 'uvc_capture_method', 'msmf')),
             )
         except Exception:
             resolutions = []
@@ -1571,6 +1908,7 @@ class AimPage(BasePage):
         self.uvcFpsCard.setVisible(is_uvc)
         self.uvcCaptureMethodCard.setVisible(is_uvc)
         self.uvcPreviewCard.setVisible(is_uvc or is_ndi)
+        self.previewCropCard.setVisible(is_uvc or is_ndi)
         self.uvcPreviewScaleCard.setVisible(is_uvc or is_ndi)
         self.ndiSourceCard.setVisible(is_ndi)
         self.ndiRefreshCard.setVisible(is_ndi)
@@ -1853,7 +2191,8 @@ class AimPage(BasePage):
                         t("no_com_port")
                     )
                     return
-                success = connect_makcu(com_port)
+                baud = int(getattr(self._config, 'makcu_baud_rate', 115200)) if self._config else 115200
+                success = connect_makcu(com_port, baud)
                 if not success:
                     QMessageBox.warning(
                         self, t("config_error"),
@@ -1944,6 +2283,131 @@ class AimPage(BasePage):
             self.xboxConnectionLabel.setText("vgamepad N/A")
             self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
 
+    # === Baud Rate Callbacks ===
+
+    def _onMakcuBaudChanged(self, text):
+        if self._config and not self._isLoadingConfig:
+            try:
+                self._config.makcu_baud_rate = int(text)
+            except ValueError:
+                pass
+
+    def _onArduinoBaudChanged(self, text):
+        if self._config and not self._isLoadingConfig:
+            try:
+                self._config.arduino_baud_rate = int(text)
+            except ValueError:
+                pass
+
+    # === Inference Performance Callbacks ===
+
+    def _onTrtFp16Changed(self, checked):
+        if self._config:
+            self._config.trt_fp16_enabled = bool(checked)
+
+    def _onCudaIoBindingChanged(self, checked):
+        if self._config:
+            self._config.cuda_io_binding_enabled = bool(checked)
+
+    def _onFrameSkipChanged(self, checked):
+        if self._config:
+            self._config.frame_skip_enabled = bool(checked)
+
+    def _onFrameSkipThresholdChanged(self, value):
+        if self._config:
+            self._config.frame_skip_threshold = value / 10.0
+
+    # === Target Tracking Callbacks ===
+
+    def _onEmaAlphaChanged(self, value):
+        if self._config:
+            self._config.ema_alpha = value / 100.0
+
+    def _onPredictionEnableChanged(self, checked):
+        if self._config:
+            self._config.prediction_enabled = bool(checked)
+
+    def _onPredictionHorizonChanged(self, value):
+        if self._config:
+            self._config.prediction_horizon_ms = float(value)
+
+    def _onPredictionMaxVelChanged(self, value):
+        if self._config:
+            self._config.prediction_max_velocity = float(value)
+
+    def _onPredictionHistoryChanged(self, value):
+        if self._config:
+            self._config.prediction_history_len = int(value)
+
+    def _onStickyLockChanged(self, checked):
+        if self._config:
+            self._config.sticky_lock_enabled = bool(checked)
+
+    def _onLockDecayChanged(self, value):
+        if self._config:
+            self._config.lock_decay_frames = int(value)
+
+    def _onLockIouChanged(self, value):
+        if self._config:
+            self._config.lock_iou_threshold = value / 100.0
+
+    # === Kalman Callbacks ===
+
+    def _onKalmanEnableChanged(self, checked):
+        if self._config:
+            self._config.kalman_enabled = bool(checked)
+        # Mutual exclusion: disable EMA when Kalman is on
+        self.emaEnableCard.setEnabled(not checked)
+        if checked:
+            self.emaEnableCard.setChecked(False)
+            if self._config:
+                self._config.ema_enabled = False
+            self.emaAlphaCard.setEnabled(False)
+        self.kalmanProcessNoiseCard.setEnabled(bool(checked))
+        self.kalmanMeasNoiseCard.setEnabled(bool(checked))
+
+    def _onKalmanProcessNoiseChanged(self, value):
+        if self._config:
+            self._config.kalman_process_noise = value / 100.0
+
+    def _onKalmanMeasNoiseChanged(self, value):
+        if self._config:
+            self._config.kalman_measurement_noise = value / 100.0
+
+    def _onEmaEnableChanged(self, checked):
+        if self._config:
+            self._config.ema_enabled = bool(checked)
+        # Mutual exclusion: disable Kalman when EMA is on
+        self.kalmanEnableCard.setEnabled(not checked)
+        if checked:
+            self.kalmanEnableCard.setChecked(False)
+            if self._config:
+                self._config.kalman_enabled = False
+            self.kalmanProcessNoiseCard.setEnabled(False)
+            self.kalmanMeasNoiseCard.setEnabled(False)
+        self.emaAlphaCard.setEnabled(bool(checked))
+
+    # === Smart Jitter Callbacks ===
+
+    def _onSmartJitterEnableChanged(self, checked):
+        if self._config:
+            self._config.smart_jitter_enabled = bool(checked)
+        self.smartJitterLmbCard.setEnabled(bool(checked))
+        self.smartJitterLevelCard.setEnabled(bool(checked))
+        self.smartJitterThreshCard.setEnabled(bool(checked))
+
+    def _onSmartJitterLmbChanged(self, checked):
+        if self._config:
+            self._config.smart_jitter_lmb_gate = bool(checked)
+
+    def _onSmartJitterLevelChanged(self, index):
+        if self._config:
+            self._config.smart_jitter_level = index + 1
+
+    def _onSmartJitterThreshChanged(self, value):
+        if self._config:
+            self._config.smart_jitter_box_threshold_pct = float(value)
+
     def retranslateUi(self):
         """刷新翻譯"""
         super().retranslateUi()
@@ -1983,6 +2447,8 @@ class AimPage(BasePage):
         self.uvcFpsCard.titleLabel.setText("UVC FPS")
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
         self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
+        self.previewCropCard.titleLabel.setText(t("preview_crop_label"))
+        self.previewCropCard.contentLabel.setText(t("preview_crop_desc"))
         self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
         self.ndiSourceCard.titleLabel.setText("NDI Stream")
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
@@ -2054,10 +2520,21 @@ class AimPage(BasePage):
         self.trackerThresholdCard.titleLabel.setText(t("tracker_stop_threshold"))
         self.trackerShowCard.titleLabel.setText(t("tracker_show_prediction"))
 
+        # EMA / Kalman
+        self.emaEnableCard.titleLabel.setText(t("ema_enabled", "EMA Smoothing"))
+        self.emaAlphaCard.titleLabel.setText(t("ema_alpha", "EMA Alpha"))
+        self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
+        self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
+        self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
+
         # Anti-Detection
         self.antiDetectionGroup.titleLabel.setText(t("anti_detection", "Anti-Detection"))
         self.jitterEnableCard.titleLabel.setText(t("jitter_enabled", "Movement Jitter"))
         self.jitterStrengthCard.titleLabel.setText(t("jitter_strength", "Jitter Strength"))
+        self.smartJitterEnableCard.titleLabel.setText(t("smart_jitter_label", "Smart Jitter"))
+        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Shooting (LMB)"))
+        self.smartJitterLevelCard.titleLabel.setText(t("smart_jitter_level_label", "Jitter Strength"))
+        self.smartJitterThreshCard.titleLabel.setText(t("smart_jitter_threshold_label", "Box Size Threshold"))
 
         # Target Priority
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
