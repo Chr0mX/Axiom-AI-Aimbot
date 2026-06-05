@@ -15,7 +15,7 @@ def _inject_axiom_packages() -> None:
     _localappdata = os.environ.get("LOCALAPPDATA", "")
     if not _localappdata:
         return
-    pkg_dir = os.path.join(_localappdata, "Packages", "AxiomAI")
+    pkg_dir = os.path.join(_localappdata, "AxiomAI", "site-packages")
     if os.path.isdir(pkg_dir) and pkg_dir not in sys.path:
         sys.path.insert(0, pkg_dir)
 
@@ -42,7 +42,7 @@ def _register_trt_dll_dirs() -> None:
             pass
         _localappdata = os.environ.get("LOCALAPPDATA", "")
         if _localappdata:
-            axiom_pkg = os.path.join(_localappdata, "Packages", "AxiomAI")
+            axiom_pkg = os.path.join(_localappdata, "AxiomAI", "site-packages")
             if os.path.isdir(axiom_pkg):
                 site_dirs.append(axiom_pkg)
 
