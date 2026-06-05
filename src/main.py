@@ -90,6 +90,21 @@ import threading
 import queue
 from typing import Optional
 
+# ── AppData GPU packages — inject BEFORE importing onnxruntime ───────────────
+# install_tensorrt_local.py writes onnxruntime-gpu + TRT packages to
+# %LOCALAPPDATA%\AxiomAI\site-packages.  This path must be at the front of
+# sys.path BEFORE "import onnxruntime" so the GPU build wins over the
+# CPU-only + DirectML version bundled with the embedded Python interpreter.
+# (session_utils._inject_axiom_packages() does the same thing but runs later,
+# after onnxruntime is already cached in sys.modules — too late.)
+_axiom_lad = os.environ.get("LOCALAPPDATA", "")
+if _axiom_lad:
+    _axiom_pkg_dir = os.path.join(_axiom_lad, "AxiomAI", "site-packages")
+    if os.path.isdir(_axiom_pkg_dir) and _axiom_pkg_dir not in sys.path:
+        sys.path.insert(0, _axiom_pkg_dir)
+        print(f"[ORT] Injected AppData packages path: {_axiom_pkg_dir}")
+# ─────────────────────────────────────────────────────────────────────────────
+
 # 初始化 pywin32 - 必須先導入 pywintypes
 import pywintypes
 import onnxruntime as ort
@@ -116,6 +131,13 @@ def _register_nvidia_dll_dirs() -> None:
             all_site_dirs.append(site.getusersitepackages())
         except (AttributeError, NotImplementedError):
             pass
+
+        # Also scan AppData packages dir (installed by install_tensorrt_local.py)
+        _lad = os.environ.get("LOCALAPPDATA", "")
+        if _lad:
+            _axiom = os.path.join(_lad, "AxiomAI", "site-packages")
+            if os.path.isdir(_axiom) and _axiom not in all_site_dirs:
+                all_site_dirs.append(_axiom)
 
         nvidia_sub_packages = [
             "cuda_runtime",
