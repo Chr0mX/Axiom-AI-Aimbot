@@ -54,6 +54,8 @@ class MakcuMouse:
         self._connected = False
         self._com_port: str = ""
         self._baud_rate: int = 115200
+        self._lmb_state_cache: int = 0
+        self._lmb_cache_time: float = 0.0
 
     def connect(self, com_port: str, baud_rate: int = 115200) -> bool:
         """Connect to MAKCU device.
@@ -229,6 +231,37 @@ class MakcuMouse:
             self._connected = False
         except Exception:
             pass
+
+    def query_lmb_state(self) -> int:
+        """Send km.left() and parse response.
+
+        Returns:
+            0 = not held, 1 = raw physical input, 2 = injected (API), 3 = both.
+        Cached for 16 ms so the aim loop doesn't flood the serial link.
+        """
+        import re as _re
+        now = time.monotonic()
+        if now - self._lmb_cache_time < 0.016:
+            return self._lmb_state_cache
+        with self._lock:
+            if not self._serial or not self._serial.is_open:
+                return 0
+            try:
+                self._serial.write(b"km.left()\r\n")
+                # Read until the MAKCU prompt ">>> " to get the full response line.
+                resp = self._serial.read_until(b">>>")
+            except Exception:
+                return 0
+        m = _re.search(rb'km\.left\((\d)\)', resp)
+        val = int(m.group(1)) if m else 0
+        self._lmb_state_cache = val
+        self._lmb_cache_time = now
+        return val
+
+    @property
+    def lmb_held(self) -> bool:
+        """True when LMB is physically held (bit 0 = raw physical input from km.left())."""
+        return bool(self.query_lmb_state() & 1)
 
     @property
     def com_port(self) -> str:

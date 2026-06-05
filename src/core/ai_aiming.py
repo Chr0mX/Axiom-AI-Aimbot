@@ -4,11 +4,12 @@ import random
 import time
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from win_utils import send_mouse_move
+from win_utils import send_mouse_move, is_makcu_connected
 
 from .ai_loop_state import LoopState
 from .humanization import apply_humanization
 from .inference import PIDController
+from .kalman_filter import KalmanFilter2D
 from .target_predictor import VelocityPredictor
 
 if TYPE_CHECKING:
@@ -24,8 +25,21 @@ def _box_iou(a: List[float], b: List[float]) -> float:
     return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
 
 
-# Module-level predictor singleton — shared across process_aiming calls.
+# Module-level singletons — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
+_kalman: Optional[KalmanFilter2D] = None
+
+
+def _get_kalman(config: Config) -> KalmanFilter2D:
+    """Return (and lazily create/reconfigure) the module-level KalmanFilter2D."""
+    global _kalman
+    pn = float(getattr(config, 'kalman_process_noise', 0.01))
+    mn = float(getattr(config, 'kalman_measurement_noise', 0.1))
+    if _kalman is None:
+        _kalman = KalmanFilter2D(process_noise=pn, measurement_noise=mn)
+    else:
+        _kalman.reconfigure(pn, mn)
+    return _kalman
 
 
 def _get_predictor(config: Config) -> VelocityPredictor:
@@ -136,6 +150,14 @@ def process_aiming(
             if _predictor is not None:
                 _predictor.reset()
 
+        # --- Kalman filter aim-point smoothing (optional, UI-exclusive with EMA) ---
+        if getattr(config, 'kalman_enabled', False):
+            kf = _get_kalman(config)
+            target_x, target_y = kf.update(target_x, target_y)
+        else:
+            if _kalman is not None:
+                _kalman.reset()
+
         # --- EMA aim-point smoothing (optional) ---
         # Smooths the target coordinate before feeding to PID, reducing jitter
         # without introducing the drift risk of full Kalman filtering.
@@ -183,6 +205,26 @@ def process_aiming(
             move_x += int(random.uniform(-j, j))
             move_y += int(random.uniform(-j, j))
 
+        # --- Smart jitter: fires when box is small (far target) ---
+        if getattr(config, 'smart_jitter_enabled', False):
+            lmb_gate = getattr(config, 'smart_jitter_lmb_gate', True)
+            if not lmb_gate:
+                is_shooting = True
+            elif getattr(config, 'mouse_move_method', '') == 'makcu' and is_makcu_connected():
+                from win_utils.makcu_mouse import makcu_mouse as _mm
+                is_shooting = _mm.lmb_held
+            else:
+                is_shooting = state.aiming_start_time > 0
+            if is_shooting:
+                box_h = selected_box[3] - selected_box[1]
+                detect_size = float(getattr(config, 'detect_range_size', 350))
+                threshold_pct = float(getattr(config, 'smart_jitter_box_threshold_pct', 15.0))
+                if detect_size > 0 and (box_h / detect_size) * 100.0 < threshold_pct:
+                    _SJ_MAP = {1: 1.0, 2: 3.0, 3: 6.0}
+                    sj = _SJ_MAP.get(int(getattr(config, 'smart_jitter_level', 1)), 1.0)
+                    move_x += int(random.uniform(-sj, sj))
+                    move_y += int(random.uniform(-sj, sj))
+
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)
     else:
@@ -201,3 +243,5 @@ def process_aiming(
             config.display_locked_box_is_decaying = False
         pid_x.reset()
         pid_y.reset()
+        if _kalman is not None:
+            _kalman.reset()
