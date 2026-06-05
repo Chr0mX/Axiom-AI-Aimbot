@@ -187,5 +187,11 @@
     "crosshair_color_g": "Vert",
     "crosshair_color_b": "Bleu",
     "preview_crop_label": "Afficher la zone de détection",
-    "preview_crop_desc": "La fenêtre d'aperçu n'affiche que la zone de détection IA"
+    "preview_crop_desc": "La fenêtre d'aperçu n'affiche que la zone de détection IA",
+    "auto_match_fps_label": "Synchroniser les FPS automatiquement",
+    "auto_match_fps_desc": "Verrouille le taux de capture sur l'intervalle d'inférence pour une synchronisation fluide des images",
+    "model_input_size_label": "Taille d'entrée du modèle",
+    "model_input_size_desc": "Résolution transmise au modèle IA (plus basse = inférence plus rapide, moins de détails)",
+    "skip_letterbox_label": "Ignorer le redimensionnement letterbox",
+    "skip_letterbox_desc": "Redimensionnement direct par plus proche voisin au lieu d'un letterbox avec marge (plus rapide pour les captures carrées)"
 }

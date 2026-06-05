@@ -246,5 +246,11 @@
     "crosshair_color_g": "Green",
     "crosshair_color_b": "Blue",
     "preview_crop_label": "Show Detection Crop",
-    "preview_crop_desc": "Preview window shows only the AI detection region"
+    "preview_crop_desc": "Preview window shows only the AI detection region",
+    "auto_match_fps_label": "Auto Match FPS",
+    "auto_match_fps_desc": "Lock screenshot rate to inference interval for smooth frame sync",
+    "model_input_size_label": "Model Input Size",
+    "model_input_size_desc": "Resolution fed to the AI model (lower = faster inference, less detail)",
+    "skip_letterbox_label": "Skip Letterbox Resize",
+    "skip_letterbox_desc": "Direct nearest-neighbour resize instead of padded letterbox (faster for square captures)"
 }

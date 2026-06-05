@@ -152,6 +152,13 @@ class AimPage(BasePage):
             parent=self.generalGroup
         )
 
+        self.autoMatchFpsCard = SwitchSettingCard(
+            FluentIcon.SYNC,
+            t("auto_match_fps_label"),
+            t("auto_match_fps_desc"),
+            parent=self.generalGroup
+        )
+
         # Minimum Confidence - using SliderSpinCard
         self.confidenceCard = SliderSpinCard(
             FluentIcon.CERTIFICATE,
@@ -795,6 +802,22 @@ class AimPage(BasePage):
         # === Inference Performance ===
         self.inferPerfGroup = SettingCardGroup(t("inference_performance", "Inference Performance"), self.scrollWidget)
 
+        self.modelInputSizeCard = SliderSpinCard(
+            FluentIcon.ZOOM_IN,
+            t("model_input_size_label"),
+            160, 640,
+            suffix="px",
+            description=t("model_input_size_desc"),
+            parent=self.inferPerfGroup
+        )
+
+        self.skipLetterboxCard = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("skip_letterbox_label"),
+            t("skip_letterbox_desc"),
+            parent=self.inferPerfGroup
+        )
+
         self.trtFp16Card = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("trt_fp16_enabled", "TensorRT FP16"),
@@ -925,6 +948,7 @@ class AimPage(BasePage):
         # 通用參數
         self.generalGroup.addSettingCard(self.detectIntervalCard)
         self.generalGroup.addSettingCard(self.screenshotIntervalCard)
+        self.generalGroup.addSettingCard(self.autoMatchFpsCard)
         self.generalGroup.addSettingCard(self.confidenceCard)
         self.generalGroup.addSettingCard(self.aimPartCard)
         self.generalGroup.addSettingCard(self.mouseMoveCard)
@@ -1045,6 +1069,8 @@ class AimPage(BasePage):
         self.addContent(self.targetPriorityGroup)
 
         # Inference Performance
+        self.inferPerfGroup.addSettingCard(self.modelInputSizeCard)
+        self.inferPerfGroup.addSettingCard(self.skipLetterboxCard)
         self.inferPerfGroup.addSettingCard(self.trtFp16Card)
         self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
         self.inferPerfGroup.addSettingCard(self.frameSkipCard)
@@ -1080,6 +1106,7 @@ class AimPage(BasePage):
         # 通用參數 - 使用新組件的 valueChanged 信號
         self.detectIntervalCard.valueChanged.connect(self._onDetectIntervalChanged)
         self.screenshotIntervalCard.valueChanged.connect(self._onScreenshotIntervalChanged)
+        self.autoMatchFpsCard.checkedChanged.connect(self._onAutoMatchFpsChanged)
         self.confidenceCard.valueChanged.connect(self._onConfidenceChanged)
         self.aimPartCombo.currentIndexChanged.connect(self._onAimPartChanged)
         self.mouseMoveCombo.currentTextChanged.connect(self._onMouseMoveChanged)
@@ -1155,6 +1182,8 @@ class AimPage(BasePage):
         self.arduinoBaudCombo.currentTextChanged.connect(self._onArduinoBaudChanged)
 
         # Inference Performance
+        self.modelInputSizeCard.valueChanged.connect(self._onModelInputSizeChanged)
+        self.skipLetterboxCard.checkedChanged.connect(self._onSkipLetterboxChanged)
         self.trtFp16Card.checkedChanged.connect(self._onTrtFp16Changed)
         self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
         self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
@@ -1216,6 +1245,9 @@ class AimPage(BasePage):
             self.detectIntervalCard.setValue(interval_ms)
             screenshot_interval_ms = int(getattr(self._config, 'screenshot_interval', self._config.detect_interval) * 1000)
             self.screenshotIntervalCard.setValue(screenshot_interval_ms)
+            _auto_match = bool(getattr(self._config, 'auto_match_fps', False))
+            self.autoMatchFpsCard.setChecked(_auto_match)
+            self.screenshotIntervalCard.setEnabled(not _auto_match)
             confidence_pct = int(self._config.min_confidence * 100)
             self.confidenceCard.setValue(confidence_pct)
 
@@ -1328,6 +1360,8 @@ class AimPage(BasePage):
             self.arduinoBaudCombo.setCurrentText(arduino_baud)
 
             # Inference Performance
+            self.modelInputSizeCard.setValue(int(getattr(self._config, 'model_input_size', 640)))
+            self.skipLetterboxCard.setChecked(bool(getattr(self._config, 'skip_letterbox', False)))
             self.trtFp16Card.setChecked(bool(getattr(self._config, 'trt_fp16_enabled', False)))
             self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
             self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
@@ -1566,11 +1600,22 @@ class AimPage(BasePage):
         """偵測間隔改變"""
         if self._config:
             self._config.detect_interval = value / 1000.0
+            if getattr(self._config, 'auto_match_fps', False):
+                self._config.screenshot_interval = self._config.detect_interval
+                self.screenshotIntervalCard.setValue(value)
 
     def _onScreenshotIntervalChanged(self, value):
         """截圖間隔改變"""
         if self._config:
             self._config.screenshot_interval = value / 1000.0
+
+    def _onAutoMatchFpsChanged(self, checked):
+        if self._config:
+            self._config.auto_match_fps = bool(checked)
+            self.screenshotIntervalCard.setEnabled(not checked)
+            if checked:
+                self._config.screenshot_interval = self._config.detect_interval
+                self.screenshotIntervalCard.setValue(int(self._config.detect_interval * 1000))
 
     def _onConfidenceChanged(self, value):
         """信心值改變"""
@@ -2205,6 +2250,18 @@ class AimPage(BasePage):
         if self._config:
             self._config.frame_skip_threshold = value / 10.0
 
+    def _onModelInputSizeChanged(self, value):
+        if self._config:
+            # Snap to nearest multiple of 32 (YOLO requirement)
+            snapped = max(160, min(640, round(value / 32) * 32))
+            self._config.model_input_size = snapped
+            if snapped != value:
+                self.modelInputSizeCard.setValue(snapped)
+
+    def _onSkipLetterboxChanged(self, checked):
+        if self._config:
+            self._config.skip_letterbox = bool(checked)
+
     # === Target Tracking Callbacks ===
 
     def _onEmaEnableChanged(self, checked):
@@ -2271,6 +2328,7 @@ class AimPage(BasePage):
         # 通用參數
         self.detectIntervalCard.titleLabel.setText(t("detect_interval"))
         self.screenshotIntervalCard.titleLabel.setText(t("screenshot_interval"))
+        self.autoMatchFpsCard.titleLabel.setText(t("auto_match_fps_label"))
         self.confidenceCard.titleLabel.setText(t("min_confidence"))
         self.aimPartCard.titleLabel.setText(t("aim_part"))
         self.mouseMoveCard.titleLabel.setText(t("mouse_move_method"))
@@ -2294,6 +2352,9 @@ class AimPage(BasePage):
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
+        self.autoMatchFpsCard.titleLabel.setText(t("auto_match_fps_label"))
+        self.modelInputSizeCard.titleLabel.setText(t("model_input_size_label"))
+        self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
 
         # Arduino 設定
         self.comPortCard.titleLabel.setText(t("arduino_com_port"))

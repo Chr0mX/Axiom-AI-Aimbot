@@ -180,6 +180,7 @@ class Config:
         # - idle_detect_interval: 未瞄準但 keep_detecting=True 時的間隔（降低占用）
         self.detect_interval: float = 0.01       # 秒，預設 10ms
         self.screenshot_interval: float = 0.01   # 秒，預設 10ms
+        self.auto_match_fps: bool = False         # 截圖間隔自動跟隨推理間隔
         self.idle_detect_interval: float = 0.05  # 秒，預設 50ms
         self.idle_detect_enabled: bool = False     # 是否啟用未瞄準時降低偵測頻率
         self.aim_toggle_key: int = 45       # Insert 鍵
@@ -232,6 +233,7 @@ class Config:
         # 幀跳過：像素差分閾值，靜態畫面時跳過推理
         self.frame_skip_enabled: bool = False
         self.frame_skip_threshold: float = 2.0
+        self.skip_letterbox: bool = False         # 直接縮放取代 letterbox（略快，正方形擷取無失真）
 
         # EMA 瞄準點平滑（在 PID 前平滑目標座標）
         self.ema_enabled: bool = False
@@ -365,6 +367,8 @@ class Config:
             'cuda_io_binding_enabled': self.cuda_io_binding_enabled,
             'frame_skip_enabled': self.frame_skip_enabled,
             'frame_skip_threshold': self.frame_skip_threshold,
+            'skip_letterbox': self.skip_letterbox,
+            'auto_match_fps': self.auto_match_fps,
 
             'ema_enabled': self.ema_enabled,
             'ema_alpha': self.ema_alpha,

@@ -246,5 +246,11 @@
     "crosshair_color_g": "綠",
     "crosshair_color_b": "藍",
     "preview_crop_label": "顯示偵測裁切",
-    "preview_crop_desc": "預覽視窗只顯示 AI 偵測區域"
+    "preview_crop_desc": "預覽視窗只顯示 AI 偵測區域",
+    "auto_match_fps_label": "自動匹配 FPS",
+    "auto_match_fps_desc": "將截圖速率鎖定到推理間隔以實現平滑幀同步",
+    "model_input_size_label": "模型輸入尺寸",
+    "model_input_size_desc": "輸入 AI 模型的解析度（越低 = 推理越快，細節越少）",
+    "skip_letterbox_label": "跳過信箱縮放",
+    "skip_letterbox_desc": "直接使用最近鄰縮放代替填充信箱（對方形截圖更快）"
 }
