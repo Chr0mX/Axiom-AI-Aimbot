@@ -235,6 +235,17 @@ class Config:
         self.frame_skip_threshold: float = 2.0
         self.skip_letterbox: bool = False         # 直接縮放取代 letterbox（略快，正方形擷取無失真）
 
+        # Kalman filter aim-point smoother (mutually exclusive with EMA in UI)
+        self.kalman_enabled: bool = False
+        self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
+        self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier
+
+        # Smart jitter — fires when bounding box is small (target is far away)
+        self.smart_jitter_enabled: bool = False
+        self.smart_jitter_level: int = 1                    # 1=Low(±1px), 2=Medium(±3px), 3=High(±6px)
+        self.smart_jitter_box_threshold_pct: float = 15.0   # box_h / detect_range_size < threshold% → jitter
+        self.smart_jitter_lmb_gate: bool = True             # only jitter while aim key is held
+
         # EMA 瞄準點平滑（在 PID 前平滑目標座標）
         self.ema_enabled: bool = False
         self.ema_alpha: float = 0.7  # 1.0=原始，0.3=強平滑
@@ -369,6 +380,15 @@ class Config:
             'frame_skip_threshold': self.frame_skip_threshold,
             'skip_letterbox': self.skip_letterbox,
             'auto_match_fps': self.auto_match_fps,
+
+            'kalman_enabled': self.kalman_enabled,
+            'kalman_process_noise': self.kalman_process_noise,
+            'kalman_measurement_noise': self.kalman_measurement_noise,
+
+            'smart_jitter_enabled': self.smart_jitter_enabled,
+            'smart_jitter_level': self.smart_jitter_level,
+            'smart_jitter_box_threshold_pct': self.smart_jitter_box_threshold_pct,
+            'smart_jitter_lmb_gate': self.smart_jitter_lmb_gate,
 
             'ema_enabled': self.ema_enabled,
             'ema_alpha': self.ema_alpha,

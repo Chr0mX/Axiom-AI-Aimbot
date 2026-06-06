@@ -930,6 +930,74 @@ class AimPage(BasePage):
             parent=self.trackingGroup
         )
 
+        self.kalmanEnableCard = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("kalman_enabled_label", "Kalman Filter"),
+            t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing. Mutually exclusive with EMA."),
+            parent=self.trackingGroup
+        )
+
+        self.kalmanProcessNoiseCard = SliderLabelCard(
+            FluentIcon.MOVE,
+            t("kalman_process_noise_label", "Process Noise"),
+            1, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("kalman_noise_desc", "Lower = smoother but slower to react"),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        self.kalmanMeasNoiseCard = SliderLabelCard(
+            FluentIcon.ALIGNMENT,
+            t("kalman_meas_noise_label", "Measurement Noise"),
+            1, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("kalman_noise_desc", "Lower = reacts faster but noisier"),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        # Smart Jitter cards
+        self.smartJitterEnableCard = SwitchSettingCard(
+            FluentIcon.MOVE,
+            t("smart_jitter_label", "Smart Jitter"),
+            t("smart_jitter_desc", "Add jitter when target box is small (far targets). Fires while shooting."),
+            parent=self.antiDetectionGroup
+        )
+
+        self.smartJitterLmbCard = SwitchSettingCard(
+            FluentIcon.FINGERPRINT,
+            t("smart_jitter_lmb_label", "Only While Shooting (LMB Held)"),
+            t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"),
+            parent=self.antiDetectionGroup
+        )
+
+        self.smartJitterLevelCombo = ComboBox()
+        self.smartJitterLevelCombo.addItems([
+            t("smart_jitter_level_low", "Low (±1 px)"),
+            t("smart_jitter_level_med", "Medium (±3 px)"),
+            t("smart_jitter_level_high", "High (±6 px)"),
+        ])
+        self.smartJitterLevelCombo.setMinimumWidth(140)
+        self.smartJitterLevelCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("smart_jitter_level_label", "Jitter Strength"),
+            "",
+            self.antiDetectionGroup
+        )
+        self.smartJitterLevelCard.hBoxLayout.addWidget(self.smartJitterLevelCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.smartJitterLevelCard.hBoxLayout.addSpacing(16)
+
+        self.smartJitterThreshCard = SliderLabelCard(
+            FluentIcon.ZOOM_OUT,
+            t("smart_jitter_threshold_label", "Box Size Threshold"),
+            1, 50,
+            format_func=lambda v: f"{v}%",
+            description=t("smart_jitter_threshold_desc", "Jitter fires when box height < this % of detection range"),
+            slider_width=160,
+            parent=self.antiDetectionGroup
+        )
+
     def _initLayout(self):
         """排版所有控制項"""
         # 模型設定
@@ -1061,6 +1129,10 @@ class AimPage(BasePage):
         # Anti-Detection
         self.antiDetectionGroup.addSettingCard(self.jitterEnableCard)
         self.antiDetectionGroup.addSettingCard(self.jitterStrengthCard)
+        self.antiDetectionGroup.addSettingCard(self.smartJitterEnableCard)
+        self.antiDetectionGroup.addSettingCard(self.smartJitterLmbCard)
+        self.antiDetectionGroup.addSettingCard(self.smartJitterLevelCard)
+        self.antiDetectionGroup.addSettingCard(self.smartJitterThreshCard)
         self.addContent(self.antiDetectionGroup)
 
         # Target Priority
@@ -1087,6 +1159,9 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.stickyLockCard)
         self.trackingGroup.addSettingCard(self.lockDecayCard)
         self.trackingGroup.addSettingCard(self.lockIouCard)
+        self.trackingGroup.addSettingCard(self.kalmanEnableCard)
+        self.trackingGroup.addSettingCard(self.kalmanProcessNoiseCard)
+        self.trackingGroup.addSettingCard(self.kalmanMeasNoiseCard)
         self.addContent(self.trackingGroup)
 
         self.scrollLayout.addStretch(1)
@@ -1199,6 +1274,17 @@ class AimPage(BasePage):
         self.stickyLockCard.checkedChanged.connect(self._onStickyLockChanged)
         self.lockDecayCard.valueChanged.connect(self._onLockDecayChanged)
         self.lockIouCard.valueChanged.connect(self._onLockIouChanged)
+
+        # Kalman
+        self.kalmanEnableCard.checkedChanged.connect(self._onKalmanEnableChanged)
+        self.kalmanProcessNoiseCard.valueChanged.connect(self._onKalmanProcessNoiseChanged)
+        self.kalmanMeasNoiseCard.valueChanged.connect(self._onKalmanMeasNoiseChanged)
+
+        # Smart Jitter
+        self.smartJitterEnableCard.checkedChanged.connect(self._onSmartJitterEnableChanged)
+        self.smartJitterLmbCard.checkedChanged.connect(self._onSmartJitterLmbChanged)
+        self.smartJitterLevelCombo.currentIndexChanged.connect(self._onSmartJitterLevelChanged)
+        self.smartJitterThreshCard.valueChanged.connect(self._onSmartJitterThreshChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -1377,6 +1463,32 @@ class AimPage(BasePage):
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
             self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
             self.lockIouCard.setValue(int(getattr(self._config, 'lock_iou_threshold', 0.3) * 100))
+
+            # Kalman
+            kalman_on = bool(getattr(self._config, 'kalman_enabled', False))
+            self.kalmanEnableCard.setChecked(kalman_on)
+            self.kalmanProcessNoiseCard.setValue(int(getattr(self._config, 'kalman_process_noise', 0.01) * 100))
+            self.kalmanMeasNoiseCard.setValue(int(getattr(self._config, 'kalman_measurement_noise', 0.1) * 100))
+            self.kalmanProcessNoiseCard.setEnabled(kalman_on)
+            self.kalmanMeasNoiseCard.setEnabled(kalman_on)
+            # Mutual exclusion: grey out EMA when Kalman is on
+            self.emaEnableCard.setEnabled(not kalman_on)
+            self.emaAlphaCard.setEnabled(not kalman_on and bool(getattr(self._config, 'ema_enabled', False)))
+            if kalman_on:
+                self.emaEnableCard.setChecked(False)
+                if self._config:
+                    self._config.ema_enabled = False
+
+            # Smart Jitter
+            sj_on = bool(getattr(self._config, 'smart_jitter_enabled', False))
+            self.smartJitterEnableCard.setChecked(sj_on)
+            self.smartJitterLmbCard.setChecked(bool(getattr(self._config, 'smart_jitter_lmb_gate', True)))
+            sj_level = int(getattr(self._config, 'smart_jitter_level', 1))
+            self.smartJitterLevelCombo.setCurrentIndex(max(0, min(2, sj_level - 1)))
+            self.smartJitterThreshCard.setValue(int(getattr(self._config, 'smart_jitter_box_threshold_pct', 15.0)))
+            self.smartJitterLmbCard.setEnabled(sj_on)
+            self.smartJitterLevelCard.setEnabled(sj_on)
+            self.smartJitterThreshCard.setEnabled(sj_on)
         finally:
             self._isLoadingConfig = False
 
@@ -2264,10 +2376,6 @@ class AimPage(BasePage):
 
     # === Target Tracking Callbacks ===
 
-    def _onEmaEnableChanged(self, checked):
-        if self._config:
-            self._config.ema_enabled = bool(checked)
-
     def _onEmaAlphaChanged(self, value):
         if self._config:
             self._config.ema_alpha = value / 100.0
@@ -2299,6 +2407,63 @@ class AimPage(BasePage):
     def _onLockIouChanged(self, value):
         if self._config:
             self._config.lock_iou_threshold = value / 100.0
+
+    # === Kalman Callbacks ===
+
+    def _onKalmanEnableChanged(self, checked):
+        if self._config:
+            self._config.kalman_enabled = bool(checked)
+        # Mutual exclusion: disable EMA when Kalman is on
+        self.emaEnableCard.setEnabled(not checked)
+        if checked:
+            self.emaEnableCard.setChecked(False)
+            if self._config:
+                self._config.ema_enabled = False
+            self.emaAlphaCard.setEnabled(False)
+        self.kalmanProcessNoiseCard.setEnabled(bool(checked))
+        self.kalmanMeasNoiseCard.setEnabled(bool(checked))
+
+    def _onKalmanProcessNoiseChanged(self, value):
+        if self._config:
+            self._config.kalman_process_noise = value / 100.0
+
+    def _onKalmanMeasNoiseChanged(self, value):
+        if self._config:
+            self._config.kalman_measurement_noise = value / 100.0
+
+    def _onEmaEnableChanged(self, checked):
+        if self._config:
+            self._config.ema_enabled = bool(checked)
+        # Mutual exclusion: disable Kalman when EMA is on
+        self.kalmanEnableCard.setEnabled(not checked)
+        if checked:
+            self.kalmanEnableCard.setChecked(False)
+            if self._config:
+                self._config.kalman_enabled = False
+            self.kalmanProcessNoiseCard.setEnabled(False)
+            self.kalmanMeasNoiseCard.setEnabled(False)
+        self.emaAlphaCard.setEnabled(bool(checked))
+
+    # === Smart Jitter Callbacks ===
+
+    def _onSmartJitterEnableChanged(self, checked):
+        if self._config:
+            self._config.smart_jitter_enabled = bool(checked)
+        self.smartJitterLmbCard.setEnabled(bool(checked))
+        self.smartJitterLevelCard.setEnabled(bool(checked))
+        self.smartJitterThreshCard.setEnabled(bool(checked))
+
+    def _onSmartJitterLmbChanged(self, checked):
+        if self._config:
+            self._config.smart_jitter_lmb_gate = bool(checked)
+
+    def _onSmartJitterLevelChanged(self, index):
+        if self._config:
+            self._config.smart_jitter_level = index + 1
+
+    def _onSmartJitterThreshChanged(self, value):
+        if self._config:
+            self._config.smart_jitter_box_threshold_pct = float(value)
 
     def retranslateUi(self):
         """刷新翻譯"""
@@ -2416,10 +2581,21 @@ class AimPage(BasePage):
         self.trackerThresholdCard.titleLabel.setText(t("tracker_stop_threshold"))
         self.trackerShowCard.titleLabel.setText(t("tracker_show_prediction"))
 
+        # EMA / Kalman
+        self.emaEnableCard.titleLabel.setText(t("ema_enabled", "EMA Smoothing"))
+        self.emaAlphaCard.titleLabel.setText(t("ema_alpha", "EMA Alpha"))
+        self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
+        self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
+        self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
+
         # Anti-Detection
         self.antiDetectionGroup.titleLabel.setText(t("anti_detection", "Anti-Detection"))
         self.jitterEnableCard.titleLabel.setText(t("jitter_enabled", "Movement Jitter"))
         self.jitterStrengthCard.titleLabel.setText(t("jitter_strength", "Jitter Strength"))
+        self.smartJitterEnableCard.titleLabel.setText(t("smart_jitter_label", "Smart Jitter"))
+        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Shooting (LMB)"))
+        self.smartJitterLevelCard.titleLabel.setText(t("smart_jitter_level_label", "Jitter Strength"))
+        self.smartJitterThreshCard.titleLabel.setText(t("smart_jitter_threshold_label", "Box Size Threshold"))
 
         # Target Priority
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
