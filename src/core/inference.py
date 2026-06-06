@@ -90,6 +90,7 @@ class PIDController:
 def preprocess_image(
     image: npt.NDArray[np.uint8],
     model_input_size: int,
+    fast_resize: bool = False,
 ) -> Tuple[npt.NDArray[np.float32], float, int, int]:
     """Preprocess image for ONNX inference using letterboxing.
 
@@ -130,6 +131,21 @@ def preprocess_image(
             crop=False,
         )
         return np.ascontiguousarray(blob, dtype=np.float32), 1.0, 0, 0
+
+    if fast_resize:
+        # Direct nearest-neighbour resize — no grey padding canvas, no pad math.
+        # Fastest path for square capture regions (detect_range_size is always
+        # square, so there is no aspect-ratio distortion).
+        fast_scale = model_input_size / h  # h == w for square captures
+        fast_blob = cv2.dnn.blobFromImage(
+            cv2.resize(image, (model_input_size, model_input_size),
+                       interpolation=cv2.INTER_NEAREST),
+            scalefactor=1.0 / 255.0,
+            size=(model_input_size, model_input_size),
+            swapRB=True,
+            crop=False,
+        )
+        return np.ascontiguousarray(fast_blob, dtype=np.float32), fast_scale, 0, 0
 
     # Uniform scale so the longer side fits in model_input_size.
     scale = min(model_input_size / w, model_input_size / h)
