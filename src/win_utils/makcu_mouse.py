@@ -111,14 +111,28 @@ class MakcuMouse:
 
                 # Switch to 4 Mbaud if requested
                 if target_baud == 4_000_000:
+                    # Device switches baud immediately on processing the command.
+                    # Flush ensures all bytes leave the host TX buffer, then
+                    # close straight away — no extra sleep at the old rate.
                     self._serial.write(self.CMD_BAUD_4M)
                     self._serial.flush()
-                    time.sleep(0.05)       # device applies new rate
                     self._serial.close()
-                    time.sleep(0.02)       # OS releases port
+                    time.sleep(0.15)       # give OS time to release the port
                     self._serial = serial.Serial(
-                        com_port, 4_000_000, timeout=0.1, write_timeout=0.005)
+                        com_port, 4_000_000, timeout=0.3, write_timeout=0.1)
                     time.sleep(0.05)       # port settle
+                    self._serial.reset_input_buffer()
+                    # Verify 4M link — device must respond at new baud
+                    self._serial.write(self.CMD_VERSION.encode('ascii'))
+                    time.sleep(0.1)
+                    if self._serial.in_waiting == 0:
+                        raise serial.SerialException(
+                            f"4 Mbaud handshake failed on {com_port}: "
+                            "no response after baud switch")
+                    self._serial.read(self._serial.in_waiting)  # drain response
+                    # Re-disable echo at new baud
+                    self._serial.write(self.CMD_ECHO_OFF.encode('ascii'))
+                    time.sleep(0.05)
                     self._serial.reset_input_buffer()
                     logger.info("[MAKCU] Switched to 4 Mbaud on %s", com_port)
                     print(f"[MAKCU] Switched to 4 Mbaud on {com_port}")
