@@ -6,15 +6,16 @@ Tests mouse button state queries, the full Misc API, and keyboard state
 over a live serial connection.  Reference: docs/MAKCU_Native_API.md
 
 Usage:
-    python debug_makcu.py [COM_PORT] [--baud 115200|4000000]
+    python debug_makcu.py [COM_PORT] [--baud 115200|4000000] [--ui]
     python debug_makcu.py COM3
     python debug_makcu.py COM3 --baud 4000000
+    python debug_makcu.py COM3 --ui            # live button visualizer
     python debug_makcu.py                      # auto-detect
     python debug_makcu.py COM3 --no-poll       # skip live poll
     python debug_makcu.py COM3 --poll 30       # poll for 30s
 
-Hold / click mouse buttons while the poll loop is running to see
-each method's live response.
+--ui launches a full-screen ANSI terminal visualizer showing which mouse
+buttons are physically held. All other tests are skipped in UI mode.
 """
 
 import argparse
@@ -379,6 +380,138 @@ def poll_buttons(ser: serial.Serial, duration: float = 15.0):
     print()
 
 
+# ── Terminal button visualizer UI ─────────────────────────────────────────────
+
+# ANSI helpers
+_A  = "\033["          # ESC [
+_RS = "\033[0m"        # reset
+_BD = "\033[1m"        # bold
+_DM = "\033[2m"        # dim
+_CL = "\033[2J\033[H"  # clear screen + home
+_HC = "\033[?25l"      # hide cursor
+_SC = "\033[?25h"      # show cursor
+
+# Colours for button states
+_COL = {
+    -1: "\033[90m",    # grey  — unknown
+     0: "\033[2;37m",  # dim white — released
+     1: "\033[1;92m",  # bright green — physical DOWN
+     2: "\033[1;93m",  # bright yellow — injected DOWN
+     3: "\033[1;91m",  # bright red — both
+}
+_STATE_LABEL = {-1: "  ?  ", 0: " up  ", 1: "PHYS▼", 2: "INJ▼ ", 3: "BOTH▼"}
+
+
+def _btn_block(val: int, name: str, width: int = 7) -> str:
+    """Render a coloured button cell: '[ LMB ]' style."""
+    col   = _COL.get(val, _COL[-1])
+    inner = f" {name} "
+    pad   = max(0, width - len(inner))
+    left  = pad // 2
+    right = pad - left
+    return f"{col}{_BD}[{' ' * left}{inner}{' ' * right}]{_RS}"
+
+
+def show_button_ui(ser: serial.Serial):
+    """
+    Full-screen terminal visualizer.  Draws a mouse diagram and updates
+    button states in-place using ANSI cursor positioning.
+
+    Layout:
+
+        ┌──────────┬──────────┐
+        │   LMB    │   RMB    │
+        ├────┬─────┴─────┬────┤
+        │    │    MMB    │    │
+        │ S1 │           │ S2 │
+        └────┴───────────┴────┘
+         catch_ml: 0 (inactive)
+
+    Button colour legend:
+        dim white = released
+        bright green  = physical DOWN (bit 0)
+        bright yellow = injected DOWN (bit 1)
+        bright red    = both
+    """
+    QUERIES = [
+        ("lmb",      b"km.left()\r\n",     rb'km\.left\((\d)\)'),
+        ("rmb",      b"km.right()\r\n",    rb'km\.right\((\d)\)'),
+        ("mmb",      b"km.middle()\r\n",   rb'km\.middle\((\d)\)'),
+        ("s1",       b"km.side1()\r\n",    rb'km\.side1\((\d)\)'),
+        ("s2",       b"km.side2()\r\n",    rb'km\.side2\((\d)\)'),
+        ("catch_ml", b"km.catch_ml()\r\n", rb'catch_ml\((\d)\)'),
+    ]
+    lock = threading.Lock()
+
+    def _read_all() -> dict[str, int]:
+        out = {}
+        for key, cmd, pat in QUERIES:
+            with lock:
+                try:
+                    ser.reset_input_buffer()
+                    ser.write(cmd)
+                    ser.flush()
+                    resp = ser.read_until(b">>>", size=256)
+                    m = re.search(pat, resp)
+                    out[key] = int(m.group(1)) if m else -1
+                except Exception:
+                    out[key] = -1
+        return out
+
+    def _render(st: dict[str, int]) -> str:
+        lmb = _btn_block(st["lmb"],      "LMB", 8)
+        rmb = _btn_block(st["rmb"],      "RMB", 8)
+        mmb = _btn_block(st["mmb"],      "MMB", 11)
+        s1  = _btn_block(st["s1"],       "S1",  4)
+        s2  = _btn_block(st["s2"],       "S2",  4)
+        cm  = st["catch_ml"]
+        cm_col   = "\033[1;92m" if cm else "\033[2;37m"
+        cm_label = f"{cm_col}{'ACTIVE' if cm else 'off'}{_RS}"
+
+        lines = [
+            f"  {_BD}MAKCU Mouse Button Visualizer{_RS}   {_DM}Ctrl+C to stop{_RS}",
+            "",
+            f"  ┌{'─'*12}┬{'─'*12}┐",
+            f"  │  {lmb}  │  {rmb}  │",
+            f"  ├────┬{'─'*7}┴{'─'*4}┬────┤",
+            f"  │{s1}│   {mmb}   │{s2}│",
+            f"  └────┴{'─'*11}┴────┘",
+            "",
+            f"  catch_ml (LMB intercept): {cm_label}",
+            "",
+            f"  {_DM}Legend:{_RS}  "
+            f"{_COL[0]}■{_RS} released  "
+            f"{_COL[1]}■{_RS} physical DOWN  "
+            f"{_COL[2]}■{_RS} injected DOWN  "
+            f"{_COL[3]}■{_RS} both",
+        ]
+        return "\n".join(lines)
+
+    sys.stdout.write(_HC)   # hide cursor
+    sys.stdout.write(_CL)   # clear screen
+    sys.stdout.flush()
+
+    prev: dict[str, int] = {}
+    try:
+        while True:
+            cur = _read_all()
+            if cur != prev:
+                # Move to top-left and redraw the block
+                sys.stdout.write("\033[H")
+                sys.stdout.write(_render(cur))
+                sys.stdout.flush()
+                prev = dict(cur)
+            time.sleep(0.02)   # ~50 Hz
+
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.stdout.write(_SC)   # restore cursor
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+        print("[UI] Stopped.")
+
+
 # ── entry point ───────────────────────────────────────────────────────────────
 
 def main():
@@ -391,6 +524,9 @@ def main():
                         help="Baud rate (default 115200). 4000000 requires a capable adapter.")
     parser.add_argument("--poll", type=float, default=15.0, metavar="SECONDS",
                         help="Duration of live button poll in seconds (default 15)")
+    parser.add_argument("--ui",          action="store_true",
+                        help="Launch live mouse button visualizer (terminal ANSI UI). "
+                             "Skips all other tests.")
     parser.add_argument("--no-misc",     action="store_true", help="Skip misc/system API tests")
     parser.add_argument("--no-mouse",    action="store_true", help="Skip mouse state snapshot")
     parser.add_argument("--no-keyboard", action="store_true", help="Skip keyboard isdown snapshot")
@@ -409,17 +545,21 @@ def main():
         sys.exit(1)
 
     try:
-        if not args.no_misc:
-            test_misc_api(ser)
+        if args.ui:
+            # Full-screen visualizer — skips all other tests
+            show_button_ui(ser)
+        else:
+            if not args.no_misc:
+                test_misc_api(ser)
 
-        if not args.no_mouse:
-            test_mouse_state(ser)
+            if not args.no_mouse:
+                test_mouse_state(ser)
 
-        if not args.no_keyboard:
-            test_keyboard_state(ser)
+            if not args.no_keyboard:
+                test_keyboard_state(ser)
 
-        if not args.no_poll:
-            poll_buttons(ser, duration=args.poll)
+            if not args.no_poll:
+                poll_buttons(ser, duration=args.poll)
 
     finally:
         ser.close()
