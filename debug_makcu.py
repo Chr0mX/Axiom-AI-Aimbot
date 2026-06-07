@@ -2,8 +2,8 @@
 """
 debug_makcu.py — MAKCU debug utility (v2)
 
-Tests mouse button state queries, the full Misc API, and keyboard state
-over a live serial connection.  Reference: docs/MAKCU_Native_API.md
+Tests mouse button state queries and the full Misc API over a live
+serial connection.  Reference: docs/MAKCU_Native_API.md
 
 Usage:
     python debug_makcu.py [COM_PORT] [--baud 115200|4000000] [--ui]
@@ -33,6 +33,13 @@ if _deps not in sys.path:
 
 import serial
 import serial.tools.list_ports
+
+# ── import MakcuMouse for connection logic ───────────────────────────────────
+_src = os.path.join(_here, "src")
+if _src not in sys.path:
+    sys.path.insert(0, _src)
+
+from win_utils.makcu_mouse import MakcuMouse
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -85,53 +92,6 @@ def _print_raw(label: str, raw: bytes, interp: str = ""):
     if interp:
         print(f"    parsed : {interp}")
     print()
-
-
-# ── connection ────────────────────────────────────────────────────────────────
-
-def connect(port: str, baud: int) -> serial.Serial:
-    print(f"\n[Connect] Opening {port} @ 115200 baud (startup rate)...")
-    ser = serial.Serial(port, 115200, timeout=0.3, write_timeout=0.05)
-    time.sleep(0.1)
-    ser.reset_input_buffer()
-
-    # Handshake
-    raw = _send_recv(ser, "km.version()\r\n", wait=0.15)
-    print(f"[Handshake] km.version() → {_decode(raw)!r}")
-    if not raw:
-        print("[Handshake] WARNING: no response — check port / device power")
-
-    # Suppress echo so responses are clean
-    _send_recv(ser, "km.echo(0)\r\n", wait=0.08)
-
-    if baud == 4_000_000:
-        print("[Connect] Switching to 4 Mbaud...")
-        # Device switches baud immediately on processing the command.
-        # Flush ensures all bytes leave the host TX buffer, then close
-        # straight away — sleeping at 115200 after the device has switched
-        # accomplishes nothing and can corrupt the input buffer.
-        ser.write(b"km.baud(4000000)\r\n")
-        ser.flush()
-        ser.close()
-        time.sleep(0.15)    # give OS time to fully release the port
-        ser = serial.Serial(port, 4_000_000, timeout=0.3, write_timeout=0.1)
-        time.sleep(0.05)    # port settle
-        ser.reset_input_buffer()
-        # Verify 4M link
-        ser.write(b"km.version()\r\n")
-        time.sleep(0.1)
-        if ser.in_waiting == 0:
-            raise serial.SerialException(
-                f"4 Mbaud handshake failed on {port}: no response after baud switch. "
-                "Check that your USB-serial adapter supports 4 Mbaud (e.g. CH340, FTDI).")
-        resp = _decode(ser.read(ser.in_waiting))
-        print(f"[4M verify] km.version() → {resp!r}")
-        # Re-disable echo at new baud
-        _send_recv(ser, "km.echo(0)\r\n", wait=0.08)
-        print("[Connect] Now at 4 Mbaud.")
-
-    print(f"[Connect] Ready on {port} @ {baud} baud.\n")
-    return ser
 
 
 # ── Misc / System API ─────────────────────────────────────────────────────────
@@ -303,34 +263,6 @@ def test_mouse_state(ser: serial.Serial):
     ]:
         raw = _send_recv(ser, cmd, wait=0.0, read_until=b">>>")
         _print_raw(label, raw, _decode(raw))
-
-
-# ── Keyboard state ────────────────────────────────────────────────────────────
-
-def test_keyboard_state(ser: serial.Serial):
-    print(SEP)
-    print("KEYBOARD STATE — isdown() SNAPSHOT")
-    print(SEP)
-    print("(hold keys before reading to see non-zero values)\n")
-
-    KEYS_TO_CHECK = [
-        ("'ctrl'",  b"km.isdown('ctrl')\r\n"),
-        ("'shift'", b"km.isdown('shift')\r\n"),
-        ("'alt'",   b"km.isdown('alt')\r\n"),
-        ("'win'",   b"km.isdown('win')\r\n"),
-        ("'space'", b"km.isdown('space')\r\n"),
-        ("'e'",     b"km.isdown('e')\r\n"),
-        ("'f'",     b"km.isdown('f')\r\n"),
-        ("'r'",     b"km.isdown('r')\r\n"),
-        ("'f1'",    b"km.isdown('f1')\r\n"),
-        ("'esc'",   b"km.isdown('esc')\r\n"),
-    ]
-    for label, cmd in KEYS_TO_CHECK:
-        raw = _send_recv(ser, cmd, wait=0.0, read_until=b">>>")
-        m = re.search(rb'isdown\((\d)\)', raw)
-        val = int(m.group(1)) if m else -1
-        state = "DOWN" if val == 1 else ("up" if val == 0 else "?")
-        _print_raw(f"isdown({label})", raw, f"{val} → {state}")
 
 
 # ── Live poll ─────────────────────────────────────────────────────────────────
@@ -524,13 +456,12 @@ def main():
                         help="Baud rate (default 115200). 4000000 requires a capable adapter.")
     parser.add_argument("--poll", type=float, default=15.0, metavar="SECONDS",
                         help="Duration of live button poll in seconds (default 15)")
-    parser.add_argument("--ui",          action="store_true",
+    parser.add_argument("--ui",       action="store_true",
                         help="Launch live mouse button visualizer (terminal ANSI UI). "
                              "Skips all other tests.")
-    parser.add_argument("--no-misc",     action="store_true", help="Skip misc/system API tests")
-    parser.add_argument("--no-mouse",    action="store_true", help="Skip mouse state snapshot")
-    parser.add_argument("--no-keyboard", action="store_true", help="Skip keyboard isdown snapshot")
-    parser.add_argument("--no-poll",     action="store_true", help="Skip live poll")
+    parser.add_argument("--no-misc",  action="store_true", help="Skip misc/system API tests")
+    parser.add_argument("--no-mouse", action="store_true", help="Skip mouse state snapshot")
+    parser.add_argument("--no-poll",  action="store_true", help="Skip live poll")
     args = parser.parse_args()
 
     port = args.port or _auto_detect_port()
@@ -538,15 +469,15 @@ def main():
         print("[ERROR] No COM port found. Plug in the MAKCU device or pass the port explicitly.")
         sys.exit(1)
 
-    try:
-        ser = connect(port, args.baud)
-    except serial.SerialException as e:
-        print(f"[ERROR] {e}")
+    mouse = MakcuMouse()
+    if not mouse.connect(port, args.baud):
+        print("[ERROR] Failed to connect to MAKCU device.")
         sys.exit(1)
+
+    ser = mouse._serial  # raw serial handle for debug commands
 
     try:
         if args.ui:
-            # Full-screen visualizer — skips all other tests
             show_button_ui(ser)
         else:
             if not args.no_misc:
@@ -555,14 +486,11 @@ def main():
             if not args.no_mouse:
                 test_mouse_state(ser)
 
-            if not args.no_keyboard:
-                test_keyboard_state(ser)
-
             if not args.no_poll:
                 poll_buttons(ser, duration=args.poll)
 
     finally:
-        ser.close()
+        mouse.disconnect()
         print("[Done] Serial port closed.")
 
 
