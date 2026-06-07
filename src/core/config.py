@@ -242,7 +242,7 @@ class Config:
 
         # Smart jitter — fires when bounding box is small (target is far away)
         self.smart_jitter_enabled: bool = False
-        self.smart_jitter_level: int = 1                    # 1=Low(±1px), 2=Medium(±3px), 3=High(±6px)
+        self.smart_jitter_strength: float = 6.0                # max pixel offset ±N applied each frame
         self.smart_jitter_box_threshold_pct: float = 15.0   # box_h / detect_range_size < threshold% → jitter
         self.smart_jitter_lmb_gate: bool = True             # only jitter while aim key is held
 
@@ -386,7 +386,7 @@ class Config:
             'kalman_measurement_noise': self.kalman_measurement_noise,
 
             'smart_jitter_enabled': self.smart_jitter_enabled,
-            'smart_jitter_level': self.smart_jitter_level,
+            'smart_jitter_strength': self.smart_jitter_strength,
             'smart_jitter_box_threshold_pct': self.smart_jitter_box_threshold_pct,
             'smart_jitter_lmb_gate': self.smart_jitter_lmb_gate,
 

@@ -972,20 +972,19 @@ class AimPage(BasePage):
             parent=self.antiDetectionGroup
         )
 
-        self.smartJitterLevelCombo = ComboBox()
-        self.smartJitterLevelCombo.addItems([
-            t("smart_jitter_level_low", "Low (±1 px)"),
-            t("smart_jitter_level_med", "Medium (±3 px)"),
-            t("smart_jitter_level_high", "High (±6 px)"),
-        ])
-        self.smartJitterLevelCombo.setMinimumWidth(140)
+        self.smartJitterStrengthSpin = DoubleSpinBox()
+        self.smartJitterStrengthSpin.setRange(0.1, 200.0)
+        self.smartJitterStrengthSpin.setSingleStep(0.5)
+        self.smartJitterStrengthSpin.setDecimals(1)
+        self.smartJitterStrengthSpin.setSuffix(" px")
+        self.smartJitterStrengthSpin.setMinimumWidth(110)
         self.smartJitterLevelCard = SettingCard(
             FluentIcon.SPEED_HIGH,
             t("smart_jitter_level_label", "Jitter Strength"),
-            "",
+            t("smart_jitter_level_desc", "Max pixel offset ±N applied per frame while jitter fires"),
             self.antiDetectionGroup
         )
-        self.smartJitterLevelCard.hBoxLayout.addWidget(self.smartJitterLevelCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.smartJitterLevelCard.hBoxLayout.addWidget(self.smartJitterStrengthSpin, 0, Qt.AlignmentFlag.AlignRight)
         self.smartJitterLevelCard.hBoxLayout.addSpacing(16)
 
         self.smartJitterThreshCard = SliderLabelCard(
@@ -1283,7 +1282,7 @@ class AimPage(BasePage):
         # Smart Jitter
         self.smartJitterEnableCard.checkedChanged.connect(self._onSmartJitterEnableChanged)
         self.smartJitterLmbCard.checkedChanged.connect(self._onSmartJitterLmbChanged)
-        self.smartJitterLevelCombo.currentIndexChanged.connect(self._onSmartJitterLevelChanged)
+        self.smartJitterStrengthSpin.valueChanged.connect(self._onSmartJitterStrengthChanged)
         self.smartJitterThreshCard.valueChanged.connect(self._onSmartJitterThreshChanged)
 
     def _loadFromConfig(self):
@@ -1483,8 +1482,7 @@ class AimPage(BasePage):
             sj_on = bool(getattr(self._config, 'smart_jitter_enabled', False))
             self.smartJitterEnableCard.setChecked(sj_on)
             self.smartJitterLmbCard.setChecked(bool(getattr(self._config, 'smart_jitter_lmb_gate', True)))
-            sj_level = int(getattr(self._config, 'smart_jitter_level', 1))
-            self.smartJitterLevelCombo.setCurrentIndex(max(0, min(2, sj_level - 1)))
+            self.smartJitterStrengthSpin.setValue(float(getattr(self._config, 'smart_jitter_strength', 6.0)))
             self.smartJitterThreshCard.setValue(int(getattr(self._config, 'smart_jitter_box_threshold_pct', 15.0)))
             self.smartJitterLmbCard.setEnabled(sj_on)
             self.smartJitterLevelCard.setEnabled(sj_on)
@@ -2457,9 +2455,9 @@ class AimPage(BasePage):
         if self._config:
             self._config.smart_jitter_lmb_gate = bool(checked)
 
-    def _onSmartJitterLevelChanged(self, index):
+    def _onSmartJitterStrengthChanged(self, value):
         if self._config:
-            self._config.smart_jitter_level = index + 1
+            self._config.smart_jitter_strength = float(value)
 
     def _onSmartJitterThreshChanged(self, value):
         if self._config:
