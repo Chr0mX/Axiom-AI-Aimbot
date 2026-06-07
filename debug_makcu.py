@@ -218,18 +218,26 @@ def _btn_query(ser: serial.Serial, cmd: bytes, pattern: bytes, label: str) -> tu
     raw = _send_recv(ser, cmd, wait=0.0, read_until=b">>>")
     m = re.search(pattern, raw)
     val = int(m.group(1)) if m else -1
-    STATES = {0: "up / not held", 1: "raw/physical DOWN", 2: "injected (API) DOWN", 3: "physical + injected"}
-    return raw, f"{val} → {STATES.get(val, 'unknown')}"
+    return raw, f"{val} → {_BTN_STATES.get(val, 'unknown')}"
 
 
-MOUSE_STATE_METHODS = [
-    ("km.left()   [LMB]",         b"km.left()\r\n",   rb'km\.left\((\d)\)'),
-    ("km.right()  [RMB]",         b"km.right()\r\n",  rb'km\.right\((\d)\)'),
-    ("km.middle() [MMB]",         b"km.middle()\r\n", rb'km\.middle\((\d)\)'),
-    ("km.side1()  [S1 / thumb]",  b"km.side1()\r\n",  rb'km\.side1\((\d)\)'),
-    ("km.side2()  [S2 / dpi]",    b"km.side2()\r\n",  rb'km\.side2\((\d)\)'),
-    ("km.catch_ml()[LMB catch]",  b"km.catch_ml()\r\n", rb'catch_ml\((\d)\)'),
+MOUSE_BTN_METHODS = [
+    ("km.left()   [LMB]",        b"km.left()\r\n",   rb'km\.left\((\d)\)'),
+    ("km.right()  [RMB]",        b"km.right()\r\n",  rb'km\.right\((\d)\)'),
+    ("km.middle() [MMB]",        b"km.middle()\r\n", rb'km\.middle\((\d)\)'),
+    ("km.side1()  [S1 / thumb]", b"km.side1()\r\n",  rb'km\.side1\((\d)\)'),
+    ("km.side2()  [S2 / dpi]",   b"km.side2()\r\n",  rb'km\.side2\((\d)\)'),
 ]
+
+# Button GET returns bit-flags: bit0=physical input, bit1=injected (API).
+# Docs describe SET values (0=release,1=down,2=silent_release) but the GET
+# response uses this bit-flag encoding in practice.
+_BTN_STATES = {
+    0: "up (not held)",
+    1: "physical DOWN (raw input)",
+    2: "injected DOWN (API)",
+    3: "BOTH physical + injected",
+}
 
 
 def test_mouse_state(ser: serial.Serial):
@@ -237,16 +245,24 @@ def test_mouse_state(ser: serial.Serial):
     print("MOUSE BUTTON & POINTER STATE — SNAPSHOT")
     print(SEP)
     print("(hold / click buttons before reading to see non-zero values)\n")
+    print("  Note: GET response is a bit-field — bit0=physical, bit1=injected\n")
 
-    for label, cmd, pattern in MOUSE_STATE_METHODS:
+    for label, cmd, pattern in MOUSE_BTN_METHODS:
         try:
             raw = _send_recv(ser, cmd, wait=0.0, read_until=b">>>")
             m = re.search(pattern, raw)
             val = int(m.group(1)) if m else -1
-            STATES = {0: "up", 1: "PHYS_DOWN", 2: "INJECT_DOWN", 3: "BOTH_DOWN"}
-            _print_raw(label, raw, f"{val} → {STATES.get(val, 'unknown')}")
+            _print_raw(label, raw, f"{val} → {_BTN_STATES.get(val, 'unknown')}")
         except Exception as e:
             print(f"  {label}  ERROR: {e}\n")
+
+    # catch_ml — LMB intercept mode (0=auto, 1=manual per docs)
+    raw = _send_recv(ser, b"km.catch_ml()\r\n", wait=0.0, read_until=b">>>")
+    m = re.search(rb'catch_ml\((\d)\)', raw)
+    val = int(m.group(1)) if m else -1
+    CATCH_MODES = {0: "auto (pass-through)", 1: "manual (intercepted)"}
+    _print_raw("km.catch_ml() [LMB intercept mode]", raw,
+               f"{val} → {CATCH_MODES.get(val, 'unknown')}")
 
     # Cursor position
     raw = _send_recv(ser, b"km.getpos()\r\n", wait=0.0, read_until=b">>>")
@@ -281,7 +297,7 @@ def poll_buttons(ser: serial.Serial, duration: float = 15.0):
         ("s2",       b"km.side2()\r\n",    rb'km\.side2\((\d)\)'),
         ("catch_ml", b"km.catch_ml()\r\n", rb'catch_ml\((\d)\)'),
     ]
-    labels = {0: "up", 1: "PHYS▼", 2: "INJ▼", 3: "BOTH▼"}
+    labels = {0: "up", 1: "PHYS▼(bit0)", 2: "INJ▼(bit1)", 3: "BOTH▼"}
     prev = {k: -1 for k, _, __ in QUERIES}
     lock = threading.Lock()
 
@@ -448,7 +464,7 @@ def show_button_ui(ser: serial.Serial):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="MAKCU debug — mouse state, keyboard state & misc API")
+        description="MAKCU debug — mouse state & misc API")
     parser.add_argument("port", nargs="?", default=None,
                         help="COM port (e.g. COM3 or /dev/ttyUSB0)")
     parser.add_argument("--baud", type=int, default=115200,
