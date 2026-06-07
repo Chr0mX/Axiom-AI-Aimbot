@@ -150,7 +150,7 @@ class Config:
         self.box_color_theme: str = "default"  # "default" | "cyan" | "red" | "yellow" | "white" | "purple"
 
         # Tracer line from screen center to detected targets
-        self.show_tracer_line: bool = False
+        self.show_tracer_line: bool = True
 
         # Crosshair overlay
         self.show_crosshair: bool = False

@@ -270,7 +270,7 @@ class PyQtOverlay(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def draw_tracer_lines(self, painter: QPainter) -> None:
-        """Draw lines from screen center to each detected box bottom-center."""
+        """Draw lines from screen center to the aim point of each detected box."""
         if not self.boxes:
             return
         cx = int(self.config.crosshairX)
@@ -280,11 +280,16 @@ class PyQtOverlay(QWidget):
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         fov_half = int(self.config.fov_size) // 2
+        aim_part     = str(getattr(self.config, 'aim_part', 'head'))
+        head_h_ratio = float(getattr(self.config, 'head_height_ratio', 0.26))
         for box in self.boxes:
             x1, y1, x2, y2 = map(int, box)
+            box_h = y2 - y1
             bx = (x1 + x2) // 2
-            by = (y1 + y2) // 2
-            # Only draw if box center is within FOV (already filtered, but guard here too)
+            if aim_part == 'head':
+                by = int(y1 + box_h * head_h_ratio * 0.5)
+            else:
+                by = int((y1 + box_h * head_h_ratio + y2) * 0.5)
             if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
                 painter.drawLine(cx, cy, bx, by)
 
