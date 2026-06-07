@@ -340,6 +340,11 @@ class PyQtOverlay(QWidget):
                 font = QFont('Arial', 9, QFont.Weight.Bold)
                 painter.setFont(font)
 
+            aim_part        = str(getattr(self.config, 'aim_part', 'head'))
+            head_h_ratio    = float(getattr(self.config, 'head_height_ratio', 0.26))
+            aim_x_color     = QColor(255, 80, 80, 220)   # soft red X marker
+            pen_aim_x       = QPen(aim_x_color, 1)
+
             for i, box in enumerate(self.boxes):
                 x1, y1, x2, y2 = map(int, box)
                 conf = float(self.confidences[i]) if i < len(self.confidences) else 0.5
@@ -351,6 +356,19 @@ class PyQtOverlay(QWidget):
                 if show_confidence and i < len(self.confidences):
                     painter.setPen(pen_text)
                     painter.drawText(x1 - 20, y1 - 15, f"{conf:.0%}")
+
+                # Draw X at the inferred head / aim point
+                box_w = x2 - x1
+                box_h = y2 - y1
+                tx = int(x1 + box_w * 0.5)
+                if aim_part == 'head':
+                    ty = int(y1 + box_h * head_h_ratio * 0.5)
+                else:
+                    ty = int((y1 + box_h * head_h_ratio + y2) * 0.5)
+                r = max(3, min(6, box_w // 8))   # arm length scales with box width
+                painter.setPen(pen_aim_x)
+                painter.drawLine(tx - r, ty - r, tx + r, ty + r)
+                painter.drawLine(tx + r, ty - r, tx - r, ty + r)
 
         # 繪製追蹤線（從螢幕中心到目標）
         if getattr(self.config, 'show_tracer_line', False):
