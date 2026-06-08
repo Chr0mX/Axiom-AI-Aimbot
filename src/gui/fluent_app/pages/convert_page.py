@@ -89,7 +89,7 @@ class ConvertPage(BasePage):
             return
         self.fp16Card.setChecked(bool(getattr(config, 'trt_fp16_enabled', True)))
         model_path = getattr(config, 'model_path', '')
-        model_name = os.path.basename(model_path)
+        model_name = os.path.basename(model_path or "")
         idx = self.modelCombo.findText(model_name)
         if idx >= 0:
             self.modelCombo.setCurrentIndex(idx)
