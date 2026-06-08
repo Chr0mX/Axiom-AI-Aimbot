@@ -394,6 +394,13 @@ class OtherPage(BasePage):
             self.trtAppdataCard.contentLabel.setText(appdata_pkg or "LOCALAPPDATA not set")
             self.trtAppdataCard.contentLabel.setStyleSheet("color: #e74c3c;")
 
+        # Compute DML paths early so status block can use them
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))))
+        embedded_site = os.path.join(src_dir, "python", "Lib", "site-packages")
+        dml_dll = os.path.join(embedded_site, "onnxruntime", "capi", "DirectML.dll")
+        dml_installed = os.path.exists(dml_dll)
+
         # DirectML status
         try:
             import onnxruntime as _ort2
@@ -403,7 +410,11 @@ class OtherPage(BasePage):
         configured_backend = os.environ.get("AXIOM_BACKEND", "auto")
         if dml_ok:
             self.dmlStatusCard.contentLabel.setText(
-                t("dml_available", "✓ DmlExecutionProvider available"))
+                t("dml_available", "✓ DmlExecutionProvider active"))
+            self.dmlStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        elif dml_installed:
+            self.dmlStatusCard.contentLabel.setText(
+                t("dml_installed_inactive", "✓ Installed — set backend to DirectML to activate"))
             self.dmlStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
         elif configured_backend == "directml":
             self.dmlStatusCard.contentLabel.setText(
@@ -411,14 +422,10 @@ class OtherPage(BasePage):
             self.dmlStatusCard.contentLabel.setStyleSheet("color: #e67e22;")
         else:
             self.dmlStatusCard.contentLabel.setText(
-                t("dml_not_available", "✗ Not available — falls back to CPU"))
+                t("dml_not_available", "✗ Not installed"))
             self.dmlStatusCard.contentLabel.setStyleSheet("color: #e74c3c;")
 
         # DirectML DLL path
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__)))))
-        embedded_site = os.path.join(src_dir, "python", "Lib", "site-packages")
-        dml_dll = os.path.join(embedded_site, "onnxruntime", "capi", "DirectML.dll")
         if os.path.exists(dml_dll):
             self.dmlDllCard.contentLabel.setText(dml_dll)
             self.dmlDllCard.contentLabel.setStyleSheet("color: #2ecc71;")
