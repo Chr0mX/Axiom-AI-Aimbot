@@ -1275,7 +1275,7 @@ class AimPage(BasePage):
             # 刷新模型列表並選中當前模型（暫時阻斷信號避免覆蓋設定）
             self.modelCombo.blockSignals(True)
             self._refreshModelList()
-            model_name = os.path.basename(self._config.model_path)
+            model_name = os.path.basename(self._config.model_path or "")
 
             # 大小寫不敏感比對
             idx = -1
