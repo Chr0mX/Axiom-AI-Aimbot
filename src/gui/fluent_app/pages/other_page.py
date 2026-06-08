@@ -123,6 +123,20 @@ class OtherPage(BasePage):
             self.dmlGroup,
         )
 
+        self.dmlDllCard = SettingCard(
+            FluentIcon.FOLDER,
+            t("dml_dll_path", "DirectML DLL Path"),
+            "—",
+            self.dmlGroup,
+        )
+
+        self.dmlEmbeddedPathCard = SettingCard(
+            FluentIcon.FOLDER,
+            t("dml_embedded_path", "Embedded ORT-DirectML Path"),
+            "—",
+            self.dmlGroup,
+        )
+
         # === Environment — Python Path ===
         self.pyGroup = SettingCardGroup(t("env_python", "Python Path"), self.scrollWidget)
 
@@ -183,6 +197,8 @@ class OtherPage(BasePage):
 
         # Environment — DirectML
         self.dmlGroup.addSettingCard(self.dmlStatusCard)
+        self.dmlGroup.addSettingCard(self.dmlDllCard)
+        self.dmlGroup.addSettingCard(self.dmlEmbeddedPathCard)
         self.addContent(self.dmlGroup)
 
         # Environment — Python Path
@@ -321,10 +337,26 @@ class OtherPage(BasePage):
         # tensorrt python package + version
         trt_version = None
         try:
-            import tensorrt as trt  # noqa: F401
-            trt_version = getattr(trt, "__version__", "unknown")
+            import tensorrt as _trt
+            trt_version = getattr(_trt, "__version__", None)
         except Exception:
-            trt_version = None
+            pass
+
+        if not trt_version:
+            dll = self._findTrtDllPath()
+            if dll and sys.platform == "win32":
+                try:
+                    import win32api
+                    info = win32api.GetFileVersionInfo(dll, "\\")
+                    ms, ls = info["FileVersionMS"], info["FileVersionLS"]
+                    trt_version = f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+                except Exception:
+                    pass
+            if not trt_version and dll:
+                import re as _re
+                m = _re.search(r"nvinfer[_-](\d+[\.\d]*)", os.path.basename(dll))
+                if m:
+                    trt_version = m.group(1)
 
         dll_path = self._findTrtDllPath()
         installed = provider_ok and (dll_path is not None)
@@ -368,14 +400,39 @@ class OtherPage(BasePage):
             dml_ok = "DmlExecutionProvider" in _ort2.get_available_providers()
         except Exception:
             dml_ok = False
+        configured_backend = os.environ.get("AXIOM_BACKEND", "auto")
         if dml_ok:
             self.dmlStatusCard.contentLabel.setText(
                 t("dml_available", "✓ DmlExecutionProvider available"))
             self.dmlStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        elif configured_backend == "directml":
+            self.dmlStatusCard.contentLabel.setText(
+                t("dml_restart_required", "⚠ Restart required — DirectML takes effect on next launch"))
+            self.dmlStatusCard.contentLabel.setStyleSheet("color: #e67e22;")
         else:
             self.dmlStatusCard.contentLabel.setText(
                 t("dml_not_available", "✗ Not available — falls back to CPU"))
             self.dmlStatusCard.contentLabel.setStyleSheet("color: #e74c3c;")
+
+        # DirectML DLL path
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))))
+        embedded_site = os.path.join(src_dir, "python", "Lib", "site-packages")
+        dml_dll = os.path.join(embedded_site, "onnxruntime", "capi", "DirectML.dll")
+        if os.path.exists(dml_dll):
+            self.dmlDllCard.contentLabel.setText(dml_dll)
+            self.dmlDllCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        else:
+            self.dmlDllCard.contentLabel.setText(t("dml_not_found", "Not found"))
+            self.dmlDllCard.contentLabel.setStyleSheet("color: #e74c3c;")
+
+        # Embedded onnxruntime-directml site-packages path
+        if os.path.isdir(embedded_site):
+            self.dmlEmbeddedPathCard.contentLabel.setText(embedded_site)
+            self.dmlEmbeddedPathCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        else:
+            self.dmlEmbeddedPathCard.contentLabel.setText(t("dml_not_found", "Not found"))
+            self.dmlEmbeddedPathCard.contentLabel.setStyleSheet("color: #e74c3c;")
 
         # System Python — search Windows PATH, skipping the embedded interpreter
         import shutil as _shutil
