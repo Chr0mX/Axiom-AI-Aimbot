@@ -802,26 +802,10 @@ class AimPage(BasePage):
         # === Inference Performance ===
         self.inferPerfGroup = SettingCardGroup(t("inference_performance", "Inference Performance"), self.scrollWidget)
 
-        self.modelInputSizeCard = SliderSpinCard(
-            FluentIcon.ZOOM_IN,
-            t("model_input_size_label"),
-            160, 640,
-            suffix="px",
-            description=t("model_input_size_desc"),
-            parent=self.inferPerfGroup
-        )
-
         self.skipLetterboxCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("skip_letterbox_label"),
             t("skip_letterbox_desc"),
-            parent=self.inferPerfGroup
-        )
-
-        self.trtFp16Card = SwitchSettingCard(
-            FluentIcon.SPEED_HIGH,
-            t("trt_fp16_enabled", "TensorRT FP16"),
-            t("trt_fp16_desc", "Enable TensorRT FP16 precision (~2x faster on RTX). Engine built on first model load (~30s)."),
             parent=self.inferPerfGroup
         )
 
@@ -1140,9 +1124,7 @@ class AimPage(BasePage):
         self.addContent(self.targetPriorityGroup)
 
         # Inference Performance
-        self.inferPerfGroup.addSettingCard(self.modelInputSizeCard)
         self.inferPerfGroup.addSettingCard(self.skipLetterboxCard)
-        self.inferPerfGroup.addSettingCard(self.trtFp16Card)
         self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
         self.inferPerfGroup.addSettingCard(self.frameSkipCard)
         self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
@@ -1256,9 +1238,7 @@ class AimPage(BasePage):
         self.arduinoBaudCombo.currentTextChanged.connect(self._onArduinoBaudChanged)
 
         # Inference Performance
-        self.modelInputSizeCard.valueChanged.connect(self._onModelInputSizeChanged)
         self.skipLetterboxCard.checkedChanged.connect(self._onSkipLetterboxChanged)
-        self.trtFp16Card.checkedChanged.connect(self._onTrtFp16Changed)
         self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
         self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
         self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
@@ -1445,9 +1425,7 @@ class AimPage(BasePage):
             self.arduinoBaudCombo.setCurrentText(arduino_baud)
 
             # Inference Performance
-            self.modelInputSizeCard.setValue(int(getattr(self._config, 'model_input_size', 640)))
             self.skipLetterboxCard.setChecked(bool(getattr(self._config, 'skip_letterbox', False)))
-            self.trtFp16Card.setChecked(bool(getattr(self._config, 'trt_fp16_enabled', False)))
             self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
             self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
             self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
@@ -2344,10 +2322,6 @@ class AimPage(BasePage):
 
     # === Inference Performance Callbacks ===
 
-    def _onTrtFp16Changed(self, checked):
-        if self._config:
-            self._config.trt_fp16_enabled = bool(checked)
-
     def _onCudaIoBindingChanged(self, checked):
         if self._config:
             self._config.cuda_io_binding_enabled = bool(checked)
@@ -2359,14 +2333,6 @@ class AimPage(BasePage):
     def _onFrameSkipThresholdChanged(self, value):
         if self._config:
             self._config.frame_skip_threshold = value / 10.0
-
-    def _onModelInputSizeChanged(self, value):
-        if self._config:
-            # Snap to nearest multiple of 32 (YOLO requirement)
-            snapped = max(160, min(640, round(value / 32) * 32))
-            self._config.model_input_size = snapped
-            if snapped != value:
-                self.modelInputSizeCard.setValue(snapped)
 
     def _onSkipLetterboxChanged(self, checked):
         if self._config:
@@ -2516,7 +2482,6 @@ class AimPage(BasePage):
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
         self.autoMatchFpsCard.titleLabel.setText(t("auto_match_fps_label"))
-        self.modelInputSizeCard.titleLabel.setText(t("model_input_size_label"))
         self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
 
         # Arduino 設定
