@@ -178,6 +178,13 @@ def ai_logic_loop(
 
     _io_binding[0] = _setup_io_binding(model)
 
+    if os.name == 'nt':
+        try:
+            ctypes.windll.kernel32.SetThreadPriority(
+                ctypes.windll.kernel32.GetCurrentThread(), 1)  # ABOVE_NORMAL
+        except Exception:
+            pass
+
     current_model_path = config.model_path
     current_backend = str(getattr(config, "inference_backend", "auto")).lower()
     current_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
@@ -201,6 +208,36 @@ def ai_logic_loop(
     # Mutable containers so the capture worker can hot-swap the backend
     _capture_backend: list = [None]
     _active_method: list = [None]
+
+    _tensor_queue: queue.Queue = queue.Queue(maxsize=1)
+    _preprocess_stop: threading.Event = threading.Event()
+
+    def _preprocess_worker() -> None:
+        last_frame_id: int = -1
+        while not _preprocess_stop.is_set() and config.Running:
+            try:
+                with capture_lock:
+                    frame = capture_state.get('latest_frame')
+                    region = capture_state.get('latest_region')
+                    frame_id = id(frame)
+                if frame is None or region is None or frame_id == last_frame_id:
+                    time.sleep(0.001)
+                    continue
+                last_frame_id = frame_id
+                tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
+                    frame, config.model_input_size)
+                try:
+                    _tensor_queue.put(
+                        (tensor, lb_scale, lb_pad_x, lb_pad_y, region),
+                        timeout=0.05)
+                except queue.Full:
+                    pass
+            except Exception:
+                time.sleep(0.001)
+
+    _preprocess_thread = threading.Thread(
+        target=_preprocess_worker, name='PreprocessWorker', daemon=True)
+    _preprocess_thread.start()
 
     def _capture_worker() -> None:
         _capture_backend[0] = initialize_screen_capture(config)
@@ -382,11 +419,11 @@ def ai_logic_loop(
                 _last_skip_frame[0] = latest_frame
 
                 t0 = time.perf_counter()
-                # preprocess_image now returns letterbox metadata so
-                # postprocess_outputs can undo the padding correctly.
-                input_tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
-                    latest_frame, config.model_input_size,
-                )
+                try:
+                    _pre_result = _tensor_queue.get(timeout=0.02)
+                except queue.Empty:
+                    continue
+                input_tensor, lb_scale, lb_pad_x, lb_pad_y, latest_region = _pre_result
                 t1 = time.perf_counter()
                 t2 = t3 = t4 = None
 
@@ -500,5 +537,8 @@ def ai_logic_loop(
                 traceback.print_exc()
                 time.sleep(1.0)
     finally:
+        _preprocess_stop.set()
+        if _preprocess_thread.is_alive():
+            _preprocess_thread.join(timeout=1.0)
         capture_stop_event.set()
         capture_thread.join(timeout=1.0)
