@@ -604,6 +604,29 @@ class SetupWizard(QDialog):
 
         ly.addSpacing(6)
 
+        # ── Inference Backend ─────────────────────────────────
+        backend_row = QHBoxLayout()
+        backend_row.setSpacing(12)
+
+        self._lbl_perf_backend = _lbl("Inference Backend", 11, bold=True)
+        backend_row.addWidget(self._lbl_perf_backend)
+        backend_row.addStretch()
+
+        if _HAS_FLUENT:
+            self._combo_backend = ComboBox()
+        else:
+            from PyQt6.QtWidgets import QComboBox
+            self._combo_backend = QComboBox()  # type: ignore[assignment]
+
+        self._combo_backend.addItems(["TensorRT (NVIDIA GPU)", "DirectML (AMD / Intel / NVIDIA)"])
+        cur_backend = getattr(self._config, 'inference_backend', 'auto')
+        self._combo_backend.setCurrentIndex(1 if cur_backend == "directml" else 0)
+        self._combo_backend.currentIndexChanged.connect(self._onBackendChanged)
+        backend_row.addWidget(self._combo_backend)
+        ly.addLayout(backend_row)
+
+        ly.addSpacing(6)
+
         # ── Model Input Size ──────────────────────────────────
         size_row = QHBoxLayout()
         size_row.setSpacing(12)
@@ -712,6 +735,9 @@ class SetupWizard(QDialog):
 
     # ── Performance Page Handlers ─────────────────────────
 
+    def _onBackendChanged(self, idx: int) -> None:
+        self._config.inference_backend = "directml" if idx == 1 else "tensorrt"
+
     def _onModelPathChanged(self, text: str):
         self._config.model_path = text
 
@@ -791,6 +817,21 @@ class SetupWizard(QDialog):
             self._btn_skip.setVisible(True)
 
     def _finish(self):
+        backend = getattr(self._config, 'inference_backend', 'auto')
+        if backend == "tensorrt":
+            try:
+                import onnxruntime as _ort
+                trt_ready = "TensorrtExecutionProvider" in _ort.get_available_providers()
+            except Exception:
+                trt_ready = False
+            if not trt_ready:
+                # setup_wizard.py lives at src/gui/fluent_app/ → up 3 = project root
+                project_root = os.path.dirname(os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__))))
+                bat = os.path.join(project_root, "安裝TensorRT.bat")
+                if os.path.exists(bat):
+                    import subprocess
+                    subprocess.Popen([bat], shell=True)
         self.setupComplete.emit()
         self.accept()
 

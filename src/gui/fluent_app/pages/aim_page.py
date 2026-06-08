@@ -78,7 +78,7 @@ class AimPage(BasePage):
 
         # Inference backend
         self.inferenceBackendCombo = ComboBox()
-        self.inferenceBackendCombo.addItems(["Auto", "CUDA", "DirectML", "CPU"])
+        self.inferenceBackendCombo.addItems(["Auto", "TensorRT", "DirectML", "CPU"])
         self.inferenceBackendCombo.setMinimumWidth(150)
         self.inferenceBackendCard = SettingCard(
             FluentIcon.COMMAND_PROMPT,
@@ -1290,7 +1290,8 @@ class AimPage(BasePage):
 
             backend_map = {
                 "auto": "Auto",
-                "cuda": "CUDA",
+                "tensorrt": "TensorRT",
+                "cuda": "TensorRT",   # legacy alias
                 "directml": "DirectML",
                 "cpu": "CPU",
             }
@@ -1523,144 +1524,38 @@ class AimPage(BasePage):
 
         backend_map = {
             "Auto": "auto",
-            "CUDA": "cuda",
+            "TensorRT": "tensorrt",
             "DirectML": "directml",
             "CPU": "cpu",
         }
         selected_backend = backend_map.get(text, "auto")
         if getattr(self._config, "inference_backend", "auto") != selected_backend:
             self._config.inference_backend = selected_backend
-        if selected_backend == "cuda" and not self._isLoadingConfig:
-            self._ensureCudaInstalled()
+        if selected_backend == "tensorrt" and not self._isLoadingConfig:
+            self._ensureTrtInstalled()
         self._updateInferenceBackendSubtitle()
 
-    def _ensureCudaInstalled(self) -> None:
-        """Install CUDA (and optionally TensorRT) when CUDAExecutionProvider is unavailable.
-
-        Flow
-        ----
-        1. If CUDA is already available just offer TensorRT and return.
-        2. Ask the user to confirm installation and whether to also add TensorRT.
-        3. Stop the AI inference threads so the ONNX session releases its GPU
-           resources before the installer subprocess runs.
-        4. Schedule a batch script that waits for this process to exit, then
-           runs install_cuda_local.py (which now also handles TensorRT when
-           requested).  The app exits so that DLLs locked by the current
-           process are released before pip tries to overwrite them.
-        """
+    def _ensureTrtInstalled(self) -> None:
+        """Launch 安裝TensorRT.bat if TensorRT is not yet available."""
         try:
-            import onnxruntime as ort
-            cuda_available = "CUDAExecutionProvider" in ort.get_available_providers()
+            import onnxruntime as _ort
+            if "TensorrtExecutionProvider" in _ort.get_available_providers():
+                return  # already installed — nothing to do
         except Exception:
-            cuda_available = False
-
-        python_exe = self._getEmbeddedPythonExe()
-        src_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
-        cuda_script = os.path.join(src_dir, "install_cuda_local.py")
-        trt_script  = os.path.join(src_dir, "install_tensorrt_local.py")
-
-        if cuda_available:
-            # CUDA is ready — just ask about TensorRT.
-            trt_reply = QMessageBox.question(
-                self,
-                "TensorRT",
-                (
-                    "CUDAExecutionProvider is already available.\n\n"
-                    "Do you also want to install TensorRT for maximum GPU performance?\n\n"
-                    "The app will close, install TensorRT, then you can reopen it."
-                ),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            pass
+        # Project root is 5 levels up from this file
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+        bat_path = os.path.join(project_root, "安裝TensorRT.bat")
+        if not os.path.exists(bat_path):
+            InfoBar.warning(
+                "TensorRT installer not found",
+                f"Expected: {bat_path}",
+                duration=6000, isClosable=True,
+                position=InfoBarPosition.TOP, parent=self,
             )
-            if trt_reply != QMessageBox.StandardButton.Yes:
-                return
-            if not os.path.exists(trt_script):
-                QMessageBox.warning(self, "TensorRT install failed",
-                                    f"Installer not found:\n{trt_script}")
-                return
-            self._scheduleAndQuit(python_exe, [trt_script])
             return
-
-        # CUDA is not installed — confirm with the user.
-        if not os.path.exists(cuda_script):
-            QMessageBox.warning(self, "CUDA install failed",
-                                f"Installer not found:\n{cuda_script}")
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "CUDA Installation Required",
-            (
-                "CUDAExecutionProvider is not available.\n\n"
-                "The CUDA packages will be installed automatically after the app "
-                "closes so that locked DLLs can be replaced safely.\n\n"
-                "Reopen the application once the installer finishes."
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        # Ask about TensorRT before closing.
-        trt_reply = QMessageBox.question(
-            self,
-            "TensorRT",
-            "Do you also want to install TensorRT after CUDA?\n\n"
-            "(Recommended for RTX GPUs — provides maximum inference speed.)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        install_trt = trt_reply == QMessageBox.StandardButton.Yes
-
-        # Stop inference threads so the ONNX session releases CUDA resources
-        # before the deferred installer subprocess runs.
-        if self._config is not None:
-            try:
-                import main as _main_mod
-                _main_mod.stop_ai_threads(self._config)
-            except Exception as exc:
-                print(f"[CUDA install] Could not stop AI threads gracefully: {exc}")
-
-        scripts = [cuda_script]
-        if install_trt and os.path.exists(trt_script):
-            scripts.append(trt_script)
-
-        self._scheduleAndQuit(python_exe, scripts)
-
-    def _scheduleAndQuit(self, python_exe: str, scripts: list) -> None:
-        """Write a bat file that waits for this PID to exit, runs each script, then quits."""
-        current_pid = os.getpid()
-        temp_dir = os.environ.get("TEMP", os.path.expanduser("~"))
-        bat_path = os.path.join(temp_dir, "axiom_install.bat")
-
-        lines = [
-            "@echo off",
-            ":WAITLOOP",
-            f'tasklist /fi "pid eq {current_pid}" /fo csv 2>nul | find "{current_pid}" >nul',
-            "if not errorlevel 1 (",
-            "    timeout /t 1 /nobreak >nul",
-            "    goto WAITLOOP",
-            ")",
-        ]
-        for script in scripts:
-            lines.append(f'"{python_exe}" "{script}"')
-        lines.append('del "%~f0"')
-
-        bat_content = "\n".join(lines) + "\n"
-        try:
-            with open(bat_path, "w") as f:
-                f.write(bat_content)
-            subprocess.Popen(
-                ["cmd", "/c", bat_path],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                close_fds=True,
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "Install scheduling failed",
-                                f"Could not schedule installer:\n{exc}")
-            return
-
-        QApplication.instance().quit()
+        subprocess.Popen([bat_path], shell=True)
 
     def _updateInferenceBackendSubtitle(self):
         if not hasattr(self, "inferenceBackendCard"):

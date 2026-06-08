@@ -28,14 +28,13 @@ class _ConvertWorker(QThread):
     finishedResult = pyqtSignal(bool, str)  # (success, output_path_or_message)
 
     def __init__(self, onnx_path: str, cache_dir: str, fp16: bool,
-                 workspace_mb: int, method: str,
+                 workspace_mb: int,
                  python_exe: str, script_path: str, parent=None):
         super().__init__(parent)
         self._onnx_path = onnx_path
         self._cache_dir = cache_dir
         self._fp16 = fp16
         self._workspace_mb = workspace_mb
-        self._method = method
         self._python_exe = python_exe
         self._script_path = script_path
 
@@ -46,7 +45,7 @@ class _ConvertWorker(QThread):
             "--model", self._onnx_path,
             "--output", self._cache_dir,
             "--workspace", str(self._workspace_mb),
-            "--method", self._method,
+            "--method", "ort",
         ]
         if not self._fp16:
             cmd.append("--no-fp16")
@@ -141,19 +140,6 @@ class ConvertPage(BasePage):
         self.workspaceCard.hBoxLayout.addWidget(self.workspaceCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.workspaceCard.hBoxLayout.addSpacing(16)
 
-        # Build method
-        self.methodCombo = ComboBox()
-        self.methodCombo.addItems(["ort", "trt"])
-        self.methodCombo.setCurrentText("ort")
-        self.methodCard = SettingCard(
-            FluentIcon.DEVELOPER_TOOLS,
-            t("trt_method", "Build Method"),
-            t("trt_method_desc", "'ort' matches what the app uses at runtime (recommended). 'trt' uses the TensorRT API directly."),
-            self.convertGroup,
-        )
-        self.methodCard.hBoxLayout.addWidget(self.methodCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.methodCard.hBoxLayout.addSpacing(16)
-
         # Output dir card with Convert button
         self.convertBtn = PrimaryPushButton(t("trt_convert", "Convert"))
         self.convertBtn.setIcon(FluentIcon.SYNC)
@@ -192,7 +178,6 @@ class ConvertPage(BasePage):
         self.convertGroup.addSettingCard(self.modelCard)
         self.convertGroup.addSettingCard(self.fp16Card)
         self.convertGroup.addSettingCard(self.workspaceCard)
-        self.convertGroup.addSettingCard(self.methodCard)
         self.convertGroup.addSettingCard(self.outputCard)
         self.addContent(self.convertGroup)
 
@@ -264,11 +249,9 @@ class ConvertPage(BasePage):
             workspace_mb = int(self.workspaceCombo.currentText())
         except ValueError:
             workspace_mb = 2048
-        method = self.methodCombo.currentText()
-
         self.logView.clear()
         self.logView.append(f"→ Converting {os.path.basename(onnx_path)} "
-                            f"(fp16={fp16}, workspace={workspace_mb} MiB, method={method})")
+                            f"(fp16={fp16}, workspace={workspace_mb} MiB)")
         self.progressBar.setVisible(True)
         self.convertBtn.setEnabled(False)
         self.convertBtn.setText(t("trt_converting", "Converting…"))
@@ -279,7 +262,7 @@ class ConvertPage(BasePage):
         script_path = os.path.join(self._src_dir, "core", "convert_to_engine.py")
 
         self._worker = _ConvertWorker(
-            onnx_path, self._cache_dir, fp16, workspace_mb, method,
+            onnx_path, self._cache_dir, fp16, workspace_mb,
             python_exe, script_path, parent=self)
         self._worker.logLine.connect(self._onLogLine)
         self._worker.finishedResult.connect(self._onConvertFinished)
@@ -315,7 +298,6 @@ class ConvertPage(BasePage):
         self.browseBtn.setText(t("trt_browse", "Browse"))
         self.fp16Card.titleLabel.setText(t("trt_fp16", "FP16 Precision"))
         self.workspaceCard.titleLabel.setText(t("trt_workspace", "Builder Workspace (MiB)"))
-        self.methodCard.titleLabel.setText(t("trt_method", "Build Method"))
         self.outputCard.titleLabel.setText(t("trt_output", "Output Cache Directory"))
         self.logLabel.setText(t("trt_build_log", "Build Log"))
         if not (self._worker and self._worker.isRunning()):

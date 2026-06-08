@@ -623,6 +623,6 @@ def _validate_detect_range_size(config: Config) -> None:
 
 def _validate_inference_backend(config: Config) -> None:
     """驗證並修正推理後端選擇"""
-    valid_backends = ("auto", "cuda", "directml", "cpu")
+    valid_backends = ("auto", "tensorrt", "cuda", "directml", "cpu")
     if getattr(config, "inference_backend", "auto") not in valid_backends:
         config.inference_backend = "auto"

@@ -190,9 +190,10 @@ def build_provider_list(config) -> list:
             logger.info("Auto-selected backend: CPU")
     else:
         provider_map = {
-            "cuda":    ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
-            "directml":["DmlExecutionProvider", "CPUExecutionProvider"],
-            "cpu":     ["CPUExecutionProvider"],
+            "tensorrt": ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
+            "cuda":     ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
+            "directml": ["DmlExecutionProvider", "CPUExecutionProvider"],
+            "cpu":      ["CPUExecutionProvider"],
         }
         preferred = provider_map.get(backend, ["CUDAExecutionProvider", "CPUExecutionProvider"])
         active = [p for p in preferred if p in available]
