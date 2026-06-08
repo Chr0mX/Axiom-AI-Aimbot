@@ -106,6 +106,27 @@ class OtherPage(BasePage):
             self.trtGroup,
         )
 
+        self.trtAppdataCard = SettingCard(
+            FluentIcon.FOLDER,
+            "AppData Packages Path",
+            "—",
+            self.trtGroup,
+        )
+
+        self.trtSysPythonCard = SettingCard(
+            FluentIcon.COMMAND_PROMPT,
+            "System Python",
+            "—",
+            self.trtGroup,
+        )
+
+        self.trtInternalPythonCard = SettingCard(
+            FluentIcon.COMMAND_PROMPT,
+            "Internal Python",
+            "—",
+            self.trtGroup,
+        )
+
         # === 關於內容（無群組標題）===
         self.aboutTitle = SubtitleLabel(t("about_title"))
         self.aboutSubtitle = CaptionLabel(t("about_subtitle"))
@@ -144,6 +165,9 @@ class OtherPage(BasePage):
         self.trtGroup.addSettingCard(self.trtVersionCard)
         self.trtGroup.addSettingCard(self.trtLibsCard)
         self.trtGroup.addSettingCard(self.trtCacheCard)
+        self.trtGroup.addSettingCard(self.trtAppdataCard)
+        self.trtGroup.addSettingCard(self.trtSysPythonCard)
+        self.trtGroup.addSettingCard(self.trtInternalPythonCard)
         self.addContent(self.trtGroup)
 
         # 關於區塊的內容（無群組標題）
@@ -235,6 +259,17 @@ class OtherPage(BasePage):
     def _findTrtDllPath(self):
         """Locate the TensorRT inference DLL (nvinfer*) from pip-wheel installs."""
         try:
+            # Check AppData AxiomAI path first (primary install location)
+            localappdata = os.environ.get("LOCALAPPDATA", "")
+            if localappdata:
+                trt_libs = os.path.join(localappdata, "AxiomAI", "site-packages", "tensorrt_libs")
+                if os.path.isdir(trt_libs):
+                    for name in os.listdir(trt_libs):
+                        low = name.lower()
+                        if low.startswith("nvinfer") and low.endswith(".dll"):
+                            return os.path.join(trt_libs, name)
+                    return trt_libs
+
             import site
             site_dirs = list(site.getsitepackages())
             try:
@@ -296,6 +331,30 @@ class OtherPage(BasePage):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         cache_dir = os.path.join(project_root, "trt_cache")
         self.trtCacheCard.contentLabel.setText(cache_dir)
+
+        # AppData packages path
+        import sys as _sys
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        appdata_pkg = os.path.join(localappdata, "AxiomAI", "site-packages") if localappdata else ""
+        if appdata_pkg and os.path.isdir(appdata_pkg):
+            self.trtAppdataCard.contentLabel.setText(appdata_pkg)
+            self.trtAppdataCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        else:
+            self.trtAppdataCard.contentLabel.setText(appdata_pkg or "LOCALAPPDATA not set")
+            self.trtAppdataCard.contentLabel.setStyleSheet("color: #e74c3c;")
+
+        # System Python (interpreter currently running the app)
+        self.trtSysPythonCard.contentLabel.setText(_sys.executable)
+        self.trtSysPythonCard.contentLabel.setStyleSheet("")
+
+        # Internal/Embedded Python (<project_root>/python/python.exe)
+        internal_python = os.path.join(project_root, "python", "python.exe")
+        if os.path.exists(internal_python):
+            self.trtInternalPythonCard.contentLabel.setText(internal_python)
+            self.trtInternalPythonCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        else:
+            self.trtInternalPythonCard.contentLabel.setText(f"{internal_python}  (not found)")
+            self.trtInternalPythonCard.contentLabel.setStyleSheet("color: #e67e22;")
 
     def _updateDiscordIcon(self):
         """根據當前主題更新 Discord 圖標顏色"""
