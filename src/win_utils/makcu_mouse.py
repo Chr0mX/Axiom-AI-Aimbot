@@ -56,6 +56,7 @@ class MakcuMouse:
         self._baud_rate: int = 115200
         self._lmb_state_cache: int = 0
         self._lmb_cache_time: float = 0.0
+        self.lmb_cache_seconds: float = 0.008  # overridden by ai_loop to match detect_interval
 
     def connect(self, com_port: str, baud_rate: int = 115200) -> bool:
         """Connect to MAKCU device.
@@ -255,7 +256,7 @@ class MakcuMouse:
         """
         import re as _re
         now = time.monotonic()
-        if now - self._lmb_cache_time < 0.016:
+        if now - self._lmb_cache_time < self.lmb_cache_seconds:
             return self._lmb_state_cache
         with self._lock:
             if not self._serial or not self._serial.is_open:

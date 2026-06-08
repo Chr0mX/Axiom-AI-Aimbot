@@ -360,6 +360,15 @@ def ai_logic_loop(
                 update_crosshair_position(config, capture_width // 2, capture_height // 2)
 
                 is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
+                if not is_aiming and getattr(config, 'makcu_lmb_aim', True) \
+                        and getattr(config, 'mouse_move_method', '') == 'makcu':
+                    try:
+                        from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
+                        if is_makcu_connected():
+                            _mm.lmb_cache_seconds = max(0.008, config.detect_interval)
+                            is_aiming = _mm.lmb_held
+                    except Exception:
+                        pass
                 if is_aiming:
                     if state.aiming_start_time == 0.0:
                         state.aiming_start_time = current_time
