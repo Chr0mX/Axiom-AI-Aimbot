@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 import time
 from typing import TYPE_CHECKING, List, Optional, Tuple
@@ -220,10 +221,11 @@ def process_aiming(
                 detect_size = float(getattr(config, 'detect_range_size', 350))
                 threshold_pct = float(getattr(config, 'smart_jitter_box_threshold_pct', 15.0))
                 if detect_size > 0 and (box_h / detect_size) * 100.0 < threshold_pct:
-                    _SJ_MAP = {1: 1.0, 2: 3.0, 3: 6.0}
-                    sj = _SJ_MAP.get(int(getattr(config, 'smart_jitter_level', 1)), 1.0)
-                    move_x += int(random.uniform(-sj, sj))
-                    move_y += int(random.uniform(-sj, sj))
+                    sj = max(0.0, float(getattr(config, 'smart_jitter_strength', 6.0)))
+                    angle = random.uniform(0, math.tau)
+                    r = random.uniform(0, sj)
+                    move_x += int(r * math.cos(angle))
+                    move_y += int(r * math.sin(angle))
 
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)

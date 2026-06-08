@@ -42,44 +42,69 @@ for _d in (_SRC_DIR, _PROJECT_ROOT):
         sys.path.insert(0, _d)
 
 
-# ── DLL pre-registration (must happen before any tensorrt / onnxruntime import) ──
+# ── AppData packages path ─────────────────────────────────────────────────────
+# install_tensorrt_local.py writes packages to %LOCALAPPDATA%\AxiomAI\site-packages.
+# Add that directory to sys.path before any package imports so Python finds them.
 
-def _register_dll_dirs() -> None:
-    """Register CUDA and TensorRT DLL directories on Windows."""
+def _inject_axiom_packages() -> None:
+    _localappdata = os.environ.get("LOCALAPPDATA", "")
+    if not _localappdata:
+        return
+    pkg_dir = os.path.join(_localappdata, "AxiomAI", "site-packages")
+    if os.path.isdir(pkg_dir) and pkg_dir not in sys.path:
+        sys.path.insert(0, pkg_dir)
+
+
+_inject_axiom_packages()
+
+# ── DLL pre-registration ──────────────────────────────────────────────────────
+# TensorRT pip wheels install DLLs under their package dir but do NOT add
+# themselves to PATH.  Without this, onnxruntime_providers_tensorrt.dll fails
+# with "nvinfer_10.dll missing" even when TRT is installed.  Register every
+# known DLL directory before the first import of onnxruntime.
+
+def _register_trt_dll_dirs() -> None:
+    """Add TensorRT and CUDA pip-wheel DLL dirs to PATH/add_dll_directory (Windows only)."""
     if sys.platform != "win32":
         return
     try:
         import site
-        site_dirs: list[str] = list(site.getsitepackages())
+        site_dirs: list = list(site.getsitepackages())
         try:
             site_dirs.append(site.getusersitepackages())
         except (AttributeError, NotImplementedError):
             pass
+        _localappdata = os.environ.get("LOCALAPPDATA", "")
+        if _localappdata:
+            axiom_pkg = os.path.join(_localappdata, "AxiomAI", "site-packages")
+            if os.path.isdir(axiom_pkg):
+                site_dirs.append(axiom_pkg)
+
+        _CUDA_SUBS = (
+            "cuda_runtime", "cublas", "cudnn",
+            "cufft", "curand", "cusolver", "cusparse",
+        )
+
+        def _add(path: str) -> None:
+            os.environ["PATH"] = f"{path};{os.environ.get('PATH', '')}"
+            try:
+                os.add_dll_directory(path)
+            except (AttributeError, OSError):
+                pass
 
         for sp in site_dirs:
-            # TensorRT DLLs (tensorrt-cu12-libs wheel)
             trt_libs = os.path.join(sp, "tensorrt_libs")
             if os.path.isdir(trt_libs):
-                os.environ["PATH"] = f"{trt_libs};{os.environ.get('PATH', '')}"
-                try:
-                    os.add_dll_directory(trt_libs)
-                except (AttributeError, OSError):
-                    pass
-
-            # CUDA runtime DLLs (nvidia-*-cu12 wheels)
-            for sub in ("cuda_runtime", "cublas", "cudnn", "cufft", "curand", "cusolver", "cusparse"):
+                _add(trt_libs)
+            for sub in _CUDA_SUBS:
                 bin_dir = os.path.join(sp, "nvidia", sub, "bin")
                 if os.path.isdir(bin_dir):
-                    os.environ["PATH"] = f"{bin_dir};{os.environ.get('PATH', '')}"
-                    try:
-                        os.add_dll_directory(bin_dir)
-                    except (AttributeError, OSError):
-                        pass
-    except Exception as exc:
-        print(f"[WARN] DLL pre-registration failed: {exc}")
+                    _add(bin_dir)
+    except Exception:
+        pass
 
 
-_register_dll_dirs()
+_register_trt_dll_dirs()
 
 
 # ── Build methods ─────────────────────────────────────────────────────────────

@@ -18,77 +18,50 @@ from ..language_manager import t
 
 
 class _ConvertWorker(QThread):
-    """Background worker that builds a TensorRT engine without freezing the UI."""
+    """Background worker that builds a TensorRT engine without freezing the UI.
+
+    Runs convert_to_engine.py as a subprocess so that C-level TRT/ORT output
+    is captured and streamed into the UI log in real time.
+    """
 
     logLine = pyqtSignal(str)
     finishedResult = pyqtSignal(bool, str)  # (success, output_path_or_message)
 
     def __init__(self, onnx_path: str, cache_dir: str, fp16: bool,
-                 workspace_mb: int, method: str, parent=None):
+                 workspace_mb: int,
+                 python_exe: str, script_path: str, parent=None):
         super().__init__(parent)
         self._onnx_path = onnx_path
         self._cache_dir = cache_dir
         self._fp16 = fp16
         self._workspace_mb = workspace_mb
-        self._method = method
+        self._python_exe = python_exe
+        self._script_path = script_path
 
     def run(self) -> None:
-        # Redirect stdout/stderr so the converter's print() calls stream into
-        # the on-page log instead of the console.
-        class _Emitter:
-            def __init__(self, sig):
-                self._sig = sig
-                self._buf = ""
-
-            def write(self, text):
-                self._buf += text
-                while "\n" in self._buf:
-                    line, self._buf = self._buf.split("\n", 1)
-                    self._sig.emit(line)
-
-            def flush(self):
-                if self._buf:
-                    self._sig.emit(self._buf)
-                    self._buf = ""
-
-        old_out, old_err = sys.stdout, sys.stderr
-        emitter = _Emitter(self.logLine)
-        sys.stdout = emitter
-        sys.stderr = emitter
+        import subprocess
+        cmd = [
+            self._python_exe, "-u", self._script_path,
+            "--model", self._onnx_path,
+            "--output", self._cache_dir,
+            "--workspace", str(self._workspace_mb),
+            "--method", "ort",
+        ]
+        if not self._fp16:
+            cmd.append("--no-fp16")
         try:
-            from core.convert_to_engine import (
-                build_engine_via_ort, build_engine_via_trt_api,
-            )
-
-            model_stem = os.path.splitext(os.path.basename(self._onnx_path))[0]
-            precision_tag = "fp16" if self._fp16 else "fp32"
-
-            if self._method == "trt":
-                output_engine = os.path.join(
-                    self._cache_dir, f"{model_stem}_{precision_tag}.engine"
-                )
-                ok = build_engine_via_trt_api(
-                    self._onnx_path, output_engine,
-                    fp16=self._fp16, workspace_mb=self._workspace_mb,
-                )
-                result_path = output_engine
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout:
+                self.logLine.emit(line.rstrip())
+            proc.wait()
+            if proc.returncode == 0:
+                self.finishedResult.emit(True, self._cache_dir)
             else:
-                ok = build_engine_via_ort(
-                    self._onnx_path, self._cache_dir,
-                    fp16=self._fp16, workspace_mb=self._workspace_mb,
-                )
-                result_path = self._cache_dir
-
-            emitter.flush()
-            if ok:
-                self.finishedResult.emit(True, result_path)
-            else:
-                self.finishedResult.emit(False, "Conversion failed — see log above.")
-        except Exception as exc:  # noqa: BLE001 — surface any error to the UI
-            emitter.flush()
+                self.finishedResult.emit(
+                    False, f"Process exited with code {proc.returncode} — see log above.")
+        except Exception as exc:
             self.finishedResult.emit(False, f"{type(exc).__name__}: {exc}")
-        finally:
-            sys.stdout, sys.stderr = old_out, old_err
 
 
 class ConvertPage(BasePage):
@@ -101,6 +74,7 @@ class ConvertPage(BasePage):
         # repo root: .../src/gui/fluent_app/pages/convert_page.py → up 4 → src → up 1 → root
         _src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__)))))
+        self._src_dir = _src_dir
         self._project_root = os.path.dirname(_src_dir)
         self._model_dir = os.path.join(self._project_root, "Model")
         self._cache_dir = os.path.join(self._project_root, "trt_cache")
@@ -111,6 +85,17 @@ class ConvertPage(BasePage):
 
     def setConfig(self, config):
         self._config = config
+        if config is None:
+            return
+        self.fp16Card.setChecked(bool(getattr(config, 'trt_fp16_enabled', True)))
+        model_path = getattr(config, 'model_path', '')
+        model_name = os.path.basename(model_path)
+        idx = self.modelCombo.findText(model_name)
+        if idx >= 0:
+            self.modelCombo.setCurrentIndex(idx)
+        elif model_path and os.path.isfile(model_path):
+            self.modelCombo.addItem(model_name, userData=model_path)
+            self.modelCombo.setCurrentIndex(self.modelCombo.count() - 1)
 
     def _initWidgets(self):
         # === Conversion settings ===
@@ -155,19 +140,6 @@ class ConvertPage(BasePage):
         self.workspaceCard.hBoxLayout.addWidget(self.workspaceCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.workspaceCard.hBoxLayout.addSpacing(16)
 
-        # Build method
-        self.methodCombo = ComboBox()
-        self.methodCombo.addItems(["ort", "trt"])
-        self.methodCombo.setCurrentText("ort")
-        self.methodCard = SettingCard(
-            FluentIcon.DEVELOPER_TOOLS,
-            t("trt_method", "Build Method"),
-            t("trt_method_desc", "'ort' matches what the app uses at runtime (recommended). 'trt' uses the TensorRT API directly."),
-            self.convertGroup,
-        )
-        self.methodCard.hBoxLayout.addWidget(self.methodCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.methodCard.hBoxLayout.addSpacing(16)
-
         # Output dir card with Convert button
         self.convertBtn = PrimaryPushButton(t("trt_convert", "Convert"))
         self.convertBtn.setIcon(FluentIcon.SYNC)
@@ -206,7 +178,6 @@ class ConvertPage(BasePage):
         self.convertGroup.addSettingCard(self.modelCard)
         self.convertGroup.addSettingCard(self.fp16Card)
         self.convertGroup.addSettingCard(self.workspaceCard)
-        self.convertGroup.addSettingCard(self.methodCard)
         self.convertGroup.addSettingCard(self.outputCard)
         self.addContent(self.convertGroup)
 
@@ -278,17 +249,21 @@ class ConvertPage(BasePage):
             workspace_mb = int(self.workspaceCombo.currentText())
         except ValueError:
             workspace_mb = 2048
-        method = self.methodCombo.currentText()
-
         self.logView.clear()
         self.logView.append(f"→ Converting {os.path.basename(onnx_path)} "
-                            f"(fp16={fp16}, workspace={workspace_mb} MiB, method={method})")
+                            f"(fp16={fp16}, workspace={workspace_mb} MiB)")
         self.progressBar.setVisible(True)
         self.convertBtn.setEnabled(False)
         self.convertBtn.setText(t("trt_converting", "Converting…"))
 
+        python_exe = os.path.join(self._project_root, "python", "python.exe")
+        if not os.path.exists(python_exe):
+            python_exe = sys.executable
+        script_path = os.path.join(self._src_dir, "core", "convert_to_engine.py")
+
         self._worker = _ConvertWorker(
-            onnx_path, self._cache_dir, fp16, workspace_mb, method, parent=self)
+            onnx_path, self._cache_dir, fp16, workspace_mb,
+            python_exe, script_path, parent=self)
         self._worker.logLine.connect(self._onLogLine)
         self._worker.finishedResult.connect(self._onConvertFinished)
         self._worker.start()
@@ -323,7 +298,6 @@ class ConvertPage(BasePage):
         self.browseBtn.setText(t("trt_browse", "Browse"))
         self.fp16Card.titleLabel.setText(t("trt_fp16", "FP16 Precision"))
         self.workspaceCard.titleLabel.setText(t("trt_workspace", "Builder Workspace (MiB)"))
-        self.methodCard.titleLabel.setText(t("trt_method", "Build Method"))
         self.outputCard.titleLabel.setText(t("trt_output", "Output Cache Directory"))
         self.logLabel.setText(t("trt_build_log", "Build Log"))
         if not (self._worker and self._worker.isRunning()):

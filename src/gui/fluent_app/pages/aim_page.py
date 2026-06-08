@@ -78,7 +78,7 @@ class AimPage(BasePage):
 
         # Inference backend
         self.inferenceBackendCombo = ComboBox()
-        self.inferenceBackendCombo.addItems(["Auto", "CUDA", "DirectML", "CPU"])
+        self.inferenceBackendCombo.addItems(["Auto", "TensorRT", "DirectML", "CPU"])
         self.inferenceBackendCombo.setMinimumWidth(150)
         self.inferenceBackendCard = SettingCard(
             FluentIcon.COMMAND_PROMPT,
@@ -149,6 +149,13 @@ class AimPage(BasePage):
             1, 100,
             suffix="ms",
             description="",
+            parent=self.generalGroup
+        )
+
+        self.autoMatchFpsCard = SwitchSettingCard(
+            FluentIcon.SYNC,
+            t("auto_match_fps_label"),
+            t("auto_match_fps_desc"),
             parent=self.generalGroup
         )
 
@@ -795,10 +802,10 @@ class AimPage(BasePage):
         # === Inference Performance ===
         self.inferPerfGroup = SettingCardGroup(t("inference_performance", "Inference Performance"), self.scrollWidget)
 
-        self.trtFp16Card = SwitchSettingCard(
+        self.skipLetterboxCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
-            t("trt_fp16_enabled", "TensorRT FP16"),
-            t("trt_fp16_desc", "Enable TensorRT FP16 precision (~2x faster on RTX). Engine built on first model load (~30s)."),
+            t("skip_letterbox_label"),
+            t("skip_letterbox_desc"),
             parent=self.inferPerfGroup
         )
 
@@ -949,20 +956,19 @@ class AimPage(BasePage):
             parent=self.antiDetectionGroup
         )
 
-        self.smartJitterLevelCombo = ComboBox()
-        self.smartJitterLevelCombo.addItems([
-            t("smart_jitter_level_low", "Low (±1 px)"),
-            t("smart_jitter_level_med", "Medium (±3 px)"),
-            t("smart_jitter_level_high", "High (±6 px)"),
-        ])
-        self.smartJitterLevelCombo.setMinimumWidth(140)
+        self.smartJitterStrengthSpin = DoubleSpinBox()
+        self.smartJitterStrengthSpin.setRange(0.1, 200.0)
+        self.smartJitterStrengthSpin.setSingleStep(0.5)
+        self.smartJitterStrengthSpin.setDecimals(1)
+        self.smartJitterStrengthSpin.setSuffix(" px")
+        self.smartJitterStrengthSpin.setMinimumWidth(110)
         self.smartJitterLevelCard = SettingCard(
             FluentIcon.SPEED_HIGH,
             t("smart_jitter_level_label", "Jitter Strength"),
-            "",
+            t("smart_jitter_level_desc", "Max pixel offset radius applied per frame while jitter fires"),
             self.antiDetectionGroup
         )
-        self.smartJitterLevelCard.hBoxLayout.addWidget(self.smartJitterLevelCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.smartJitterLevelCard.hBoxLayout.addWidget(self.smartJitterStrengthSpin, 0, Qt.AlignmentFlag.AlignRight)
         self.smartJitterLevelCard.hBoxLayout.addSpacing(16)
 
         self.smartJitterThreshCard = SliderLabelCard(
@@ -993,6 +999,7 @@ class AimPage(BasePage):
         # 通用參數
         self.generalGroup.addSettingCard(self.detectIntervalCard)
         self.generalGroup.addSettingCard(self.screenshotIntervalCard)
+        self.generalGroup.addSettingCard(self.autoMatchFpsCard)
         self.generalGroup.addSettingCard(self.confidenceCard)
         self.generalGroup.addSettingCard(self.aimPartCard)
         self.generalGroup.addSettingCard(self.mouseMoveCard)
@@ -1117,7 +1124,7 @@ class AimPage(BasePage):
         self.addContent(self.targetPriorityGroup)
 
         # Inference Performance
-        self.inferPerfGroup.addSettingCard(self.trtFp16Card)
+        self.inferPerfGroup.addSettingCard(self.skipLetterboxCard)
         self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
         self.inferPerfGroup.addSettingCard(self.frameSkipCard)
         self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
@@ -1155,6 +1162,7 @@ class AimPage(BasePage):
         # 通用參數 - 使用新組件的 valueChanged 信號
         self.detectIntervalCard.valueChanged.connect(self._onDetectIntervalChanged)
         self.screenshotIntervalCard.valueChanged.connect(self._onScreenshotIntervalChanged)
+        self.autoMatchFpsCard.checkedChanged.connect(self._onAutoMatchFpsChanged)
         self.confidenceCard.valueChanged.connect(self._onConfidenceChanged)
         self.aimPartCombo.currentIndexChanged.connect(self._onAimPartChanged)
         self.mouseMoveCombo.currentTextChanged.connect(self._onMouseMoveChanged)
@@ -1230,7 +1238,7 @@ class AimPage(BasePage):
         self.arduinoBaudCombo.currentTextChanged.connect(self._onArduinoBaudChanged)
 
         # Inference Performance
-        self.trtFp16Card.checkedChanged.connect(self._onTrtFp16Changed)
+        self.skipLetterboxCard.checkedChanged.connect(self._onSkipLetterboxChanged)
         self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
         self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
         self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
@@ -1254,7 +1262,7 @@ class AimPage(BasePage):
         # Smart Jitter
         self.smartJitterEnableCard.checkedChanged.connect(self._onSmartJitterEnableChanged)
         self.smartJitterLmbCard.checkedChanged.connect(self._onSmartJitterLmbChanged)
-        self.smartJitterLevelCombo.currentIndexChanged.connect(self._onSmartJitterLevelChanged)
+        self.smartJitterStrengthSpin.valueChanged.connect(self._onSmartJitterStrengthChanged)
         self.smartJitterThreshCard.valueChanged.connect(self._onSmartJitterThreshChanged)
 
     def _loadFromConfig(self):
@@ -1282,7 +1290,8 @@ class AimPage(BasePage):
 
             backend_map = {
                 "auto": "Auto",
-                "cuda": "CUDA",
+                "tensorrt": "TensorRT",
+                "cuda": "TensorRT",   # legacy alias
                 "directml": "DirectML",
                 "cpu": "CPU",
             }
@@ -1302,6 +1311,9 @@ class AimPage(BasePage):
             self.detectIntervalCard.setValue(interval_ms)
             screenshot_interval_ms = int(getattr(self._config, 'screenshot_interval', self._config.detect_interval) * 1000)
             self.screenshotIntervalCard.setValue(screenshot_interval_ms)
+            _auto_match = bool(getattr(self._config, 'auto_match_fps', False))
+            self.autoMatchFpsCard.setChecked(_auto_match)
+            self.screenshotIntervalCard.setEnabled(not _auto_match)
             confidence_pct = int(self._config.min_confidence * 100)
             self.confidenceCard.setValue(confidence_pct)
 
@@ -1414,7 +1426,7 @@ class AimPage(BasePage):
             self.arduinoBaudCombo.setCurrentText(arduino_baud)
 
             # Inference Performance
-            self.trtFp16Card.setChecked(bool(getattr(self._config, 'trt_fp16_enabled', False)))
+            self.skipLetterboxCard.setChecked(bool(getattr(self._config, 'skip_letterbox', False)))
             self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
             self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
             self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
@@ -1449,8 +1461,7 @@ class AimPage(BasePage):
             sj_on = bool(getattr(self._config, 'smart_jitter_enabled', False))
             self.smartJitterEnableCard.setChecked(sj_on)
             self.smartJitterLmbCard.setChecked(bool(getattr(self._config, 'smart_jitter_lmb_gate', True)))
-            sj_level = int(getattr(self._config, 'smart_jitter_level', 1))
-            self.smartJitterLevelCombo.setCurrentIndex(max(0, min(2, sj_level - 1)))
+            self.smartJitterStrengthSpin.setValue(float(getattr(self._config, 'smart_jitter_strength', 6.0)))
             self.smartJitterThreshCard.setValue(int(getattr(self._config, 'smart_jitter_box_threshold_pct', 15.0)))
             self.smartJitterLmbCard.setEnabled(sj_on)
             self.smartJitterLevelCard.setEnabled(sj_on)
@@ -1513,144 +1524,51 @@ class AimPage(BasePage):
 
         backend_map = {
             "Auto": "auto",
-            "CUDA": "cuda",
+            "TensorRT": "tensorrt",
             "DirectML": "directml",
             "CPU": "cpu",
         }
+        prev_backend = getattr(self._config, "inference_backend", "auto")
         selected_backend = backend_map.get(text, "auto")
-        if getattr(self._config, "inference_backend", "auto") != selected_backend:
+        if prev_backend != selected_backend:
             self._config.inference_backend = selected_backend
-        if selected_backend == "cuda" and not self._isLoadingConfig:
-            self._ensureCudaInstalled()
+        if selected_backend == "tensorrt" and not self._isLoadingConfig:
+            self._ensureTrtInstalled()
+        if not self._isLoadingConfig and (
+            selected_backend == "directml" or prev_backend == "directml"
+        ):
+            InfoBar.info(
+                t("restart_required", "Restart Required"),
+                t("restart_dml_notice",
+                  "Switching to/from DirectML takes effect after restarting the app."),
+                duration=5000,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
         self._updateInferenceBackendSubtitle()
 
-    def _ensureCudaInstalled(self) -> None:
-        """Install CUDA (and optionally TensorRT) when CUDAExecutionProvider is unavailable.
-
-        Flow
-        ----
-        1. If CUDA is already available just offer TensorRT and return.
-        2. Ask the user to confirm installation and whether to also add TensorRT.
-        3. Stop the AI inference threads so the ONNX session releases its GPU
-           resources before the installer subprocess runs.
-        4. Schedule a batch script that waits for this process to exit, then
-           runs install_cuda_local.py (which now also handles TensorRT when
-           requested).  The app exits so that DLLs locked by the current
-           process are released before pip tries to overwrite them.
-        """
+    def _ensureTrtInstalled(self) -> None:
+        """Launch 安裝TensorRT.bat if TensorRT is not yet available."""
         try:
-            import onnxruntime as ort
-            cuda_available = "CUDAExecutionProvider" in ort.get_available_providers()
+            import onnxruntime as _ort
+            if "TensorrtExecutionProvider" in _ort.get_available_providers():
+                return  # already installed — nothing to do
         except Exception:
-            cuda_available = False
-
-        python_exe = self._getEmbeddedPythonExe()
-        src_dir = os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        )
-        cuda_script = os.path.join(src_dir, "install_cuda_local.py")
-        trt_script  = os.path.join(src_dir, "install_tensorrt_local.py")
-
-        if cuda_available:
-            # CUDA is ready — just ask about TensorRT.
-            trt_reply = QMessageBox.question(
-                self,
-                "TensorRT",
-                (
-                    "CUDAExecutionProvider is already available.\n\n"
-                    "Do you also want to install TensorRT for maximum GPU performance?\n\n"
-                    "The app will close, install TensorRT, then you can reopen it."
-                ),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            pass
+        # Project root is 5 levels up from this file
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+        bat_path = os.path.join(project_root, "安裝TensorRT.bat")
+        if not os.path.exists(bat_path):
+            InfoBar.warning(
+                "TensorRT installer not found",
+                f"Expected: {bat_path}",
+                duration=6000, isClosable=True,
+                position=InfoBarPosition.TOP, parent=self,
             )
-            if trt_reply != QMessageBox.StandardButton.Yes:
-                return
-            if not os.path.exists(trt_script):
-                QMessageBox.warning(self, "TensorRT install failed",
-                                    f"Installer not found:\n{trt_script}")
-                return
-            self._scheduleAndQuit(python_exe, [trt_script])
             return
-
-        # CUDA is not installed — confirm with the user.
-        if not os.path.exists(cuda_script):
-            QMessageBox.warning(self, "CUDA install failed",
-                                f"Installer not found:\n{cuda_script}")
-            return
-
-        reply = QMessageBox.question(
-            self,
-            "CUDA Installation Required",
-            (
-                "CUDAExecutionProvider is not available.\n\n"
-                "The CUDA packages will be installed automatically after the app "
-                "closes so that locked DLLs can be replaced safely.\n\n"
-                "Reopen the application once the installer finishes."
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        # Ask about TensorRT before closing.
-        trt_reply = QMessageBox.question(
-            self,
-            "TensorRT",
-            "Do you also want to install TensorRT after CUDA?\n\n"
-            "(Recommended for RTX GPUs — provides maximum inference speed.)",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        install_trt = trt_reply == QMessageBox.StandardButton.Yes
-
-        # Stop inference threads so the ONNX session releases CUDA resources
-        # before the deferred installer subprocess runs.
-        if self._config is not None:
-            try:
-                import main as _main_mod
-                _main_mod.stop_ai_threads(self._config)
-            except Exception as exc:
-                print(f"[CUDA install] Could not stop AI threads gracefully: {exc}")
-
-        scripts = [cuda_script]
-        if install_trt and os.path.exists(trt_script):
-            scripts.append(trt_script)
-
-        self._scheduleAndQuit(python_exe, scripts)
-
-    def _scheduleAndQuit(self, python_exe: str, scripts: list) -> None:
-        """Write a bat file that waits for this PID to exit, runs each script, then quits."""
-        current_pid = os.getpid()
-        temp_dir = os.environ.get("TEMP", os.path.expanduser("~"))
-        bat_path = os.path.join(temp_dir, "axiom_install.bat")
-
-        lines = [
-            "@echo off",
-            ":WAITLOOP",
-            f'tasklist /fi "pid eq {current_pid}" /fo csv 2>nul | find "{current_pid}" >nul',
-            "if not errorlevel 1 (",
-            "    timeout /t 1 /nobreak >nul",
-            "    goto WAITLOOP",
-            ")",
-        ]
-        for script in scripts:
-            lines.append(f'"{python_exe}" "{script}"')
-        lines.append('del "%~f0"')
-
-        bat_content = "\n".join(lines) + "\n"
-        try:
-            with open(bat_path, "w") as f:
-                f.write(bat_content)
-            subprocess.Popen(
-                ["cmd", "/c", bat_path],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                close_fds=True,
-            )
-        except Exception as exc:
-            QMessageBox.warning(self, "Install scheduling failed",
-                                f"Could not schedule installer:\n{exc}")
-            return
-
-        QApplication.instance().quit()
+        subprocess.Popen([bat_path], shell=True)
 
     def _updateInferenceBackendSubtitle(self):
         if not hasattr(self, "inferenceBackendCard"):
@@ -1678,11 +1596,22 @@ class AimPage(BasePage):
         """偵測間隔改變"""
         if self._config:
             self._config.detect_interval = value / 1000.0
+            if getattr(self._config, 'auto_match_fps', False):
+                self._config.screenshot_interval = self._config.detect_interval
+                self.screenshotIntervalCard.setValue(value)
 
     def _onScreenshotIntervalChanged(self, value):
         """截圖間隔改變"""
         if self._config:
             self._config.screenshot_interval = value / 1000.0
+
+    def _onAutoMatchFpsChanged(self, checked):
+        if self._config:
+            self._config.auto_match_fps = bool(checked)
+            self.screenshotIntervalCard.setEnabled(not checked)
+            if checked:
+                self._config.screenshot_interval = self._config.detect_interval
+                self.screenshotIntervalCard.setValue(int(self._config.detect_interval * 1000))
 
     def _onConfidenceChanged(self, value):
         """信心值改變"""
@@ -2301,10 +2230,6 @@ class AimPage(BasePage):
 
     # === Inference Performance Callbacks ===
 
-    def _onTrtFp16Changed(self, checked):
-        if self._config:
-            self._config.trt_fp16_enabled = bool(checked)
-
     def _onCudaIoBindingChanged(self, checked):
         if self._config:
             self._config.cuda_io_binding_enabled = bool(checked)
@@ -2316,6 +2241,10 @@ class AimPage(BasePage):
     def _onFrameSkipThresholdChanged(self, value):
         if self._config:
             self._config.frame_skip_threshold = value / 10.0
+
+    def _onSkipLetterboxChanged(self, checked):
+        if self._config:
+            self._config.skip_letterbox = bool(checked)
 
     # === Target Tracking Callbacks ===
 
@@ -2400,9 +2329,9 @@ class AimPage(BasePage):
         if self._config:
             self._config.smart_jitter_lmb_gate = bool(checked)
 
-    def _onSmartJitterLevelChanged(self, index):
+    def _onSmartJitterStrengthChanged(self, value):
         if self._config:
-            self._config.smart_jitter_level = index + 1
+            self._config.smart_jitter_strength = float(value)
 
     def _onSmartJitterThreshChanged(self, value):
         if self._config:
@@ -2436,6 +2365,7 @@ class AimPage(BasePage):
         # 通用參數
         self.detectIntervalCard.titleLabel.setText(t("detect_interval"))
         self.screenshotIntervalCard.titleLabel.setText(t("screenshot_interval"))
+        self.autoMatchFpsCard.titleLabel.setText(t("auto_match_fps_label"))
         self.confidenceCard.titleLabel.setText(t("min_confidence"))
         self.aimPartCard.titleLabel.setText(t("aim_part"))
         self.mouseMoveCard.titleLabel.setText(t("mouse_move_method"))
@@ -2459,6 +2389,8 @@ class AimPage(BasePage):
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
+        self.autoMatchFpsCard.titleLabel.setText(t("auto_match_fps_label"))
+        self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
 
         # Arduino 設定
         self.comPortCard.titleLabel.setText(t("arduino_com_port"))

@@ -12,6 +12,8 @@ import time
 # Add that directory to sys.path before any package imports so Python finds them.
 
 def _inject_axiom_packages() -> None:
+    if os.environ.get("AXIOM_BACKEND") == "directml":
+        return
     _localappdata = os.environ.get("LOCALAPPDATA", "")
     if not _localappdata:
         return
@@ -30,6 +32,8 @@ _inject_axiom_packages()
 
 def _register_trt_dll_dirs() -> None:
     """Add TensorRT and CUDA pip-wheel DLL dirs to PATH/add_dll_directory (Windows only)."""
+    if os.environ.get("AXIOM_BACKEND") == "directml":
+        return
     if sys.platform != "win32":
         return
     try:
@@ -190,9 +194,10 @@ def build_provider_list(config) -> list:
             logger.info("Auto-selected backend: CPU")
     else:
         provider_map = {
-            "cuda":    ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
-            "directml":["DmlExecutionProvider", "CPUExecutionProvider"],
-            "cpu":     ["CPUExecutionProvider"],
+            "tensorrt": ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
+            "cuda":     ["TensorrtExecutionProvider", "CUDAExecutionProvider", "CPUExecutionProvider"],
+            "directml": ["DmlExecutionProvider", "CPUExecutionProvider"],
+            "cpu":      ["CPUExecutionProvider"],
         }
         preferred = provider_map.get(backend, ["CUDAExecutionProvider", "CPUExecutionProvider"])
         active = [p for p in preferred if p in available]

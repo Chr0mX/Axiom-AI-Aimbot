@@ -12,7 +12,7 @@ import types
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
-    QAbstractSlider, QDialog, QFileDialog, QFrame, QHBoxLayout,
+    QAbstractSlider, QDialog, QFrame, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSlider,
     QStackedWidget, QVBoxLayout, QWidget,
 )
@@ -580,161 +580,106 @@ class SetupWizard(QDialog):
         self._lbl_perf_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         ly.addWidget(self._lbl_perf_sub)
 
-        ly.addSpacing(10)
+        ly.addSpacing(16)
 
-        # ── Model Path ────────────────────────────────────────
-        self._lbl_perf_model = _lbl("", 11)
-        ly.addWidget(self._lbl_perf_model)
+        # ── Inference Backend ─────────────────────────────────
+        backend_row = QHBoxLayout()
+        backend_row.setSpacing(12)
 
-        model_row = QHBoxLayout()
-        model_row.setSpacing(8)
-
-        self._edit_model_path = QLineEdit()
-        self._edit_model_path.setText(getattr(self._config, 'model_path', 'Model/ApexLegendsOrbeet_15k.onnx'))
-        self._edit_model_path.textChanged.connect(self._onModelPathChanged)
-        model_row.addWidget(self._edit_model_path, 1)
-
-        self._btn_browse_model = QPushButton("...")
-        self._btn_browse_model.setFixedWidth(36)
-        self._btn_browse_model.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_browse_model.clicked.connect(self._onBrowseModel)
-        model_row.addWidget(self._btn_browse_model)
-
-        ly.addLayout(model_row)
-
-        ly.addSpacing(6)
-
-        # ── Model Input Size ──────────────────────────────────
-        size_row = QHBoxLayout()
-        size_row.setSpacing(12)
-
-        self._lbl_perf_size = _lbl("", 11)
-        self._lbl_perf_size.setFixedWidth(200)
-        size_row.addWidget(self._lbl_perf_size)
+        self._lbl_perf_backend = _lbl("Inference Backend", 11, bold=True)
+        backend_row.addWidget(self._lbl_perf_backend)
+        backend_row.addStretch()
 
         if _HAS_FLUENT:
-            self._combo_input_size = ComboBox()
+            self._combo_backend = ComboBox()
         else:
             from PyQt6.QtWidgets import QComboBox
-            self._combo_input_size = QComboBox()  # type: ignore[assignment]
+            self._combo_backend = QComboBox()  # type: ignore[assignment]
 
-        for s in ["320", "480", "640"]:
-            self._combo_input_size.addItem(s)
+        self._combo_backend.addItems(["TensorRT (NVIDIA GPU)", "DirectML (AMD / Intel / NVIDIA)"])
+        cur_backend = getattr(self._config, 'inference_backend', 'auto')
+        self._combo_backend.setCurrentIndex(1 if cur_backend == "directml" else 0)
+        self._combo_backend.currentIndexChanged.connect(self._onBackendChanged)
+        backend_row.addWidget(self._combo_backend)
+        ly.addLayout(backend_row)
 
-        cur_size = str(getattr(self._config, 'model_input_size', 640))
-        idx = self._combo_input_size.findText(cur_size)
-        self._combo_input_size.setCurrentIndex(idx if idx >= 0 else 2)
-        self._combo_input_size.currentTextChanged.connect(self._onModelInputSizeChanged)
+        ly.addSpacing(10)
 
-        size_row.addWidget(self._combo_input_size)
-        size_row.addStretch()
-        ly.addLayout(size_row)
+        # ── Model section (TensorRT only) ─────────────────────
+        self._model_section = QWidget()
+        model_ly = QVBoxLayout(self._model_section)
+        model_ly.setContentsMargins(0, 0, 0, 0)
+        model_ly.setSpacing(6)
 
-        ly.addSpacing(6)
+        self._lbl_perf_model = _lbl("", 11, bold=True)
+        model_ly.addWidget(self._lbl_perf_model)
 
-        # ── TRT FP16 ──────────────────────────────────────────
-        trt_row = QHBoxLayout()
-        trt_row.setSpacing(12)
-
-        if _HAS_FLUENT:
-            self._sw_trt_fp16 = SwitchButton()
-        else:
-            from PyQt6.QtWidgets import QCheckBox
-            self._sw_trt_fp16 = QCheckBox()  # type: ignore[assignment]
-
-        self._sw_trt_fp16.setChecked(getattr(self._config, 'trt_fp16_enabled', False))
-        self._sw_trt_fp16.checkedChanged.connect(self._onTrtFp16Toggle)
-        trt_row.addWidget(self._sw_trt_fp16)
-
-        trt_text = QVBoxLayout()
-        trt_text.setSpacing(2)
-        self._lbl_perf_trt = _lbl("", 11, bold=True)
-        self._lbl_perf_trt_hint = _lbl("", 9, color="#888888")
-        trt_text.addWidget(self._lbl_perf_trt)
-        trt_text.addWidget(self._lbl_perf_trt_hint)
-        trt_row.addLayout(trt_text)
-        trt_row.addStretch()
-        ly.addLayout(trt_row)
-
-        ly.addSpacing(6)
-
-        # ── EMA Smoothing ─────────────────────────────────────
-        ema_row = QHBoxLayout()
-        ema_row.setSpacing(12)
+        model_row = QHBoxLayout()
+        model_row.setSpacing(6)
 
         if _HAS_FLUENT:
-            self._sw_ema = SwitchButton()
+            self._combo_model = ComboBox()
         else:
-            from PyQt6.QtWidgets import QCheckBox
-            self._sw_ema = QCheckBox()  # type: ignore[assignment]
+            from PyQt6.QtWidgets import QComboBox
+            self._combo_model = QComboBox()  # type: ignore[assignment]
 
-        self._sw_ema.setChecked(getattr(self._config, 'ema_enabled', False))
-        self._sw_ema.checkedChanged.connect(self._onEmaToggle)
-        ema_row.addWidget(self._sw_ema)
+        self._combo_model.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._combo_model.currentIndexChanged.connect(self._onModelComboChanged)
+        model_row.addWidget(self._combo_model, 1)
 
-        ema_text = QVBoxLayout()
-        ema_text.setSpacing(2)
-        self._lbl_perf_ema = _lbl("", 11, bold=True)
-        self._lbl_perf_ema_hint = _lbl("", 9, color="#888888")
-        ema_text.addWidget(self._lbl_perf_ema)
-        ema_text.addWidget(self._lbl_perf_ema_hint)
-        ema_row.addLayout(ema_text)
-        ema_row.addStretch()
-        ly.addLayout(ema_row)
+        self._btn_refresh_model = QPushButton("↻")
+        self._btn_refresh_model.setFixedWidth(30)
+        self._btn_refresh_model.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_refresh_model.clicked.connect(self._refreshModelCombo)
+        model_row.addWidget(self._btn_refresh_model)
 
-        ly.addSpacing(6)
+        model_ly.addLayout(model_row)
+        ly.addWidget(self._model_section)
 
-        # ── Velocity Prediction ───────────────────────────────
-        pred_row = QHBoxLayout()
-        pred_row.setSpacing(12)
-
-        if _HAS_FLUENT:
-            self._sw_prediction = SwitchButton()
-        else:
-            from PyQt6.QtWidgets import QCheckBox
-            self._sw_prediction = QCheckBox()  # type: ignore[assignment]
-
-        self._sw_prediction.setChecked(getattr(self._config, 'prediction_enabled', False))
-        self._sw_prediction.checkedChanged.connect(self._onPredictionToggle)
-        pred_row.addWidget(self._sw_prediction)
-
-        pred_text = QVBoxLayout()
-        pred_text.setSpacing(2)
-        self._lbl_perf_pred = _lbl("", 11, bold=True)
-        self._lbl_perf_pred_hint = _lbl("", 9, color="#888888")
-        pred_text.addWidget(self._lbl_perf_pred)
-        pred_text.addWidget(self._lbl_perf_pred_hint)
-        pred_row.addLayout(pred_text)
-        pred_row.addStretch()
-        ly.addLayout(pred_row)
+        # Populate model combo and set initial visibility
+        self._refreshModelCombo()
+        self._model_section.setVisible(self._combo_backend.currentIndex() == 0)
 
         return w
 
     # ── Performance Page Handlers ─────────────────────────
 
-    def _onModelPathChanged(self, text: str):
-        self._config.model_path = text
+    def _onBackendChanged(self, idx: int) -> None:
+        self._config.inference_backend = "directml" if idx == 1 else "tensorrt"
+        self._model_section.setVisible(idx == 0)
 
-    def _onBrowseModel(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Model", "", "ONNX Models (*.onnx);;All Files (*)")
-        if path:
-            self._edit_model_path.setText(path)
-
-    def _onModelInputSizeChanged(self, text: str):
+    def _refreshModelCombo(self) -> None:
+        project_root = os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__))))
+        model_dir = os.path.join(project_root, "Model")
+        self._combo_model.blockSignals(True)
+        self._combo_model.clear()
         try:
-            self._config.model_input_size = int(text)
-        except ValueError:
-            pass
+            files = sorted(
+                f for f in os.listdir(model_dir)
+                if f.lower().endswith(".onnx")
+            ) if os.path.isdir(model_dir) else []
+        except OSError:
+            files = []
+        if files:
+            for f in files:
+                self._combo_model.addItem(f, f"Model/{f}")
+            cur = getattr(self._config, 'model_path', '')
+            idx = self._combo_model.findData(cur)
+            self._combo_model.setCurrentIndex(idx if idx >= 0 else 0)
+            self._combo_model.setEnabled(True)
+            if self._config:
+                self._config.model_path = self._combo_model.currentData()
+        else:
+            self._combo_model.addItem("— No models found —", "")
+            self._combo_model.setEnabled(False)
+        self._combo_model.blockSignals(False)
 
-    def _onTrtFp16Toggle(self, checked: bool):
-        self._config.trt_fp16_enabled = checked
-
-    def _onEmaToggle(self, checked: bool):
-        self._config.ema_enabled = checked
-
-    def _onPredictionToggle(self, checked: bool):
-        self._config.prediction_enabled = checked
+    def _onModelComboChanged(self, _idx: int) -> None:
+        data = self._combo_model.currentData()
+        if data and self._config:
+            self._config.model_path = data
 
     def _buildDonePage(self) -> QWidget:
         w = QWidget()
@@ -791,6 +736,21 @@ class SetupWizard(QDialog):
             self._btn_skip.setVisible(True)
 
     def _finish(self):
+        backend = getattr(self._config, 'inference_backend', 'auto')
+        if backend == "tensorrt":
+            try:
+                import onnxruntime as _ort
+                trt_ready = "TensorrtExecutionProvider" in _ort.get_available_providers()
+            except Exception:
+                trt_ready = False
+            if not trt_ready:
+                # setup_wizard.py lives at src/gui/fluent_app/ → up 3 = project root
+                project_root = os.path.dirname(os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__))))
+                bat = os.path.join(project_root, "安裝TensorRT.bat")
+                if os.path.exists(bat):
+                    import subprocess
+                    subprocess.Popen([bat], shell=True)
         self.setupComplete.emit()
         self.accept()
 
@@ -873,24 +833,7 @@ class SetupWizard(QDialog):
             lm.get("wizard_perf_subtitle",
                    "Configure inference and tracking options. These can be changed later in the Aim tab."))
         self._lbl_perf_model.setText(
-            lm.get("wizard_perf_model_path", "Model Path"))
-        self._lbl_perf_size.setText(
-            lm.get("wizard_perf_input_size", "Model Input Size (px)"))
-        self._lbl_perf_trt.setText(
-            lm.get("wizard_perf_trt", "TensorRT FP16"))
-        self._lbl_perf_trt_hint.setText(
-            lm.get("wizard_perf_trt_hint",
-                   "Requires NVIDIA GPU — builds engine on first run (~30 s)"))
-        self._lbl_perf_ema.setText(
-            lm.get("wizard_perf_ema", "EMA Aim Smoothing"))
-        self._lbl_perf_ema_hint.setText(
-            lm.get("wizard_perf_ema_hint",
-                   "Reduces jitter by smoothing the aim point each frame"))
-        self._lbl_perf_pred.setText(
-            lm.get("wizard_perf_pred", "Velocity Prediction"))
-        self._lbl_perf_pred_hint.setText(
-            lm.get("wizard_perf_pred_hint",
-                   "Extrapolates target position to compensate for detection latency"))
+            lm.get("wizard_perf_model_path", "Model"))
 
         # Done
         self._lbl_done_title.setText(
