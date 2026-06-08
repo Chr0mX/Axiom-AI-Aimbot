@@ -1543,31 +1543,41 @@ class AimPage(BasePage):
         selected_backend = backend_map.get(text, "auto")
         if prev_backend != selected_backend:
             self._config.inference_backend = selected_backend
-        if selected_backend == "tensorrt" and not self._isLoadingConfig:
-            self._ensureTrtInstalled()
-        if not self._isLoadingConfig and (
-            selected_backend == "directml" or prev_backend == "directml"
-        ):
-            InfoBar.info(
-                t("restart_required", "Restart Required"),
-                t("restart_dml_notice",
-                  "Switching to/from DirectML takes effect after restarting the app."),
-                duration=5000,
-                isClosable=True,
-                position=InfoBarPosition.TOP,
-                parent=self,
-            )
+        if not self._isLoadingConfig and (selected_backend == "directml" or prev_backend == "directml"):
+            if selected_backend == "tensorrt":
+                self._ensureTrtInstalled()
+                if getattr(self, "_trt_installer_launched", False):
+                    InfoBar.info(
+                        "TensorRT Installer Launched",
+                        "Restart the app after installation completes.",
+                        duration=6000, isClosable=True,
+                        position=InfoBarPosition.TOP, parent=self,
+                    )
+                    self._updateInferenceBackendSubtitle()
+                    return
+            self._startRestartCountdown()
+            return
         self._updateInferenceBackendSubtitle()
 
     def _ensureTrtInstalled(self) -> None:
-        """Launch 安裝TensorRT.bat if TensorRT is not yet available."""
+        """Launch 安裝TensorRT.bat if TensorRT is not yet available. Sets self._trt_installer_launched."""
+        self._trt_installer_launched = False
+        # Runtime check (works when TRT ORT is loaded)
         try:
             import onnxruntime as _ort
             if "TensorrtExecutionProvider" in _ort.get_available_providers():
-                return  # already installed — nothing to do
+                return
         except Exception:
             pass
-        # Project root is 5 levels up from this file
+        # Disk check (works when embedded DML ORT is loaded instead of TRT ORT)
+        localappdata = os.environ.get("LOCALAPPDATA", "")
+        if localappdata:
+            trt_libs = os.path.join(localappdata, "AxiomAI", "site-packages", "tensorrt_libs")
+            if os.path.isdir(trt_libs):
+                for name in os.listdir(trt_libs):
+                    if name.lower().startswith("nvinfer") and name.lower().endswith(".dll"):
+                        return  # TRT installed — caller handles restart
+        # Not installed — launch installer
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
         bat_path = os.path.join(project_root, "安裝TensorRT.bat")
@@ -1580,6 +1590,44 @@ class AimPage(BasePage):
             )
             return
         subprocess.Popen([bat_path], shell=True)
+        self._trt_installer_launched = True
+
+    def _startRestartCountdown(self) -> None:
+        from PyQt6.QtCore import QTimer
+        self._restartCountdown = 5
+        self._restartCountdownBar = InfoBar.info(
+            t("restart_required", "Restart Required"),
+            f"Restarting in {self._restartCountdown}s…",
+            duration=-1,
+            isClosable=True,
+            position=InfoBarPosition.TOP,
+            parent=self,
+        )
+        self._restartTimer = QTimer(self)
+        self._restartTimer.timeout.connect(self._onRestartTick)
+        self._restartTimer.start(1000)
+
+    def _onRestartTick(self) -> None:
+        self._restartCountdown -= 1
+        if self._restartCountdown <= 0:
+            self._restartTimer.stop()
+            bar = getattr(self, "_restartCountdownBar", None)
+            if bar:
+                bar.close()
+            self._restartApp()
+        else:
+            bar = getattr(self, "_restartCountdownBar", None)
+            if bar:
+                for lbl in bar.findChildren(BodyLabel):
+                    lbl.setText(f"Restarting in {self._restartCountdown}s…")
+                    break
+
+    def _restartApp(self) -> None:
+        from core.config import save_config
+        if self._config:
+            save_config(self._config)
+        subprocess.Popen([sys.executable] + sys.argv)
+        QApplication.instance().quit()
 
     def _updateInferenceBackendSubtitle(self):
         if not hasattr(self, "inferenceBackendCard"):
