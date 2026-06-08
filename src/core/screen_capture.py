@@ -413,7 +413,12 @@ class NDICapture:
             if self.source_name and source is None:
                 raise RuntimeError(f"NDI source '{self.source_name}' not found")
 
-            receiver_kwargs: dict[str, Any] = {'color_format': RecvColorFormat.RGBX_RGBA}
+            _bgra_fmt = getattr(RecvColorFormat, 'BGRX_BGRA', None)
+            receiver_kwargs: dict[str, Any] = {
+                'color_format': _bgra_fmt if _bgra_fmt is not None else RecvColorFormat.RGBX_RGBA
+            }
+            self._recv_is_bgra: bool = _bgra_fmt is not None
+            print(f'[Capture][NDI] Color format: {"BGRX_BGRA (no cvtColor)" if self._recv_is_bgra else "RGBX_RGBA (cvtColor fallback)"}')
             if RecvBandwidth is not None:
                 bw_pref = str(getattr(config, 'ndi_bandwidth', 'highest')).lower()
                 bw_value = getattr(RecvBandwidth, bw_pref, None) or getattr(RecvBandwidth, 'highest', None)
@@ -556,39 +561,44 @@ class NDICapture:
             print(f'[Capture][NDI] Auto-select source setup failed: {exc}')
 
     @staticmethod
-    def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
+    def _raw_array_from_cyndilib_frame(frame: Any) -> tuple[np.ndarray | None, int, int]:
+        """Return raw (H, W, 4) uint8 array + (width, height) with no color conversion."""
         if hasattr(frame, 'get_array'):
             try:
-                raw = frame.get_array()
                 width = int(getattr(frame, 'xres', 0) or 0)
                 height = int(getattr(frame, 'yres', 0) or 0)
                 if width <= 0 or height <= 0:
-                    return None
+                    return None, 0, 0
+                raw = frame.get_array()
                 arr = np.asarray(raw, dtype=np.uint8)
                 expected = width * height * 4
                 if arr.size < expected:
-                    return None
-                arr = arr[:expected].reshape(height, width, 4)
-                return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
+                    return None, 0, 0
+                return arr[:expected].reshape(height, width, 4), width, height
             except Exception:
-                return None
+                return None, 0, 0
+        try:
+            width, height = frame.get_resolution()
+            if width <= 0 or height <= 0:
+                return None, 0, 0
+            raw = frame.get_array()
+            if raw is None:
+                return None, 0, 0
+            arr = np.asarray(raw, dtype=np.uint8)
+            expected = width * height * 4
+            if arr.size < expected:
+                return None, 0, 0
+            return arr[:expected].reshape(height, width, 4), width, height
+        except Exception:
+            return None, 0, 0
 
-        width, height = frame.get_resolution()
-        if width <= 0 or height <= 0:
+    @staticmethod
+    def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
+        """Legacy wrapper — converts full frame RGBA→BGRA. Use _raw_array_from_cyndilib_frame for crop-first path."""
+        arr, w, h = NDICapture._raw_array_from_cyndilib_frame(frame)
+        if arr is None:
             return None
-
-        raw = frame.get_array()
-        if raw is None:
-            return None
-        raw = np.asarray(raw, dtype=np.uint8)
-        if raw.size == 0:
-            return None
-
-        expected = width * height * 4
-        if raw.size < expected:
-            return None
-        rgba = raw[:expected].reshape(height, width, 4)
-        return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA)
+        return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         if not self._receiver.is_connected():
@@ -635,11 +645,11 @@ class NDICapture:
                 return None
             frame_obj = self._receiver.video_frame or self._video_frame
 
-        frame = self._bgra_from_cyndilib_frame(frame_obj)
-        if frame is None:
+        raw, frame_w, frame_h = self._raw_array_from_cyndilib_frame(frame_obj)
+        if raw is None:
             return None
-        full_frame = frame
-        frame_h, frame_w = full_frame.shape[:2]
+
+        # Metadata update must use full dims before any crop
         if frame_w > 0 and frame_h > 0:
             self.preview_width = frame_w
             self.preview_height = frame_h
@@ -662,22 +672,39 @@ class NDICapture:
         if _frame_fps > 0:
             self.config.source_nominal_fps = _frame_fps
 
-        if region is not None:
-            left = max(0, int(region.get('left', 0)))
-            top = max(0, int(region.get('top', 0)))
-            width = max(0, int(region.get('width', frame_w)))
-            height = max(0, int(region.get('height', frame_h)))
-            right = min(frame_w, left + width)
-            bottom = min(frame_h, top + height)
-            if right <= left or bottom <= top:
-                return None
-            frame = frame[top:bottom, left:right]
+        recv_is_bgra: bool = getattr(self, '_recv_is_bgra', False)
+
+        def _to_bgra(arr: np.ndarray) -> np.ndarray:
+            return arr if recv_is_bgra else cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
 
         if self.show_window:
-            # Feed the preview thread — it draws overlays and calls imshow independently
+            # Preview needs the full frame — convert once, then slice for inference (free view)
+            full_bgra = _to_bgra(raw)
             with self._ndi_frame_lock:
-                self._ndi_frame_ref[0] = full_frame
+                self._ndi_frame_ref[0] = full_bgra
             self._ndi_region_ref[0] = region
+            if region is not None:
+                left   = max(0, int(region.get('left',   0)))
+                top    = max(0, int(region.get('top',     0)))
+                right  = min(frame_w, left + max(0, int(region.get('width',  frame_w))))
+                bottom = min(frame_h, top  + max(0, int(region.get('height', frame_h))))
+                if right <= left or bottom <= top:
+                    return None
+                frame = full_bgra[top:bottom, left:right]
+            else:
+                frame = full_bgra
+        else:
+            # No preview — crop raw array first, then convert only the small region
+            if region is not None:
+                left   = max(0, int(region.get('left',   0)))
+                top    = max(0, int(region.get('top',     0)))
+                right  = min(frame_w, left + max(0, int(region.get('width',  frame_w))))
+                bottom = min(frame_h, top  + max(0, int(region.get('height', frame_h))))
+                if right <= left or bottom <= top:
+                    return None
+                frame = _to_bgra(raw[top:bottom, left:right])
+            else:
+                frame = _to_bgra(raw)
 
         if frame.ndim == 3 and frame.shape[2] == 4:
             return frame
