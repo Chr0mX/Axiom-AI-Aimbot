@@ -196,6 +196,7 @@ class Config:
         # 保持檢測功能
         self.keep_detecting: bool = True   # 啟用保持檢測
         self.always_aim: bool = False      # 不按瞄準鍵也執行自動瞄準
+        self.makcu_lmb_aim: bool = True    # MAKCU LMB held → aim trigger
         self.fov_follow_mouse: bool = False # FOV 跟隨鼠標
 
         # 顯示開關
@@ -338,6 +339,7 @@ class Config:
             'ndi_bandwidth': self.ndi_bandwidth,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
+            'makcu_lmb_aim': self.makcu_lmb_aim,
             'fov_follow_mouse': self.fov_follow_mouse,
             'aim_toggle_key': self.aim_toggle_key,
             'auto_fire_key2': self.auto_fire_key2,
