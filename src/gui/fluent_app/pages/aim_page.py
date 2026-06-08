@@ -1286,6 +1286,17 @@ class AimPage(BasePage):
 
             if idx >= 0:
                 self.modelCombo.setCurrentIndex(idx)
+            elif self.modelCombo.count() > 0:
+                default_name = "ApexLegendsOrbeet_15k.onnx"
+                default_idx = -1
+                for i in range(self.modelCombo.count()):
+                    if self.modelCombo.itemText(i).lower() == default_name.lower():
+                        default_idx = i
+                        break
+                pick = default_idx if default_idx >= 0 else 0
+                self.modelCombo.setCurrentIndex(pick)
+                if self._config:
+                    self._config.model_path = "Model/" + self.modelCombo.itemText(pick)
             self.modelCombo.blockSignals(False)
 
             backend_map = {
