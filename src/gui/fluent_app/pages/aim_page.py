@@ -1528,11 +1528,24 @@ class AimPage(BasePage):
             "DirectML": "directml",
             "CPU": "cpu",
         }
+        prev_backend = getattr(self._config, "inference_backend", "auto")
         selected_backend = backend_map.get(text, "auto")
-        if getattr(self._config, "inference_backend", "auto") != selected_backend:
+        if prev_backend != selected_backend:
             self._config.inference_backend = selected_backend
         if selected_backend == "tensorrt" and not self._isLoadingConfig:
             self._ensureTrtInstalled()
+        if not self._isLoadingConfig and (
+            selected_backend == "directml" or prev_backend == "directml"
+        ):
+            InfoBar.info(
+                t("restart_required", "Restart Required"),
+                t("restart_dml_notice",
+                  "Switching to/from DirectML takes effect after restarting the app."),
+                duration=5000,
+                isClosable=True,
+                position=InfoBarPosition.TOP,
+                parent=self,
+            )
         self._updateInferenceBackendSubtitle()
 
     def _ensureTrtInstalled(self) -> None:

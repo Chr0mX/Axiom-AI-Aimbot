@@ -71,8 +71,8 @@ class OtherPage(BasePage):
         self.exitSaveCard.hBoxLayout.addWidget(self.exitSaveBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.exitSaveCard.hBoxLayout.addSpacing(16)
 
-        # === TensorRT Environment ===
-        self.trtGroup = SettingCardGroup(t("trt_env", "TensorRT Environment"), self.scrollWidget)
+        # === Environment — TensorRT ===
+        self.trtGroup = SettingCardGroup(t("env_trt", "TensorRT"), self.scrollWidget)
 
         self.trtRecheckBtn = PushButton(t("trt_recheck", "Re-check"))
         self.trtRecheckBtn.setIcon(FluentIcon.SYNC)
@@ -113,18 +113,31 @@ class OtherPage(BasePage):
             self.trtGroup,
         )
 
+        # === Environment — DirectML ===
+        self.dmlGroup = SettingCardGroup(t("env_dml", "DirectML"), self.scrollWidget)
+
+        self.dmlStatusCard = SettingCard(
+            FluentIcon.IOT,
+            t("dml_status", "DirectML Status"),
+            t("dml_checking", "Checking…"),
+            self.dmlGroup,
+        )
+
+        # === Environment — Python Path ===
+        self.pyGroup = SettingCardGroup(t("env_python", "Python Path"), self.scrollWidget)
+
         self.trtSysPythonCard = SettingCard(
             FluentIcon.COMMAND_PROMPT,
             "System Python",
             "—",
-            self.trtGroup,
+            self.pyGroup,
         )
 
         self.trtInternalPythonCard = SettingCard(
             FluentIcon.COMMAND_PROMPT,
             "Internal Python",
             "—",
-            self.trtGroup,
+            self.pyGroup,
         )
 
         # === 關於內容（無群組標題）===
@@ -160,15 +173,22 @@ class OtherPage(BasePage):
         self.programGroup.addSettingCard(self.exitSaveCard)
         self.addContent(self.programGroup)
 
-        # TensorRT Environment
+        # Environment — TensorRT
         self.trtGroup.addSettingCard(self.trtStatusCard)
         self.trtGroup.addSettingCard(self.trtVersionCard)
         self.trtGroup.addSettingCard(self.trtLibsCard)
         self.trtGroup.addSettingCard(self.trtCacheCard)
         self.trtGroup.addSettingCard(self.trtAppdataCard)
-        self.trtGroup.addSettingCard(self.trtSysPythonCard)
-        self.trtGroup.addSettingCard(self.trtInternalPythonCard)
         self.addContent(self.trtGroup)
+
+        # Environment — DirectML
+        self.dmlGroup.addSettingCard(self.dmlStatusCard)
+        self.addContent(self.dmlGroup)
+
+        # Environment — Python Path
+        self.pyGroup.addSettingCard(self.trtSysPythonCard)
+        self.pyGroup.addSettingCard(self.trtInternalPythonCard)
+        self.addContent(self.pyGroup)
 
         # 關於區塊的內容（無群組標題）
         aboutWidget = QWidget()
@@ -333,7 +353,6 @@ class OtherPage(BasePage):
         self.trtCacheCard.contentLabel.setText(cache_dir)
 
         # AppData packages path
-        import sys as _sys
         localappdata = os.environ.get("LOCALAPPDATA", "")
         appdata_pkg = os.path.join(localappdata, "AxiomAI", "site-packages") if localappdata else ""
         if appdata_pkg and os.path.isdir(appdata_pkg):
@@ -343,9 +362,33 @@ class OtherPage(BasePage):
             self.trtAppdataCard.contentLabel.setText(appdata_pkg or "LOCALAPPDATA not set")
             self.trtAppdataCard.contentLabel.setStyleSheet("color: #e74c3c;")
 
-        # System Python (interpreter currently running the app)
-        self.trtSysPythonCard.contentLabel.setText(_sys.executable)
-        self.trtSysPythonCard.contentLabel.setStyleSheet("")
+        # DirectML status
+        try:
+            import onnxruntime as _ort2
+            dml_ok = "DmlExecutionProvider" in _ort2.get_available_providers()
+        except Exception:
+            dml_ok = False
+        if dml_ok:
+            self.dmlStatusCard.contentLabel.setText(
+                t("dml_available", "✓ DmlExecutionProvider available"))
+            self.dmlStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        else:
+            self.dmlStatusCard.contentLabel.setText(
+                t("dml_not_available", "✗ Not available — falls back to CPU"))
+            self.dmlStatusCard.contentLabel.setStyleSheet("color: #e74c3c;")
+
+        # System Python — search Windows PATH, skipping the embedded interpreter
+        import shutil as _shutil
+        embedded_python_dir = os.path.abspath(os.path.join(project_root, "python"))
+        sys_python = None
+        for _name in ("python3", "python"):
+            _found = _shutil.which(_name)
+            if _found and not os.path.abspath(_found).startswith(embedded_python_dir):
+                sys_python = _found
+                break
+        self.trtSysPythonCard.contentLabel.setText(sys_python or "Not found in PATH")
+        self.trtSysPythonCard.contentLabel.setStyleSheet(
+            "color: #2ecc71;" if sys_python else "color: #e74c3c;")
 
         # Internal/Embedded Python (<project_root>/python/python.exe)
         internal_python = os.path.join(project_root, "python", "python.exe")

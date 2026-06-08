@@ -91,18 +91,25 @@ import queue
 from typing import Optional
 
 # ── AppData GPU packages — inject BEFORE importing onnxruntime ───────────────
-# install_tensorrt_local.py writes onnxruntime-gpu + TRT packages to
-# %LOCALAPPDATA%\AxiomAI\site-packages.  This path must be at the front of
-# sys.path BEFORE "import onnxruntime" so the GPU build wins over the
-# CPU-only + DirectML version bundled with the embedded Python interpreter.
-# (session_utils._inject_axiom_packages() does the same thing but runs later,
-# after onnxruntime is already cached in sys.modules — too late.)
-_axiom_lad = os.environ.get("LOCALAPPDATA", "")
-if _axiom_lad:
-    _axiom_pkg_dir = os.path.join(_axiom_lad, "AxiomAI", "site-packages")
-    if os.path.isdir(_axiom_pkg_dir) and _axiom_pkg_dir not in sys.path:
-        sys.path.insert(0, _axiom_pkg_dir)
-        print(f"[ORT] Injected AppData packages path: {_axiom_pkg_dir}")
+# Read the configured backend before any onnxruntime import so we can decide
+# whether to inject the AppData GPU packages.
+# DirectML users must NOT get the GPU build — it shadows DmlExecutionProvider.
+import json as _json
+_cfg_path = os.path.join(project_root, "config.json")
+try:
+    with open(_cfg_path, "r", encoding="utf-8") as _f:
+        _early_backend = _json.load(_f).get("inference_backend", "auto")
+except Exception:
+    _early_backend = "auto"
+os.environ.setdefault("AXIOM_BACKEND", _early_backend)
+
+if _early_backend != "directml":
+    _axiom_lad = os.environ.get("LOCALAPPDATA", "")
+    if _axiom_lad:
+        _axiom_pkg_dir = os.path.join(_axiom_lad, "AxiomAI", "site-packages")
+        if os.path.isdir(_axiom_pkg_dir) and _axiom_pkg_dir not in sys.path:
+            sys.path.insert(0, _axiom_pkg_dir)
+            print(f"[ORT] Injected AppData packages path: {_axiom_pkg_dir}")
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 初始化 pywin32 - 必須先導入 pywintypes
