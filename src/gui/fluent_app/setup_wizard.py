@@ -650,8 +650,8 @@ class SetupWizard(QDialog):
         self._model_section.setVisible(idx == 0)
 
     def _refreshModelCombo(self) -> None:
-        project_root = os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__))))
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(
+            os.path.dirname(os.path.abspath(__file__)))))  # fluent_app→gui→src→project root
         model_dir = os.path.join(project_root, "Model")
         self._combo_model.blockSignals(True)
         self._combo_model.clear()

@@ -17,7 +17,7 @@ from qfluentwidgets import (
     BodyLabel, ComboBox, PrimaryPushButton, SettingCard,
     qconfig, ConfigItem, OptionsConfigItem, RangeConfigItem,
     BoolValidator, OptionsValidator, RangeValidator, PushButton,
-    SegmentedWidget
+    SegmentedWidget, InfoBar, InfoBarPosition
 )
 from ..components.no_wheel_widgets import NoWheelSlider as Slider, NoWheelSpinBox as SpinBox, NoWheelDoubleSpinBox as DoubleSpinBox
 from ..components.slider_spin_card import SliderSpinCard, SliderLabelCard
