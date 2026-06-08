@@ -42,7 +42,7 @@ class _ConvertWorker(QThread):
     def run(self) -> None:
         import subprocess
         cmd = [
-            self._python_exe, self._script_path,
+            self._python_exe, "-u", self._script_path,
             "--model", self._onnx_path,
             "--output", self._cache_dir,
             "--workspace", str(self._workspace_mb),
