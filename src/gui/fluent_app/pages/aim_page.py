@@ -122,7 +122,7 @@ class AimPage(BasePage):
 
         # Circular FOV Filter (Someone_idea port)
         self.fovCircleCard = SwitchSettingCard(
-            FluentIcon.CIRCLE_OUTLINE,
+            FluentIcon.REMOVE,
             t("fov_circle_filter", "Circular FOV Filter"),
             t("fov_circle_filter_desc", "Only track targets inside the FOV circle, not the full square region"),
             parent=self.fovGroup
