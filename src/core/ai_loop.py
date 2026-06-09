@@ -221,7 +221,7 @@ def ai_logic_loop(
         last_frame_id: int = -1
         while not _preprocess_stop.is_set() and config.Running:
             try:
-                with capture_lock:
+                with frame_lock:
                     frame = capture_state.get('latest_frame')
                     region = capture_state.get('latest_region')
                     frame_id = id(frame)
