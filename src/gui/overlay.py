@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import queue
+import time
 from typing import List, TYPE_CHECKING
 
 from PyQt6.QtWidgets import QApplication, QWidget
@@ -340,6 +341,18 @@ class PyQtOverlay(QWidget):
             else:
                 box_color = OverlayColors.get_box_color()
 
+            # Chroma: compute a shared hue for all in-FOV boxes this frame
+            speed = float(getattr(self.config, 'chroma_box_speed', 1.0))
+            hue = (time.monotonic() * speed * 60.0) % 360.0
+            chroma_color = QColor.fromHsvF(hue / 360.0, 1.0, 1.0)
+            chroma_color.setAlpha(220)
+
+            # FOV boundary values for per-box in/out test
+            use_circle = getattr(self.config, 'fov_circle_filter_enabled', False)
+            fov_half = float(self.config.fov_size) / 2.0
+            ox = float(self.config.crosshairX)
+            oy = float(self.config.crosshairY)
+
             show_confidence = self.config.show_confidence
             if show_confidence:
                 confidence_color = OverlayColors.get_confidence_text_color()
@@ -352,7 +365,18 @@ class PyQtOverlay(QWidget):
                 conf = float(self.confidences[i]) if i < len(self.confidences) else 0.5
                 # Confidence-based thickness: low conf → 1px, high conf → 3px
                 thickness = max(1, min(3, 1 + round(conf * 2)))
-                painter.setPen(QPen(box_color, thickness))
+
+                # Determine if this box intersects the FOV region
+                bx1, by1, bx2, by2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+                if use_circle:
+                    nx = min(max(ox, bx1), bx2)
+                    ny = min(max(oy, by1), by2)
+                    in_fov = (nx - ox) ** 2 + (ny - oy) ** 2 <= fov_half * fov_half
+                else:
+                    in_fov = (bx1 < ox + fov_half and bx2 > ox - fov_half and
+                              by1 < oy + fov_half and by2 > oy - fov_half)
+
+                painter.setPen(QPen(chroma_color if in_fov else box_color, thickness))
                 self.draw_corner_box(painter, x1, y1, x2, y2)
 
                 if show_confidence and i < len(self.confidences):

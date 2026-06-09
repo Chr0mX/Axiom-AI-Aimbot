@@ -485,6 +485,10 @@ def ai_logic_loop(
                     boxes, confidences, class_ids = filter_detections_by_semantic_class(
                         boxes, confidences, class_ids, config)
 
+                # Snapshot all post-NMS boxes for overlay display before FOV filter
+                display_boxes = list(boxes)
+                display_confs = list(confidences)
+
                 boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size, config)
 
                 if config.single_target_mode:
@@ -525,9 +529,10 @@ def ai_logic_loop(
                 update_queues(
                     overlay_boxes_queue,
                     overlay_confidences_queue,
-                    boxes,
-                    confidences,
+                    display_boxes,
+                    display_confs,
                     auto_fire_queue=auto_fire_boxes_queue,
+                    auto_fire_boxes=boxes,
                 )
 
                 if getattr(config, 'enable_latency_stats', False):

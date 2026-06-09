@@ -102,6 +102,15 @@ class VisualsPage(BasePage):
         self.boxThemeCard.hBoxLayout.addWidget(self.boxThemeCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.boxThemeCard.hBoxLayout.addSpacing(16)
 
+        # Chroma Speed (rainbow cycle for in-FOV boxes)
+        self.chromaSpeedCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("chroma_box_speed", "Chroma Speed"),
+            1, 20, suffix="x",
+            description=t("chroma_box_speed_hint", "Rainbow cycle speed for boxes inside FOV"),
+            parent=self.displayGroup
+        )
+
         # Status Panel Elements (Checkbox style)
         self.statusPanelElementsCard = SettingCard(
             FluentIcon.INFO,
@@ -234,6 +243,7 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
         self.displayGroup.addSettingCard(self.showTracerLineCard)
         self.displayGroup.addSettingCard(self.boxThemeCard)
+        self.displayGroup.addSettingCard(self.chromaSpeedCard)
         self.addContent(self.displayGroup)
 
         # Status panel settings
@@ -268,6 +278,7 @@ class VisualsPage(BasePage):
         self.showDetectRangeCard.checkedChanged.connect(self._onShowDetectRangeChanged)
         self.showTracerLineCard.checkedChanged.connect(self._onShowTracerLineChanged)
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
+        self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
         self.spAutoAimCheck.stateChanged.connect(self._onStatusPanelAutoAimChanged)
         self.spModelCheck.stateChanged.connect(self._onStatusPanelModelChanged)
         self.spMouseMoveCheck.stateChanged.connect(self._onStatusPanelMouseMoveChanged)
@@ -305,6 +316,7 @@ class VisualsPage(BasePage):
         theme_text = str(getattr(self._config, 'box_color_theme', 'default')).capitalize()
         _valid_themes = ("Default", "Cyan", "Red", "Yellow", "White", "Purple")
         self.boxThemeCombo.setCurrentText(theme_text if theme_text in _valid_themes else "Default")
+        self.chromaSpeedCard.setValue(int(getattr(self._config, 'chroma_box_speed', 1)))
         self.spAutoAimCheck.setChecked(getattr(self._config, 'status_panel_show_auto_aim', True))
         self.spModelCheck.setChecked(getattr(self._config, 'status_panel_show_model', True))
         self.spMouseMoveCheck.setChecked(getattr(self._config, 'status_panel_show_mouse_move', True))
@@ -357,6 +369,10 @@ class VisualsPage(BasePage):
     def _onBoxThemeChanged(self, text):
         if self._config:
             self._config.box_color_theme = str(text).lower()
+
+    def _onChromaSpeedChanged(self, value):
+        if self._config:
+            self._config.chroma_box_speed = float(value)
 
     def _onStatusPanelAutoAimChanged(self, state):
         if self._config:

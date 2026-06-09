@@ -148,6 +148,7 @@ class Config:
 
         # Confidence box color theme
         self.box_color_theme: str = "default"  # "default" | "cyan" | "red" | "yellow" | "white" | "purple"
+        self.chroma_box_speed: float = 1.0  # rainbow cycle speed for in-FOV boxes
 
         # Tracer line from screen center to detected targets
         self.show_tracer_line: bool = False
@@ -447,6 +448,7 @@ class Config:
             'target_priority_confidence_weight': self.target_priority_confidence_weight,
 
             'box_color_theme': self.box_color_theme,
+            'chroma_box_speed': self.chroma_box_speed,
             'show_tracer_line': self.show_tracer_line,
 
             'show_crosshair': self.show_crosshair,

@@ -180,6 +180,7 @@ def update_queues(
     boxes: List[List[float]],
     confidences: List[float],
     auto_fire_queue: queue.Queue | None = None,
+    auto_fire_boxes: List[List[float]] | None = None,
 ) -> None:
     """更新檢測結果隊列，並向自動開火單獨佇列廣播"""
 
@@ -200,4 +201,4 @@ def update_queues(
                 auto_fire_queue.get_nowait()
         except queue.Empty:
             pass
-        auto_fire_queue.put(list(boxes))
+        auto_fire_queue.put(list(auto_fire_boxes) if auto_fire_boxes is not None else list(boxes))
