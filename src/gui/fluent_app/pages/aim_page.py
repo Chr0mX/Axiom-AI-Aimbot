@@ -1788,6 +1788,8 @@ class AimPage(BasePage):
     def _onMouseMoveChanged(self, text):
         if self._config:
             self._config.mouse_move_method = text
+            if text == "makcu":
+                self._config.mouse_click_method = "makcu"
             if text == "ddxoft":
                 try:
                     from win_utils import ensure_ddxoft_ready
