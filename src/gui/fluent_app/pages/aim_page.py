@@ -1994,6 +1994,11 @@ class AimPage(BasePage):
         self.ndiSourceCard.setVisible(is_ndi)
         self.ndiRefreshCard.setVisible(is_ndi)
         self.ndiBandwidthCard.setVisible(is_ndi)
+        is_external = is_ndi or is_uvc
+        self.fovFollowCard.setVisible(not is_external)
+        if is_external and self._config:
+            self._config.fov_follow_mouse = False
+            self.fovFollowCard.setChecked(False)
 
     def _onAlwaysAimChanged(self, checked):
         if self._config:

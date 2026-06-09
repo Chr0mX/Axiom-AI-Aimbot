@@ -313,8 +313,11 @@ class PyQtOverlay(QWidget):
             detect_range_color = OverlayColors.get_detect_range_color()
             pen_range = QPen(detect_range_color, 1)
             painter.setPen(pen_range)
-            painter.drawRect(x1, y1, int(range_size), int(range_size))
-        
+            if getattr(self.config, 'fov_circle_filter_enabled', False):
+                painter.drawEllipse(x1, y1, int(range_size), int(range_size))
+            else:
+                painter.drawRect(x1, y1, int(range_size), int(range_size))
+
         # 繪製 FOV 框（只顯示四角）- 使用主題顏色
         if show_fov:
             fov = self.config.fov_size
@@ -322,7 +325,11 @@ class PyQtOverlay(QWidget):
             fov_color = OverlayColors.get_fov_color()
             pen = QPen(fov_color, 2)
             painter.setPen(pen)
-            self.draw_fov_corners(painter, cx, cy, fov)
+            if getattr(self.config, 'fov_circle_filter_enabled', False):
+                half_fov = fov // 2
+                painter.drawEllipse(cx - half_fov, cy - half_fov, fov, fov)
+            else:
+                self.draw_fov_corners(painter, cx, cy, fov)
 
         # 繪製檢測框和置信度 - 使用主題顏色
         if show_boxes and self.boxes:
