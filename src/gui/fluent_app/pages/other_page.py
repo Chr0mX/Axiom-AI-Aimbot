@@ -286,10 +286,7 @@ class OtherPage(BasePage):
 
         self.showConsoleCard.setChecked(self._config.show_console)
 
-        is_makcu = getattr(self._config, 'mouse_move_method', '') == 'makcu'
-        self.makcuHwGroup.setVisible(is_makcu)
-        if is_makcu:
-            self._refreshMakcuHwInfo()
+        self._refreshMakcuHwInfo()
     
     # === 回調函數 ===
     def _onChangeLanguage(self):
