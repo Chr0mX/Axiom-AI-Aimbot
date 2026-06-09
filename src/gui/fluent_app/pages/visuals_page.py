@@ -106,7 +106,8 @@ class VisualsPage(BasePage):
         self.chromaSpeedCard = SliderLabelCard(
             FluentIcon.SPEED_HIGH,
             t("chroma_box_speed", "Chroma Speed"),
-            1, 20, suffix="x",
+            1, 20,
+            format_func=lambda v: f"{v}x",
             description=t("chroma_box_speed_hint", "Rainbow cycle speed for boxes inside FOV"),
             parent=self.displayGroup
         )
