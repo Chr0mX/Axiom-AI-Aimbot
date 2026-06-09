@@ -220,7 +220,7 @@ def postprocess_outputs(
     filtered_predictions = predictions[conf_mask]
 
     if len(filtered_predictions) == 0:
-        return [], []
+        return [], [], []
 
     cx = filtered_predictions[:, 0]
     cy = filtered_predictions[:, 1]
