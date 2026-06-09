@@ -271,7 +271,7 @@ class PyQtOverlay(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def draw_tracer_lines(self, painter: QPainter) -> None:
-        """Draw lines from screen center to each detected box bottom-center."""
+        """Draw lines from screen center to the aim point of each detected box."""
         if not self.boxes:
             return
         cx = int(self.config.crosshairX)
@@ -281,11 +281,16 @@ class PyQtOverlay(QWidget):
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         fov_half = int(self.config.fov_size) // 2
+        aim_part     = str(getattr(self.config, 'aim_part', 'head'))
+        head_h_ratio = float(getattr(self.config, 'head_height_ratio', 0.26))
         for box in self.boxes:
             x1, y1, x2, y2 = map(int, box)
+            box_h = y2 - y1
             bx = (x1 + x2) // 2
-            by = (y1 + y2) // 2
-            # Only draw if box center is within FOV (already filtered, but guard here too)
+            if aim_part == 'head':
+                by = int(y1 + box_h * head_h_ratio * 0.5)
+            else:
+                by = int((y1 + box_h * head_h_ratio + y2) * 0.5)
             if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
                 painter.drawLine(cx, cy, bx, by)
 
@@ -360,6 +365,11 @@ class PyQtOverlay(QWidget):
                 font = QFont('Arial', 9, QFont.Weight.Bold)
                 painter.setFont(font)
 
+            aim_part        = str(getattr(self.config, 'aim_part', 'head'))
+            head_h_ratio    = float(getattr(self.config, 'head_height_ratio', 0.26))
+            aim_x_color     = QColor(255, 80, 80, 220)   # soft red X marker
+            pen_aim_x       = QPen(aim_x_color, 1)
+
             for i, box in enumerate(self.boxes):
                 x1, y1, x2, y2 = map(int, box)
                 conf = float(self.confidences[i]) if i < len(self.confidences) else 0.5
@@ -382,6 +392,19 @@ class PyQtOverlay(QWidget):
                 if show_confidence and i < len(self.confidences):
                     painter.setPen(pen_text)
                     painter.drawText(x1 - 20, y1 - 15, f"{conf:.0%}")
+
+                # Draw X at the inferred head / aim point
+                box_w = x2 - x1
+                box_h = y2 - y1
+                tx = int(x1 + box_w * 0.5)
+                if aim_part == 'head':
+                    ty = int(y1 + box_h * head_h_ratio * 0.5)
+                else:
+                    ty = int((y1 + box_h * head_h_ratio + y2) * 0.5)
+                r = max(3, min(6, box_w // 8))   # arm length scales with box width
+                painter.setPen(pen_aim_x)
+                painter.drawLine(tx - r, ty - r, tx + r, ty + r)
+                painter.drawLine(tx + r, ty - r, tx - r, ty + r)
 
         # 繪製追蹤線（從螢幕中心到目標）
         if getattr(self.config, 'show_tracer_line', False):

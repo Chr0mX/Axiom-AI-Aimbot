@@ -303,7 +303,7 @@ class MakcuMouse:
                 return 0
             try:
                 self._serial.write(cmd)
-                resp = self._serial.read_until(b">>>")
+                resp = self._serial.read_until(b"\n")
             except Exception:
                 return 0
         m = _re.search(rb'([0-3])\r?\n', resp)
