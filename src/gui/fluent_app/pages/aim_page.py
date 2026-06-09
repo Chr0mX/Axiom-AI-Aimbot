@@ -357,7 +357,7 @@ class AimPage(BasePage):
         self.ndiBandwidthCard.hBoxLayout.addSpacing(16)
 
         self.ndiPreResizeCard = SwitchSettingCard(
-            FluentIcon.ZOOM_TO_FIT,
+            FluentIcon.ZOOM,
             "NDI Pre-Resize",
             "Resize NDI frames to model input size in the capture thread — reduces preprocessing load and improves inference FPS",
             parent=self.generalGroup
