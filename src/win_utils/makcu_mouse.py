@@ -46,6 +46,7 @@ class MakcuMouse:
     CMD_LEFT_UP = "km.left(0)\r\n"
     CMD_ECHO_OFF = "km.echo(0)\r\n"
     CMD_VERSION = "km.version()\r\n"
+    CMD_INFO = "km.info()\r\n"
     CMD_BAUD_4M = b"km.baud(4000000)\r\n"
 
     def __init__(self):
@@ -58,6 +59,8 @@ class MakcuMouse:
         self._lmb_cache_time: float = 0.0
         self.lmb_cache_seconds: float = 0.008  # overridden by ai_loop to match detect_interval
         self._button_cache: dict = {}  # cache for all button queries: key -> (val, timestamp)
+        self._version_string: str = ""
+        self._device_info: dict = {}
 
     def connect(self, com_port: str, baud_rate: int = 115200) -> bool:
         """Connect to MAKCU device.
@@ -105,6 +108,7 @@ class MakcuMouse:
                 version_info = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore').strip()
                 logger.info("[MAKCU] Device info: %s", version_info)
                 print(f"[MAKCU] Device responded: {version_info}")
+                self._version_string = version_info.replace('>>>', '').strip()
 
                 # Disable echo to reduce serial traffic
                 self._serial.write(self.CMD_ECHO_OFF.encode('ascii'))
@@ -141,6 +145,8 @@ class MakcuMouse:
 
                 self._baud_rate = target_baud
                 self._connected = True
+                self._device_info = {}
+                self._query_info_locked()
                 logger.info("[MAKCU] Connected to %s @ %d baud", com_port, target_baud)
                 print(f"[MAKCU] Successfully connected to {com_port} @ {target_baud} baud")
                 return True
@@ -168,6 +174,39 @@ class MakcuMouse:
             logger.error("[MAKCU] Cannot open %s: %s", com_port, e)
             print(f"[MAKCU] Cannot open {com_port}: {e}")
             return False
+
+    def _query_info_locked(self) -> dict:
+        """Send km.info() and parse key=value response. Caller must hold _lock."""
+        if not self._connected or not self._serial:
+            return {}
+        try:
+            self._serial.reset_input_buffer()
+            self._serial.write(self.CMD_INFO.encode('ascii'))
+            time.sleep(0.15)
+            raw = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore')
+            info = {}
+            for line in raw.splitlines():
+                line = line.strip().replace('>>>', '').strip()
+                if '=' in line:
+                    k, _, v = line.partition('=')
+                    info[k.strip().upper()] = v.strip()
+            self._device_info = info
+            return info
+        except Exception:
+            return {}
+
+    def query_info(self) -> dict:
+        """Send km.info() and return parsed key=value dict. Returns {} on failure."""
+        with self._lock:
+            return self._query_info_locked()
+
+    @property
+    def device_info(self) -> dict:
+        return dict(self._device_info)
+
+    @property
+    def version_string(self) -> str:
+        return self._version_string
 
     def disconnect(self):
         """Disconnect from MAKCU device"""

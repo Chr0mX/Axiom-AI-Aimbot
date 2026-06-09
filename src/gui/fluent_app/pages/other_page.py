@@ -15,6 +15,7 @@ from qfluentwidgets import (
 
 from ..base_page import BasePage
 from ..language_manager import t
+from win_utils.makcu_mouse import makcu_mouse as _makcu_mouse, is_makcu_connected
 
 
 class OtherPage(BasePage):
@@ -137,6 +138,23 @@ class OtherPage(BasePage):
             self.dmlGroup,
         )
 
+        # === MAKCU Hardware ===
+        self.makcuHwGroup = SettingCardGroup(t("makcu_hw_info", "MAKCU Hardware"), self.scrollWidget)
+
+        self.makcuHwRefreshBtn = PushButton(t("refresh", "Refresh"))
+        self.makcuHwRefreshBtn.setIcon(FluentIcon.SYNC)
+        self.makcuHwStatusCard = SettingCard(
+            FluentIcon.IOT, t("makcu_hw_status", "Status"), "—", self.makcuHwGroup)
+        self.makcuHwStatusCard.hBoxLayout.addWidget(self.makcuHwRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuHwStatusCard.hBoxLayout.addSpacing(16)
+
+        self.makcuHwPortCard   = SettingCard(FluentIcon.WIFI,            t("makcu_hw_port",   "COM Port"),     "—", self.makcuHwGroup)
+        self.makcuHwBaudCard   = SettingCard(FluentIcon.SPEED_HIGH,      t("makcu_hw_baud",   "Baud Rate"),    "—", self.makcuHwGroup)
+        self.makcuHwVerCard    = SettingCard(FluentIcon.TAG,             t("makcu_hw_ver",    "Version"),      "—", self.makcuHwGroup)
+        self.makcuHwModelCard  = SettingCard(FluentIcon.DEVELOPER_TOOLS, t("makcu_hw_model",  "Model"),        "—", self.makcuHwGroup)
+        self.makcuHwVendorCard = SettingCard(FluentIcon.GLOBE,           t("makcu_hw_vendor", "Vendor"),       "—", self.makcuHwGroup)
+        self.makcuHwTempCard   = SettingCard(FluentIcon.CALORIES,        t("makcu_hw_temp",   "Temperature"),  "—", self.makcuHwGroup)
+
         # === Environment — Python Path ===
         self.pyGroup = SettingCardGroup(t("env_python", "Python Path"), self.scrollWidget)
 
@@ -206,6 +224,16 @@ class OtherPage(BasePage):
         self.pyGroup.addSettingCard(self.trtInternalPythonCard)
         self.addContent(self.pyGroup)
 
+        # MAKCU Hardware
+        self.makcuHwGroup.addSettingCard(self.makcuHwStatusCard)
+        self.makcuHwGroup.addSettingCard(self.makcuHwPortCard)
+        self.makcuHwGroup.addSettingCard(self.makcuHwBaudCard)
+        self.makcuHwGroup.addSettingCard(self.makcuHwVerCard)
+        self.makcuHwGroup.addSettingCard(self.makcuHwModelCard)
+        self.makcuHwGroup.addSettingCard(self.makcuHwVendorCard)
+        self.makcuHwGroup.addSettingCard(self.makcuHwTempCard)
+        self.addContent(self.makcuHwGroup)
+
         # 關於區塊的內容（無群組標題）
         aboutWidget = QWidget()
         aboutWidget.setStyleSheet("background: transparent;")
@@ -243,6 +271,9 @@ class OtherPage(BasePage):
         self.trtRecheckBtn.clicked.connect(self._checkTensorRT)
         self._checkTensorRT()
 
+        # MAKCU Hardware
+        self.makcuHwRefreshBtn.clicked.connect(self._refreshMakcuHwInfo)
+
         # 社群按鈕
         self.discordBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")))
         self.githubBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/iisHong0w0/Axiom-AI-Aimbot")))
@@ -252,8 +283,13 @@ class OtherPage(BasePage):
         """從 Config 載入值"""
         if not self._config:
             return
-        
+
         self.showConsoleCard.setChecked(self._config.show_console)
+
+        is_makcu = getattr(self._config, 'mouse_move_method', '') == 'makcu'
+        self.makcuHwGroup.setVisible(is_makcu)
+        if is_makcu:
+            self._refreshMakcuHwInfo()
     
     # === 回調函數 ===
     def _onChangeLanguage(self):
@@ -292,6 +328,44 @@ class OtherPage(BasePage):
             # 關閉視窗
             window.close()
     
+    def _refreshMakcuHwInfo(self):
+        dash = "—"
+        try:
+            connected = is_makcu_connected()
+        except Exception:
+            connected = False
+
+        if connected:
+            self.makcuHwStatusCard.contentLabel.setText(t("connected", "Connected"))
+            self.makcuHwStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+        else:
+            self.makcuHwStatusCard.contentLabel.setText(t("disconnected", "Disconnected"))
+            self.makcuHwStatusCard.contentLabel.setStyleSheet("color: #e74c3c;")
+
+        port = getattr(_makcu_mouse, '_com_port', '') or (
+            getattr(self._config, 'makcu_com_port', '') if self._config else '')
+        self.makcuHwPortCard.contentLabel.setText(port or dash)
+
+        baud = getattr(_makcu_mouse, '_baud_rate', None)
+        if not baud:
+            baud = getattr(self._config, 'makcu_baud_rate', 115200) if self._config else 115200
+        self.makcuHwBaudCard.contentLabel.setText(f"{int(baud):,}")
+
+        ver = getattr(_makcu_mouse, 'version_string', '') or dash
+        self.makcuHwVerCard.contentLabel.setText(ver)
+
+        if connected:
+            try:
+                _makcu_mouse.query_info()
+            except Exception:
+                pass
+
+        info = getattr(_makcu_mouse, 'device_info', {})
+        self.makcuHwModelCard.contentLabel.setText(info.get('MODEL', dash))
+        self.makcuHwVendorCard.contentLabel.setText(info.get('VENDOR', dash))
+        temp = info.get('TEMP', '')
+        self.makcuHwTempCard.contentLabel.setText(f"{temp} °C" if temp else dash)
+
     def _findTrtDllPath(self):
         """Locate the TensorRT inference DLL (nvinfer*) from pip-wheel installs."""
         try:
@@ -502,6 +576,17 @@ class OtherPage(BasePage):
         self.aboutSubtitle.setText(t("about_subtitle"))
         self.versionLabel.setText(t("version_info"))
         self.communityLabel.setText(t("community_links"))
+
+        # MAKCU Hardware
+        self.makcuHwGroup.titleLabel.setText(t("makcu_hw_info", "MAKCU Hardware"))
+        self.makcuHwStatusCard.titleLabel.setText(t("makcu_hw_status", "Status"))
+        self.makcuHwPortCard.titleLabel.setText(t("makcu_hw_port", "COM Port"))
+        self.makcuHwBaudCard.titleLabel.setText(t("makcu_hw_baud", "Baud Rate"))
+        self.makcuHwVerCard.titleLabel.setText(t("makcu_hw_ver", "Version"))
+        self.makcuHwModelCard.titleLabel.setText(t("makcu_hw_model", "Model"))
+        self.makcuHwVendorCard.titleLabel.setText(t("makcu_hw_vendor", "Vendor"))
+        self.makcuHwTempCard.titleLabel.setText(t("makcu_hw_temp", "Temperature"))
+        self.makcuHwRefreshBtn.setText(t("refresh", "Refresh"))
 
         # 更新 Discord 圖標
         self._updateDiscordIcon()
