@@ -59,6 +59,7 @@ class Config:
         self.preview_crop_to_detection: bool = False
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
+        self.ndi_pre_resize: bool = True   # resize NDI frames to model_input_size in capture thread
         self.ndi_width: int = self.width
         self.ndi_height: int = self.height
         self.crosshairX: int = self.width // 2
@@ -151,7 +152,7 @@ class Config:
         self.chroma_box_speed: float = 1.0  # rainbow cycle speed for in-FOV boxes
 
         # Tracer line from screen center to detected targets
-        self.show_tracer_line: bool = False
+        self.show_tracer_line: bool = True
 
         # Crosshair overlay
         self.show_crosshair: bool = False
@@ -356,6 +357,7 @@ class Config:
             'preview_crop_to_detection': self.preview_crop_to_detection,
             'ndi_source_name': self.ndi_source_name,
             'ndi_bandwidth': self.ndi_bandwidth,
+            'ndi_pre_resize': self.ndi_pre_resize,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
             'makcu_aim_button': self.makcu_aim_button,

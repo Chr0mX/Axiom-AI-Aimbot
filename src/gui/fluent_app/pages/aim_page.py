@@ -356,6 +356,13 @@ class AimPage(BasePage):
         self.ndiBandwidthCard.hBoxLayout.addWidget(self.ndiBandwidthCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.ndiBandwidthCard.hBoxLayout.addSpacing(16)
 
+        self.ndiPreResizeCard = SwitchSettingCard(
+            FluentIcon.ZOOM_TO_FIT,
+            "NDI Pre-Resize",
+            "Resize NDI frames to model input size in the capture thread — reduces preprocessing load and improves inference FPS",
+            parent=self.generalGroup
+        )
+
         # Always Aim (no need to press aim key)
         self.alwaysAimCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
@@ -1080,6 +1087,7 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.ndiSourceCard)
         self.generalGroup.addSettingCard(self.ndiRefreshCard)
         self.generalGroup.addSettingCard(self.ndiBandwidthCard)
+        self.generalGroup.addSettingCard(self.ndiPreResizeCard)
         self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
@@ -1249,6 +1257,7 @@ class AimPage(BasePage):
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
         self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
+        self.ndiPreResizeCard.checkedChanged.connect(self._onNdiPreResizeChanged)
         self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
@@ -1443,6 +1452,7 @@ class AimPage(BasePage):
                     self.ndiSourceCombo.setCurrentIndex(idx)
             ndi_bw = str(getattr(self._config, 'ndi_bandwidth', 'highest')).capitalize()
             self.ndiBandwidthCombo.setCurrentText(ndi_bw if ndi_bw in ("Highest", "Lowest") else "Highest")
+            self.ndiPreResizeCard.setChecked(bool(getattr(self._config, 'ndi_pre_resize', True)))
             self._updateCaptureControlsVisibility(screenshot_method)
             self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
             self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
@@ -1906,6 +1916,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.ndi_bandwidth = str(text).lower()
 
+    def _onNdiPreResizeChanged(self, checked):
+        if self._config:
+            self._config.ndi_pre_resize = bool(checked)
+
     def _onNdiSourceChanged(self, text):
         if not self._config:
             return
@@ -1999,6 +2013,7 @@ class AimPage(BasePage):
         if is_external and self._config:
             self._config.fov_follow_mouse = False
             self.fovFollowCard.setChecked(False)
+        self.ndiPreResizeCard.setVisible(is_ndi)
 
     def _onAlwaysAimChanged(self, checked):
         if self._config:
@@ -2561,6 +2576,7 @@ class AimPage(BasePage):
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
         self.ndiRefreshBtn.setText(t("refresh"))
         self.ndiBandwidthCard.titleLabel.setText("NDI Bandwidth")
+        self.ndiPreResizeCard.titleLabel.setText("NDI Pre-Resize")
         self.alwaysAimCard.titleLabel.setText(t("always_aim"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))

@@ -10,6 +10,7 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
+import cv2
 import numpy as np
 
 from win_utils import is_key_pressed
@@ -197,7 +198,11 @@ def ai_logic_loop(
     last_stats_print = time.perf_counter()
     last_detection_run_time = 0.0
 
-    capture_lock = threading.Lock()
+    # Two independent locks to eliminate cross-contention:
+    #   region_lock  — inference writes target_region, capture reads it
+    #   frame_lock   — capture writes latest_frame/latest_region, inference reads them
+    region_lock = threading.Lock()
+    frame_lock  = threading.Lock()
     capture_stop_event = threading.Event()
     capture_state: dict[str, object] = {
         'latest_frame': None,
@@ -273,7 +278,7 @@ def ai_logic_loop(
                         _active_method[0] = new_method
                         _last_valid_frame[0] = None  # reset cached frame on backend change
 
-                with capture_lock:
+                with region_lock:
                     target_region = capture_state.get('target_region')
 
                 if target_region is None:
@@ -298,9 +303,26 @@ def ai_logic_loop(
                 else:
                     continue
 
-                with capture_lock:
+                # Pre-resize NDI frames in the capture thread so the inference
+                # thread only runs blobFromImage (fast path) instead of a full
+                # letterbox resize on a potentially large crop region.
+                store_region = target_region
+                if (getattr(config, 'ndi_pre_resize', True)
+                        and _active_method[0] == 'ndi'):
+                    model_sz = int(getattr(config, 'model_input_size', 640))
+                    fh, fw = captured_frame.shape[:2]
+                    if fw != model_sz or fh != model_sz:
+                        captured_frame = cv2.resize(
+                            captured_frame, (model_sz, model_sz),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                        store_region = dict(target_region)
+                        store_region['width'] = model_sz
+                        store_region['height'] = model_sz
+
+                with frame_lock:
                     capture_state['latest_frame'] = captured_frame
-                    capture_state['latest_region'] = target_region
+                    capture_state['latest_region'] = store_region
 
                 config.last_screenshot_time = time.time()
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
@@ -393,8 +415,9 @@ def ai_logic_loop(
                 if region['width'] <= 0 or region['height'] <= 0:
                     continue
 
-                with capture_lock:
+                with region_lock:
                     capture_state['target_region'] = region
+                with frame_lock:
                     latest_frame = capture_state.get('latest_frame')
                     latest_region = capture_state.get('latest_region')
 
