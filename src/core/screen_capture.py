@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 import logging
 import threading
 import time
@@ -768,6 +769,12 @@ class NDICapture:
             }
             theme_key = str(getattr(cfg, 'box_color_theme', 'default')).lower()
             box_color_bgra = _theme_bgra.get(theme_key, (0, 255, 0, 255))
+            speed = float(getattr(cfg, 'chroma_box_speed', 1.0))
+            hue = (time.monotonic() * speed * 60.0) % 360.0
+            r, g, b = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
+            chroma_bgra = (int(b * 255), int(g * 255), int(r * 255), 220)
+            use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
+            fov_half = float(getattr(cfg, 'fov_size', 220)) / 2.0
             for i, box in enumerate(boxes):
                 try:
                     x1, y1, x2, y2 = [int(v) for v in box]
@@ -782,14 +789,23 @@ class NDICapture:
                 conf = float(confidences[i]) if i < len(confidences) else 0.5
                 thickness = max(1, min(3, 1 + round(conf * 2)))
                 corner_len = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
-                cv2.line(frame_bgra, (x1, y1), (x1 + corner_len, y1), box_color_bgra, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner_len), box_color_bgra, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2 - corner_len, y1), box_color_bgra, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner_len), box_color_bgra, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1 + corner_len, y2), box_color_bgra, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner_len), box_color_bgra, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2 - corner_len, y2), box_color_bgra, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner_len), box_color_bgra, thickness, cv2.LINE_AA)
+                bx1, by1, bx2, by2 = float(x1), float(y1), float(x2), float(y2)
+                if use_circle:
+                    nx = min(max(float(cx), bx1), bx2)
+                    ny = min(max(float(cy), by1), by2)
+                    in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
+                else:
+                    in_fov = (bx1 < cx + fov_half and bx2 > cx - fov_half and
+                              by1 < cy + fov_half and by2 > cy - fov_half)
+                draw_color = chroma_bgra if in_fov else box_color_bgra
+                cv2.line(frame_bgra, (x1, y1), (x1 + corner_len, y1), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y1), (x2 - corner_len, y1), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y2), (x1 + corner_len, y2), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y2), (x2 - corner_len, y2), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
                 if show_conf and i < len(confidences):
                     cv2.putText(
                         frame_bgra,
@@ -1169,6 +1185,12 @@ class UVCCapture:
             }
             theme_key = str(getattr(cfg, 'box_color_theme', 'default')).lower()
             box_color_bgr = _theme_bgr.get(theme_key, (0, 255, 0))
+            speed = float(getattr(cfg, 'chroma_box_speed', 1.0))
+            hue = (time.monotonic() * speed * 60.0) % 360.0
+            r, g, b = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
+            chroma_bgr = (int(b * 255), int(g * 255), int(r * 255))
+            use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
+            fov_half = float(getattr(cfg, 'fov_size', 220)) / 2.0
             for i, box in enumerate(boxes):
                 try:
                     x1, y1, x2, y2 = [int(v) for v in box]
@@ -1183,14 +1205,23 @@ class UVCCapture:
                 conf = float(confidences[i]) if i < len(confidences) else 0.5
                 thickness = max(1, min(3, 1 + round(conf * 2)))
                 corner_len = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
-                cv2.line(frame_bgr, (x1, y1), (x1 + corner_len, y1), box_color_bgr, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner_len), box_color_bgr, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2 - corner_len, y1), box_color_bgr, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner_len), box_color_bgr, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1 + corner_len, y2), box_color_bgr, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner_len), box_color_bgr, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2 - corner_len, y2), box_color_bgr, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner_len), box_color_bgr, thickness, cv2.LINE_AA)
+                bx1, by1, bx2, by2 = float(x1), float(y1), float(x2), float(y2)
+                if use_circle:
+                    nx = min(max(float(cx), bx1), bx2)
+                    ny = min(max(float(cy), by1), by2)
+                    in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
+                else:
+                    in_fov = (bx1 < cx + fov_half and bx2 > cx - fov_half and
+                              by1 < cy + fov_half and by2 > cy - fov_half)
+                draw_color = chroma_bgr if in_fov else box_color_bgr
+                cv2.line(frame_bgr, (x1, y1), (x1 + corner_len, y1), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y1), (x2 - corner_len, y1), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y2), (x1 + corner_len, y2), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y2), (x2 - corner_len, y2), draw_color, thickness, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
                 if show_conf and i < len(confidences):
                     cv2.putText(
                         frame_bgr,
