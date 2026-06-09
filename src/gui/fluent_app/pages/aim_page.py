@@ -548,13 +548,18 @@ class AimPage(BasePage):
         self.makcuConnectCard.hBoxLayout.addWidget(self.makcuConnectBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuConnectCard.hBoxLayout.addSpacing(16)
 
-        # MAKCU LMB as aim trigger
-        self.makcuLmbAimCard = SwitchSettingCard(
+        # MAKCU aim button selector (LMB / RMB / Off)
+        self.makcuAimButtonCombo = ComboBox()
+        self.makcuAimButtonCombo.addItems(["LMB", "RMB", "Off"])
+        self.makcuAimButtonCombo.setMinimumWidth(100)
+        self.makcuAimButtonCard = SettingCard(
             FluentIcon.FINGERPRINT,
-            t("makcu_lmb_aim", "LMB Aim Trigger"),
-            t("makcu_lmb_aim_desc", "Aim/track only while MAKCU left-click is held; inference keeps running"),
-            parent=self.makcuGroup
+            t("makcu_aim_button", "Aim Trigger Button"),
+            t("makcu_aim_button_desc", "Hold this button to aim/track; inference always runs"),
+            self.makcuGroup
         )
+        self.makcuAimButtonCard.hBoxLayout.addWidget(self.makcuAimButtonCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuAimButtonCard.hBoxLayout.addSpacing(16)
 
         # 靈敏度
         self.xboxSensitivityCard = SliderSpinCard(
@@ -1049,7 +1054,7 @@ class AimPage(BasePage):
         self.makcuGroup.addSettingCard(self.makcuBaudCard)
         self.makcuGroup.addSettingCard(self.makcuConnectionCard)
         self.makcuGroup.addSettingCard(self.makcuConnectCard)
-        self.makcuGroup.addSettingCard(self.makcuLmbAimCard)
+        self.makcuGroup.addSettingCard(self.makcuAimButtonCard)
         self.addContent(self.makcuGroup)
         # 預設隱藏 MAKCU 設定
         self.makcuGroup.setVisible(False)
@@ -1206,7 +1211,7 @@ class AimPage(BasePage):
         self.makcuComRefreshBtn.clicked.connect(self._refreshMakcuComPorts)
         self.makcuComPortCombo.currentTextChanged.connect(self._onMakcuComPortChanged)
         self.makcuConnectBtn.clicked.connect(self._onMakcuConnectToggle)
-        self.makcuLmbAimCard.checkedChanged.connect(self._onMakcuLmbAimChanged)
+        self.makcuAimButtonCombo.currentTextChanged.connect(self._onMakcuAimButtonChanged)
 
         # Xbox 相關信號
         self.xboxSensitivityCard.valueChanged.connect(self._onXboxSensitivityChanged)
@@ -1397,7 +1402,9 @@ class AimPage(BasePage):
                 idx = self.makcuComPortCombo.findText(self._config.makcu_com_port)
                 if idx >= 0:
                     self.makcuComPortCombo.setCurrentIndex(idx)
-            self.makcuLmbAimCard.setChecked(getattr(self._config, 'makcu_lmb_aim', True))
+            _aim_map = {"lmb": "LMB", "rmb": "RMB", "off": "Off"}
+            _aim_btn = _aim_map.get(str(getattr(self._config, 'makcu_aim_button', 'lmb')).lower(), "LMB")
+            self.makcuAimButtonCombo.setCurrentText(_aim_btn)
 
             # PID - 使用新組件的 setValue
             self.pidPxCard.setValue(int(self._config.pid_kp_x * 100))
@@ -2222,9 +2229,9 @@ class AimPage(BasePage):
             self.makcuConnectionLabel.setText("pyserial N/A")
             self.makcuConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
 
-    def _onMakcuLmbAimChanged(self, checked):
+    def _onMakcuAimButtonChanged(self, text):
         if self._config:
-            self._config.makcu_lmb_aim = checked
+            self._config.makcu_aim_button = text.lower()
 
     # === Xbox 360 回調函數 ===
     def _onXboxSensitivityChanged(self, value):

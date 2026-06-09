@@ -57,6 +57,7 @@ class MakcuMouse:
         self._lmb_state_cache: int = 0
         self._lmb_cache_time: float = 0.0
         self.lmb_cache_seconds: float = 0.008  # overridden by ai_loop to match detect_interval
+        self._button_cache: dict = {}  # cache for all button queries: key -> (val, timestamp)
 
     def connect(self, com_port: str, baud_rate: int = 115200) -> bool:
         """Connect to MAKCU device.
@@ -247,36 +248,50 @@ class MakcuMouse:
         except Exception:
             pass
 
-    def query_lmb_state(self) -> int:
-        """Send km.left() and parse response.
+    def _query_button(self, cmd: bytes, cache_key: str) -> int:
+        """Send a no-arg button query command and return the state (0-3).
 
-        Returns:
-            0 = released, 1 = pressed (combined physical and software state).
-        Cached for 16 ms so the aim loop doesn't flood the serial link.
+        States: 0=up, 1=physical down, 2=injected down, 3=both.
+        Cached for lmb_cache_seconds to avoid serial flooding.
         """
         import re as _re
         now = time.monotonic()
-        if now - self._lmb_cache_time < self.lmb_cache_seconds:
-            return self._lmb_state_cache
+        cached = self._button_cache.get(cache_key)
+        if cached and now - cached[1] < self.lmb_cache_seconds:
+            return cached[0]
         with self._lock:
             if not self._serial or not self._serial.is_open:
                 return 0
             try:
-                self._serial.write(b"km.left()\r\n")
+                self._serial.write(cmd)
                 resp = self._serial.read_until(b">>>")
             except Exception:
                 return 0
-        # Echo is disabled (km.echo(0) sent on connect), so response is "0\r\n>>>" or "1\r\n>>>"
-        m = _re.search(rb'([01])\r?\n', resp)
+        m = _re.search(rb'([0-3])\r?\n', resp)
         val = int(m.group(1)) if m else 0
-        self._lmb_state_cache = val
-        self._lmb_cache_time = now
+        self._button_cache[cache_key] = (val, now)
         return val
+
+    def query_lmb_state(self) -> int:
+        """Query LMB state. Returns 0=up, 1=physical, 2=injected, 3=both."""
+        val = self._query_button(b"km.left()\r\n", "lmb")
+        self._lmb_state_cache = val
+        self._lmb_cache_time = time.monotonic()
+        return val
+
+    def query_rmb_state(self) -> int:
+        """Query RMB state. Returns 0=up, 1=physical, 2=injected, 3=both."""
+        return self._query_button(b"km.right()\r\n", "rmb")
 
     @property
     def lmb_held(self) -> bool:
-        """True when LMB is pressed (km.left() returns 1=pressed, 0=released)."""
-        return self.query_lmb_state() == 1
+        """True when LMB is physically pressed."""
+        return self.query_lmb_state() >= 1
+
+    @property
+    def rmb_held(self) -> bool:
+        """True when RMB is physically pressed."""
+        return self.query_rmb_state() >= 1
 
     @property
     def com_port(self) -> str:
