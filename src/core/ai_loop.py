@@ -344,6 +344,12 @@ def ai_logic_loop(
                 )
                 if model is not prev_model:
                     _io_binding[0] = _setup_io_binding(model)
+                    # Refresh ONNX class-name metadata for semantic FP filter (Someone_idea).
+                    try:
+                        from .detection_semantics import sync_detection_class_names_from_backend
+                        sync_detection_class_names_from_backend(model, config)
+                    except Exception:
+                        pass
 
                 if current_time - state.last_pid_update > state.pid_check_interval:
                     pid_x.Kp, pid_x.Ki, pid_x.Kd = config.pid_kp_x, config.pid_ki_x, config.pid_kd_x
@@ -453,7 +459,7 @@ def ai_logic_loop(
                     else:
                         outputs = model.run(None, {input_name: input_tensor})
                     t3 = time.perf_counter()
-                    boxes, confidences = postprocess_outputs(
+                    boxes, confidences, class_ids = postprocess_outputs(
                         outputs,
                         latest_region['width'],
                         latest_region['height'],
@@ -473,7 +479,13 @@ def ai_logic_loop(
                     print(f"ONNX 推理錯誤: {e}")
                     continue
 
-                boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size)
+                # --- Semantic FP filter (new feature from Someone_idea) ---
+                if getattr(config, 'detect_semantic_filter_enabled', False):
+                    from .detection_semantics import filter_detections_by_semantic_class
+                    boxes, confidences, class_ids = filter_detections_by_semantic_class(
+                        boxes, confidences, class_ids, config)
+
+                boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size, config)
 
                 if config.single_target_mode:
                     boxes, confidences = find_closest_target(

@@ -186,7 +186,7 @@ def postprocess_outputs(
     letterbox_scale: float = 1.0,
     letterbox_pad_x: int = 0,
     letterbox_pad_y: int = 0,
-) -> Tuple[List[List[float]], List[float]]:
+) -> Tuple[List[List[float]], List[float], List[int]]:
     """Post-process ONNX model output into screen-space bounding boxes.
 
     Y-axis fix
@@ -244,7 +244,16 @@ def postprocess_outputs(
     boxes = np.stack([x1, y1, x2, y2], axis=1).tolist()
     confidences = filtered_predictions[:, 4].tolist()
 
-    return boxes, confidences
+    # Extract class IDs for multi-class models (>5 output columns).
+    # Single-class models (5 cols: cx,cy,w,h,conf) get all-zeros — no behaviour change.
+    num_cols = filtered_predictions.shape[1]
+    if num_cols > 5:
+        class_ids = filtered_predictions[:, 5:].argmax(axis=1).tolist()
+        class_ids = [int(c) for c in class_ids]
+    else:
+        class_ids = [0] * len(boxes)
+
+    return boxes, confidences, class_ids
 
 
 def non_max_suppression(

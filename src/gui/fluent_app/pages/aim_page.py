@@ -120,6 +120,14 @@ class AimPage(BasePage):
             parent=self.fovGroup
         )
 
+        # Circular FOV Filter (Someone_idea port)
+        self.fovCircleCard = SwitchSettingCard(
+            FluentIcon.CIRCLE_OUTLINE,
+            t("fov_circle_filter", "Circular FOV Filter"),
+            t("fov_circle_filter_desc", "Only track targets inside the FOV circle, not the full square region"),
+            parent=self.fovGroup
+        )
+
         # AI Detection Range - using SliderSpinCard
         self.detectRangeCard = SliderSpinCard(
             FluentIcon.FULL_SCREEN,
@@ -166,6 +174,14 @@ class AimPage(BasePage):
             1, 100,
             suffix="%",
             description="",
+            parent=self.generalGroup
+        )
+
+        # Semantic FP Filter (Someone_idea port)
+        self.semanticFilterCard = SwitchSettingCard(
+            FluentIcon.FILTER,
+            t("semantic_filter_enabled", "Semantic FP Filter"),
+            t("semantic_filter_desc", "Discard trees, vehicles, and HUD elements by class name and geometry"),
             parent=self.generalGroup
         )
 
@@ -907,6 +923,14 @@ class AimPage(BasePage):
             parent=self.trackingGroup
         )
 
+        # Adaptive IoU (Someone_idea port — replaces fixed lock_iou_threshold)
+        self.stickyAdaptiveIouCard = SwitchSettingCard(
+            FluentIcon.EDUCATION,
+            t("sticky_adaptive_iou", "Adaptive IoU Threshold"),
+            t("sticky_adaptive_iou_desc", "Scale match threshold by target size — keeps lock on small/far targets"),
+            parent=self.trackingGroup
+        )
+
         self.lockDecayCard = SliderLabelCard(
             FluentIcon.HISTORY,
             t("lock_decay_frames", "Lock Decay Frames"),
@@ -922,8 +946,33 @@ class AimPage(BasePage):
             t("lock_iou_threshold", "IoU Match Threshold"),
             10, 70,
             format_func=lambda v: f"{v / 100:.2f}",
-            description=t("lock_iou_desc", "Minimum overlap required to match the same target across frames"),
+            description=t("lock_iou_desc", "Minimum overlap (base threshold when Adaptive IoU is on)"),
             slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        # Aim shaping (Someone_idea port)
+        self.aimDeadzoneCard = SwitchSettingCard(
+            FluentIcon.MINIMIZE,
+            t("aim_deadzone_enabled", "Adaptive Deadzone"),
+            t("aim_deadzone_desc", "Stop micro-correcting when crosshair is already close to target"),
+            parent=self.trackingGroup
+        )
+
+        self.aimLateralBrakeCard = SwitchSettingCard(
+            FluentIcon.SPEED_OFF,
+            t("aim_lateral_brake_enabled", "Lateral Overshoot Brake"),
+            t("aim_lateral_brake_desc", "Slow horizontal correction when vertically aligned — more human-like"),
+            parent=self.trackingGroup
+        )
+
+        self.maxMovePerFrameCard = SliderLabelCard(
+            FluentIcon.MOVE,
+            t("max_move_per_frame_px", "Max Move Per Frame (px)"),
+            10, 300,
+            format_func=lambda v: f"{v} px",
+            description=t("max_move_per_frame_desc", "Hard cap on pixels moved per frame — prevents instant snap detection"),
+            label_width=60,
             parent=self.trackingGroup
         )
 
@@ -1005,6 +1054,7 @@ class AimPage(BasePage):
         # FOV 與偵測範圍
         self.fovGroup.addSettingCard(self.fovCard)
         self.fovGroup.addSettingCard(self.fovFollowCard)
+        self.fovGroup.addSettingCard(self.fovCircleCard)
         self.fovGroup.addSettingCard(self.detectRangeCard)
         self.fovGroup.addSettingCard(self.screenshotMethodCard)
         self.addContent(self.fovGroup)
@@ -1014,6 +1064,7 @@ class AimPage(BasePage):
         self.generalGroup.addSettingCard(self.screenshotIntervalCard)
         self.generalGroup.addSettingCard(self.autoMatchFpsCard)
         self.generalGroup.addSettingCard(self.confidenceCard)
+        self.generalGroup.addSettingCard(self.semanticFilterCard)
         self.generalGroup.addSettingCard(self.aimPartCard)
         self.generalGroup.addSettingCard(self.mouseMoveCard)
         self.generalGroup.addSettingCard(self.uvcDeviceCard)
@@ -1152,8 +1203,12 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.predictionMaxVelCard)
         self.trackingGroup.addSettingCard(self.predictionHistoryCard)
         self.trackingGroup.addSettingCard(self.stickyLockCard)
+        self.trackingGroup.addSettingCard(self.stickyAdaptiveIouCard)
         self.trackingGroup.addSettingCard(self.lockDecayCard)
         self.trackingGroup.addSettingCard(self.lockIouCard)
+        self.trackingGroup.addSettingCard(self.aimDeadzoneCard)
+        self.trackingGroup.addSettingCard(self.aimLateralBrakeCard)
+        self.trackingGroup.addSettingCard(self.maxMovePerFrameCard)
         self.trackingGroup.addSettingCard(self.kalmanEnableCard)
         self.trackingGroup.addSettingCard(self.kalmanProcessNoiseCard)
         self.trackingGroup.addSettingCard(self.kalmanMeasNoiseCard)
@@ -1171,6 +1226,7 @@ class AimPage(BasePage):
         # FOV 與偵測範圍 - 使用新組件的 valueChanged 信號
         self.fovCard.valueChanged.connect(self._onFovChanged)
         self.fovFollowCard.checkedChanged.connect(self._onFovFollowChanged)
+        self.fovCircleCard.checkedChanged.connect(self._onFovCircleChanged)
         self.detectRangeCard.valueChanged.connect(self._onDetectRangeChanged)
 
         # 通用參數 - 使用新組件的 valueChanged 信號
@@ -1178,6 +1234,7 @@ class AimPage(BasePage):
         self.screenshotIntervalCard.valueChanged.connect(self._onScreenshotIntervalChanged)
         self.autoMatchFpsCard.checkedChanged.connect(self._onAutoMatchFpsChanged)
         self.confidenceCard.valueChanged.connect(self._onConfidenceChanged)
+        self.semanticFilterCard.checkedChanged.connect(self._onSemanticFilterChanged)
         self.aimPartCombo.currentIndexChanged.connect(self._onAimPartChanged)
         self.mouseMoveCombo.currentTextChanged.connect(self._onMouseMoveChanged)
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)
@@ -1266,8 +1323,12 @@ class AimPage(BasePage):
         self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
         self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
         self.stickyLockCard.checkedChanged.connect(self._onStickyLockChanged)
+        self.stickyAdaptiveIouCard.checkedChanged.connect(self._onStickyAdaptiveIouChanged)
         self.lockDecayCard.valueChanged.connect(self._onLockDecayChanged)
         self.lockIouCard.valueChanged.connect(self._onLockIouChanged)
+        self.aimDeadzoneCard.checkedChanged.connect(self._onAimDeadzoneChanged)
+        self.aimLateralBrakeCard.checkedChanged.connect(self._onAimLateralBrakeChanged)
+        self.maxMovePerFrameCard.valueChanged.connect(self._onMaxMovePerFrameChanged)
 
         # Kalman
         self.kalmanEnableCard.checkedChanged.connect(self._onKalmanEnableChanged)
@@ -1330,6 +1391,7 @@ class AimPage(BasePage):
             # FOV 與偵測範圍 - 使用新組件的 setValue
             self.fovCard.setValue(self._config.fov_size)
             self.fovFollowCard.setChecked(self._config.fov_follow_mouse)
+            self.fovCircleCard.setChecked(bool(getattr(self._config, 'fov_circle_filter_enabled', False)))
             self.detectRangeCard.setValue(self._config.detect_range_size)
 
             # 通用參數 - 使用新組件的 setValue
@@ -1342,6 +1404,7 @@ class AimPage(BasePage):
             self.screenshotIntervalCard.setEnabled(not _auto_match)
             confidence_pct = int(self._config.min_confidence * 100)
             self.confidenceCard.setValue(confidence_pct)
+            self.semanticFilterCard.setChecked(bool(getattr(self._config, 'detect_semantic_filter_enabled', False)))
 
             aim_parts = ["head", "body", "both"]
             if self._config.aim_part in aim_parts:
@@ -1468,8 +1531,12 @@ class AimPage(BasePage):
             self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
             self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
+            self.stickyAdaptiveIouCard.setChecked(bool(getattr(self._config, 'sticky_adaptive_iou', True)))
             self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
             self.lockIouCard.setValue(int(getattr(self._config, 'lock_iou_threshold', 0.3) * 100))
+            self.aimDeadzoneCard.setChecked(bool(getattr(self._config, 'aim_deadzone_enabled', False)))
+            self.aimLateralBrakeCard.setChecked(bool(getattr(self._config, 'aim_lateral_brake_enabled', False)))
+            self.maxMovePerFrameCard.setValue(int(getattr(self._config, 'max_move_per_frame_px', 85)))
 
             # Kalman
             kalman_on = bool(getattr(self._config, 'kalman_enabled', False))
@@ -1664,6 +1731,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.fov_follow_mouse = checked
 
+    def _onFovCircleChanged(self, checked):
+        if self._config:
+            self._config.fov_circle_filter_enabled = bool(checked)
+
     def _onDetectRangeChanged(self, value):
         """偵測範圍改變"""
         if self._config:
@@ -1694,6 +1765,10 @@ class AimPage(BasePage):
         """信心值改變"""
         if self._config:
             self._config.min_confidence = value / 100.0
+
+    def _onSemanticFilterChanged(self, checked):
+        if self._config:
+            self._config.detect_semantic_filter_enabled = bool(checked)
 
     def _onAimPartChanged(self, index):
         if self._config:
@@ -2353,6 +2428,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.sticky_lock_enabled = bool(checked)
 
+    def _onStickyAdaptiveIouChanged(self, checked):
+        if self._config:
+            self._config.sticky_adaptive_iou = bool(checked)
+
     def _onLockDecayChanged(self, value):
         if self._config:
             self._config.lock_decay_frames = int(value)
@@ -2360,6 +2439,18 @@ class AimPage(BasePage):
     def _onLockIouChanged(self, value):
         if self._config:
             self._config.lock_iou_threshold = value / 100.0
+
+    def _onAimDeadzoneChanged(self, checked):
+        if self._config:
+            self._config.aim_deadzone_enabled = bool(checked)
+
+    def _onAimLateralBrakeChanged(self, checked):
+        if self._config:
+            self._config.aim_lateral_brake_enabled = bool(checked)
+
+    def _onMaxMovePerFrameChanged(self, value):
+        if self._config:
+            self._config.max_move_per_frame_px = float(value)
 
     # === Kalman Callbacks ===
 

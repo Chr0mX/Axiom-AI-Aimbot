@@ -260,7 +260,25 @@ class Config:
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
         self.lock_decay_frames: int = 15       # 鎖定目標消失後維持的幀數
-        self.lock_iou_threshold: float = 0.3   # 視為同一目標的最低 IoU
+        self.lock_iou_threshold: float = 0.3   # 視為同一目標的最低 IoU（adaptive 模式下作為基礎值）
+        self.sticky_adaptive_iou: bool = True  # adaptive IoU scaling by box area (Someone_idea)
+
+        # FOV filter mode
+        self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square (Someone_idea)
+
+        # Aim shaping (ported from Someone_idea)
+        self.aim_deadzone_enabled: bool = False
+        self.aim_deadzone_min_px: float = 0.4
+        self.aim_deadzone_close_px: float = 0.2
+        self.aim_lateral_brake_enabled: bool = False
+        self.aim_lateral_brake_strength: float = 0.75
+        self.aim_lateral_brake_dom_trigger: float = 1.12
+        self.aim_lateral_brake_dom_max: float = 3.0
+        self.aim_lateral_brake_min_scale: float = 0.26
+        self.max_move_per_frame_px: float = 85.0
+
+        # Semantic false-positive filter (ported from Someone_idea)
+        self.detect_semantic_filter_enabled: bool = False
 
         # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
         self.display_locked_box: list | None = None
@@ -402,6 +420,21 @@ class Config:
             'sticky_lock_enabled': self.sticky_lock_enabled,
             'lock_decay_frames': self.lock_decay_frames,
             'lock_iou_threshold': self.lock_iou_threshold,
+            'sticky_adaptive_iou': self.sticky_adaptive_iou,
+
+            'fov_circle_filter_enabled': self.fov_circle_filter_enabled,
+
+            'aim_deadzone_enabled': self.aim_deadzone_enabled,
+            'aim_deadzone_min_px': self.aim_deadzone_min_px,
+            'aim_deadzone_close_px': self.aim_deadzone_close_px,
+            'aim_lateral_brake_enabled': self.aim_lateral_brake_enabled,
+            'aim_lateral_brake_strength': self.aim_lateral_brake_strength,
+            'aim_lateral_brake_dom_trigger': self.aim_lateral_brake_dom_trigger,
+            'aim_lateral_brake_dom_max': self.aim_lateral_brake_dom_max,
+            'aim_lateral_brake_min_scale': self.aim_lateral_brake_min_scale,
+            'max_move_per_frame_px': self.max_move_per_frame_px,
+
+            'detect_semantic_filter_enabled': self.detect_semantic_filter_enabled,
 
             'bezier_curve_enabled': self.bezier_curve_enabled,
             'bezier_curve_strength': self.bezier_curve_strength,
