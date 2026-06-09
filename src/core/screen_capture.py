@@ -740,16 +740,19 @@ class NDICapture:
             half = max(1, fov // 2)
             x1, y1 = cx - half, cy - half
             x2, y2 = cx + half, cy + half
-            corner = max(8, min(20, fov // 6))
             color = (0, 0, 255, 255)
-            cv2.line(frame_bgra, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgra, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgra, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgra, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
+            if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
+                cv2.circle(frame_bgra, (cx, cy), half, color, 2, cv2.LINE_AA)
+            else:
+                corner = max(8, min(20, fov // 6))
+                cv2.line(frame_bgra, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
 
         if bool(getattr(cfg, 'show_boxes', True)):
             boxes = list(getattr(cfg, 'latest_boxes', []) or [])
@@ -1138,20 +1141,19 @@ class UVCCapture:
             half = max(1, fov // 2)
             x1, y1 = cx - half, cy - half
             x2, y2 = cx + half, cy + half
-            corner = max(8, min(20, fov // 6))
             color = (0, 0, 255)
-            # top-left
-            cv2.line(frame_bgr, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
-            # top-right
-            cv2.line(frame_bgr, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
-            # bottom-left
-            cv2.line(frame_bgr, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
-            # bottom-right
-            cv2.line(frame_bgr, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
-            cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
+            if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
+                cv2.circle(frame_bgr, (cx, cy), half, color, 2, cv2.LINE_AA)
+            else:
+                corner = max(8, min(20, fov // 6))
+                cv2.line(frame_bgr, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
+                cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
 
         if bool(getattr(cfg, 'show_boxes', True)):
             boxes = list(getattr(cfg, 'latest_boxes', []) or [])
