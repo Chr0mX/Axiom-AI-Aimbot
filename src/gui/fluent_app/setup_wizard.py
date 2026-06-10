@@ -7,6 +7,9 @@ Steps: Welcome → Language → Theme → Acrylic → Done
 from __future__ import annotations
 
 import os
+import platform
+import re
+import subprocess
 import types
 
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
@@ -286,6 +289,25 @@ class _ThemeCard(QFrame):
 
 
 # ──────────────────────────────────────────────────────────
+def _detect_gpu_name() -> str:
+    try:
+        r = subprocess.run(
+            ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+            capture_output=True, text=True, timeout=5
+        )
+        if r.returncode == 0:
+            name = r.stdout.strip().splitlines()[0]
+            if name:
+                return name
+    except Exception:
+        pass
+    return ''
+
+def _is_rtx20_or_newer(gpu_name: str) -> bool:
+    m = re.search(r'RTX\s*(\d{4})', gpu_name, re.IGNORECASE)
+    return bool(m) and int(m.group(1)) >= 2000
+
+
 # Setup Wizard
 # ──────────────────────────────────────────────────────────
 
@@ -309,7 +331,7 @@ class SetupWizard(QDialog):
 
         self._config      = config
         self._langManager = getLanguageManager()
-        self._isDark      = False   # 精靈自身預覽狀態
+        self._isDark      = True    # 精靈自身預覽狀態（預設深色）
 
         self.setWindowTitle("Axiom – Setup")
         self.setFixedSize(580, 510)
@@ -318,7 +340,7 @@ class SetupWizard(QDialog):
                             Qt.WindowType.WindowCloseButtonHint)
 
         self._buildUI()
-        self._applyLightStyle()
+        self._applyDarkStyle()
         self._updateTexts()
 
         # 語言切換時即時刷新精靈文字
@@ -482,7 +504,7 @@ class SetupWizard(QDialog):
 
         self._card_light = _ThemeCard("light")
         self._card_dark  = _ThemeCard("dark")
-        self._card_light.setSelected(True)   # 預設 light
+        self._card_dark.setSelected(True)    # 預設 dark
 
         self._card_light.clicked.connect(self._onThemeCardClicked)
         self._card_dark.clicked.connect(self._onThemeCardClicked)
@@ -582,6 +604,21 @@ class SetupWizard(QDialog):
 
         ly.addSpacing(16)
 
+        # ── Hardware Detection Row ────────────────────────────
+        self._detected_gpu = _detect_gpu_name()
+        cpu_name = platform.processor() or platform.machine()
+
+        hw_row = QHBoxLayout()
+        hw_row.setSpacing(12)
+        hw_row.addWidget(_lbl("Hardware", 11, bold=True))
+        hw_row.addStretch()
+        hw_row.addWidget(_lbl(f"GPU: {self._detected_gpu or 'Not detected'}", 10))
+        hw_row.addSpacing(12)
+        hw_row.addWidget(_lbl(f"CPU: {cpu_name or 'Unknown'}", 10))
+        ly.addLayout(hw_row)
+
+        ly.addSpacing(8)
+
         # ── Inference Backend ─────────────────────────────────
         backend_row = QHBoxLayout()
         backend_row.setSpacing(12)
@@ -597,8 +634,20 @@ class SetupWizard(QDialog):
             self._combo_backend = QComboBox()  # type: ignore[assignment]
 
         self._combo_backend.addItems(["TensorRT (NVIDIA GPU)", "DirectML (AMD / Intel / NVIDIA)"])
-        cur_backend = getattr(self._config, 'inference_backend', 'auto')
-        self._combo_backend.setCurrentIndex(1 if cur_backend == "directml" else 0)
+
+        # Auto-select backend based on detected GPU
+        if self._detected_gpu:
+            if _is_rtx20_or_newer(self._detected_gpu):
+                auto_idx = 0  # TensorRT
+                self._config.inference_backend = 'tensorrt'
+            else:
+                auto_idx = 1  # DirectML
+                self._config.inference_backend = 'directml'
+        else:
+            cur_backend = getattr(self._config, 'inference_backend', 'auto')
+            auto_idx = 1 if cur_backend == "directml" else 0
+
+        self._combo_backend.setCurrentIndex(auto_idx)
         self._combo_backend.currentIndexChanged.connect(self._onBackendChanged)
         backend_row.addWidget(self._combo_backend)
         ly.addLayout(backend_row)
@@ -670,7 +719,8 @@ class SetupWizard(QDialog):
             self._combo_model.setCurrentIndex(idx if idx >= 0 else 0)
             self._combo_model.setEnabled(True)
             if self._config:
-                self._config.model_path = self._combo_model.currentData()
+                data = self._combo_model.currentData() or f"Model/{self._combo_model.currentText()}"
+                self._config.model_path = data
         else:
             self._combo_model.addItem("— No models found —", "")
             self._combo_model.setEnabled(False)
@@ -678,6 +728,10 @@ class SetupWizard(QDialog):
 
     def _onModelComboChanged(self, _idx: int) -> None:
         data = self._combo_model.currentData()
+        if not data:
+            text = self._combo_model.currentText()
+            if text and not text.startswith('—'):
+                data = f"Model/{text}"
         if data and self._config:
             self._config.model_path = data
 

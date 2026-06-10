@@ -35,6 +35,12 @@ def main():
         wizard.applyChosenTheme()
         save_config(config)
 
+        # If wizard chose DirectML, restart fresh so no TRT providers are cached
+        if getattr(config, 'inference_backend', 'auto') == 'directml':
+            import subprocess as _sp
+            _sp.Popen([sys.executable] + sys.argv)
+            sys.exit(0)
+
     # 初始化配置管理器
     cfg_manager = ConfigManager()
 
