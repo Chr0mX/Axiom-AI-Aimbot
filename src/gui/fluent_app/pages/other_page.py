@@ -150,6 +150,11 @@ class OtherPage(BasePage):
         self.makcuHwModelCard  = SettingCard(FluentIcon.DEVELOPER_TOOLS, t("makcu_hw_model",  "Model"),        "—", self.makcuHwGroup)
         self.makcuHwVendorCard = SettingCard(FluentIcon.GLOBE,           t("makcu_hw_vendor", "Vendor"),       "—", self.makcuHwGroup)
         self.makcuHwTempCard   = SettingCard(FluentIcon.CALORIES,        t("makcu_hw_temp",   "Temperature"),  "—", self.makcuHwGroup)
+        _grey = "color: #888888;"
+        for _card in (self.makcuHwVerCard, self.makcuHwModelCard,
+                      self.makcuHwVendorCard, self.makcuHwTempCard):
+            _card.contentLabel.setStyleSheet(_grey)
+            _card.titleLabel.setStyleSheet(_grey)
 
         # === Environment — Python Path ===
         self.pyGroup = SettingCardGroup(t("env_python", "Python Path"), self.scrollWidget)

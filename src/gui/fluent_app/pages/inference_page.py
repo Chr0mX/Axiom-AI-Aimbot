@@ -508,8 +508,9 @@ class InferencePage(BasePage):
         self.makcuConnectionCard.hBoxLayout.addSpacing(16)
 
         self.makcuBaudCombo = ComboBox()
-        self.makcuBaudCombo.addItems(["115200", "4000000"])
+        self.makcuBaudCombo.addItems(["4000000"])
         self.makcuBaudCombo.setMinimumWidth(120)
+        self.makcuBaudCombo.setEnabled(False)
         self.makcuBaudCard = SettingCard(
             FluentIcon.SPEED_HIGH,
             t("makcu_baud_rate", "Baud Rate"),
@@ -874,10 +875,7 @@ class InferencePage(BasePage):
             elif self.makcuComPortCombo.count() > 1:
                 self.makcuComPortCombo.setCurrentIndex(1)
 
-            makcu_baud = str(getattr(self._config, 'makcu_baud_rate', 115200))
-            if self.makcuBaudCombo.findText(makcu_baud) < 0:
-                makcu_baud = "115200"
-            self.makcuBaudCombo.setCurrentText(makcu_baud)
+            self.makcuBaudCombo.setCurrentText("4000000")
 
             arduino_baud = str(getattr(self._config, 'arduino_baud_rate', 115200))
             if self.arduinoBaudCombo.findText(arduino_baud) < 0:
@@ -1458,8 +1456,7 @@ class InferencePage(BasePage):
                 if not com_port or com_port == t("no_com_port"):
                     QMessageBox.warning(self, t("config_error"), t("no_com_port"))
                     return
-                baud = int(getattr(self._config, 'makcu_baud_rate', 115200)) if self._config else 115200
-                success = connect_makcu(com_port, baud)
+                success = connect_makcu(com_port)
                 if not success:
                     QMessageBox.warning(self, t("config_error"),
                                         f"MAKCU {t('disconnected')}: {com_port}")
