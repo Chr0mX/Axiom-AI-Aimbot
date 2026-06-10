@@ -215,6 +215,11 @@ def ai_logic_loop(
     _aim_toggle_active: list = [False]
     _aim_btn_prev: list = [False]
 
+    # Preprocess worker state — runs concurrently with inference to avoid
+    # serializing resize+normalize and ONNX inference on the same thread.
+    _tensor_queue: queue.Queue = queue.Queue(maxsize=1)
+    _preprocess_stop: threading.Event = threading.Event()
+
     def _capture_worker() -> None:
         _capture_backend[0] = initialize_screen_capture(config)
         _active_method[0] = _detect_active_capture_method(
@@ -285,6 +290,29 @@ def ai_logic_loop(
                 _set_windows_timer_resolution_1ms(False)
             if _capture_backend[0] is not None:
                 _cleanup_capture(_capture_backend[0])
+
+    def _preprocess_worker() -> None:
+        last_frame_id: int = -1
+        while not _preprocess_stop.is_set() and config.Running:
+            try:
+                with frame_lock:
+                    frame = capture_state.get('latest_frame')
+                    region = capture_state.get('latest_region')
+                    frame_id = id(frame)
+                if frame is None or region is None or frame_id == last_frame_id:
+                    time.sleep(0.001)
+                    continue
+                last_frame_id = frame_id
+                tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(frame, config.model_input_size)
+                try:
+                    _tensor_queue.put((tensor, lb_scale, lb_pad_x, lb_pad_y, region), timeout=0.05)
+                except queue.Full:
+                    pass
+            except Exception:
+                time.sleep(0.001)
+
+    _preprocess_thread = threading.Thread(target=_preprocess_worker, name='PreprocessWorker', daemon=True)
+    _preprocess_thread.start()
 
     capture_thread = threading.Thread(target=_capture_worker, name='CaptureWorker', daemon=True)
     capture_thread.start()
@@ -381,13 +409,6 @@ def ai_logic_loop(
 
                 with region_lock:
                     capture_state['target_region'] = region
-                with frame_lock:
-                    latest_frame = capture_state.get('latest_frame')
-                    latest_region = capture_state.get('latest_region')
-
-                if latest_frame is None or latest_region is None:
-                    _sleep_precise(0.001)
-                    continue
 
                 idle_enabled = getattr(config, 'idle_detect_enabled', True)
                 if getattr(config, 'always_aim', False) or getattr(config, 'always_auto_fire', False):
@@ -406,11 +427,12 @@ def ai_logic_loop(
                     continue
                 last_detection_run_time = now_detect
 
-                # Frame skip gate: skip inference when the capture region
-                # hasn't changed significantly (e.g. static background).
                 t0 = time.perf_counter()
-                input_tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
-                    latest_frame, config.model_input_size)
+                try:
+                    _pre_result = _tensor_queue.get(timeout=0.02)
+                except queue.Empty:
+                    continue
+                input_tensor, lb_scale, lb_pad_x, lb_pad_y, latest_region = _pre_result
                 t1 = time.perf_counter()
                 t2 = t3 = t4 = None
 
@@ -531,5 +553,8 @@ def ai_logic_loop(
                 traceback.print_exc()
                 time.sleep(1.0)
     finally:
+        _preprocess_stop.set()
+        if _preprocess_thread.is_alive():
+            _preprocess_thread.join(timeout=1.0)
         capture_stop_event.set()
         capture_thread.join(timeout=1.0)
