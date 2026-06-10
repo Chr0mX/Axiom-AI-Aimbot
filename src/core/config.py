@@ -59,7 +59,7 @@ class Config:
         self.preview_crop_to_detection: bool = False
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
-        self.ndi_pre_resize: bool = True   # resize NDI frames to model_input_size in capture thread
+        self.ndi_pre_resize: bool = False   # resize NDI frames to model_input_size in capture thread
         self.ndi_width: int = self.width
         self.ndi_height: int = self.height
         self.crosshairX: int = self.width // 2
@@ -158,7 +158,7 @@ class Config:
         self.mouse_click_method: str = "mouse_event" # 滑鼠點擊方式
         self.arduino_com_port: str = ""              # Arduino Leonardo COM 埠
         self.makcu_com_port: str = ""                  # MAKCU KM Host COM 埠
-        self.makcu_baud_rate: int = 115200           # MAKCU 串列傳輸速率（支援 115200/500000/1000000/2000000/4000000）
+        self.makcu_baud_rate: int = 4_000_000        # MAKCU 串列傳輸速率（使用官方 DE AD 幀序列切換至 4 Mbaud）
         self.arduino_baud_rate: int = 115200         # Arduino 串列傳輸速率
 
         # Xbox 360 虛擬手把設定

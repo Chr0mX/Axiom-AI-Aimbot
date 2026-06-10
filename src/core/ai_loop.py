@@ -212,36 +212,6 @@ def ai_logic_loop(
     _capture_backend: list = [None]
     _active_method: list = [None]
 
-    _tensor_queue: queue.Queue = queue.Queue(maxsize=1)
-    _preprocess_stop: threading.Event = threading.Event()
-
-    def _preprocess_worker() -> None:
-        last_frame_id: int = -1
-        while not _preprocess_stop.is_set() and config.Running:
-            try:
-                with frame_lock:
-                    frame = capture_state.get('latest_frame')
-                    region = capture_state.get('latest_region')
-                    frame_id = id(frame)
-                if frame is None or region is None or frame_id == last_frame_id:
-                    time.sleep(0.001)
-                    continue
-                last_frame_id = frame_id
-                tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
-                    frame, config.model_input_size)
-                try:
-                    _tensor_queue.put(
-                        (tensor, lb_scale, lb_pad_x, lb_pad_y, region),
-                        timeout=0.05)
-                except queue.Full:
-                    pass
-            except Exception:
-                time.sleep(0.001)
-
-    _preprocess_thread = threading.Thread(
-        target=_preprocess_worker, name='PreprocessWorker', daemon=True)
-    _preprocess_thread.start()
-
     def _capture_worker() -> None:
         _capture_backend[0] = initialize_screen_capture(config)
         _active_method[0] = _detect_active_capture_method(
@@ -443,11 +413,8 @@ def ai_logic_loop(
                 # Frame skip gate: skip inference when the capture region
                 # hasn't changed significantly (e.g. static background).
                 t0 = time.perf_counter()
-                try:
-                    _pre_result = _tensor_queue.get(timeout=0.02)
-                except queue.Empty:
-                    continue
-                input_tensor, lb_scale, lb_pad_x, lb_pad_y, latest_region = _pre_result
+                input_tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
+                    latest_frame, config.model_input_size)
                 t1 = time.perf_counter()
                 t2 = t3 = t4 = None
 
@@ -493,10 +460,6 @@ def ai_logic_loop(
                     boxes, confidences, class_ids = filter_detections_by_semantic_class(
                         boxes, confidences, class_ids, config)
 
-                # Snapshot all post-NMS boxes for overlay display before FOV filter
-                display_boxes = list(boxes)
-                display_confs = list(confidences)
-
                 boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size, config)
 
                 if config.single_target_mode:
@@ -537,8 +500,8 @@ def ai_logic_loop(
                 update_queues(
                     overlay_boxes_queue,
                     overlay_confidences_queue,
-                    display_boxes,
-                    display_confs,
+                    boxes,
+                    confidences,
                     auto_fire_queue=auto_fire_boxes_queue,
                     auto_fire_boxes=boxes,
                 )
@@ -572,8 +535,5 @@ def ai_logic_loop(
                 traceback.print_exc()
                 time.sleep(1.0)
     finally:
-        _preprocess_stop.set()
-        if _preprocess_thread.is_alive():
-            _preprocess_thread.join(timeout=1.0)
         capture_stop_event.set()
         capture_thread.join(timeout=1.0)

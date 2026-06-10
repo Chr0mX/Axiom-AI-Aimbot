@@ -2,9 +2,9 @@
 """
 Achieve hardware-level mouse movement through the MAKCU KM host device.
 MAKCU acts as a USB HID proxy, injecting mouse/keyboard inputs at the hardware level.
-Uses the Traditional ASCII API (e.g., .move(dx,dy)) over a serial connection.
+Uses the ASCII API over a serial connection at 4 Mbaud.
 
-API Reference: https://www.makcu.com/cn/api
+API Reference: https://makcu.k4tech.net/native/
 """
 
 import os
@@ -14,12 +14,10 @@ import time
 import logging
 from typing import Optional
 
-# 使用本地的依賴模組 (src/python/dependencies)
 _src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _python_dir = os.path.join(_src_dir, 'python')
 _deps_dir = os.path.join(_python_dir, 'dependencies')
 
-# 確保依賴路徑優先
 if _deps_dir not in sys.path:
     sys.path.insert(0, _deps_dir)
 
@@ -28,160 +26,215 @@ import serial.tools.list_ports
 
 logger = logging.getLogger(__name__)
 
+# Official 4 Mbaud connection constants
+_OPERATING_BAUD    = 4_000_000
+_BAUD_CHANGE_FRAME = bytes([0xDE, 0xAD, 0x05, 0x00, 0xA5, 0x00, 0x09, 0x3D, 0x00])
+
+# Button stream parsing — prefix emitted before each mask byte
+# Do NOT use \n/\r splitting: mask 0x0A (R+S1) and 0x0D (L+M+S1) collide with newlines
+_KM_PREFIX = bytes([0x6B, 0x6D, 0x2E])  # "km."
+
 
 class MakcuMouse:
     """MAKCU KM Host Mouse Controller
 
     Uses the MAKCU device's ASCII serial API to inject hardware-level mouse inputs.
-    Unlike Arduino Leonardo, MAKCU does not reset on serial connection, so no
-    startup delay is needed. Supports int16 range for move dx/dy (much larger
-    than Arduino's -128~127 signed char limit).
+    Connects at 4 Mbaud using the official DE AD baud-change sequence.
+    Button state is maintained via the km.buttons(1) event stream — no polling.
     """
 
-    # ASCII command templates (Traditional API)
-    # Standard MAKCU KM commands.
-    CMD_MOVE = "km.move({dx},{dy})\r\n"
-    CMD_CLICK = "km.click({button},{count})\r\n"
+    CMD_MOVE      = "km.move({dx},{dy})\r\n"
     CMD_LEFT_DOWN = "km.left(1)\r\n"
-    CMD_LEFT_UP = "km.left(0)\r\n"
-    CMD_ECHO_OFF = "km.echo(0)\r\n"
-    CMD_VERSION = "km.version()\r\n"
-    CMD_INFO = "km.info()\r\n"
-    CMD_BAUD_4M = b"km.baud(4000000)\r\n"
+    CMD_LEFT_UP   = "km.left(0)\r\n"
+    CMD_ECHO_OFF  = "km.echo(0)\r\n"
+    CMD_VERSION   = "km.version()\r\n"
+    CMD_INFO      = "km.info()\r\n"
 
     def __init__(self):
         self._serial: Optional[serial.Serial] = None
         self._lock = threading.Lock()
         self._connected = False
         self._com_port: str = ""
-        self._baud_rate: int = 115200
-        self._lmb_state_cache: int = 0
-        self._lmb_cache_time: float = 0.0
-        self.lmb_cache_seconds: float = 0.008  # overridden by ai_loop to match detect_interval
-        self._button_cache: dict = {}  # cache for all button queries: key -> (val, timestamp)
         self._version_string: str = ""
         self._device_info: dict = {}
 
-    def connect(self, com_port: str, baud_rate: int = 115200) -> bool:
-        """Connect to MAKCU device.
+        # Button event stream state
+        self._btn_mask: int = 0
+        self._stream_stop  = threading.Event()
+        self._stream_thread: Optional[threading.Thread] = None
 
-        MAKCU supports only 115200 and 4000000 baud.  We always open at 115200
-        first (the device's startup rate), perform the handshake, then if the
-        caller requested 4 Mbaud we send km.baud(4000000), close and reopen at
-        4 Mbaud.
+        # Legacy attribute kept so ai_loop.py can set it without errors
+        self.lmb_cache_seconds: float = 0.008
+
+    # ------------------------------------------------------------------
+    # Connection
+    # ------------------------------------------------------------------
+
+    def connect(self, com_port: str, baud_rate: int = _OPERATING_BAUD) -> bool:
+        """Connect to MAKCU device using the official 4 Mbaud sequence.
+
+        Always targets 4 Mbaud regardless of baud_rate. Tries 4M first
+        (warm start / same power cycle), then falls back to sending the
+        DE AD baud-change frame at 115200 before reopening at 4M.
         """
-        # Normalise: accept only the two supported rates
-        target_baud = 4_000_000 if baud_rate == 4_000_000 else 115200
-
         with self._lock:
-            # Close existing connection
-            if self._serial and self._serial.is_open:
-                try:
-                    self._serial.close()
-                except Exception:
-                    pass
-                self._connected = False
+            self._close_locked()
 
-            try:
-                # Always open at 115200 — the device's startup/default rate
-                if not self._open_serial(com_port):
-                    self._connected = False
-                    return False
-
-                self._com_port = com_port
-
-                # Brief settle time
-                time.sleep(0.1)
-                self._serial.reset_input_buffer()
-
-                # Verify device with version command
-                self._serial.write(self.CMD_VERSION.encode('ascii'))
-                time.sleep(0.1)
-
-                if self._serial.in_waiting == 0:
-                    logger.error("[MAKCU] Handshake failed on %s: no response.", com_port)
-                    print(f"[MAKCU] Handshake failed on {com_port}: no response from device.")
-                    self._serial.close()
-                    self._connected = False
-                    return False
-
-                version_info = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore').strip()
-                logger.info("[MAKCU] Device info: %s", version_info)
-                print(f"[MAKCU] Device responded: {version_info}")
-                self._version_string = version_info.replace('>>>', '').strip()
-
-                # Disable echo to reduce serial traffic
-                self._serial.write(self.CMD_ECHO_OFF.encode('ascii'))
-                time.sleep(0.05)
-                self._serial.reset_input_buffer()
-
-                # Switch to 4 Mbaud if requested
-                if target_baud == 4_000_000:
-                    # Device switches baud immediately on processing the command.
-                    # Flush ensures all bytes leave the host TX buffer, then
-                    # close straight away — no extra sleep at the old rate.
-                    self._serial.write(self.CMD_BAUD_4M)
-                    self._serial.flush()
-                    self._serial.close()
-                    time.sleep(0.15)       # give OS time to release the port
-                    self._serial = serial.Serial(
-                        com_port, 4_000_000, timeout=0.3, write_timeout=0.1)
-                    time.sleep(0.05)       # port settle
-                    self._serial.reset_input_buffer()
-                    # Verify 4M link — device must respond at new baud
-                    self._serial.write(self.CMD_VERSION.encode('ascii'))
-                    time.sleep(0.1)
-                    if self._serial.in_waiting == 0:
-                        raise serial.SerialException(
-                            f"4 Mbaud handshake failed on {com_port}: "
-                            "no response after baud switch")
-                    self._serial.read(self._serial.in_waiting)  # drain response
-                    # Re-disable echo at new baud
-                    self._serial.write(self.CMD_ECHO_OFF.encode('ascii'))
-                    time.sleep(0.05)
-                    self._serial.reset_input_buffer()
-                    logger.info("[MAKCU] Switched to 4 Mbaud on %s", com_port)
-                    print(f"[MAKCU] Switched to 4 Mbaud on {com_port}")
-
-                self._baud_rate = target_baud
+            # Step 1: device may already be at 4M from a previous session
+            if self._try_open_locked(com_port, _OPERATING_BAUD):
                 self._connected = True
-                self._device_info = {}
+                self._com_port = com_port
                 self._query_info_locked()
-                logger.info("[MAKCU] Connected to %s @ %d baud", com_port, target_baud)
-                print(f"[MAKCU] Successfully connected to {com_port} @ {target_baud} baud")
-                return True
+                logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
+                print(f"[MAKCU] Connected to {com_port} @ {_OPERATING_BAUD} baud")
+            else:
+                # Step 2: send DE AD baud-change at 115200 then reopen at 4M
+                try:
+                    s = serial.Serial(com_port, 115200, timeout=0.5, write_timeout=0.1)
+                    time.sleep(0.05)
+                    s.write(_BAUD_CHANGE_FRAME)
+                    s.flush()
+                    time.sleep(0.1)
+                    s.close()
+                except serial.SerialException as exc:
+                    logger.error("[MAKCU] Baud-change frame failed: %s", exc)
+                    print(f"[MAKCU] Connection failed: {exc}")
+                    return False
 
-            except serial.SerialException as e:
-                logger.error("[MAKCU] Connection failed: %s", e)
-                print(f"[MAKCU] Connection failed: {e}")
-                self._connected = False
-                return False
-            except Exception as e:
-                logger.error("[MAKCU] Error during connection: %s", e)
-                print(f"[MAKCU] Error during connection: {e}")
-                self._connected = False
-                return False
+                time.sleep(0.05)
 
-    def _open_serial(self, com_port: str) -> bool:
-        """Open serial port at 115200 (MAKCU startup rate).
+                if not self._try_open_locked(com_port, _OPERATING_BAUD):
+                    logger.error("[MAKCU] Could not connect to %s after baud change", com_port)
+                    print(f"[MAKCU] Connection failed on {com_port}")
+                    return False
 
-        Returns True on success, False on failure.
-        """
+                self._connected = True
+                self._com_port = com_port
+                self._query_info_locked()
+                logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
+                print(f"[MAKCU] Connected to {com_port} @ {_OPERATING_BAUD} baud")
+
+        # Start button event stream outside the lock
+        self._start_stream()
+        return True
+
+    def _try_open_locked(self, com_port: str, baud: int) -> bool:
+        """Open port at baud, probe with km.version(). Returns True if km.MAKCU found."""
         try:
-            self._serial = serial.Serial(com_port, 115200, timeout=0.1, write_timeout=0.005)
+            self._serial = serial.Serial(com_port, baud, timeout=0.3, write_timeout=0.1)
+            time.sleep(0.05)
+            self._serial.reset_input_buffer()
+            self._serial.write(self.CMD_VERSION.encode('ascii'))
+            self._serial.flush()
+            deadline = time.monotonic() + 0.5
+            raw = b''
+            while time.monotonic() < deadline:
+                if self._serial.in_waiting:
+                    raw += self._serial.read(self._serial.in_waiting)
+                    if b'km.MAKCU' in raw:
+                        break
+                else:
+                    time.sleep(0.01)
+            if b'km.MAKCU' not in raw:
+                self._close_locked()
+                return False
+            self._version_string = raw.decode('ascii', errors='ignore').replace('>>>', '').strip()
+            self._serial.write(self.CMD_ECHO_OFF.encode('ascii'))
+            self._serial.flush()
+            time.sleep(0.1)
+            self._serial.reset_input_buffer()
             return True
-        except serial.SerialException as e:
-            logger.error("[MAKCU] Cannot open %s: %s", com_port, e)
-            print(f"[MAKCU] Cannot open {com_port}: {e}")
+        except serial.SerialException as exc:
+            logger.debug("[MAKCU] _try_open_locked %s@%d failed: %s", com_port, baud, exc)
+            self._close_locked()
             return False
 
+    def _close_locked(self):
+        """Close serial port. Caller must hold _lock or be in single-threaded context."""
+        if self._serial:
+            try:
+                self._serial.close()
+            except Exception:
+                pass
+            self._serial = None
+        self._connected = False
+
+    # ------------------------------------------------------------------
+    # Button event stream
+    # ------------------------------------------------------------------
+
+    def _start_stream(self):
+        """Enable km.buttons(1) stream and start the reader thread."""
+        self._stream_stop.clear()
+        self._btn_mask = 0
+        try:
+            with self._lock:
+                if self._serial and self._serial.is_open:
+                    self._serial.write(b'km.buttons(1)\r\n')
+                    self._serial.flush()
+        except Exception:
+            return
+        self._stream_thread = threading.Thread(
+            target=self._stream_reader, daemon=True, name="makcu-stream")
+        self._stream_thread.start()
+
+    def _stop_stream(self):
+        """Stop the reader thread and send km.buttons(0)."""
+        self._stream_stop.set()
+        if self._stream_thread:
+            self._stream_thread.join(timeout=1.0)
+            self._stream_thread = None
+        try:
+            with self._lock:
+                if self._serial and self._serial.is_open:
+                    self._serial.write(b'km.buttons(0)\r\n')
+                    self._serial.flush()
+        except Exception:
+            pass
+        self._btn_mask = 0
+
+    def _stream_reader(self):
+        """Daemon thread: reads km. prefix + mask bytes from serial, updates _btn_mask.
+
+        km.echo(0) means the device sends nothing in response to move/click writes,
+        so all incoming bytes are button stream events — no lock needed on reads.
+        """
+        buf = bytearray()
+        while not self._stream_stop.is_set():
+            try:
+                ser = self._serial
+                if not ser or not ser.is_open:
+                    break
+                n = ser.in_waiting
+                if n:
+                    buf.extend(ser.read(n))
+                    while len(buf) >= 4:
+                        idx = buf.find(_KM_PREFIX)
+                        if idx == -1:
+                            del buf[:-3]
+                            break
+                        if idx + 3 >= len(buf):
+                            del buf[:idx]
+                            break
+                        self._btn_mask = buf[idx + 3]
+                        del buf[:idx + 4]
+                else:
+                    time.sleep(0.003)
+            except Exception:
+                break
+
+    # ------------------------------------------------------------------
+    # Info query
+    # ------------------------------------------------------------------
+
     def _query_info_locked(self) -> dict:
-        """Send km.info() and parse key=value response. Caller must hold _lock."""
-        if not self._connected or not self._serial:
+        """Send km.info() and parse key=value pairs. Caller must hold _lock."""
+        if not self._serial:
             return {}
         try:
             self._serial.reset_input_buffer()
             self._serial.write(self.CMD_INFO.encode('ascii'))
+            self._serial.flush()
             time.sleep(0.15)
             raw = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore')
             info = {}
@@ -196,7 +249,7 @@ class MakcuMouse:
             return {}
 
     def query_info(self) -> dict:
-        """Send km.info() and return parsed key=value dict. Returns {} on failure."""
+        """Return parsed km.info() dict."""
         with self._lock:
             return self._query_info_locked()
 
@@ -208,39 +261,35 @@ class MakcuMouse:
     def version_string(self) -> str:
         return self._version_string
 
+    # ------------------------------------------------------------------
+    # Disconnect
+    # ------------------------------------------------------------------
+
     def disconnect(self):
-        """Disconnect from MAKCU device"""
+        """Stop stream then close serial port."""
+        self._stop_stream()
         with self._lock:
-            if self._serial and self._serial.is_open:
-                try:
-                    self._serial.close()
-                except Exception:
-                    pass
-            self._connected = False
-            logger.info("[MAKCU] Disconnected")
-            print("[MAKCU] Disconnected")
+            self._close_locked()
+        logger.info("[MAKCU] Disconnected")
+        print("[MAKCU] Disconnected")
 
     def is_connected(self) -> bool:
-        """Check if connected to MAKCU"""
         return self._connected and self._serial is not None and self._serial.is_open
 
+    @property
+    def com_port(self) -> str:
+        return self._com_port
+
+    # ------------------------------------------------------------------
+    # Mouse control
+    # ------------------------------------------------------------------
+
     def move(self, dx: int, dy: int):
-        """Move mouse (relative)
-
-        MAKCU supports int16 range for dx/dy (-32768 ~ 32767),
-        much larger than Arduino's -128 ~ 127 signed char limit.
-
-        Args:
-            dx: X direction movement (-32768 ~ 32767)
-            dy: Y direction movement (-32768 ~ 32767)
-        """
+        """Relative mouse move. Supports int16 range (-32768 ~ 32767)."""
         if not self.is_connected():
             return
-
-        # Clamp to int16 range
         dx = max(-32768, min(32767, int(dx)))
         dy = max(-32768, min(32767, int(dy)))
-
         try:
             cmd = self.CMD_MOVE.format(dx=dx, dy=dy)
             with self._lock:
@@ -252,125 +301,73 @@ class MakcuMouse:
             pass
 
     def click(self, action: int = 1):
-        """Perform mouse click
-
-        Args:
-            action: 1=click (press and release), 2=press down, 3=release
-        """
+        """Left mouse click. action: 1=click, 2=press, 3=release."""
         if not self.is_connected():
             return
-
         try:
             if action == 1:
-                # Single left click: press then release
-                # Use km.left(1) + km.left(0) for reliable hardware-level click
                 with self._lock:
                     if self._serial and self._serial.is_open:
                         self._serial.write(self.CMD_LEFT_DOWN.encode('ascii'))
-                        time.sleep(0.03)  # Brief hold for hardware to register
+                        time.sleep(0.03)
                         self._serial.write(self.CMD_LEFT_UP.encode('ascii'))
                 return
-            elif action == 2:
-                # Left button press
-                cmd = self.CMD_LEFT_DOWN
-            elif action == 3:
-                # Left button release
-                cmd = self.CMD_LEFT_UP
-            else:
-                return
-
-            with self._lock:
-                if self._serial and self._serial.is_open:
-                    self._serial.write(cmd.encode('ascii'))
+            cmd = self.CMD_LEFT_DOWN if action == 2 else self.CMD_LEFT_UP if action == 3 else None
+            if cmd:
+                with self._lock:
+                    if self._serial and self._serial.is_open:
+                        self._serial.write(cmd.encode('ascii'))
         except serial.SerialException:
             self._connected = False
         except Exception:
             pass
 
-    def _query_button(self, cmd: bytes, cache_key: str) -> int:
-        """Send a no-arg button query command and return the state (0-3).
-
-        States: 0=up, 1=physical down, 2=injected down, 3=both.
-        Cached for lmb_cache_seconds to avoid serial flooding.
-        """
-        import re as _re
-        now = time.monotonic()
-        cached = self._button_cache.get(cache_key)
-        if cached and now - cached[1] < self.lmb_cache_seconds:
-            return cached[0]
-        with self._lock:
-            if not self._serial or not self._serial.is_open:
-                return 0
-            try:
-                self._serial.write(cmd)
-                resp = self._serial.read_until(b"\n")
-            except Exception:
-                return 0
-        m = _re.search(rb'([0-3])\r?\n', resp)
-        val = int(m.group(1)) if m else 0
-        self._button_cache[cache_key] = (val, now)
-        return val
-
-    def query_lmb_state(self) -> int:
-        """Query LMB state. Returns 0=up, 1=physical, 2=injected, 3=both."""
-        val = self._query_button(b"km.left()\r\n", "lmb")
-        self._lmb_state_cache = val
-        self._lmb_cache_time = time.monotonic()
-        return val
-
-    def query_rmb_state(self) -> int:
-        """Query RMB state. Returns 0=up, 1=physical, 2=injected, 3=both."""
-        return self._query_button(b"km.right()\r\n", "rmb")
+    # ------------------------------------------------------------------
+    # Button state — read from live stream mask, no serial I/O
+    # ------------------------------------------------------------------
 
     @property
     def lmb_held(self) -> bool:
-        """True when LMB is physically pressed."""
-        return self.query_lmb_state() >= 1
+        """True when left mouse button is physically pressed."""
+        return bool(self._btn_mask & 0x01)
 
     @property
     def rmb_held(self) -> bool:
-        """True when RMB is physically pressed."""
-        return self.query_rmb_state() >= 1
+        """True when right mouse button is physically pressed."""
+        return bool(self._btn_mask & 0x02)
 
-    @property
-    def com_port(self) -> str:
-        """Currently connected COM port"""
-        return self._com_port
+    def query_lmb_state(self) -> int:
+        """Return 1 if LMB pressed, 0 if released. No serial I/O."""
+        return 1 if (self._btn_mask & 0x01) else 0
+
+    def query_rmb_state(self) -> int:
+        """Return 1 if RMB pressed, 0 if released. No serial I/O."""
+        return 1 if (self._btn_mask & 0x02) else 0
 
 
-# Global singleton
+# ---------------------------------------------------------------------------
+# Module-level singleton and convenience functions
+# ---------------------------------------------------------------------------
+
 makcu_mouse = MakcuMouse()
 
 
 def send_mouse_move_makcu(dx: int, dy: int):
-    """MAKCU mouse move (direct execution)"""
     makcu_mouse.move(dx, dy)
 
 
 def send_mouse_click_makcu(action: int = 1):
-    """MAKCU mouse click"""
     makcu_mouse.click(action)
     return True
 
 
-def connect_makcu(com_port: str, baud_rate: int = 115200) -> bool:
-    """Connect to MAKCU device
-
-    Args:
-        com_port: COM port (e.g., 'COM3')
-        baud_rate: Baud rate, default 115200
-
-    Returns:
-        Whether connection was successful
-    """
+def connect_makcu(com_port: str, baud_rate: int = _OPERATING_BAUD) -> bool:
     return makcu_mouse.connect(com_port, baud_rate)
 
 
 def disconnect_makcu():
-    """Disconnect MAKCU"""
     makcu_mouse.disconnect()
 
 
 def is_makcu_connected() -> bool:
-    """Check if MAKCU is connected"""
     return makcu_mouse.is_connected()
