@@ -232,6 +232,19 @@ class Config:
         self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
         self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier
 
+        # Bezier curve mouse movement
+        self.bezier_curve_enabled: bool = False
+        self.bezier_curve_strength: float = 0.5   # 0.0–1.0 curve bend amount
+        self.bezier_curve_steps: int = 10          # 2–20 interpolation steps
+
+        # Basic jitter
+        self.jitter_enabled: bool = False
+        self.jitter_strength: float = 1.5          # pixel offset radius
+
+        # Frame skip gate
+        self.frame_skip_enabled: bool = False
+        self.frame_skip_threshold: float = 2.0     # avg pixel diff below this → skip
+
         # Smart jitter — fires when bounding box is small (target is far away)
         self.smart_jitter_enabled: bool = False
         self.smart_jitter_strength: float = 6.0                # max pixel offset radius applied each frame
@@ -395,6 +408,13 @@ class Config:
             'kalman_process_noise': self.kalman_process_noise,
             'kalman_measurement_noise': self.kalman_measurement_noise,
 
+            'bezier_curve_enabled': self.bezier_curve_enabled,
+            'bezier_curve_strength': self.bezier_curve_strength,
+            'bezier_curve_steps': self.bezier_curve_steps,
+            'jitter_enabled': self.jitter_enabled,
+            'jitter_strength': self.jitter_strength,
+            'frame_skip_enabled': self.frame_skip_enabled,
+            'frame_skip_threshold': self.frame_skip_threshold,
             'smart_jitter_enabled': self.smart_jitter_enabled,
             'smart_jitter_strength': self.smart_jitter_strength,
             'smart_jitter_box_threshold_pct': self.smart_jitter_box_threshold_pct,
