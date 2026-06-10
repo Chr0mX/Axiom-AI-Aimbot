@@ -47,8 +47,7 @@ trt_cache/
 *.trt
 *.plan
 
-# Model files (large binaries — keep in external storage)
-Model/*.onnx
+# Model files (compiled engines only — keep in external storage)
 Model/*.engine
 
 # Runtime / crash artifacts
