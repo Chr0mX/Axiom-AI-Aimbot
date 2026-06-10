@@ -141,12 +141,8 @@ class OtherPage(BasePage):
         # === MAKCU Hardware ===
         self.makcuHwGroup = SettingCardGroup(t("makcu_hw_info", "MAKCU Hardware"), self.scrollWidget)
 
-        self.makcuHwRefreshBtn = PushButton(t("refresh", "Refresh"))
-        self.makcuHwRefreshBtn.setIcon(FluentIcon.SYNC)
         self.makcuHwStatusCard = SettingCard(
             FluentIcon.IOT, t("makcu_hw_status", "Status"), "—", self.makcuHwGroup)
-        self.makcuHwStatusCard.hBoxLayout.addWidget(self.makcuHwRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
-        self.makcuHwStatusCard.hBoxLayout.addSpacing(16)
 
         self.makcuHwPortCard   = SettingCard(FluentIcon.WIFI,            t("makcu_hw_port",   "COM Port"),     "—", self.makcuHwGroup)
         self.makcuHwBaudCard   = SettingCard(FluentIcon.SPEED_HIGH,      t("makcu_hw_baud",   "Baud Rate"),    "—", self.makcuHwGroup)
@@ -271,8 +267,11 @@ class OtherPage(BasePage):
         self.trtRecheckBtn.clicked.connect(self._checkTensorRT)
         self._checkTensorRT()
 
-        # MAKCU Hardware
-        self.makcuHwRefreshBtn.clicked.connect(self._refreshMakcuHwInfo)
+        # MAKCU Hardware — auto-refresh every 3 s
+        from PyQt6.QtCore import QTimer as _QTimer
+        self._makcuHwTimer = _QTimer(self)
+        self._makcuHwTimer.timeout.connect(self._refreshMakcuHwInfo)
+        self._makcuHwTimer.start(3000)
 
         # 社群按鈕
         self.discordBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")))
@@ -348,16 +347,17 @@ class OtherPage(BasePage):
             baud = getattr(self._config, 'makcu_baud_rate', 115200) if self._config else 115200
         self.makcuHwBaudCard.contentLabel.setText(f"{int(baud):,}")
 
-        ver = getattr(_makcu_mouse, 'version_string', '') or dash
-        self.makcuHwVerCard.contentLabel.setText(ver)
-
         if connected:
             try:
                 _makcu_mouse.query_info()
             except Exception:
                 pass
 
+        ver  = getattr(_makcu_mouse, 'version_string', '')
         info = getattr(_makcu_mouse, 'device_info', {})
+        if not ver:
+            ver = info.get('VERSION', dash)
+        self.makcuHwVerCard.contentLabel.setText(ver or dash)
         self.makcuHwModelCard.contentLabel.setText(info.get('MODEL', dash))
         self.makcuHwVendorCard.contentLabel.setText(info.get('VENDOR', dash))
         temp = info.get('TEMP', '')
@@ -583,7 +583,6 @@ class OtherPage(BasePage):
         self.makcuHwModelCard.titleLabel.setText(t("makcu_hw_model", "Model"))
         self.makcuHwVendorCard.titleLabel.setText(t("makcu_hw_vendor", "Vendor"))
         self.makcuHwTempCard.titleLabel.setText(t("makcu_hw_temp", "Temperature"))
-        self.makcuHwRefreshBtn.setText(t("refresh", "Refresh"))
 
         # 更新 Discord 圖標
         self._updateDiscordIcon()
