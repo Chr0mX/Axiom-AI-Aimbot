@@ -381,33 +381,38 @@ class KeysPage(BasePage):
         self.makcuInferenceCard.hBoxLayout.addWidget(self.makcuInferenceCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuInferenceCard.hBoxLayout.addSpacing(16)
 
-        # MAKCU aim key (AimKeys[1])
-        self.makcuAimCombo = ComboBox()
-        self.makcuAimCombo.setMinimumWidth(110)
-        for label, _ in _MAKCU_BTN_OPTIONS:
-            self.makcuAimCombo.addItem(label)
-        self.makcuAimCard = SettingCard(
-            FluentIcon.FINGERPRINT,
-            t("makcu_key_makcu", "MAKCU"),
-            t("makcu_key_makcu_desc", "Hold this mouse button to activate MAKCU aim"),
-            self.makcuKeysGroup
-        )
-        self.makcuAimCard.hBoxLayout.addWidget(self.makcuAimCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.makcuAimCard.hBoxLayout.addSpacing(16)
-
-        # Aim Trigger Button (makcu_aim_button)
+        # Auto Aim Key (makcu_aim_button) — which mouse button activates aim
         self.makcuTriggerCombo = ComboBox()
         self.makcuTriggerCombo.setMinimumWidth(110)
         for label, _ in _MAKCU_TRIGGER_OPTIONS:
             self.makcuTriggerCombo.addItem(label)
         self.makcuTriggerCard = SettingCard(
             FluentIcon.FINGERPRINT,
-            t("makcu_key_trigger", "Aim Trigger Button"),
-            t("makcu_key_trigger_desc", "Hold this button to aim/track"),
+            t("makcu_auto_aim_key", "Auto Aim Key"),
+            t("makcu_auto_aim_key_desc", "Mouse button that activates Auto Aim"),
             self.makcuKeysGroup
         )
         self.makcuTriggerCard.hBoxLayout.addWidget(self.makcuTriggerCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuTriggerCard.hBoxLayout.addSpacing(16)
+
+        # Auto Aim Mode (makcu_aim_mode) — hold or toggle
+        _AIM_MODE_OPTIONS = [
+            (t("aim_mode_hold", "Hold"), "hold"),
+            (t("aim_mode_toggle", "Toggle"), "toggle"),
+        ]
+        self._AIM_MODE_OPTIONS = _AIM_MODE_OPTIONS
+        self.makcuAimModeCombo = ComboBox()
+        self.makcuAimModeCombo.setMinimumWidth(110)
+        for label, _ in _AIM_MODE_OPTIONS:
+            self.makcuAimModeCombo.addItem(label)
+        self.makcuAimModeCard = SettingCard(
+            FluentIcon.ROTATE,
+            t("makcu_aim_mode", "Aim Mode"),
+            t("makcu_aim_mode_desc", "Hold: aim while button held  |  Toggle: click to toggle aim on/off"),
+            self.makcuKeysGroup
+        )
+        self.makcuAimModeCard.hBoxLayout.addWidget(self.makcuAimModeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuAimModeCard.hBoxLayout.addSpacing(16)
 
     # ──────────────────────────────────────────────
     # Layout
@@ -429,8 +434,8 @@ class KeysPage(BasePage):
 
         # MAKCU Keys (hidden by default until setConfig runs)
         self.makcuKeysGroup.addSettingCard(self.makcuInferenceCard)
-        self.makcuKeysGroup.addSettingCard(self.makcuAimCard)
         self.makcuKeysGroup.addSettingCard(self.makcuTriggerCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuAimModeCard)
         self.addContent(self.makcuKeysGroup)
         self.makcuKeysGroup.setVisible(False)
 
@@ -450,8 +455,8 @@ class KeysPage(BasePage):
         self.fireKey2Btn.keyBound.connect(self._onFireKey2Changed)
 
         self.makcuInferenceCombo.currentIndexChanged.connect(self._onMakcuInferenceKeyChanged)
-        self.makcuAimCombo.currentIndexChanged.connect(self._onMakcuAimKeyChanged)
         self.makcuTriggerCombo.currentIndexChanged.connect(self._onMakcuTriggerKeyChanged)
+        self.makcuAimModeCombo.currentIndexChanged.connect(self._onMakcuAimModeChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -494,16 +499,7 @@ class KeysPage(BasePage):
                 self.makcuInferenceCombo.blockSignals(False)
                 break
 
-        # MAKCU aim key (AimKeys[1])
-        aim1 = self._config.AimKeys[1] if len(self._config.AimKeys) >= 2 else 0x06
-        for i, (_, vk) in enumerate(_MAKCU_BTN_OPTIONS):
-            if vk == aim1:
-                self.makcuAimCombo.blockSignals(True)
-                self.makcuAimCombo.setCurrentIndex(i)
-                self.makcuAimCombo.blockSignals(False)
-                break
-
-        # Aim Trigger Button (makcu_aim_button)
+        # Auto Aim Key (makcu_aim_button)
         trigger = getattr(self._config, 'makcu_aim_button', 'lmb').lower()
         for i, (_, val) in enumerate(_MAKCU_TRIGGER_OPTIONS):
             if val == trigger:
@@ -511,6 +507,29 @@ class KeysPage(BasePage):
                 self.makcuTriggerCombo.setCurrentIndex(i)
                 self.makcuTriggerCombo.blockSignals(False)
                 break
+
+        # Aim Mode (makcu_aim_mode)
+        mode = getattr(self._config, 'makcu_aim_mode', 'hold').lower()
+        for i, (_, val) in enumerate(self._AIM_MODE_OPTIONS):
+            if val == mode:
+                self.makcuAimModeCombo.blockSignals(True)
+                self.makcuAimModeCombo.setCurrentIndex(i)
+                self.makcuAimModeCombo.blockSignals(False)
+                break
+
+        self._refreshMakcuVisibility()
+
+    def _refreshMakcuVisibility(self):
+        """Show/hide MAKCU cards based on always_aim and keep_detecting."""
+        if not self._config:
+            return
+        always_aim = bool(getattr(self._config, 'always_aim', False))
+        keep_detecting = bool(getattr(self._config, 'keep_detecting', True))
+        # Inference card: hidden when keep_detecting is on (no need to hold a button)
+        self.makcuInferenceCard.setVisible(not keep_detecting)
+        # Auto Aim Key + Mode: hidden when always_aim is on (aim is always active)
+        self.makcuTriggerCard.setVisible(not always_aim)
+        self.makcuAimModeCard.setVisible(not always_aim)
 
     # ──────────────────────────────────────────────
     # Callbacks
@@ -541,16 +560,13 @@ class KeysPage(BasePage):
                 self._config.AimKeys.append(0)
             self._config.AimKeys[0] = vk
 
-    def _onMakcuAimKeyChanged(self, idx: int):
-        if self._config and 0 <= idx < len(_MAKCU_BTN_OPTIONS):
-            vk = _MAKCU_BTN_OPTIONS[idx][1]
-            while len(self._config.AimKeys) < 2:
-                self._config.AimKeys.append(0)
-            self._config.AimKeys[1] = vk
-
     def _onMakcuTriggerKeyChanged(self, idx: int):
         if self._config and 0 <= idx < len(_MAKCU_TRIGGER_OPTIONS):
             self._config.makcu_aim_button = _MAKCU_TRIGGER_OPTIONS[idx][1]
+
+    def _onMakcuAimModeChanged(self, idx: int):
+        if self._config and 0 <= idx < len(self._AIM_MODE_OPTIONS):
+            self._config.makcu_aim_mode = self._AIM_MODE_OPTIONS[idx][1]
 
     # ──────────────────────────────────────────────
     # Retranslate
@@ -579,10 +595,10 @@ class KeysPage(BasePage):
         # MAKCU Keys
         self.makcuInferenceCard.titleLabel.setText(t("makcu_key_inference", "Inference"))
         self.makcuInferenceCard.contentLabel.setText(t("makcu_key_inference_desc", "Hold this mouse button to activate inference"))
-        self.makcuAimCard.titleLabel.setText(t("makcu_key_makcu", "MAKCU"))
-        self.makcuAimCard.contentLabel.setText(t("makcu_key_makcu_desc", "Hold this mouse button to activate MAKCU aim"))
-        self.makcuTriggerCard.titleLabel.setText(t("makcu_key_trigger", "Aim Trigger Button"))
-        self.makcuTriggerCard.contentLabel.setText(t("makcu_key_trigger_desc", "Hold this button to aim/track"))
+        self.makcuTriggerCard.titleLabel.setText(t("makcu_auto_aim_key", "Auto Aim Key"))
+        self.makcuTriggerCard.contentLabel.setText(t("makcu_auto_aim_key_desc", "Mouse button that activates Auto Aim"))
+        self.makcuAimModeCard.titleLabel.setText(t("makcu_aim_mode", "Aim Mode"))
+        self.makcuAimModeCard.contentLabel.setText(t("makcu_aim_mode_desc", "Hold: aim while button held  |  Toggle: click to toggle aim on/off"))
 
         # 刷新按鍵綁定按鈕文字
         self.aimKey1Btn.refreshText()

@@ -59,7 +59,6 @@ class Config:
         self.preview_crop_to_detection: bool = False
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
-        self.ndi_pre_resize: bool = False   # resize NDI frames to model_input_size in capture thread
         self.ndi_width: int = self.width
         self.ndi_height: int = self.height
         self.crosshairX: int = self.width // 2
@@ -189,7 +188,9 @@ class Config:
         # 保持檢測功能
         self.keep_detecting: bool = True   # 啟用保持檢測
         self.always_aim: bool = False      # 不按瞄準鍵也執行自動瞄準
-        self.makcu_aim_button: str = "lmb"  # "lmb", "rmb", or "off"
+        self.makcu_aim_button: str = "lmb"   # "lmb", "rmb", or "off"
+        self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
+        self.makcu_aim_active: bool = False  # runtime state — not serialized
         self.fov_follow_mouse: bool = False # FOV 跟隨鼠標
 
         # 顯示開關
@@ -345,10 +346,10 @@ class Config:
             'preview_crop_to_detection': self.preview_crop_to_detection,
             'ndi_source_name': self.ndi_source_name,
             'ndi_bandwidth': self.ndi_bandwidth,
-            'ndi_pre_resize': self.ndi_pre_resize,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
             'makcu_aim_button': self.makcu_aim_button,
+            'makcu_aim_mode': self.makcu_aim_mode,
             'fov_follow_mouse': self.fov_follow_mouse,
             'aim_toggle_key': self.aim_toggle_key,
             'auto_fire_key2': self.auto_fire_key2,

@@ -32,6 +32,10 @@ class InferencePage(BasePage):
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
+        from PyQt6.QtCore import QTimer
+        self._aimStatusTimer = QTimer(self)
+        self._aimStatusTimer.timeout.connect(self._updateMakcuAimStatus)
+        self._aimStatusTimer.start(250)
 
     def setConfig(self, config):
         self._config = config
@@ -334,13 +338,6 @@ class InferencePage(BasePage):
         self.ndiBandwidthCard.hBoxLayout.addWidget(self.ndiBandwidthCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.ndiBandwidthCard.hBoxLayout.addSpacing(16)
 
-        self.ndiPreResizeCard = SwitchSettingCard(
-            FluentIcon.ZOOM,
-            "NDI Pre-Resize",
-            "Resize NDI frames to model input size in the capture thread — reduces preprocessing load and improves inference FPS",
-            parent=self.generalGroup
-        )
-
         self.alwaysAimCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
             t("always_aim"),
@@ -531,6 +528,17 @@ class InferencePage(BasePage):
         self.makcuConnectCard.hBoxLayout.addWidget(self.makcuConnectBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuConnectCard.hBoxLayout.addSpacing(16)
 
+        self.makcuAimStatusLabel = BodyLabel("—")
+        self.makcuAimStatusLabel.setStyleSheet("color: #888888; font-weight: bold;")
+        self.makcuAimStatusCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            t("makcu_aim_status", "Auto Aim"),
+            "",
+            self.makcuGroup
+        )
+        self.makcuAimStatusCard.hBoxLayout.addWidget(self.makcuAimStatusLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuAimStatusCard.hBoxLayout.addSpacing(16)
+
         # === Xbox 360 Settings ===
         self.xboxGroup = SettingCardGroup("Xbox 360 Controller", self.scrollWidget)
 
@@ -630,7 +638,6 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.ndiSourceCard)
         self.generalGroup.addSettingCard(self.ndiRefreshCard)
         self.generalGroup.addSettingCard(self.ndiBandwidthCard)
-        self.generalGroup.addSettingCard(self.ndiPreResizeCard)
         self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
@@ -653,6 +660,7 @@ class InferencePage(BasePage):
         self.makcuGroup.addSettingCard(self.makcuBaudCard)
         self.makcuGroup.addSettingCard(self.makcuConnectionCard)
         self.makcuGroup.addSettingCard(self.makcuConnectCard)
+        self.makcuGroup.addSettingCard(self.makcuAimStatusCard)
         self.addContent(self.makcuGroup)
         self.makcuGroup.setVisible(False)
 
@@ -702,7 +710,6 @@ class InferencePage(BasePage):
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
         self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
-        self.ndiPreResizeCard.checkedChanged.connect(self._onNdiPreResizeChanged)
         self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
@@ -844,7 +851,6 @@ class InferencePage(BasePage):
                 self.ndiSourceCombo.blockSignals(False)
             ndi_bw = str(getattr(self._config, 'ndi_bandwidth', 'highest')).capitalize()
             self.ndiBandwidthCombo.setCurrentText(ndi_bw if ndi_bw in ("Highest", "Lowest") else "Highest")
-            self.ndiPreResizeCard.setChecked(bool(getattr(self._config, 'ndi_pre_resize', True)))
             self._updateCaptureControlsVisibility(screenshot_method)
 
             self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
@@ -964,7 +970,6 @@ class InferencePage(BasePage):
         if is_external and self._config:
             self._config.fov_follow_mouse = False
             self.fovFollowCard.setChecked(False)
-        self.ndiPreResizeCard.setVisible(is_ndi)
 
     def _updateInferenceBackendSubtitle(self):
         if not hasattr(self, "inferenceBackendCard"):
@@ -1283,10 +1288,6 @@ class InferencePage(BasePage):
         if self._config:
             self._config.ndi_bandwidth = str(text).lower()
 
-    def _onNdiPreResizeChanged(self, checked):
-        if self._config:
-            self._config.ndi_pre_resize = bool(checked)
-
     def _onNdiSourceChanged(self, text):
         if not self._config:
             return
@@ -1301,10 +1302,21 @@ class InferencePage(BasePage):
             if checked:
                 self._config.idle_detect_enabled = False
                 self.idleDetectEnableCard.setChecked(False)
+        self._notifyKeysPageVisibility()
 
     def _onKeepDetectingChanged(self, checked):
         if self._config:
             self._config.keep_detecting = checked
+        self._notifyKeysPageVisibility()
+
+    def _notifyKeysPageVisibility(self):
+        """Tell the keys page to refresh MAKCU card visibility."""
+        try:
+            win = self.window()
+            if hasattr(win, 'keysInterface') and hasattr(win.keysInterface, '_refreshMakcuVisibility'):
+                win.keysInterface._refreshMakcuVisibility()
+        except Exception:
+            pass
 
     def _onIdleDetectEnableChanged(self, checked):
         if self._config:
@@ -1481,7 +1493,20 @@ class InferencePage(BasePage):
             self.makcuConnectionLabel.setText("pyserial N/A")
             self.makcuConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
 
-
+    def _updateMakcuAimStatus(self):
+        if not self._config:
+            return
+        active = bool(getattr(self._config, 'makcu_aim_active', False))
+        always = bool(getattr(self._config, 'always_aim', False))
+        if always:
+            self.makcuAimStatusLabel.setText(t("always_on", "Always On"))
+            self.makcuAimStatusLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+        elif active:
+            self.makcuAimStatusLabel.setText(t("active", "Active"))
+            self.makcuAimStatusLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+        else:
+            self.makcuAimStatusLabel.setText(t("inactive", "Inactive"))
+            self.makcuAimStatusLabel.setStyleSheet("color: #888888; font-weight: bold;")
 
     def _onXboxSensitivityChanged(self, value):
         if self._config:
@@ -1601,7 +1626,6 @@ class InferencePage(BasePage):
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
         self.ndiRefreshBtn.setText(t("refresh"))
         self.ndiBandwidthCard.titleLabel.setText("NDI Bandwidth")
-        self.ndiPreResizeCard.titleLabel.setText("NDI Pre-Resize")
         self.alwaysAimCard.titleLabel.setText(t("always_aim"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))

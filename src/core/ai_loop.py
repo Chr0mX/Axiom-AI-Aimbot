@@ -10,7 +10,6 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
-import cv2
 import numpy as np
 
 from win_utils import is_key_pressed
@@ -212,6 +211,10 @@ def ai_logic_loop(
     _capture_backend: list = [None]
     _active_method: list = [None]
 
+    # MAKCU aim toggle state (used when makcu_aim_mode == "toggle")
+    _aim_toggle_active: list = [False]
+    _aim_btn_prev: list = [False]
+
     def _capture_worker() -> None:
         _capture_backend[0] = initialize_screen_capture(config)
         _active_method[0] = _detect_active_capture_method(
@@ -271,26 +274,9 @@ def ai_logic_loop(
                 else:
                     continue
 
-                # Pre-resize NDI frames in the capture thread so the inference
-                # thread only runs blobFromImage (fast path) instead of a full
-                # letterbox resize on a potentially large crop region.
-                store_region = target_region
-                if (getattr(config, 'ndi_pre_resize', True)
-                        and _active_method[0] == 'ndi'):
-                    model_sz = int(getattr(config, 'model_input_size', 640))
-                    fh, fw = captured_frame.shape[:2]
-                    if fw != model_sz or fh != model_sz:
-                        captured_frame = cv2.resize(
-                            captured_frame, (model_sz, model_sz),
-                            interpolation=cv2.INTER_AREA,
-                        )
-                        store_region = dict(target_region)
-                        store_region['width'] = model_sz
-                        store_region['height'] = model_sz
-
                 with frame_lock:
                     capture_state['latest_frame'] = captured_frame
-                    capture_state['latest_region'] = store_region
+                    capture_state['latest_region'] = target_region
 
                 config.last_screenshot_time = time.time()
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
@@ -357,15 +343,25 @@ def ai_logic_loop(
 
                 is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
                 _makcu_btn = getattr(config, 'makcu_aim_button', 'lmb')
-                if not is_aiming and _makcu_btn != 'off' \
+                _makcu_mode = getattr(config, 'makcu_aim_mode', 'hold')
+                if _makcu_btn != 'off' \
                         and getattr(config, 'mouse_move_method', '') == 'makcu':
                     try:
                         from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
                         if is_makcu_connected():
-                            _mm.lmb_cache_seconds = max(0.008, config.detect_interval)
-                            is_aiming = _mm.rmb_held if _makcu_btn == 'rmb' else _mm.lmb_held
+                            btn_now = _mm.rmb_held if _makcu_btn == 'rmb' else _mm.lmb_held
+                            if _makcu_mode == 'toggle':
+                                # Rising-edge detection: flip toggle on button press
+                                if btn_now and not _aim_btn_prev[0]:
+                                    _aim_toggle_active[0] = not _aim_toggle_active[0]
+                                _aim_btn_prev[0] = btn_now
+                                is_aiming = is_aiming or _aim_toggle_active[0]
+                            else:
+                                # Hold mode: aim while button is held
+                                is_aiming = is_aiming or btn_now
                     except Exception:
                         pass
+                config.makcu_aim_active = is_aiming
                 if is_aiming:
                     if state.aiming_start_time == 0.0:
                         state.aiming_start_time = current_time
