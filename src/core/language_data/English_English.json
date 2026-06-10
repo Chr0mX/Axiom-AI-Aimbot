@@ -265,5 +265,12 @@
     "smart_jitter_level_med": "Medium (±3px)",
     "smart_jitter_level_high": "High (±6px)",
     "skip_letterbox_label": "Skip Letterbox Padding",
-    "skip_letterbox_desc": "Directly scale the capture region instead of padding to square. Slightly faster for square captures."
+    "skip_letterbox_desc": "Directly scale the capture region instead of padding to square. Slightly faster for square captures.",
+    "makcu_keys_group": "MAKCU Keys",
+    "makcu_key_inference": "Inference",
+    "makcu_key_inference_desc": "Hold this mouse button to activate inference",
+    "makcu_key_makcu": "MAKCU",
+    "makcu_key_makcu_desc": "Hold this mouse button to activate MAKCU aim",
+    "makcu_key_trigger": "Aim Trigger Button",
+    "makcu_key_trigger_desc": "Hold this button to aim/track"
 }

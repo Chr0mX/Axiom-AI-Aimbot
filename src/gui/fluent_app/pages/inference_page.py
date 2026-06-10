@@ -2,6 +2,7 @@
 """Inference Page - Model, FOV, Capture, General Parameters, Inference Performance"""
 
 import os
+import re
 import glob
 import sys
 import subprocess
@@ -529,18 +530,6 @@ class InferencePage(BasePage):
         self.makcuConnectCard.hBoxLayout.addWidget(self.makcuConnectBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuConnectCard.hBoxLayout.addSpacing(16)
 
-        self.makcuAimButtonCombo = ComboBox()
-        self.makcuAimButtonCombo.addItems(["LMB", "RMB", "Off"])
-        self.makcuAimButtonCombo.setMinimumWidth(100)
-        self.makcuAimButtonCard = SettingCard(
-            FluentIcon.FINGERPRINT,
-            t("makcu_aim_button", "Aim Trigger Button"),
-            t("makcu_aim_button_desc", "Hold this button to aim/track; inference always runs"),
-            self.makcuGroup
-        )
-        self.makcuAimButtonCard.hBoxLayout.addWidget(self.makcuAimButtonCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.makcuAimButtonCard.hBoxLayout.addSpacing(16)
-
         # === Xbox 360 Settings ===
         self.xboxGroup = SettingCardGroup("Xbox 360 Controller", self.scrollWidget)
 
@@ -663,7 +652,6 @@ class InferencePage(BasePage):
         self.makcuGroup.addSettingCard(self.makcuBaudCard)
         self.makcuGroup.addSettingCard(self.makcuConnectionCard)
         self.makcuGroup.addSettingCard(self.makcuConnectCard)
-        self.makcuGroup.addSettingCard(self.makcuAimButtonCard)
         self.addContent(self.makcuGroup)
         self.makcuGroup.setVisible(False)
 
@@ -732,7 +720,6 @@ class InferencePage(BasePage):
         self.makcuComRefreshBtn.clicked.connect(self._refreshMakcuComPorts)
         self.makcuComPortCombo.currentTextChanged.connect(self._onMakcuComPortChanged)
         self.makcuConnectBtn.clicked.connect(self._onMakcuConnectToggle)
-        self.makcuAimButtonCombo.currentTextChanged.connect(self._onMakcuAimButtonChanged)
         self.makcuBaudCombo.currentTextChanged.connect(self._onMakcuBaudChanged)
 
         self.xboxSensitivityCard.valueChanged.connect(self._onXboxSensitivityChanged)
@@ -872,14 +859,20 @@ class InferencePage(BasePage):
                 idx = self.comPortCombo.findText(self._config.arduino_com_port)
                 if idx >= 0:
                     self.comPortCombo.setCurrentIndex(idx)
+                elif self.comPortCombo.count() > 1:
+                    self.comPortCombo.setCurrentIndex(1)
+            elif self.comPortCombo.count() > 1:
+                self.comPortCombo.setCurrentIndex(1)
 
-            if getattr(self._config, 'makcu_com_port', ''):
-                idx = self.makcuComPortCombo.findText(self._config.makcu_com_port)
+            _makcu_port = getattr(self._config, 'makcu_com_port', '')
+            if _makcu_port:
+                idx = self.makcuComPortCombo.findText(_makcu_port)
                 if idx >= 0:
                     self.makcuComPortCombo.setCurrentIndex(idx)
-            _aim_map = {"lmb": "LMB", "rmb": "RMB", "off": "Off"}
-            _aim_btn = _aim_map.get(str(getattr(self._config, 'makcu_aim_button', 'lmb')).lower(), "LMB")
-            self.makcuAimButtonCombo.setCurrentText(_aim_btn)
+                elif self.makcuComPortCombo.count() > 1:
+                    self.makcuComPortCombo.setCurrentIndex(1)
+            elif self.makcuComPortCombo.count() > 1:
+                self.makcuComPortCombo.setCurrentIndex(1)
 
             makcu_baud = str(getattr(self._config, 'makcu_baud_rate', 115200))
             if self.makcuBaudCombo.findText(makcu_baud) < 0:
@@ -922,13 +915,19 @@ class InferencePage(BasePage):
         if os.path.exists(model_dir):
             os.startfile(model_dir)
 
+    @staticmethod
+    def _sorted_com_ports(ports):
+        def _num(p):
+            m = re.search(r'(\d+)$', p.device)
+            return int(m.group(1)) if m else 0
+        return sorted(ports, key=_num, reverse=True)
+
     def _refreshComPorts(self):
         self.comPortCombo.clear()
         self.comPortCombo.addItem(t("no_com_port"))
         try:
             import serial.tools.list_ports
-            ports = serial.tools.list_ports.comports()
-            for port in ports:
+            for port in self._sorted_com_ports(serial.tools.list_ports.comports()):
                 self.comPortCombo.addItem(port.device)
         except ImportError:
             pass
@@ -938,8 +937,7 @@ class InferencePage(BasePage):
         self.makcuComPortCombo.addItem(t("no_com_port"))
         try:
             import serial.tools.list_ports
-            ports = serial.tools.list_ports.comports()
-            for port in ports:
+            for port in self._sorted_com_ports(serial.tools.list_ports.comports()):
                 self.makcuComPortCombo.addItem(port.device)
         except ImportError:
             pass
@@ -1486,9 +1484,7 @@ class InferencePage(BasePage):
             self.makcuConnectionLabel.setText("pyserial N/A")
             self.makcuConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
 
-    def _onMakcuAimButtonChanged(self, text):
-        if self._config:
-            self._config.makcu_aim_button = text.lower()
+
 
     def _onXboxSensitivityChanged(self, value):
         if self._config:
