@@ -75,22 +75,43 @@ def calculate_detection_region(config: Config, crosshair_x: int, crosshair_y: in
     }
 
 
+def _circle_intersects_bbox(
+    cx: float, cy: float, r: float,
+    x1: float, y1: float, x2: float, y2: float,
+) -> bool:
+    # Ported from Someone_idea/fov_filter.py — true circle/AABB intersection test.
+    # Finds the closest point on the rectangle to the circle centre, then checks
+    # whether that point lies within the radius.
+    lx, rx = (x1, x2) if x1 <= x2 else (x2, x1)
+    ty, by = (y1, y2) if y1 <= y2 else (y2, y1)
+    nx = min(max(cx, lx), rx)
+    ny = min(max(cy, ty), by)
+    return (nx - cx) ** 2 + (ny - cy) ** 2 <= r * r
+
+
 def filter_boxes_by_fov(
     boxes: List[List[float]],
     confidences: List[float],
     crosshair_x: int,
     crosshair_y: int,
     fov_size: int,
+    config=None,
 ) -> Tuple[List[List[float]], List[float]]:
-    """FOV 過濾：只保留與 FOV 框有交集的人物框"""
+    """FOV 過濾：只保留與 FOV 框有交集的人物框
+
+    Extended to support an optional circular FOV test (Someone_idea/fov_filter.py).
+    fov_circle_filter_enabled=False (default) keeps the original square behaviour.
+    """
 
     if not boxes:
         return [], []
 
+    use_circle = bool(getattr(config, 'fov_circle_filter_enabled', False))
     fov_half = fov_size // 2
-    fov_left = crosshair_x - fov_half
-    fov_top = crosshair_y - fov_half
-    fov_right = crosshair_x + fov_half
+    r = float(fov_half)
+    fov_left   = crosshair_x - fov_half
+    fov_top    = crosshair_y - fov_half
+    fov_right  = crosshair_x + fov_half
     fov_bottom = crosshair_y + fov_half
 
     filtered_boxes = []
@@ -98,7 +119,11 @@ def filter_boxes_by_fov(
 
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = box
-        if x1 < fov_right and x2 > fov_left and y1 < fov_bottom and y2 > fov_top:
+        if use_circle:
+            keep = _circle_intersects_bbox(float(crosshair_x), float(crosshair_y), r, x1, y1, x2, y2)
+        else:
+            keep = x1 < fov_right and x2 > fov_left and y1 < fov_bottom and y2 > fov_top
+        if keep:
             filtered_boxes.append(box)
             if i < len(confidences):
                 filtered_confidences.append(confidences[i])
@@ -155,6 +180,7 @@ def update_queues(
     boxes: List[List[float]],
     confidences: List[float],
     auto_fire_queue: queue.Queue | None = None,
+    auto_fire_boxes: List[List[float]] | None = None,
 ) -> None:
     """更新檢測結果隊列，並向自動開火單獨佇列廣播"""
 
@@ -175,4 +201,4 @@ def update_queues(
                 auto_fire_queue.get_nowait()
         except queue.Empty:
             pass
-        auto_fire_queue.put(list(boxes))
+        auto_fire_queue.put(list(auto_fire_boxes) if auto_fire_boxes is not None else list(boxes))

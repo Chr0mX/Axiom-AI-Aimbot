@@ -159,8 +159,6 @@ def ai_logic_loop(
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
 
     state = LoopState(cached_mouse_move_method=config.mouse_move_method)
-    _last_skip_frame: list = [None]  # stores last frame used for pixel-diff gate
-
     # CUDA IO binding — set up once per model session to avoid repeated
     # host→device copies.  Recreated on model hot-swap.
     _io_binding: list = [None]
@@ -197,7 +195,11 @@ def ai_logic_loop(
     last_stats_print = time.perf_counter()
     last_detection_run_time = 0.0
 
-    capture_lock = threading.Lock()
+    # Two independent locks to eliminate cross-contention:
+    #   region_lock  — inference writes target_region, capture reads it
+    #   frame_lock   — capture writes latest_frame/latest_region, inference reads them
+    region_lock = threading.Lock()
+    frame_lock  = threading.Lock()
     capture_stop_event = threading.Event()
     capture_state: dict[str, object] = {
         'latest_frame': None,
@@ -209,35 +211,14 @@ def ai_logic_loop(
     _capture_backend: list = [None]
     _active_method: list = [None]
 
+    # MAKCU aim toggle state (used when makcu_aim_mode == "toggle")
+    _aim_toggle_active: list = [False]
+    _aim_btn_prev: list = [False]
+
+    # Preprocess worker state — runs concurrently with inference to avoid
+    # serializing resize+normalize and ONNX inference on the same thread.
     _tensor_queue: queue.Queue = queue.Queue(maxsize=1)
     _preprocess_stop: threading.Event = threading.Event()
-
-    def _preprocess_worker() -> None:
-        last_frame_id: int = -1
-        while not _preprocess_stop.is_set() and config.Running:
-            try:
-                with capture_lock:
-                    frame = capture_state.get('latest_frame')
-                    region = capture_state.get('latest_region')
-                    frame_id = id(frame)
-                if frame is None or region is None or frame_id == last_frame_id:
-                    time.sleep(0.001)
-                    continue
-                last_frame_id = frame_id
-                tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
-                    frame, config.model_input_size)
-                try:
-                    _tensor_queue.put(
-                        (tensor, lb_scale, lb_pad_x, lb_pad_y, region),
-                        timeout=0.05)
-                except queue.Full:
-                    pass
-            except Exception:
-                time.sleep(0.001)
-
-    _preprocess_thread = threading.Thread(
-        target=_preprocess_worker, name='PreprocessWorker', daemon=True)
-    _preprocess_thread.start()
 
     def _capture_worker() -> None:
         _capture_backend[0] = initialize_screen_capture(config)
@@ -273,7 +254,7 @@ def ai_logic_loop(
                         _active_method[0] = new_method
                         _last_valid_frame[0] = None  # reset cached frame on backend change
 
-                with capture_lock:
+                with region_lock:
                     target_region = capture_state.get('target_region')
 
                 if target_region is None:
@@ -298,7 +279,7 @@ def ai_logic_loop(
                 else:
                     continue
 
-                with capture_lock:
+                with frame_lock:
                     capture_state['latest_frame'] = captured_frame
                     capture_state['latest_region'] = target_region
 
@@ -309,6 +290,29 @@ def ai_logic_loop(
                 _set_windows_timer_resolution_1ms(False)
             if _capture_backend[0] is not None:
                 _cleanup_capture(_capture_backend[0])
+
+    def _preprocess_worker() -> None:
+        last_frame_id: int = -1
+        while not _preprocess_stop.is_set() and config.Running:
+            try:
+                with frame_lock:
+                    frame = capture_state.get('latest_frame')
+                    region = capture_state.get('latest_region')
+                    frame_id = id(frame)
+                if frame is None or region is None or frame_id == last_frame_id:
+                    time.sleep(0.001)
+                    continue
+                last_frame_id = frame_id
+                tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(frame, config.model_input_size)
+                try:
+                    _tensor_queue.put((tensor, lb_scale, lb_pad_x, lb_pad_y, region), timeout=0.05)
+                except queue.Full:
+                    pass
+            except Exception:
+                time.sleep(0.001)
+
+    _preprocess_thread = threading.Thread(target=_preprocess_worker, name='PreprocessWorker', daemon=True)
+    _preprocess_thread.start()
 
     capture_thread = threading.Thread(target=_capture_worker, name='CaptureWorker', daemon=True)
     capture_thread.start()
@@ -344,6 +348,12 @@ def ai_logic_loop(
                 )
                 if model is not prev_model:
                     _io_binding[0] = _setup_io_binding(model)
+                    # Refresh ONNX class-name metadata for semantic FP filter (Someone_idea).
+                    try:
+                        from .detection_semantics import sync_detection_class_names_from_backend
+                        sync_detection_class_names_from_backend(model, config)
+                    except Exception:
+                        pass
 
                 if current_time - state.last_pid_update > state.pid_check_interval:
                     pid_x.Kp, pid_x.Ki, pid_x.Kd = config.pid_kp_x, config.pid_ki_x, config.pid_kd_x
@@ -361,15 +371,25 @@ def ai_logic_loop(
 
                 is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
                 _makcu_btn = getattr(config, 'makcu_aim_button', 'lmb')
-                if not is_aiming and _makcu_btn != 'off' \
+                _makcu_mode = getattr(config, 'makcu_aim_mode', 'hold')
+                if _makcu_btn != 'off' \
                         and getattr(config, 'mouse_move_method', '') == 'makcu':
                     try:
                         from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
                         if is_makcu_connected():
-                            _mm.lmb_cache_seconds = max(0.008, config.detect_interval)
-                            is_aiming = _mm.rmb_held if _makcu_btn == 'rmb' else _mm.lmb_held
+                            btn_now = _mm.rmb_held if _makcu_btn == 'rmb' else _mm.lmb_held
+                            if _makcu_mode == 'toggle':
+                                # Rising-edge detection: flip toggle on button press
+                                if btn_now and not _aim_btn_prev[0]:
+                                    _aim_toggle_active[0] = not _aim_toggle_active[0]
+                                _aim_btn_prev[0] = btn_now
+                                is_aiming = is_aiming or _aim_toggle_active[0]
+                            else:
+                                # Hold mode: aim while button is held
+                                is_aiming = is_aiming or btn_now
                     except Exception:
                         pass
+                config.makcu_aim_active = is_aiming
                 if is_aiming:
                     if state.aiming_start_time == 0.0:
                         state.aiming_start_time = current_time
@@ -387,14 +407,8 @@ def ai_logic_loop(
                 if region['width'] <= 0 or region['height'] <= 0:
                     continue
 
-                with capture_lock:
+                with region_lock:
                     capture_state['target_region'] = region
-                    latest_frame = capture_state.get('latest_frame')
-                    latest_region = capture_state.get('latest_region')
-
-                if latest_frame is None or latest_region is None:
-                    _sleep_precise(0.001)
-                    continue
 
                 idle_enabled = getattr(config, 'idle_detect_enabled', True)
                 if getattr(config, 'always_aim', False) or getattr(config, 'always_auto_fire', False):
@@ -412,21 +426,6 @@ def ai_logic_loop(
                         _sleep_precise(next_detect_wait)
                     continue
                 last_detection_run_time = now_detect
-
-                # Frame skip gate: skip inference when the capture region
-                # hasn't changed significantly (e.g. static background).
-                # Compare BGR channels only — alpha is always 255 in BGRA frames,
-                # so including it deflates the mean diff by 25% and causes nearly
-                # every frame to be skipped when motion is borderline.
-                if getattr(config, 'frame_skip_enabled', False) and _last_skip_frame[0] is not None:
-                    _a, _b = latest_frame, _last_skip_frame[0]
-                    if _a.shape == _b.shape:
-                        _diff = np.mean(np.abs(
-                            _a[..., :3].astype(np.int16) - _b[..., :3].astype(np.int16)
-                        ))
-                        if _diff < float(getattr(config, 'frame_skip_threshold', 2.0)):
-                            continue  # reuse last boxes; no inference this frame
-                _last_skip_frame[0] = latest_frame
 
                 t0 = time.perf_counter()
                 try:
@@ -453,7 +452,7 @@ def ai_logic_loop(
                     else:
                         outputs = model.run(None, {input_name: input_tensor})
                     t3 = time.perf_counter()
-                    boxes, confidences = postprocess_outputs(
+                    boxes, confidences, class_ids = postprocess_outputs(
                         outputs,
                         latest_region['width'],
                         latest_region['height'],
@@ -473,7 +472,13 @@ def ai_logic_loop(
                     print(f"ONNX 推理錯誤: {e}")
                     continue
 
-                boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size)
+                # --- Semantic FP filter (new feature from Someone_idea) ---
+                if getattr(config, 'detect_semantic_filter_enabled', False):
+                    from .detection_semantics import filter_detections_by_semantic_class
+                    boxes, confidences, class_ids = filter_detections_by_semantic_class(
+                        boxes, confidences, class_ids, config)
+
+                boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size, config)
 
                 if config.single_target_mode:
                     boxes, confidences = find_closest_target(
@@ -516,6 +521,7 @@ def ai_logic_loop(
                     boxes,
                     confidences,
                     auto_fire_queue=auto_fire_boxes_queue,
+                    auto_fire_boxes=boxes,
                 )
 
                 if getattr(config, 'enable_latency_stats', False):

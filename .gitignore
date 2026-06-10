@@ -26,8 +26,30 @@ Thumbs.db
 # Logs and local config
 *.log
 config/*.json
+*.config
+config.json
+user_config.json
+settings.json
 
 # Test cache
 .pytest_cache/
 .coverage
 htmlcov/
+
+# cyndilib NDI library (installed by src/install_cyndilib.py)
+src/python/Lib/site-packages/cyndilib/
+src/python/Lib/site-packages/cyndilib-*/
+src/python/Lib/site-packages/cyndilib*.dist-info/
+
+# TensorRT engine cache and compiled engines
+trt_cache/
+*.engine
+*.trt
+*.plan
+
+# Model files (compiled engines only — keep in external storage)
+Model/*.engine
+
+# Runtime / crash artifacts
+crash_reports/
+*.dmp

@@ -76,6 +76,88 @@ def calculate_aim_target(box: List[float], aim_part: str, head_height_ratio: flo
     return target_x, target_y
 
 
+def _adaptive_sticky_iou(base_iou: float, box: list, fov_size: float) -> float:
+    # Replaces fixed lock_iou_threshold with area-scaled version.
+    # Ported from Someone_idea/sticky_aim.py StickyTargetLock._adaptive_iou_threshold().
+    # Small/far targets get a looser threshold so box jitter doesn't break the lock.
+    area = max(0.0, box[2] - box[0]) * max(0.0, box[3] - box[1])
+    s = max(0.55, min(1.65, (max(0.1, fov_size / 240.0)) ** 2))
+    b = float(base_iou)
+    if area < 350 * s:   return max(0.05, b * 0.34)
+    if area < 900 * s:   return max(0.06, b * 0.48)
+    if area < 2200 * s:  return max(0.08, b * 0.62)
+    if area < 4500 * s:  return max(0.05, b * 0.48)
+    return max(0.04, b * 0.34)
+
+
+def _apply_adaptive_deadzone(
+    error_x: float, error_y: float, box_height: float, config
+) -> tuple:
+    # Zero out small errors so the cursor doesn't micro-jitter when already on-target.
+    # Deadzone grows with target proximity because detection noise is larger for close targets.
+    # Ported from Someone_idea/ai_aiming.py.
+    try:
+        if not getattr(config, 'aim_deadzone_enabled', False):
+            return error_x, error_y
+        fov = float(getattr(config, 'fov_size', 222) or 222)
+        h_norm = box_height / max(fov, 1.0)
+        dz_min = float(getattr(config, 'aim_deadzone_min_px', 0.4))
+        dz_close = float(getattr(config, 'aim_deadzone_close_px', 0.2))
+        t = min(1.0, h_norm / 0.28)
+        deadzone = dz_min + (dz_close * 9.0 - dz_min) * (t ** 0.85)
+        deadzone = max(0.16, min(deadzone, fov * 0.075))
+        mag = math.hypot(error_x, error_y)
+        if mag < deadzone:
+            return 0.0, 0.0
+        scale = min(1.0, (mag - deadzone) / (deadzone * 0.3 + 1e-6))
+        ratio = (mag - deadzone) / mag
+        return error_x * ratio * scale, error_y * ratio * scale
+    except Exception:
+        return error_x, error_y
+
+
+def _apply_lateral_overshoot_brake(
+    error_x: float, error_y: float, box: list, config
+) -> tuple:
+    # Slows horizontal correction when vertical error dominates, mimicking the human
+    # tendency to settle onto a target rather than diagonal-snapping.
+    # Ported from Someone_idea/ai_aiming.py.
+    try:
+        if not getattr(config, 'aim_lateral_brake_enabled', False):
+            return error_x, error_y
+        ex = abs(error_x)
+        ey = abs(error_y)
+        if ey < 1e-6:
+            return error_x, error_y
+        dom_trigger = float(getattr(config, 'aim_lateral_brake_dom_trigger', 1.12))
+        dominance = ex / max(ey, 1e-6)
+        if dominance < dom_trigger:
+            return error_x, error_y
+        dom_max = float(getattr(config, 'aim_lateral_brake_dom_max', 3.0))
+        strength = float(getattr(config, 'aim_lateral_brake_strength', 0.75))
+        min_scale = float(getattr(config, 'aim_lateral_brake_min_scale', 0.26))
+        t = min(1.0, (dominance - dom_trigger) / max(dom_max - dom_trigger, 0.1))
+        brake_raw = 1.0 - (1.0 - min_scale) * (t ** 0.9) * strength
+        x_scale = max(min_scale, min(1.0, brake_raw))
+        return error_x * x_scale, error_y
+    except Exception:
+        return error_x, error_y
+
+
+def _apply_per_frame_cap(move_x: float, move_y: float, config) -> tuple:
+    # Hard cap on pixels-per-frame to prevent instant lock-on snaps.
+    # A mouse travelling 300+ px in a single 16ms frame is physically implausible for a human.
+    # Ported from Someone_idea/ai_aiming.py.
+    max_pf = float(getattr(config, 'max_move_per_frame_px', 0) or 0)
+    if max_pf <= 0:
+        return move_x, move_y
+    mag = math.hypot(move_x, move_y)
+    if mag > max_pf:
+        scale = max_pf / mag
+        return move_x * scale, move_y * scale
+    return move_x, move_y
+
+
 def process_aiming(
     config: Config,
     boxes: List[List[float]],
@@ -125,7 +207,12 @@ def process_aiming(
         sticky = getattr(config, 'sticky_lock_enabled', False)
         selected = valid_targets[0]
         if sticky and state.locked_box is not None:
-            iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
+            # Replaced fixed lock_iou_threshold with adaptive area-scaled version (Someone_idea).
+            _base_iou = float(getattr(config, 'lock_iou_threshold', 0.3))
+            if getattr(config, 'sticky_adaptive_iou', True):
+                iou_thresh = _adaptive_sticky_iou(_base_iou, state.locked_box, float(getattr(config, 'fov_size', 222)))
+            else:
+                iou_thresh = _base_iou
             best_item, best_iou = None, 0.0
             for item in valid_targets:
                 iou = _box_iou(state.locked_box, item[4])
@@ -179,6 +266,16 @@ def process_aiming(
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
 
+        # --- Adaptive deadzone (new feature from Someone_idea) ---
+        if getattr(config, 'aim_deadzone_enabled', False):
+            errorX, errorY = _apply_adaptive_deadzone(errorX, errorY, selected_box[3] - selected_box[1], config)
+            if errorX == 0.0 and errorY == 0.0:
+                return
+
+        # --- Lateral overshoot brake (new feature from Someone_idea) ---
+        if getattr(config, 'aim_lateral_brake_enabled', False):
+            errorX, errorY = _apply_lateral_overshoot_brake(errorX, errorY, selected_box, config)
+
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
 
         if getattr(config, 'aim_y_reduce_enabled', False) and state.aiming_start_time > 0:
@@ -200,6 +297,11 @@ def process_aiming(
             dx, dy = _result
 
         move_x, move_y = int(round(dx)), int(round(dy))
+
+        # --- Per-frame pixel cap (new feature from Someone_idea) ---
+        if getattr(config, 'max_move_per_frame_px', 0) > 0:
+            _mx, _my = _apply_per_frame_cap(float(move_x), float(move_y), config)
+            move_x, move_y = int(round(_mx)), int(round(_my))
 
         if getattr(config, 'jitter_enabled', False) and (move_x != 0 or move_y != 0):
             j = float(getattr(config, 'jitter_strength', 1.5))

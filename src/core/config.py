@@ -90,18 +90,13 @@ class Config:
         # Defaults to screen height (same as legacy behavior)
         self.detect_range_size: int = self.height # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）
         self.show_confidence: bool = True # 是否在框上顯示置信度
-        self.min_confidence: float = 0.20  # 最小置信度，範圍 0~1，預設 0.20
+        self.min_confidence: float = 0.80  # 最小置信度，範圍 0~1
         self.aim_part: str = "head"
         
         # Single target mode
         self.single_target_mode: bool = True  # 啟用單一目標模式（只瞄準置信度最高的目標）
         
-        # Aim curve smoothing (Bezier)
-        self.bezier_curve_enabled: bool = False # 是否啟用貝茲曲線平滑
-        self.bezier_curve_strength: float = 0.35  # 0~1, larger curve is more obvious
-        self.bezier_curve_steps: int = 7          # More segments = smoother (>=2)
-
-        # Smart tracking prediction settings (replaces Kalman) 
+        # Smart tracking prediction settings (replaces Kalman)
         self.tracker_enabled: bool = False          # SmartTracker removed; kept for config compatibility
         self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
         self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
@@ -138,19 +133,16 @@ class Config:
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能
         self.aim_y_reduce_delay: float = 0.6      # 按下瞄準鍵後多久開始歸零 (秒)
 
-        # Anti-detection: human-like movement jitter
-        self.jitter_enabled: bool = False
-        self.jitter_strength: float = 1.5         # Max random offset per axis (pixels)
-
         # Target priority scoring
         self.target_priority_mode: str = "distance"       # "distance" | "confidence" | "composite"
         self.target_priority_confidence_weight: float = 0.5  # Weight for confidence in composite mode
 
         # Confidence box color theme
         self.box_color_theme: str = "default"  # "default" | "cyan" | "red" | "yellow" | "white" | "purple"
+        self.chroma_box_speed: float = 1.0  # rainbow cycle speed for in-FOV boxes
 
         # Tracer line from screen center to detected targets
-        self.show_tracer_line: bool = False
+        self.show_tracer_line: bool = True
 
         # Crosshair overlay
         self.show_crosshair: bool = False
@@ -161,11 +153,11 @@ class Config:
         self.crosshair_size: int = 4
 
         # 滑鼠控制方式
-        self.mouse_move_method: str = "mouse_event"  # 滑鼠移動方式（預設使用安全的 mouse_event）
+        self.mouse_move_method: str = "makcu"  # 滑鼠移動方式
         self.mouse_click_method: str = "mouse_event" # 滑鼠點擊方式
         self.arduino_com_port: str = ""              # Arduino Leonardo COM 埠
         self.makcu_com_port: str = ""                  # MAKCU KM Host COM 埠
-        self.makcu_baud_rate: int = 115200           # MAKCU 串列傳輸速率（支援 115200/500000/1000000/2000000/4000000）
+        self.makcu_baud_rate: int = 4_000_000        # MAKCU 串列傳輸速率（使用官方 DE AD 幀序列切換至 4 Mbaud）
         self.arduino_baud_rate: int = 115200         # Arduino 串列傳輸速率
 
         # Xbox 360 虛擬手把設定
@@ -196,7 +188,9 @@ class Config:
         # 保持檢測功能
         self.keep_detecting: bool = True   # 啟用保持檢測
         self.always_aim: bool = False      # 不按瞄準鍵也執行自動瞄準
-        self.makcu_aim_button: str = "lmb"  # "lmb", "rmb", or "off"
+        self.makcu_aim_button: str = "lmb"   # "lmb", "rmb", or "off"
+        self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
+        self.makcu_aim_active: bool = False  # runtime state — not serialized
         self.fov_follow_mouse: bool = False # FOV 跟隨鼠標
 
         # 顯示開關
@@ -231,9 +225,6 @@ class Config:
         # CUDA IO Binding 零拷貝推理（僅 CUDA provider 有效）
         self.cuda_io_binding_enabled: bool = False
 
-        # 幀跳過：像素差分閾值，靜態畫面時跳過推理
-        self.frame_skip_enabled: bool = False
-        self.frame_skip_threshold: float = 2.0
         self.skip_letterbox: bool = False         # 直接縮放取代 letterbox（略快，正方形擷取無失真）
 
         # Kalman filter aim-point smoother (mutually exclusive with EMA in UI)
@@ -260,7 +251,25 @@ class Config:
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
         self.lock_decay_frames: int = 15       # 鎖定目標消失後維持的幀數
-        self.lock_iou_threshold: float = 0.3   # 視為同一目標的最低 IoU
+        self.lock_iou_threshold: float = 0.3   # 視為同一目標的最低 IoU（adaptive 模式下作為基礎值）
+        self.sticky_adaptive_iou: bool = True  # adaptive IoU scaling by box area (Someone_idea)
+
+        # FOV filter mode
+        self.fov_circle_filter_enabled: bool = True  # circular FOV test instead of square
+
+        # Aim shaping (ported from Someone_idea)
+        self.aim_deadzone_enabled: bool = False
+        self.aim_deadzone_min_px: float = 0.4
+        self.aim_deadzone_close_px: float = 0.2
+        self.aim_lateral_brake_enabled: bool = False
+        self.aim_lateral_brake_strength: float = 0.75
+        self.aim_lateral_brake_dom_trigger: float = 1.12
+        self.aim_lateral_brake_dom_max: float = 3.0
+        self.aim_lateral_brake_min_scale: float = 0.26
+        self.max_move_per_frame_px: float = 85.0
+
+        # Semantic false-positive filter (ported from Someone_idea)
+        self.detect_semantic_filter_enabled: bool = True
 
         # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
         self.display_locked_box: list | None = None
@@ -340,6 +349,7 @@ class Config:
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
             'makcu_aim_button': self.makcu_aim_button,
+            'makcu_aim_mode': self.makcu_aim_mode,
             'fov_follow_mouse': self.fov_follow_mouse,
             'aim_toggle_key': self.aim_toggle_key,
             'auto_fire_key2': self.auto_fire_key2,
@@ -378,8 +388,6 @@ class Config:
 
             'trt_fp16_enabled': self.trt_fp16_enabled,
             'cuda_io_binding_enabled': self.cuda_io_binding_enabled,
-            'frame_skip_enabled': self.frame_skip_enabled,
-            'frame_skip_threshold': self.frame_skip_threshold,
             'skip_letterbox': self.skip_letterbox,
             'auto_match_fps': self.auto_match_fps,
 
@@ -402,18 +410,27 @@ class Config:
             'sticky_lock_enabled': self.sticky_lock_enabled,
             'lock_decay_frames': self.lock_decay_frames,
             'lock_iou_threshold': self.lock_iou_threshold,
+            'sticky_adaptive_iou': self.sticky_adaptive_iou,
 
-            'bezier_curve_enabled': self.bezier_curve_enabled,
-            'bezier_curve_strength': self.bezier_curve_strength,
-            'bezier_curve_steps': self.bezier_curve_steps,
+            'fov_circle_filter_enabled': self.fov_circle_filter_enabled,
 
-            'jitter_enabled': self.jitter_enabled,
-            'jitter_strength': self.jitter_strength,
+            'aim_deadzone_enabled': self.aim_deadzone_enabled,
+            'aim_deadzone_min_px': self.aim_deadzone_min_px,
+            'aim_deadzone_close_px': self.aim_deadzone_close_px,
+            'aim_lateral_brake_enabled': self.aim_lateral_brake_enabled,
+            'aim_lateral_brake_strength': self.aim_lateral_brake_strength,
+            'aim_lateral_brake_dom_trigger': self.aim_lateral_brake_dom_trigger,
+            'aim_lateral_brake_dom_max': self.aim_lateral_brake_dom_max,
+            'aim_lateral_brake_min_scale': self.aim_lateral_brake_min_scale,
+            'max_move_per_frame_px': self.max_move_per_frame_px,
+
+            'detect_semantic_filter_enabled': self.detect_semantic_filter_enabled,
 
             'target_priority_mode': self.target_priority_mode,
             'target_priority_confidence_weight': self.target_priority_confidence_weight,
 
             'box_color_theme': self.box_color_theme,
+            'chroma_box_speed': self.chroma_box_speed,
             'show_tracer_line': self.show_tracer_line,
 
             'show_crosshair': self.show_crosshair,
