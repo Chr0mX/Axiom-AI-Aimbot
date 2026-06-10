@@ -5,8 +5,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QHBoxLayout
 from PyQt6.QtGui import QKeySequence
 from qfluentwidgets import (
-    SettingCardGroup, SettingCard, FluentIcon, 
-    PushButton, BodyLabel
+    SettingCardGroup, SettingCard, FluentIcon,
+    PushButton, BodyLabel, ComboBox,
 )
 
 from ..base_page import BasePage
@@ -25,6 +25,23 @@ MOUSE_VK_BIND_OPTIONS = (
     (0x05, "Mouse X1"),
     (0x06, "Mouse X2"),
 )
+
+# MAKCU mouse-button combo options (label, VK code)
+_MAKCU_BTN_OPTIONS = [
+    ("Left",   0x01),
+    ("Right",  0x02),
+    ("Middle", 0x04),
+    ("Side 1", 0x05),
+    ("Side 2", 0x06),
+    ("None",   0x00),
+]
+
+# MAKCU aim-trigger combo options (label, config string)
+_MAKCU_TRIGGER_OPTIONS = [
+    ("Left",  "lmb"),
+    ("Right", "rmb"),
+    ("Off",   "off"),
+]
 
 
 # 虛擬鍵碼對應翻譯 key 表
@@ -88,7 +105,7 @@ class KeyBindButton(PushButton):
         self.clicked.connect(self._startListening)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._showContextMenu)
-        
+
         # 手柄輪詢計時器
         self._gamepadTimer = QTimer(self)
         self._gamepadTimer.setInterval(50)  # 50ms 輪詢
@@ -111,7 +128,7 @@ class KeyBindButton(PushButton):
         self._listening = True
         self.setText(t("key_press_to_bind"))
         self.setFocus()
-        
+
         # 記錄目前按下的所有鍵，避免一進監聽就偵測到（例如某些滑鼠微動延遲釋放）
         import win32api
         self._initial_keys = set()
@@ -168,15 +185,15 @@ class KeyBindButton(PushButton):
         if not self._listening:
             self._updateText()
 
-    
+
     def _pollGamepad(self):
         """輪詢全局按鍵與手柄（由 QTimer 觸發）"""
         if not self._listening:
             self._gamepadTimer.stop()
             return
-            
+
         import win32api
-        
+
         # 1. 輪詢系統全局按鍵 (包含滑鼠與鍵盤)
         for i in range(1, 255):
             is_down = (win32api.GetAsyncKeyState(i) & 0x8000) != 0
@@ -199,7 +216,7 @@ class KeyBindButton(PushButton):
             self.setText(vk_to_name(gp_vk))
             self.keyBound.emit(gp_vk)
             self._stopListening()
-    
+
     def _qtKeyToVk(self, qtKey: int) -> int:
         """將 Qt Key 轉換為 Windows VK code"""
         # 字母
@@ -235,25 +252,49 @@ class KeyBindButton(PushButton):
 
 class KeysPage(BasePage):
     """按鍵綁定頁面"""
-    
+
     def __init__(self, parent=None):
         super().__init__("tab_keys", parent)
         self._config = None
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
-    
+
     def setConfig(self, config):
         """設定 Config 實例並載入值"""
         self._config = config
         self._loadFromConfig()
-    
+        self._updateMakcuVisibility()
+
+    def showEvent(self, event):
+        """Re-check MAKCU visibility whenever this tab is navigated to."""
+        super().showEvent(event)
+        self._updateMakcuVisibility()
+
+    # ──────────────────────────────────────────────
+    # MAKCU visibility helper
+    # ──────────────────────────────────────────────
+
+    def _updateMakcuVisibility(self):
+        is_makcu = getattr(self._config, 'mouse_move_method', '') == 'makcu' if self._config else False
+        # Aim key cards 1–3 hidden in MAKCU mode; toggle key always visible
+        for card in (self.aimKey1Card, self.aimKey2Card, self.aimKey3Card):
+            card.setVisible(not is_makcu)
+        # Fire keys group hidden in MAKCU mode
+        self.fireKeysGroup.setVisible(not is_makcu)
+        # MAKCU keys group visible only in MAKCU mode
+        self.makcuKeysGroup.setVisible(is_makcu)
+
+    # ──────────────────────────────────────────────
+    # Widget init
+    # ──────────────────────────────────────────────
+
     def _initWidgets(self):
         """初始化所有控制項"""
-        
+
         # === 瞄準按鍵 ===
         self.aimKeysGroup = SettingCardGroup(t("auto_aim"), self.scrollWidget)
-        
+
         # 瞄準鍵 1
         self.aimKey1Btn = KeyBindButton()
         self.aimKey1Card = SettingCard(
@@ -264,7 +305,7 @@ class KeysPage(BasePage):
         )
         self.aimKey1Card.hBoxLayout.addWidget(self.aimKey1Btn, 0, Qt.AlignmentFlag.AlignRight)
         self.aimKey1Card.hBoxLayout.addSpacing(16)
-        
+
         # 瞄準鍵 2
         self.aimKey2Btn = KeyBindButton()
         self.aimKey2Card = SettingCard(
@@ -275,7 +316,7 @@ class KeysPage(BasePage):
         )
         self.aimKey2Card.hBoxLayout.addWidget(self.aimKey2Btn, 0, Qt.AlignmentFlag.AlignRight)
         self.aimKey2Card.hBoxLayout.addSpacing(16)
-        
+
         # 瞄準鍵 3
         self.aimKey3Btn = KeyBindButton()
         self.aimKey3Card = SettingCard(
@@ -286,8 +327,8 @@ class KeysPage(BasePage):
         )
         self.aimKey3Card.hBoxLayout.addWidget(self.aimKey3Btn, 0, Qt.AlignmentFlag.AlignRight)
         self.aimKey3Card.hBoxLayout.addSpacing(16)
-        
-        # 切換鍵
+
+        # 切換鍵 (always visible)
         self.toggleKeyBtn = KeyBindButton()
         self.toggleKeyCard = SettingCard(
             FluentIcon.POWER_BUTTON,
@@ -300,7 +341,7 @@ class KeysPage(BasePage):
 
         # === 自動射擊按鍵 ===
         self.fireKeysGroup = SettingCardGroup(t("keys_and_auto_fire"), self.scrollWidget)
-        
+
         # 自動射擊鍵 1
         self.fireKey1Btn = KeyBindButton()
         self.fireKey1Card = SettingCard(
@@ -311,7 +352,7 @@ class KeysPage(BasePage):
         )
         self.fireKey1Card.hBoxLayout.addWidget(self.fireKey1Btn, 0, Qt.AlignmentFlag.AlignRight)
         self.fireKey1Card.hBoxLayout.addSpacing(16)
-        
+
         # 自動射擊鍵 2
         self.fireKey2Btn = KeyBindButton()
         self.fireKey2Card = SettingCard(
@@ -322,7 +363,56 @@ class KeysPage(BasePage):
         )
         self.fireKey2Card.hBoxLayout.addWidget(self.fireKey2Btn, 0, Qt.AlignmentFlag.AlignRight)
         self.fireKey2Card.hBoxLayout.addSpacing(16)
-    
+
+        # === MAKCU Keys (shown only when mouse_move_method == "makcu") ===
+        self.makcuKeysGroup = SettingCardGroup(t("makcu_keys_group", "MAKCU Keys"), self.scrollWidget)
+
+        # Inference key (AimKeys[0])
+        self.makcuInferenceCombo = ComboBox()
+        self.makcuInferenceCombo.setMinimumWidth(110)
+        for label, _ in _MAKCU_BTN_OPTIONS:
+            self.makcuInferenceCombo.addItem(label)
+        self.makcuInferenceCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            t("makcu_key_inference", "Inference"),
+            t("makcu_key_inference_desc", "Hold this mouse button to activate inference"),
+            self.makcuKeysGroup
+        )
+        self.makcuInferenceCard.hBoxLayout.addWidget(self.makcuInferenceCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuInferenceCard.hBoxLayout.addSpacing(16)
+
+        # MAKCU aim key (AimKeys[1])
+        self.makcuAimCombo = ComboBox()
+        self.makcuAimCombo.setMinimumWidth(110)
+        for label, _ in _MAKCU_BTN_OPTIONS:
+            self.makcuAimCombo.addItem(label)
+        self.makcuAimCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            t("makcu_key_makcu", "MAKCU"),
+            t("makcu_key_makcu_desc", "Hold this mouse button to activate MAKCU aim"),
+            self.makcuKeysGroup
+        )
+        self.makcuAimCard.hBoxLayout.addWidget(self.makcuAimCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuAimCard.hBoxLayout.addSpacing(16)
+
+        # Aim Trigger Button (makcu_aim_button)
+        self.makcuTriggerCombo = ComboBox()
+        self.makcuTriggerCombo.setMinimumWidth(110)
+        for label, _ in _MAKCU_TRIGGER_OPTIONS:
+            self.makcuTriggerCombo.addItem(label)
+        self.makcuTriggerCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            t("makcu_key_trigger", "Aim Trigger Button"),
+            t("makcu_key_trigger_desc", "Hold this button to aim/track"),
+            self.makcuKeysGroup
+        )
+        self.makcuTriggerCard.hBoxLayout.addWidget(self.makcuTriggerCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuTriggerCard.hBoxLayout.addSpacing(16)
+
+    # ──────────────────────────────────────────────
+    # Layout
+    # ──────────────────────────────────────────────
+
     def _initLayout(self):
         """排版所有控制項"""
         # 瞄準按鍵
@@ -331,14 +421,25 @@ class KeysPage(BasePage):
         self.aimKeysGroup.addSettingCard(self.aimKey3Card)
         self.aimKeysGroup.addSettingCard(self.toggleKeyCard)
         self.addContent(self.aimKeysGroup)
-        
+
         # 自動射擊按鍵
         self.fireKeysGroup.addSettingCard(self.fireKey1Card)
         self.fireKeysGroup.addSettingCard(self.fireKey2Card)
         self.addContent(self.fireKeysGroup)
-        
+
+        # MAKCU Keys (hidden by default until setConfig runs)
+        self.makcuKeysGroup.addSettingCard(self.makcuInferenceCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuAimCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuTriggerCard)
+        self.addContent(self.makcuKeysGroup)
+        self.makcuKeysGroup.setVisible(False)
+
         self.scrollLayout.addStretch(1)
-    
+
+    # ──────────────────────────────────────────────
+    # Signal connections
+    # ──────────────────────────────────────────────
+
     def _connectSignals(self):
         """連接信號"""
         self.aimKey1Btn.keyBound.connect(lambda vk: self._onAimKeyChanged(0, vk))
@@ -347,12 +448,20 @@ class KeysPage(BasePage):
         self.toggleKeyBtn.keyBound.connect(self._onToggleKeyChanged)
         self.fireKey1Btn.keyBound.connect(self._onFireKey1Changed)
         self.fireKey2Btn.keyBound.connect(self._onFireKey2Changed)
-    
+
+        self.makcuInferenceCombo.currentIndexChanged.connect(self._onMakcuInferenceKeyChanged)
+        self.makcuAimCombo.currentIndexChanged.connect(self._onMakcuAimKeyChanged)
+        self.makcuTriggerCombo.currentIndexChanged.connect(self._onMakcuTriggerKeyChanged)
+
+    # ──────────────────────────────────────────────
+    # Config load
+    # ──────────────────────────────────────────────
+
     def _loadFromConfig(self):
         """從 Config 載入值"""
         if not self._config:
             return
-        
+
         # 瞄準鍵
         if len(self._config.AimKeys) >= 1:
             self.aimKey1Btn.setVkCode(self._config.AimKeys[0])
@@ -360,21 +469,59 @@ class KeysPage(BasePage):
             self.aimKey2Btn.setVkCode(self._config.AimKeys[1])
         if len(self._config.AimKeys) >= 3:
             self.aimKey3Btn.setVkCode(self._config.AimKeys[2])
-        
+
         # 切換鍵
         self.toggleKeyBtn.setVkCode(self._config.aim_toggle_key)
-        
+
         # 自動射擊鍵
         self.fireKey1Btn.setVkCode(self._config.auto_fire_key)
         self.fireKey2Btn.setVkCode(self._config.auto_fire_key2)
-    
-    # === 回調函數 ===
+
+        # MAKCU Keys
+        self._loadMakcuCombos()
+
+    def _loadMakcuCombos(self):
+        """Load MAKCU-specific combo boxes from config."""
+        if not self._config:
+            return
+
+        # Inference key (AimKeys[0])
+        aim0 = self._config.AimKeys[0] if len(self._config.AimKeys) >= 1 else 0x01
+        for i, (_, vk) in enumerate(_MAKCU_BTN_OPTIONS):
+            if vk == aim0:
+                self.makcuInferenceCombo.blockSignals(True)
+                self.makcuInferenceCombo.setCurrentIndex(i)
+                self.makcuInferenceCombo.blockSignals(False)
+                break
+
+        # MAKCU aim key (AimKeys[1])
+        aim1 = self._config.AimKeys[1] if len(self._config.AimKeys) >= 2 else 0x06
+        for i, (_, vk) in enumerate(_MAKCU_BTN_OPTIONS):
+            if vk == aim1:
+                self.makcuAimCombo.blockSignals(True)
+                self.makcuAimCombo.setCurrentIndex(i)
+                self.makcuAimCombo.blockSignals(False)
+                break
+
+        # Aim Trigger Button (makcu_aim_button)
+        trigger = getattr(self._config, 'makcu_aim_button', 'lmb').lower()
+        for i, (_, val) in enumerate(_MAKCU_TRIGGER_OPTIONS):
+            if val == trigger:
+                self.makcuTriggerCombo.blockSignals(True)
+                self.makcuTriggerCombo.setCurrentIndex(i)
+                self.makcuTriggerCombo.blockSignals(False)
+                break
+
+    # ──────────────────────────────────────────────
+    # Callbacks
+    # ──────────────────────────────────────────────
+
     def _onAimKeyChanged(self, index: int, vk: int):
         if self._config:
             while len(self._config.AimKeys) <= index:
                 self._config.AimKeys.append(0)
             self._config.AimKeys[index] = vk
-    
+
     def _onToggleKeyChanged(self, vk: int):
         if self._config:
             self._config.aim_toggle_key = vk
@@ -382,11 +529,33 @@ class KeysPage(BasePage):
     def _onFireKey1Changed(self, vk: int):
         if self._config:
             self._config.auto_fire_key = vk
-    
+
     def _onFireKey2Changed(self, vk: int):
         if self._config:
             self._config.auto_fire_key2 = vk
-    
+
+    def _onMakcuInferenceKeyChanged(self, idx: int):
+        if self._config and 0 <= idx < len(_MAKCU_BTN_OPTIONS):
+            vk = _MAKCU_BTN_OPTIONS[idx][1]
+            while len(self._config.AimKeys) < 1:
+                self._config.AimKeys.append(0)
+            self._config.AimKeys[0] = vk
+
+    def _onMakcuAimKeyChanged(self, idx: int):
+        if self._config and 0 <= idx < len(_MAKCU_BTN_OPTIONS):
+            vk = _MAKCU_BTN_OPTIONS[idx][1]
+            while len(self._config.AimKeys) < 2:
+                self._config.AimKeys.append(0)
+            self._config.AimKeys[1] = vk
+
+    def _onMakcuTriggerKeyChanged(self, idx: int):
+        if self._config and 0 <= idx < len(_MAKCU_TRIGGER_OPTIONS):
+            self._config.makcu_aim_button = _MAKCU_TRIGGER_OPTIONS[idx][1]
+
+    # ──────────────────────────────────────────────
+    # Retranslate
+    # ──────────────────────────────────────────────
+
     def retranslateUi(self):
         """刷新翻譯"""
         super().retranslateUi()
@@ -394,6 +563,7 @@ class KeysPage(BasePage):
         # 群組標題
         self.aimKeysGroup.titleLabel.setText(t("auto_aim"))
         self.fireKeysGroup.titleLabel.setText(t("keys_and_auto_fire"))
+        self.makcuKeysGroup.titleLabel.setText(t("makcu_keys_group", "MAKCU Keys"))
 
         # 瞄準按鍵
         self.aimKey1Card.titleLabel.setText(t("aim_key_1"))
@@ -405,6 +575,14 @@ class KeysPage(BasePage):
         # 自動射擊按鍵
         self.fireKey1Card.titleLabel.setText(t("auto_fire_key_1"))
         self.fireKey2Card.titleLabel.setText(t("auto_fire_key_2"))
+
+        # MAKCU Keys
+        self.makcuInferenceCard.titleLabel.setText(t("makcu_key_inference", "Inference"))
+        self.makcuInferenceCard.contentLabel.setText(t("makcu_key_inference_desc", "Hold this mouse button to activate inference"))
+        self.makcuAimCard.titleLabel.setText(t("makcu_key_makcu", "MAKCU"))
+        self.makcuAimCard.contentLabel.setText(t("makcu_key_makcu_desc", "Hold this mouse button to activate MAKCU aim"))
+        self.makcuTriggerCard.titleLabel.setText(t("makcu_key_trigger", "Aim Trigger Button"))
+        self.makcuTriggerCard.contentLabel.setText(t("makcu_key_trigger_desc", "Hold this button to aim/track"))
 
         # 刷新按鍵綁定按鈕文字
         self.aimKey1Btn.refreshText()
