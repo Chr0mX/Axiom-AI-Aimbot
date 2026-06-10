@@ -31,3 +31,10 @@ config/*.json
 .pytest_cache/
 .coverage
 htmlcov/
+
+# cyndilib NDI library (installed by src/install_cyndilib.py)
+src/python/Lib/site-packages/cyndilib/
+src/python/Lib/site-packages/cyndilib-*/
+
+# TensorRT engine cache
+trt_cache/

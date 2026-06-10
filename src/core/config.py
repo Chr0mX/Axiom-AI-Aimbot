@@ -224,9 +224,6 @@ class Config:
         # CUDA IO Binding 零拷貝推理（僅 CUDA provider 有效）
         self.cuda_io_binding_enabled: bool = False
 
-        # 幀跳過：像素差分閾值，靜態畫面時跳過推理
-        self.frame_skip_enabled: bool = False
-        self.frame_skip_threshold: float = 2.0
         self.skip_letterbox: bool = False         # 直接縮放取代 letterbox（略快，正方形擷取無失真）
 
         # Kalman filter aim-point smoother (mutually exclusive with EMA in UI)
@@ -390,8 +387,6 @@ class Config:
 
             'trt_fp16_enabled': self.trt_fp16_enabled,
             'cuda_io_binding_enabled': self.cuda_io_binding_enabled,
-            'frame_skip_enabled': self.frame_skip_enabled,
-            'frame_skip_threshold': self.frame_skip_threshold,
             'skip_letterbox': self.skip_letterbox,
             'auto_match_fps': self.auto_match_fps,
 
