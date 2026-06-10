@@ -602,22 +602,6 @@ class InferencePage(BasePage):
             parent=self.inferPerfGroup
         )
 
-        self.frameSkipCard = SwitchSettingCard(
-            FluentIcon.SPEED_MEDIUM,
-            t("frame_skip_enabled", "Frame Skip Gate"),
-            t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."),
-            parent=self.inferPerfGroup
-        )
-
-        self.frameSkipThresholdCard = SliderLabelCard(
-            FluentIcon.ALIGNMENT,
-            t("frame_skip_threshold", "Skip Threshold"),
-            5, 100,
-            format_func=lambda v: f"{v / 10:.1f}",
-            description=t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"),
-            slider_width=160,
-            parent=self.inferPerfGroup
-        )
 
     # ──────────────────────────────────────────────
     # Layout
@@ -692,8 +676,6 @@ class InferencePage(BasePage):
 
         self.inferPerfGroup.addSettingCard(self.skipLetterboxCard)
         self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
-        self.inferPerfGroup.addSettingCard(self.frameSkipCard)
-        self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
         self.addContent(self.inferPerfGroup)
 
         self.scrollLayout.addStretch(1)
@@ -759,8 +741,6 @@ class InferencePage(BasePage):
 
         self.skipLetterboxCard.checkedChanged.connect(self._onSkipLetterboxChanged)
         self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
-        self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
-        self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -838,29 +818,42 @@ class InferencePage(BasePage):
 
             self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
-            self._refreshUvcResolutions()
             resolution_text = str(getattr(self._config, 'uvc_resolution',
                 f"{getattr(self._config, 'uvc_width', self._config.width)}x{getattr(self._config, 'uvc_height', self._config.height)}"))
-            idx = self.uvcResolutionCombo.findText(resolution_text)
-            if idx < 0:
-                self.uvcResolutionCombo.addItem(resolution_text)
+            if screenshot_method == 'uvc':
+                self._refreshUvcResolutions()
                 idx = self.uvcResolutionCombo.findText(resolution_text)
-            if idx >= 0:
-                self.uvcResolutionCombo.setCurrentIndex(idx)
+                if idx < 0:
+                    self.uvcResolutionCombo.addItem(resolution_text)
+                    idx = self.uvcResolutionCombo.findText(resolution_text)
+                if idx >= 0:
+                    self.uvcResolutionCombo.setCurrentIndex(idx)
+            else:
+                self.uvcResolutionCombo.blockSignals(True)
+                self.uvcResolutionCombo.clear()
+                self.uvcResolutionCombo.addItem(resolution_text)
+                self.uvcResolutionCombo.blockSignals(False)
             self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
             self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
             self.previewCropCard.setChecked(bool(getattr(self._config, 'preview_crop_to_detection', False)))
             self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
 
-            self._refreshNdiSources()
             ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
-            if ndi_source:
-                idx = self.ndiSourceCombo.findText(ndi_source)
-                if idx < 0:
-                    self.ndiSourceCombo.addItem(ndi_source)
+            if screenshot_method == 'ndi':
+                self._refreshNdiSources()
+                if ndi_source:
                     idx = self.ndiSourceCombo.findText(ndi_source)
-                if idx >= 0:
-                    self.ndiSourceCombo.setCurrentIndex(idx)
+                    if idx < 0:
+                        self.ndiSourceCombo.addItem(ndi_source)
+                        idx = self.ndiSourceCombo.findText(ndi_source)
+                    if idx >= 0:
+                        self.ndiSourceCombo.setCurrentIndex(idx)
+            else:
+                self.ndiSourceCombo.blockSignals(True)
+                self.ndiSourceCombo.clear()
+                if ndi_source:
+                    self.ndiSourceCombo.addItem(ndi_source)
+                self.ndiSourceCombo.blockSignals(False)
             ndi_bw = str(getattr(self._config, 'ndi_bandwidth', 'highest')).capitalize()
             self.ndiBandwidthCombo.setCurrentText(ndi_bw if ndi_bw in ("Highest", "Lowest") else "Highest")
             self.ndiPreResizeCard.setChecked(bool(getattr(self._config, 'ndi_pre_resize', True)))
@@ -904,8 +897,6 @@ class InferencePage(BasePage):
 
             self.skipLetterboxCard.setChecked(bool(getattr(self._config, 'skip_letterbox', False)))
             self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
-            self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
-            self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
 
         finally:
             self._isLoadingConfig = False
@@ -1099,7 +1090,7 @@ class InferencePage(BasePage):
                         return
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-        bat_path = os.path.join(project_root, "安裝TensorRT.bat")
+        bat_path = os.path.join(project_root, "Install TensorRT.bat")
         if not os.path.exists(bat_path):
             InfoBar.warning("TensorRT installer not found", f"Expected: {bat_path}",
                             duration=6000, isClosable=True, position=InfoBarPosition.TOP, parent=self)
@@ -1573,14 +1564,6 @@ class InferencePage(BasePage):
         if self._config:
             self._config.cuda_io_binding_enabled = bool(checked)
 
-    def _onFrameSkipChanged(self, checked):
-        if self._config:
-            self._config.frame_skip_enabled = bool(checked)
-
-    def _onFrameSkipThresholdChanged(self, value):
-        if self._config:
-            self._config.frame_skip_threshold = value / 10.0
-
     # ──────────────────────────────────────────────
     # Retranslate
     # ──────────────────────────────────────────────
@@ -1632,6 +1615,7 @@ class InferencePage(BasePage):
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
         self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
+        self.skipLetterboxCard.contentLabel.setText(t("skip_letterbox_desc"))
 
         self.comPortCard.titleLabel.setText(t("arduino_com_port"))
         self.comRefreshBtn.setText(t("refresh"))

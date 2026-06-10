@@ -160,8 +160,6 @@ def ai_logic_loop(
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
 
     state = LoopState(cached_mouse_move_method=config.mouse_move_method)
-    _last_skip_frame: list = [None]  # stores last frame used for pixel-diff gate
-
     # CUDA IO binding — set up once per model session to avoid repeated
     # host→device copies.  Recreated on model hot-swap.
     _io_binding: list = [None]
@@ -444,19 +442,6 @@ def ai_logic_loop(
 
                 # Frame skip gate: skip inference when the capture region
                 # hasn't changed significantly (e.g. static background).
-                # Compare BGR channels only — alpha is always 255 in BGRA frames,
-                # so including it deflates the mean diff by 25% and causes nearly
-                # every frame to be skipped when motion is borderline.
-                if getattr(config, 'frame_skip_enabled', False) and _last_skip_frame[0] is not None:
-                    _a, _b = latest_frame, _last_skip_frame[0]
-                    if _a.shape == _b.shape:
-                        _diff = np.mean(np.abs(
-                            _a[..., :3].astype(np.int16) - _b[..., :3].astype(np.int16)
-                        ))
-                        if _diff < float(getattr(config, 'frame_skip_threshold', 2.0)):
-                            continue  # reuse last boxes; no inference this frame
-                _last_skip_frame[0] = latest_frame
-
                 t0 = time.perf_counter()
                 try:
                     _pre_result = _tensor_queue.get(timeout=0.02)

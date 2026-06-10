@@ -747,7 +747,7 @@ class SetupWizard(QDialog):
                 # setup_wizard.py lives at src/gui/fluent_app/ → up 3 = project root
                 project_root = os.path.dirname(os.path.dirname(
                     os.path.dirname(os.path.abspath(__file__))))
-                bat = os.path.join(project_root, "安裝TensorRT.bat")
+                bat = os.path.join(project_root, "Install TensorRT.bat")
                 if os.path.exists(bat):
                     import subprocess
                     subprocess.Popen([bat], shell=True)

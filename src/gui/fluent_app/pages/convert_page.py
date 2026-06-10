@@ -266,6 +266,8 @@ class ConvertPage(BasePage):
             python_exe, script_path, parent=self)
         self._worker.logLine.connect(self._onLogLine)
         self._worker.finishedResult.connect(self._onConvertFinished)
+        if self._config:
+            self._config.inference_paused = True
         self._worker.start()
 
     def _onLogLine(self, line: str):
@@ -275,6 +277,8 @@ class ConvertPage(BasePage):
         self.progressBar.setVisible(False)
         self.convertBtn.setEnabled(True)
         self.convertBtn.setText(t("trt_convert", "Convert"))
+        if self._config:
+            self._config.inference_paused = False
         if success:
             self.logView.append(f"✓ Done. Engine cache written to: {message}")
             InfoBar.success(

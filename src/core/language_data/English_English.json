@@ -82,7 +82,7 @@
     "model_settings": "Model Settings",
     "mouse_move_ddxoft": "ddxoft",
     "mouse_move_method": "Move Method:",
-    "screenshot_method": "Screenshot Method:",
+    "screenshot_method": "Capture Method:",
     "mouse_click_method": "Click Method:",
     "xbox_sensitivity": "Controller Sensitivity (%)",
     "xbox_deadzone": "Controller Deadzone (%)",
@@ -263,5 +263,7 @@
     "smart_jitter_threshold_desc": "Jitter fires when box height is below this % of detect range",
     "smart_jitter_level_low": "Low (±1px)",
     "smart_jitter_level_med": "Medium (±3px)",
-    "smart_jitter_level_high": "High (±6px)"
+    "smart_jitter_level_high": "High (±6px)",
+    "skip_letterbox_label": "Skip Letterbox Padding",
+    "skip_letterbox_desc": "Directly scale the capture region instead of padding to square. Slightly faster for square captures."
 }
