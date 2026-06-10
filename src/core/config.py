@@ -91,18 +91,13 @@ class Config:
         # Defaults to screen height (same as legacy behavior)
         self.detect_range_size: int = self.height # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）
         self.show_confidence: bool = True # 是否在框上顯示置信度
-        self.min_confidence: float = 0.20  # 最小置信度，範圍 0~1，預設 0.20
+        self.min_confidence: float = 0.80  # 最小置信度，範圍 0~1
         self.aim_part: str = "head"
         
         # Single target mode
         self.single_target_mode: bool = True  # 啟用單一目標模式（只瞄準置信度最高的目標）
         
-        # Aim curve smoothing (Bezier)
-        self.bezier_curve_enabled: bool = False # 是否啟用貝茲曲線平滑
-        self.bezier_curve_strength: float = 0.35  # 0~1, larger curve is more obvious
-        self.bezier_curve_steps: int = 7          # More segments = smoother (>=2)
-
-        # Smart tracking prediction settings (replaces Kalman) 
+        # Smart tracking prediction settings (replaces Kalman)
         self.tracker_enabled: bool = False          # SmartTracker removed; kept for config compatibility
         self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
         self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
@@ -139,10 +134,6 @@ class Config:
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能
         self.aim_y_reduce_delay: float = 0.6      # 按下瞄準鍵後多久開始歸零 (秒)
 
-        # Anti-detection: human-like movement jitter
-        self.jitter_enabled: bool = False
-        self.jitter_strength: float = 1.5         # Max random offset per axis (pixels)
-
         # Target priority scoring
         self.target_priority_mode: str = "distance"       # "distance" | "confidence" | "composite"
         self.target_priority_confidence_weight: float = 0.5  # Weight for confidence in composite mode
@@ -163,7 +154,7 @@ class Config:
         self.crosshair_size: int = 4
 
         # 滑鼠控制方式
-        self.mouse_move_method: str = "mouse_event"  # 滑鼠移動方式（預設使用安全的 mouse_event）
+        self.mouse_move_method: str = "makcu"  # 滑鼠移動方式
         self.mouse_click_method: str = "mouse_event" # 滑鼠點擊方式
         self.arduino_com_port: str = ""              # Arduino Leonardo COM 埠
         self.makcu_com_port: str = ""                  # MAKCU KM Host COM 埠
@@ -266,7 +257,7 @@ class Config:
         self.sticky_adaptive_iou: bool = True  # adaptive IoU scaling by box area (Someone_idea)
 
         # FOV filter mode
-        self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square (Someone_idea)
+        self.fov_circle_filter_enabled: bool = True  # circular FOV test instead of square
 
         # Aim shaping (ported from Someone_idea)
         self.aim_deadzone_enabled: bool = False
@@ -280,7 +271,7 @@ class Config:
         self.max_move_per_frame_px: float = 85.0
 
         # Semantic false-positive filter (ported from Someone_idea)
-        self.detect_semantic_filter_enabled: bool = False
+        self.detect_semantic_filter_enabled: bool = True
 
         # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
         self.display_locked_box: list | None = None
@@ -438,13 +429,6 @@ class Config:
             'max_move_per_frame_px': self.max_move_per_frame_px,
 
             'detect_semantic_filter_enabled': self.detect_semantic_filter_enabled,
-
-            'bezier_curve_enabled': self.bezier_curve_enabled,
-            'bezier_curve_strength': self.bezier_curve_strength,
-            'bezier_curve_steps': self.bezier_curve_steps,
-
-            'jitter_enabled': self.jitter_enabled,
-            'jitter_strength': self.jitter_strength,
 
             'target_priority_mode': self.target_priority_mode,
             'target_priority_confidence_weight': self.target_priority_confidence_weight,
