@@ -12,6 +12,7 @@ from qfluentwidgets.components.settings.setting_card import SettingCard
 
 from .pages.visuals_page import VisualsPage
 
+from .pages.model_page import ModelPage
 from .pages.inference_page import InferencePage
 from .pages.aim_page import AimPage
 from .pages.trigger_page import TriggerPage
@@ -108,6 +109,7 @@ class AxiomWindow(FluentWindow):
         # Setup Pages - using new tab key names
 
         self.displayInterface = VisualsPage(self)  # tab_display
+        self.modelInterface = ModelPage(self)       # tab_model
         self.inferenceInterface = InferencePage(self)  # tab_inference
         self.aimInterface = AimPage(self)           # tab_aim_control
         self.triggerInterface = TriggerPage(self)   # tab_auto_features
@@ -118,6 +120,7 @@ class AxiomWindow(FluentWindow):
 
 
         self.displayInterface.setObjectName("displayInterface")
+        self.modelInterface.setObjectName("modelInterface")
         self.inferenceInterface.setObjectName("inferenceInterface")
         self.aimInterface.setObjectName("aimInterface")
         self.triggerInterface.setObjectName("triggerInterface")
@@ -288,8 +291,8 @@ class AxiomWindow(FluentWindow):
         """設定 Config 實例並傳遞給所有頁面"""
         self._config = config
         pages = [
-            self.displayInterface, self.inferenceInterface, self.aimInterface,
-            self.triggerInterface, self.keysInterface,
+            self.displayInterface, self.modelInterface, self.inferenceInterface,
+            self.aimInterface, self.triggerInterface, self.keysInterface,
             self.configInterface, self.convertInterface, self.otherInterface
         ]
         for page in pages:
@@ -349,6 +352,8 @@ class AxiomWindow(FluentWindow):
         # Navigation items using translation keys
 
         
+        self.nav_model = self.addSubInterface(self.modelInterface, FluentIcon.ROBOT, t("tab_model"))
+
         self.nav_inference = self.addSubInterface(self.inferenceInterface, FluentIcon.COMMAND_PROMPT, t("tab_inference"))
 
         self.nav_aim = self.addSubInterface(self.aimInterface, QIcon(os.path.join(self.base_path, "assets", "aim.svg")), t("tab_aim_control"))
@@ -533,6 +538,7 @@ class AxiomWindow(FluentWindow):
         # --- 6. 刷新各頁自定義面板樣式（例如參數頁左右面板） ---
         pages = [
             getattr(self, 'displayInterface', None),
+            getattr(self, 'modelInterface', None),
             getattr(self, 'inferenceInterface', None),
             getattr(self, 'aimInterface', None),
             getattr(self, 'triggerInterface', None),
@@ -708,6 +714,7 @@ class AxiomWindow(FluentWindow):
         # Update navigation items text
 
         if hasattr(self, 'nav_display'): self.nav_display.setText(t("tab_display"))
+        if hasattr(self, 'nav_model'): self.nav_model.setText(t("tab_model"))
         if hasattr(self, 'nav_inference'): self.nav_inference.setText(t("tab_inference"))
         if hasattr(self, 'nav_aim'): self.nav_aim.setText(t("tab_aim_control"))
         if hasattr(self, 'nav_trigger'): self.nav_trigger.setText(t("tab_auto_features"))
@@ -725,9 +732,9 @@ class AxiomWindow(FluentWindow):
         
         # Update all pages
         pages = [
-            self.displayInterface, self.inferenceInterface, self.aimInterface,
-            self.triggerInterface, self.keysInterface, self.configInterface,
-            self.convertInterface, self.otherInterface
+            self.displayInterface, self.modelInterface, self.inferenceInterface,
+            self.aimInterface, self.triggerInterface, self.keysInterface,
+            self.configInterface, self.convertInterface, self.otherInterface
         ]
 
         for page in pages:

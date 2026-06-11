@@ -202,5 +202,8 @@
     "smart_jitter_threshold_desc": "जब बॉक्स ऊंचाई डिटेक्ट रेंज के इस % से कम हो तो जिटर सक्रिय होगा",
     "smart_jitter_level_low": "कम (±1px)",
     "smart_jitter_level_med": "मध्यम (±3px)",
-    "smart_jitter_level_high": "उच्च (±6px)"
+    "smart_jitter_level_high": "उच्च (±6px)",
+    "tab_model": "मॉडल",
+    "model_info": "मॉडल जानकारी",
+    "model_inspecting": "जाँच रही है…"
 }

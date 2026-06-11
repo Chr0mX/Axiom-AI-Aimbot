@@ -211,5 +211,8 @@
     "smart_jitter_threshold_desc": "Джиттер срабатывает, когда высота рамки ниже этого % от зоны обнаружения",
     "smart_jitter_level_low": "Низкий (±1px)",
     "smart_jitter_level_med": "Средний (±3px)",
-    "smart_jitter_level_high": "Высокий (±6px)"
+    "smart_jitter_level_high": "Высокий (±6px)",
+    "tab_model": "Модель",
+    "model_info": "Информация о модели",
+    "model_inspecting": "Проверка…"
 }

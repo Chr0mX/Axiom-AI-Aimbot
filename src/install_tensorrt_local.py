@@ -28,7 +28,7 @@ Note on Python 3.13+:
 
 from __future__ import annotations
 
-__version__ = "1.3"
+__version__ = "1.4"
 
 import os
 import subprocess
@@ -56,7 +56,7 @@ PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 _PY_VER = sys.version_info[:2]
 _BINDINGS_SUPPORTED = _PY_VER <= (3, 12)
 
-TENSORRT_PACKAGES = ["tensorrt_cu12_libs<11", "tensorrt<11"]
+TENSORRT_PACKAGES = ["tensorrt_cu12_libs<11", "tensorrt-cu12<11"]
 if _BINDINGS_SUPPORTED:
     TENSORRT_PACKAGES.append("tensorrt_cu12_bindings<11")
 else:
