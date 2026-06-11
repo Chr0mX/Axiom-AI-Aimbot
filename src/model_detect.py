@@ -39,7 +39,7 @@ if os.path.isdir(_embedded_pkgs) and _embedded_pkgs not in sys.path:
 # Inject TensorRT + CUDA DLL dirs — mirrors main.py's _register_nvidia_dll_dirs().
 # AppData is pinned to sys.path[0] so the Axiom-installed tensorrt package always
 # takes precedence over anything the embedded interpreter might find elsewhere.
-_NVIDIA_SUBPKGS = ["cuda_runtime", "cublas", "cudnn"]
+_NVIDIA_SUBPKGS = ["cuda_runtime", "cublas", "cufft", "cudnn"]
 
 def _inject_tensorrt_paths() -> None:
     import site as _site
