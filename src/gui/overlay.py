@@ -348,7 +348,8 @@ class PyQtOverlay(QWidget):
 
             # Chroma: compute a shared hue for all in-FOV boxes this frame
             speed = float(getattr(self.config, 'chroma_box_speed', 1.0))
-            hue = (time.monotonic() * speed * 60.0) % 360.0
+            use_chroma = speed > 0
+            hue = (time.monotonic() * speed * 60.0) % 360.0 if use_chroma else 0.0
             chroma_color = QColor.fromHsvF(hue / 360.0, 1.0, 1.0)
             chroma_color.setAlpha(220)
 
@@ -386,7 +387,7 @@ class PyQtOverlay(QWidget):
                     in_fov = (bx1 < ox + fov_half and bx2 > ox - fov_half and
                               by1 < oy + fov_half and by2 > oy - fov_half)
 
-                painter.setPen(QPen(chroma_color if in_fov else box_color, thickness))
+                painter.setPen(QPen((chroma_color if in_fov else box_color) if use_chroma else box_color, thickness))
                 self.draw_corner_box(painter, x1, y1, x2, y2)
 
                 if show_confidence and i < len(self.confidences):

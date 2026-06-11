@@ -517,6 +517,7 @@ def ai_logic_loop(
                     boxes, confidences, class_ids = filter_detections_by_semantic_class(
                         boxes, confidences, class_ids, config)
 
+                all_boxes, all_confidences = boxes, confidences
                 boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size, config)
 
                 if config.single_target_mode:
@@ -557,8 +558,8 @@ def ai_logic_loop(
                 update_queues(
                     overlay_boxes_queue,
                     overlay_confidences_queue,
-                    boxes,
-                    confidences,
+                    all_boxes,
+                    all_confidences,
                     auto_fire_queue=auto_fire_boxes_queue,
                     auto_fire_boxes=boxes,
                 )
