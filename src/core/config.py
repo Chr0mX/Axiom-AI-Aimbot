@@ -192,6 +192,7 @@ class Config:
         self.makcu_aim_button: str = "lmb"   # "lmb", "rmb", or "off"
         self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_aim_active: bool = False  # runtime state — not serialized
+        self.makcu_disengage_delay: float = 0.0  # seconds to keep aiming after releasing aim button (0 = off)
         self.fov_follow_mouse: bool = False # FOV 跟隨鼠標
 
         # 顯示開關
@@ -365,6 +366,7 @@ class Config:
             'always_aim': self.always_aim,
             'makcu_aim_button': self.makcu_aim_button,
             'makcu_aim_mode': self.makcu_aim_mode,
+            'makcu_disengage_delay': self.makcu_disengage_delay,
             'fov_follow_mouse': self.fov_follow_mouse,
             'aim_toggle_key': self.aim_toggle_key,
             'auto_fire_key2': self.auto_fire_key2,

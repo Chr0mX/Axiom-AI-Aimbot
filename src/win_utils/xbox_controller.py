@@ -96,7 +96,7 @@ class XboxController:
         # Adjustable parameters
         self.sensitivity: float = 1.0
         self.deadzone: float = 0.05
-        self.stick_duration: float = 0.03
+        self.stick_duration: float = 0.005
         self.max_stick_value: float = 1.0
         
         # 統計
@@ -191,32 +191,33 @@ class XboxController:
         if not self.ensure_initialized():
             return False
         
+        # First lock section: compute stick values and push joystick
         with self._lock:
             try:
                 # 應用靈敏度
                 scaled_x = dx * self.sensitivity
                 scaled_y = dy * self.sensitivity
-                
+
                 # 映射到 -1.0 ~ 1.0 範圍
                 # 使用非線性映射：較大的移動量產生較大的搖桿偏移
                 # 基準值：50 像素 = 搖桿全推
                 BASE_PIXELS = 50.0
                 norm_x = max(-1.0, min(1.0, scaled_x / BASE_PIXELS))
                 norm_y = max(-1.0, min(1.0, scaled_y / BASE_PIXELS))
-                
+
                 # 應用最大值限制
                 norm_x *= self.max_stick_value
                 norm_y *= self.max_stick_value
-                
+
                 # 死區處理
                 if abs(norm_x) < self.deadzone:
                     norm_x = 0.0
                 if abs(norm_y) < self.deadzone:
                     norm_y = 0.0
-                
+
                 if norm_x == 0.0 and norm_y == 0.0:
                     return True
-                
+
                 # 設定右搖桿值
                 # vgamepad 的 right_joystick_float: x_value_float, y_value_float
                 # Y 軸: vgamepad 中 正=上，但遊戲中下移= dy>0
@@ -226,28 +227,37 @@ class XboxController:
                     y_value_float=-norm_y  # 反轉 Y
                 )
                 self._gamepad.update()
-                
-                # 短暫維持搖桿位置
-                if self.stick_duration > 0:
-                    time.sleep(self.stick_duration)
-                
+
+            except Exception as e:
+                self._error_count += 1
+                self._last_error = str(e)
+                if self._error_count <= 3:
+                    logger.error(f"[Xbox] 右搖桿移動失敗: {e}")
+                if self._error_count > 5:
+                    self._connected = False
+                    self._gamepad = None
+                return False
+
+        # Sleep outside the lock so other threads (inference) are not blocked
+        if self.stick_duration > 0:
+            time.sleep(self.stick_duration)
+
+        # Second lock section: center the joystick
+        with self._lock:
+            try:
                 # 釋放搖桿（回中）
                 self._gamepad.right_joystick_float(
                     x_value_float=0.0,
                     y_value_float=0.0
                 )
                 self._gamepad.update()
-                
                 self._move_count += 1
                 return True
-                
             except Exception as e:
                 self._error_count += 1
                 self._last_error = str(e)
                 if self._error_count <= 3:
-                    logger.error(f"[Xbox] 右搖桿移動失敗: {e}")
-                
-                # 嘗試重新連線
+                    logger.error(f"[Xbox] 右搖桿回中失敗: {e}")
                 if self._error_count > 5:
                     self._connected = False
                     self._gamepad = None

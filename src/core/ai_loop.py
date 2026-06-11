@@ -251,6 +251,9 @@ def ai_logic_loop(
     # MAKCU aim toggle state (used when makcu_aim_mode == "toggle")
     _aim_toggle_active: list = [False]
     _aim_btn_prev: list = [False]
+    # MAKCU disengage-delay state
+    _disengage_time: list = [0.0]   # perf_counter timestamp when aim was released
+    _was_aiming: list = [False]     # previous-frame is_aiming for falling-edge detection
 
     # Preprocess worker state — runs concurrently with inference to avoid
     # serializing resize+normalize and ONNX inference on the same thread.
@@ -428,6 +431,21 @@ def ai_logic_loop(
                                 is_aiming = is_aiming or btn_now
                     except Exception:
                         pass
+                # Makcu disengage-delay: keep is_aiming True for up to N seconds after release
+                _disengage_delay = float(getattr(config, 'makcu_disengage_delay', 0.0) or 0.0)
+                if _was_aiming[0] and not is_aiming:
+                    # Falling edge: user just released/toggled off aim
+                    _disengage_time[0] = current_time
+                elif is_aiming and _disengage_time[0] > 0.0:
+                    # Re-engaged during delay window: cancel timer
+                    _disengage_time[0] = 0.0
+                if not is_aiming and _disengage_delay > 0.0 and _disengage_time[0] > 0.0:
+                    if current_time - _disengage_time[0] < _disengage_delay:
+                        is_aiming = True  # still within delay window
+                    else:
+                        _disengage_time[0] = 0.0  # delay expired
+                _was_aiming[0] = is_aiming
+
                 config.makcu_aim_active = is_aiming
                 if is_aiming:
                     if state.aiming_start_time == 0.0:

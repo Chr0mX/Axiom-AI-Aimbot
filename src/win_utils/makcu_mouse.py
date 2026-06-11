@@ -311,7 +311,9 @@ class MakcuMouse:
                 with self._lock:
                     if self._serial and self._serial.is_open:
                         self._serial.write(self.CMD_LEFT_DOWN.encode('ascii'))
-                        time.sleep(0.03)
+                time.sleep(0.03)
+                with self._lock:
+                    if self._serial and self._serial.is_open:
                         self._serial.write(self.CMD_LEFT_UP.encode('ascii'))
                 return
             cmd = self.CMD_LEFT_DOWN if action == 2 else self.CMD_LEFT_UP if action == 3 else None
