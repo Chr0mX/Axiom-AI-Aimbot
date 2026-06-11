@@ -135,6 +135,14 @@ _PRIORITY_MAP = {
     "time_critical": 15,
 }
 
+# Windows PROCESS priority classes — what Task Manager shows
+_PROCESS_CLASS_MAP = {
+    "normal":        0x00000020,  # NORMAL_PRIORITY_CLASS
+    "above_normal":  0x00008000,  # ABOVE_NORMAL_PRIORITY_CLASS
+    "high":          0x00000080,  # HIGH_PRIORITY_CLASS
+    "time_critical": 0x00000080,  # HIGH_PRIORITY_CLASS (REALTIME_PRIORITY_CLASS is unsafe)
+}
+
 
 def _set_thread_priority(level: str) -> None:
     if os.name != 'nt':
@@ -143,6 +151,18 @@ def _set_thread_priority(level: str) -> None:
         ctypes.windll.kernel32.SetThreadPriority(
             ctypes.windll.kernel32.GetCurrentThread(),
             _PRIORITY_MAP.get(level, 2),
+        )
+    except Exception:
+        pass
+
+
+def _set_process_priority(level: str) -> None:
+    if os.name != 'nt':
+        return
+    try:
+        ctypes.windll.kernel32.SetPriorityClass(
+            ctypes.windll.kernel32.GetCurrentProcess(),
+            _PROCESS_CLASS_MAP.get(level, 0x00000080),
         )
     except Exception:
         pass
@@ -196,7 +216,9 @@ def ai_logic_loop(
 
     _io_binding[0] = _setup_io_binding(model)
 
-    _set_thread_priority(getattr(config, 'thread_priority', 'high'))
+    _prio_level = getattr(config, 'thread_priority', 'high')
+    _set_process_priority(_prio_level)
+    _set_thread_priority(_prio_level)
 
     current_model_path = config.model_path
     current_backend = str(getattr(config, "inference_backend", "auto")).lower()
