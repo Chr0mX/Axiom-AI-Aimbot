@@ -28,7 +28,7 @@ Note on Python 3.13+:
 
 from __future__ import annotations
 
-__version__ = "1.1"
+__version__ = "1.2"
 
 import os
 import subprocess
@@ -118,8 +118,9 @@ def run(cmd: list) -> None:
     subprocess.run(cmd, check=True)
 
 
-def _run_check(snippet: str) -> str:
-    """Run a Python snippet with PACKAGES_DIR on sys.path and nvidia DLL dirs registered."""
+def _build_inject(snippet: str) -> str:
+    """Build the bootstrap snippet that puts PACKAGES_DIR on sys.path and registers
+    every nvidia/*/bin/ + tensorrt_libs DLL dir before running `snippet`."""
     # Scan all nvidia/*/bin/ dirs that actually exist — covers transitive deps like
     # nvjitlink and cuda_nvrtc that are not in any hardcoded list.
     _nvidia_base = PACKAGES_DIR / "nvidia"
@@ -133,17 +134,31 @@ def _run_check(snippet: str) -> str:
             for p in _dll_dirs
         )
     )
-    inject = (
+    return (
         f"import sys; sys.path.insert(0, {str(PACKAGES_DIR)!r}); "
         + _dll_reg
         + snippet
     )
+
+
+def _run_check(snippet: str) -> str:
+    """Run a Python snippet with PACKAGES_DIR on sys.path and nvidia DLL dirs registered."""
     result = subprocess.run(
-        [sys.executable, "-c", inject],
+        [sys.executable, "-c", _build_inject(snippet)],
         capture_output=True,
         text=True,
     )
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _run_check_err(snippet: str) -> tuple[bool, str]:
+    """Like _run_check but returns (ok, stderr) so callers can diagnose failures."""
+    result = subprocess.run(
+        [sys.executable, "-c", _build_inject(snippet)],
+        capture_output=True,
+        text=True,
+    )
+    return (result.returncode == 0, result.stderr.strip())
 
 
 # ── Detection ─────────────────────────────────────────────────────────────────
@@ -220,6 +235,14 @@ def verify_installation() -> None:
         elif required:
             log(f"  [MISSING] {name}")
             all_ok = False
+            # Surface the real import error instead of leaving it silent — the
+            # detection helpers swallow stderr, so re-run with it captured.
+            if fn is is_tensorrt_importable and _BINDINGS_SUPPORTED:
+                _ok, _err = _run_check_err("import tensorrt; print(tensorrt.__version__)")
+                if _err:
+                    warn("  ↳ import tensorrt failed with:")
+                    for _line in _err.splitlines():
+                        warn(f"      {_line}")
         else:
             log(f"  [SKIP]    {name}")
 
@@ -269,9 +292,14 @@ def main() -> None:
             if not (PACKAGES_DIR / "nvidia" / "cufft" / "bin").is_dir():
                 log("Installing nvidia-cufft-cu12 (required by nvinfer_10.dll)...")
                 _pip(["nvidia-cufft-cu12"], upgrade=False)
-            log("Installing tensorrt_cu12_bindings for Python API support...")
+            # Install the libs + bindings as a matched pair. The bindings .pyd does
+            # `import tensorrt_libs` at import time and links against nvinfer's ABI;
+            # installing bindings alone lets it fall back to a mismatched tensorrt_libs
+            # in the embedded interpreter, which fails to load silently. TENSORRT_PACKAGES
+            # already pins both to the same `<11` line so pip resolves a matching pair.
+            log(f"Installing matched TensorRT pair: {', '.join(TENSORRT_PACKAGES)}")
             # Force --upgrade so existing (possibly stale) dirs get replaced.
-            _pip(["tensorrt_cu12_bindings<11"], upgrade=True)
+            _pip(TENSORRT_PACKAGES, upgrade=True)
             verify_installation()
         else:
             log("TensorrtExecutionProvider already available — nothing to do.")
