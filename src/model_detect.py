@@ -37,28 +37,12 @@ if os.path.isdir(_embedded_pkgs) and _embedded_pkgs not in sys.path:
     sys.path.insert(0, _embedded_pkgs)
 
 # Inject TensorRT + CUDA DLL dirs — mirrors main.py's _register_nvidia_dll_dirs().
-# Must register ALL nvidia sub-package bin dirs; TensorRT bindings won't import
-# without cublas/cudnn/etc DLLs being findable first.
+# AppData is pinned to sys.path[0] so the Axiom-installed tensorrt package always
+# takes precedence over anything the embedded interpreter might find elsewhere.
 _NVIDIA_SUBPKGS = ["cuda_runtime", "cublas", "cudnn"]
 
 def _inject_tensorrt_paths() -> None:
     import site as _site
-    candidates: list[str] = []
-
-    # 1. AxiomAI AppData (primary installer location)
-    _lad = os.environ.get("LOCALAPPDATA", "")
-    if _lad:
-        candidates.append(os.path.join(_lad, "AxiomAI", "site-packages"))
-
-    # 2. All site-packages known to the current interpreter
-    try:
-        candidates.extend(_site.getsitepackages())
-    except Exception:
-        pass
-    try:
-        candidates.append(_site.getusersitepackages())
-    except Exception:
-        pass
 
     def _add_dll(path: str) -> None:
         if not os.path.isdir(path):
@@ -70,16 +54,35 @@ def _inject_tensorrt_paths() -> None:
             except Exception:
                 pass
 
-    for _pkg_dir in candidates:
-        if not os.path.isdir(_pkg_dir):
-            continue
-        if _pkg_dir not in sys.path:
-            sys.path.insert(0, _pkg_dir)
-        # nvidia/<sub>/bin/ — cublas64_12.dll, cudnn*.dll, cudart64_12.dll, etc.
+    def _register(pkg_dir: str) -> None:
+        if not os.path.isdir(pkg_dir):
+            return
+        if pkg_dir not in sys.path:
+            sys.path.insert(0, pkg_dir)
         for _sub in _NVIDIA_SUBPKGS:
-            _add_dll(os.path.join(_pkg_dir, "nvidia", _sub, "bin"))
-        # tensorrt_libs/ — nvinfer_10.dll, nvonnxparser_10.dll, etc.
-        _add_dll(os.path.join(_pkg_dir, "tensorrt_libs"))
+            _add_dll(os.path.join(pkg_dir, "nvidia", _sub, "bin"))
+        _add_dll(os.path.join(pkg_dir, "tensorrt_libs"))
+
+    # Register interpreter site-packages first (lower priority)
+    try:
+        for _p in _site.getsitepackages():
+            _register(_p)
+    except Exception:
+        pass
+    try:
+        _register(_site.getusersitepackages())
+    except Exception:
+        pass
+
+    # AppData last so it lands at sys.path[0] (highest priority)
+    _lad = os.environ.get("LOCALAPPDATA", "")
+    if _lad:
+        _appdata = os.path.join(_lad, "AxiomAI", "site-packages")
+        _register(_appdata)
+        # Guarantee it stays at the front even if already present
+        if _appdata in sys.path:
+            sys.path.remove(_appdata)
+        sys.path.insert(0, _appdata)
 
 _inject_tensorrt_paths()
 
