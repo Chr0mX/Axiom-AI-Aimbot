@@ -5,8 +5,6 @@ Usage:
     python src/model_detect.py <path/to/model.engine>
 """
 
-__version__ = "1.0"
-
 from __future__ import annotations
 
 __version__ = "1.0"
