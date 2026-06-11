@@ -66,13 +66,9 @@ else:
 
 ONNXRUNTIME_GPU_PACKAGES = [
     "onnxruntime-gpu",
-    "nvidia-cublas-cu12",
-    "nvidia-cuda-runtime-cu12",
-    "nvidia-cudnn-cu12",
-    "nvidia-cufft-cu12",
-    "nvidia-curand-cu12",
-    "nvidia-cusolver-cu12",
-    "nvidia-cusparse-cu12",
+    "nvidia-cuda-runtime-cu12",  # cudart64_12.dll
+    "nvidia-cublas-cu12",         # cublas64_12.dll, cublasLt64_12.dll (cuDNN dep)
+    "nvidia-cudnn-cu12",          # convolutions
 ]
 
 COMMON_DEPS = [
@@ -80,8 +76,7 @@ COMMON_DEPS = [
     "flatbuffers",
     "packaging",
     "protobuf",
-    "sympy",
-    "coloredlogs",
+    "sympy",      # ORT shape inference
 ]
 
 
@@ -122,7 +117,7 @@ def run(cmd: list) -> None:
 
 def _run_check(snippet: str) -> str:
     """Run a Python snippet with PACKAGES_DIR on sys.path and nvidia DLL dirs registered."""
-    _nvidia_subs = ["cuda_runtime", "cublas", "cufft", "curand", "cusolver", "cusparse", "cudnn"]
+    _nvidia_subs = ["cuda_runtime", "cublas", "cudnn"]
     _dll_dirs = (
         [str(PACKAGES_DIR / "tensorrt_libs")]
         + [str(PACKAGES_DIR / "nvidia" / sub / "bin") for sub in _nvidia_subs]
