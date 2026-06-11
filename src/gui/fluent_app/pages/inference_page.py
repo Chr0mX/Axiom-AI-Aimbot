@@ -600,6 +600,22 @@ class InferencePage(BasePage):
             parent=self.inferPerfGroup
         )
 
+        self.frameSkipCard = SwitchSettingCard(
+            FluentIcon.SPEED_MEDIUM,
+            t("frame_skip_enabled", "Frame Skip Gate"),
+            t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."),
+            parent=self.inferPerfGroup
+        )
+
+        self.frameSkipThresholdCard = SliderLabelCard(
+            FluentIcon.ALIGNMENT,
+            t("frame_skip_threshold", "Skip Threshold"),
+            5, 100,
+            format_func=lambda v: f"{v / 10:.1f}",
+            description=t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"),
+            slider_width=160,
+            parent=self.inferPerfGroup
+        )
 
     # ──────────────────────────────────────────────
     # Layout
@@ -673,6 +689,8 @@ class InferencePage(BasePage):
 
         self.inferPerfGroup.addSettingCard(self.skipLetterboxCard)
         self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
+        self.inferPerfGroup.addSettingCard(self.frameSkipCard)
+        self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
         self.addContent(self.inferPerfGroup)
 
         self.scrollLayout.addStretch(1)
@@ -736,6 +754,8 @@ class InferencePage(BasePage):
 
         self.skipLetterboxCard.checkedChanged.connect(self._onSkipLetterboxChanged)
         self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
+        self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
+        self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -894,6 +914,8 @@ class InferencePage(BasePage):
 
             self.skipLetterboxCard.setChecked(bool(getattr(self._config, 'skip_letterbox', False)))
             self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
+            self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
+            self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
 
         finally:
             self._isLoadingConfig = False
@@ -1582,6 +1604,14 @@ class InferencePage(BasePage):
         if self._config:
             self._config.cuda_io_binding_enabled = bool(checked)
 
+    def _onFrameSkipChanged(self, checked):
+        if self._config:
+            self._config.frame_skip_enabled = bool(checked)
+
+    def _onFrameSkipThresholdChanged(self, value):
+        if self._config:
+            self._config.frame_skip_threshold = value / 10.0
+
     # ──────────────────────────────────────────────
     # Retranslate
     # ──────────────────────────────────────────────
@@ -1633,6 +1663,9 @@ class InferencePage(BasePage):
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
         self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
         self.skipLetterboxCard.contentLabel.setText(t("skip_letterbox_desc"))
+        self.frameSkipCard.titleLabel.setText(t("frame_skip_enabled", "Frame Skip Gate"))
+        self.frameSkipCard.contentLabel.setText(t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."))
+        self.frameSkipThresholdCard.titleLabel.setText(t("frame_skip_threshold", "Skip Threshold"))
 
         self.comPortCard.titleLabel.setText(t("arduino_com_port"))
         self.comRefreshBtn.setText(t("refresh"))

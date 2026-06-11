@@ -694,7 +694,7 @@ class StatusPanel(QWidget):
             self._applyAcrylicEffect()
 
         # 3. 獲取數據
-        current_aim = self.config.AimToggle
+        current_aim = self.config.AimToggle and getattr(self.config, 'makcu_aim_active', False)
         current_model = getattr(self.config, 'model_path', '')
         current_method = getattr(self.config, 'mouse_move_method', 'ddxoft')
         current_screenshot_method = getattr(self.config, 'screenshot_method', 'mss')
