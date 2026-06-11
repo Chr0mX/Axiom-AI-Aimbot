@@ -50,6 +50,21 @@ class OtherPage(BasePage):
         self.languageCard.hBoxLayout.addWidget(self.languageBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.languageCard.hBoxLayout.addSpacing(16)
 
+        # === Performance ===
+        self.perfGroup = SettingCardGroup(t("performance_settings", "Performance"), self.scrollWidget)
+
+        self.threadPriorityCombo = ComboBox()
+        self.threadPriorityCombo.addItems(["Normal", "Above Normal", "High", "Time Critical"])
+        self.threadPriorityCombo.setMinimumWidth(150)
+        self.threadPriorityCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("thread_priority", "Thread Priority"),
+            t("thread_priority_desc", "CPU priority for inference, capture and preprocess threads. Takes effect on next inference start."),
+            self.perfGroup
+        )
+        self.threadPriorityCard.hBoxLayout.addWidget(self.threadPriorityCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.threadPriorityCard.hBoxLayout.addSpacing(16)
+
         # === 程式控制 ===
         self.programGroup = SettingCardGroup(t("program_control"), self.scrollWidget)
 
@@ -201,6 +216,10 @@ class OtherPage(BasePage):
         self.appSettingsGroup.addSettingCard(self.languageCard)
         self.addContent(self.appSettingsGroup)
 
+        # Performance
+        self.perfGroup.addSettingCard(self.threadPriorityCard)
+        self.addContent(self.perfGroup)
+
         # 程式控制
         self.programGroup.addSettingCard(self.showConsoleCard)
         self.programGroup.addSettingCard(self.exitSaveCard)
@@ -264,6 +283,9 @@ class OtherPage(BasePage):
         # Language
         self.languageBtn.clicked.connect(self._onChangeLanguage)
 
+        # Performance
+        self.threadPriorityCombo.currentTextChanged.connect(self._onThreadPriorityChanged)
+
         # 程式控制
         self.showConsoleCard.checkedChanged.connect(self._onShowConsoleChanged)
         self.exitSaveBtn.clicked.connect(self._onExitSave)
@@ -290,6 +312,13 @@ class OtherPage(BasePage):
 
         self.showConsoleCard.setChecked(self._config.show_console)
 
+        _prio_rev = {"normal": "Normal", "above_normal": "Above Normal",
+                     "high": "High", "time_critical": "Time Critical"}
+        self.threadPriorityCombo.blockSignals(True)
+        self.threadPriorityCombo.setCurrentText(
+            _prio_rev.get(getattr(self._config, 'thread_priority', 'high'), "High"))
+        self.threadPriorityCombo.blockSignals(False)
+
         self._refreshMakcuHwInfo()
     
     # === 回調函數 ===
@@ -304,6 +333,13 @@ class OtherPage(BasePage):
             dlg.exec()
         except Exception as e:
             print(f"[Language] Failed to open language dialog: {e}")
+
+    def _onThreadPriorityChanged(self, text):
+        if not self._config:
+            return
+        _prio_map = {"Normal": "normal", "Above Normal": "above_normal",
+                     "High": "high", "Time Critical": "time_critical"}
+        self._config.thread_priority = _prio_map.get(text, "high")
 
     def _onShowConsoleChanged(self, checked):
         if self._config:
@@ -558,6 +594,12 @@ class OtherPage(BasePage):
         self.languageCard.titleLabel.setText(t("language_settings", "Language"))
         self.languageBtn.setText(t("change_language", "Change Language"))
         self.programGroup.titleLabel.setText(t("program_control"))
+
+        # Performance
+        self.perfGroup.titleLabel.setText(t("performance_settings", "Performance"))
+        self.threadPriorityCard.titleLabel.setText(t("thread_priority", "Thread Priority"))
+        self.threadPriorityCard.contentLabel.setText(
+            t("thread_priority_desc", "CPU priority for inference, capture and NDI receive threads. Takes effect on next inference start."))
 
         # 程式控制
         self.showConsoleCard.titleLabel.setText(t("show_console"))
