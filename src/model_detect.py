@@ -7,7 +7,7 @@ Usage:
 
 from __future__ import annotations
 
-__version__ = "1.0"
+__version__ = "1.1"
 
 import argparse
 import os
@@ -193,10 +193,12 @@ def inspect_engine(path: str) -> dict:
         if _trt_dlls_present:
             raise RuntimeError(
                 "TensorRT DLLs are installed (TensorrtExecutionProvider works in-app) "
-                "but the Python bindings package is missing.\n"
+                "but the Python bindings could not be imported.\n"
+                f"Underlying import error: {_e}\n"
                 "Fix: run the Axiom TRT installer with the embedded Python:\n"
                 "  src\\python\\python.exe src\\install_tensorrt_local.py\n"
-                "This installs tensorrt_cu12_bindings needed for engine file inspection."
+                "This installs a matched tensorrt_cu12_libs + bindings pair needed "
+                "for engine file inspection."
             )
         _searched = [p for p in sys.path if "tensorrt" in p.lower() or "axiom" in p.lower() or "nvidia" in p.lower()]
         _hint = f"\nSearched: {_searched}" if _searched else "\nNo tensorrt-related paths found in sys.path."
