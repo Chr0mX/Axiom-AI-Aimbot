@@ -15,7 +15,23 @@ import sys
 _SRC_DIR     = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_DIR = os.path.dirname(_SRC_DIR)
 
-# Inject embedded site-packages (onnxruntime lives here when bundled)
+# ── if running with system Python, re-launch with the embedded interpreter ──
+# The embedded Python at src/python/python.exe already has onnxruntime and
+# its native DLLs wired up correctly — sys.path injection alone is not enough
+# for native extension modules (.pyd) that depend on co-located DLLs.
+_embedded_python = os.path.join(_SRC_DIR, "python", "python.exe")
+if (
+    os.name == "nt"
+    and os.path.exists(_embedded_python)
+    and os.path.abspath(sys.executable) != os.path.abspath(_embedded_python)
+):
+    import subprocess
+    result = subprocess.run([_embedded_python, os.path.abspath(__file__)] + sys.argv[1:])
+    sys.exit(result.returncode)
+
+# ── from here we are running under the embedded Python (or non-Windows) ─────
+
+# Inject embedded site-packages (belt-and-suspenders for edge cases)
 _embedded_pkgs = os.path.join(_SRC_DIR, "python", "Lib", "site-packages")
 if os.path.isdir(_embedded_pkgs) and _embedded_pkgs not in sys.path:
     sys.path.insert(0, _embedded_pkgs)
@@ -26,6 +42,13 @@ if _localappdata:
     _axiom_pkgs = os.path.join(_localappdata, "AxiomAI", "site-packages")
     if os.path.isdir(_axiom_pkgs) and _axiom_pkgs not in sys.path:
         sys.path.insert(0, _axiom_pkgs)
+    # Also add TRT DLL directory so Windows can find nvinfer*.dll
+    _trt_libs = os.path.join(_axiom_pkgs, "tensorrt_libs")
+    if os.path.isdir(_trt_libs) and hasattr(os, "add_dll_directory"):
+        try:
+            os.add_dll_directory(_trt_libs)
+        except Exception:
+            pass
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
