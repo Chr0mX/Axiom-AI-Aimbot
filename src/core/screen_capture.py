@@ -414,12 +414,22 @@ class NDICapture:
             if self.source_name and source is None:
                 raise RuntimeError(f"NDI source '{self.source_name}' not found")
 
+            _uyvy_fmt = getattr(RecvColorFormat, 'UYVY_RGBA', None)
             _bgra_fmt = getattr(RecvColorFormat, 'BGRX_BGRA', None)
-            receiver_kwargs: dict[str, Any] = {
-                'color_format': _bgra_fmt if _bgra_fmt is not None else RecvColorFormat.RGBX_RGBA
-            }
-            self._recv_is_bgra: bool = _bgra_fmt is not None
-            print(f'[Capture][NDI] Color format: {"BGRX_BGRA (no cvtColor)" if self._recv_is_bgra else "RGBX_RGBA (cvtColor fallback)"}')
+            if _uyvy_fmt is not None:
+                receiver_kwargs: dict[str, Any] = {'color_format': _uyvy_fmt}
+                self._recv_fourcc: str = 'uyvy'
+                print('[Capture][NDI] Color format: UYVY_RGBA (half bandwidth, zero-copy reshape)')
+            elif _bgra_fmt is not None:
+                receiver_kwargs = {'color_format': _bgra_fmt}
+                self._recv_fourcc = 'bgra'
+                print('[Capture][NDI] Color format: BGRX_BGRA (no cvtColor)')
+            else:
+                receiver_kwargs = {'color_format': RecvColorFormat.RGBX_RGBA}
+                self._recv_fourcc = 'rgba'
+                print('[Capture][NDI] Color format: RGBX_RGBA (cvtColor fallback)')
+            # Legacy flag kept so any external callers that check _recv_is_bgra still work
+            self._recv_is_bgra: bool = self._recv_fourcc == 'bgra'
             if RecvBandwidth is not None:
                 bw_pref = str(getattr(config, 'ndi_bandwidth', 'highest')).lower()
                 bw_value = getattr(RecvBandwidth, bw_pref, None) or getattr(RecvBandwidth, 'highest', None)
@@ -476,6 +486,11 @@ class NDICapture:
         self._ndi_frame_ref: list = [None]    # list[np.ndarray | None]
         self._ndi_region_ref: list = [None]
         self._ndi_stop: threading.Event = threading.Event()
+        # FPS caching — read once from frame metadata, then skip per-frame probe
+        self._fps_cached: bool = False
+        # Pre-allocated BGRA output buffer for the crop-path (avoids per-frame malloc)
+        self._bgra_buf: np.ndarray | None = None
+        self._bgra_shape: tuple = ()
 
         self._ndi_preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
@@ -561,34 +576,33 @@ class NDICapture:
         except Exception as exc:
             print(f'[Capture][NDI] Auto-select source setup failed: {exc}')
 
-    @staticmethod
-    def _raw_array_from_cyndilib_frame(frame: Any) -> tuple[np.ndarray | None, int, int]:
-        """Return raw (H, W, 4) uint8 array + (width, height) with no color conversion."""
-        if hasattr(frame, 'get_array'):
-            try:
-                width = int(getattr(frame, 'xres', 0) or 0)
-                height = int(getattr(frame, 'yres', 0) or 0)
-                if width <= 0 or height <= 0:
-                    return None, 0, 0
-                raw = frame.get_array()
-                arr = np.asarray(raw, dtype=np.uint8)
-                expected = width * height * 4
-                if arr.size < expected:
-                    return None, 0, 0
-                return arr[:expected].reshape(height, width, 4), width, height
-            except Exception:
-                return None, 0, 0
+    def _raw_array_from_cyndilib_frame(self, frame: Any) -> tuple[np.ndarray | None, int, int]:
+        """Return raw uint8 array + (width, height) with no color conversion.
+
+        For UYVY the shape is (H, W*2) — a packed 4:2:2 plane.
+        For BGRA/RGBA the shape is (H, W, 4).
+        Uses the buffer protocol (zero-copy) when available, falls back to get_array().
+        """
         try:
-            width, height = frame.get_resolution()
+            width = int(getattr(frame, 'xres', 0) or 0)
+            height = int(getattr(frame, 'yres', 0) or 0)
             if width <= 0 or height <= 0:
                 return None, 0, 0
-            raw = frame.get_array()
-            if raw is None:
-                return None, 0, 0
-            arr = np.asarray(raw, dtype=np.uint8)
-            expected = width * height * 4
+            is_uyvy = getattr(self, '_recv_fourcc', '') == 'uyvy'
+            bytes_per_pixel = 2 if is_uyvy else 4
+            expected = width * height * bytes_per_pixel
+            # Try buffer protocol first (zero-copy)
+            try:
+                arr = np.frombuffer(frame, dtype=np.uint8)
+            except TypeError:
+                raw = frame.get_array() if hasattr(frame, 'get_array') else None
+                if raw is None:
+                    return None, 0, 0
+                arr = np.asarray(raw, dtype=np.uint8)
             if arr.size < expected:
                 return None, 0, 0
+            if is_uyvy:
+                return arr[:expected].reshape(height, width * 2), width, height
             return arr[:expected].reshape(height, width, 4), width, height
         except Exception:
             return None, 0, 0
@@ -635,8 +649,14 @@ class NDICapture:
             except Exception:
                 return None
             frame_obj = self._video_frame_sync
-            if int(getattr(frame_obj, 'xres', 0) or 0) <= 0 or int(getattr(frame_obj, 'yres', 0) or 0) <= 0:
-                return None
+            # Validate frame has actual data using proper API when available
+            try:
+                _res = frame_obj.get_resolution()
+                if min(_res) <= 0 or frame_obj.get_data_size() == 0:
+                    return None
+            except Exception:
+                if int(getattr(frame_obj, 'xres', 0) or 0) <= 0 or int(getattr(frame_obj, 'yres', 0) or 0) <= 0:
+                    return None
         else:
             try:
                 recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 10)
@@ -654,32 +674,40 @@ class NDICapture:
         if frame_w > 0 and frame_h > 0:
             self.preview_width = frame_w
             self.preview_height = frame_h
-            # Expose active NDI stream resolution so detection/FOV use the same coordinate space.
             self.config.ndi_width = frame_w
             self.config.ndi_height = frame_h
 
-        # Update nominal FPS from frame metadata when available.
-        _frame_fps: float = 0.0
-        for _attr in ('frame_rate', 'framerate', 'fps', 'video_fps'):
-            _v = getattr(frame_obj, _attr, None)
-            if isinstance(_v, (int, float)) and float(_v) > 0:
-                _frame_fps = float(_v)
-                break
-        if _frame_fps <= 0:
-            _num = getattr(frame_obj, 'frame_rate_N', None)
-            _den = getattr(frame_obj, 'frame_rate_D', None)
-            if isinstance(_num, (int, float)) and isinstance(_den, (int, float)) and float(_den) > 0:
-                _frame_fps = float(_num) / float(_den)
-        if _frame_fps > 0:
-            self.config.source_nominal_fps = _frame_fps
+        # Cache FPS from frame metadata — read once via proper API, skip every subsequent frame
+        if not self._fps_cached:
+            _frame_fps: float = 0.0
+            try:
+                _frame_fps = float(frame_obj.get_frame_rate())
+            except Exception:
+                for _attr in ('frame_rate', 'framerate', 'fps', 'video_fps'):
+                    _v = getattr(frame_obj, _attr, None)
+                    if isinstance(_v, (int, float)) and float(_v) > 0:
+                        _frame_fps = float(_v)
+                        break
+                if _frame_fps <= 0:
+                    _num = getattr(frame_obj, 'frame_rate_N', None)
+                    _den = getattr(frame_obj, 'frame_rate_D', None)
+                    if isinstance(_num, (int, float)) and isinstance(_den, (int, float)) and float(_den) > 0:
+                        _frame_fps = float(_num) / float(_den)
+            if _frame_fps > 0:
+                self.config.source_nominal_fps = _frame_fps
+                self._fps_cached = True
 
-        recv_is_bgra: bool = getattr(self, '_recv_is_bgra', False)
+        recv_fourcc: str = getattr(self, '_recv_fourcc', 'rgba')
 
         def _to_bgra(arr: np.ndarray) -> np.ndarray:
-            return arr if recv_is_bgra else cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
+            if recv_fourcc == 'uyvy':
+                return cv2.cvtColor(arr, cv2.COLOR_YUV2BGRA_UYVY)
+            if recv_fourcc == 'bgra':
+                return arr
+            return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
 
         if self.show_window:
-            # Preview needs the full frame — convert once, then slice for inference (free view)
+            # Preview needs the full frame — convert once, then slice for inference
             full_bgra = _to_bgra(raw)
             with self._ndi_frame_lock:
                 self._ndi_frame_ref[0] = full_bgra
@@ -695,7 +723,7 @@ class NDICapture:
             else:
                 frame = full_bgra
         else:
-            # No preview — crop raw array first, then convert only the small region
+            # No preview — crop raw first, convert only the small region
             if region is not None:
                 left   = max(0, int(region.get('left',   0)))
                 top    = max(0, int(region.get('top',     0)))
@@ -703,7 +731,31 @@ class NDICapture:
                 bottom = min(frame_h, top  + max(0, int(region.get('height', frame_h))))
                 if right <= left or bottom <= top:
                     return None
-                frame = _to_bgra(raw[top:bottom, left:right])
+
+                if recv_fourcc == 'uyvy':
+                    # UYVY 4:2:2: raw shape is (H, W*2) bytes; horizontal crop must
+                    # align to even-pixel boundary so each macropixel stays intact.
+                    left  = left  & ~1
+                    right = (right + 1) & ~1
+                    crop_raw = raw[top:bottom, left * 2:right * 2]
+                    expected_shape = (bottom - top, right - left, 4)
+                    if self._bgra_shape != expected_shape:
+                        self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
+                        self._bgra_shape = expected_shape
+                    cv2.cvtColor(crop_raw, cv2.COLOR_YUV2BGRA_UYVY, self._bgra_buf)
+                    frame = self._bgra_buf
+                elif recv_fourcc == 'bgra':
+                    # Already BGRA — slice only, no conversion
+                    frame = raw[top:bottom, left:right]
+                else:
+                    # RGBA — convert only the crop region; pre-alloc dst to avoid malloc
+                    crop_raw = raw[top:bottom, left:right]
+                    expected_shape = (bottom - top, right - left, 4)
+                    if self._bgra_shape != expected_shape:
+                        self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
+                        self._bgra_shape = expected_shape
+                    cv2.cvtColor(crop_raw, cv2.COLOR_RGBA2BGRA, self._bgra_buf)
+                    frame = self._bgra_buf
             else:
                 frame = _to_bgra(raw)
 
