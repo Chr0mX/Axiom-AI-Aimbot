@@ -262,9 +262,14 @@ def main() -> None:
     if is_tensorrt_available():
         if _BINDINGS_SUPPORTED and not is_tensorrt_importable():
             log("TensorrtExecutionProvider is available but Python bindings are missing.")
+            # nvinfer_10.dll depends on cufft64_11.dll — ensure it's in AppData so the
+            # _run_check subprocess can find it via add_dll_directory (PATH is not enough
+            # when add_dll_directory has been called, as it changes the DLL search mode).
+            if not (PACKAGES_DIR / "nvidia" / "cufft" / "bin").is_dir():
+                log("Installing nvidia-cufft-cu12 (required by nvinfer_10.dll)...")
+                _pip(["nvidia-cufft-cu12"], upgrade=False)
             log("Installing tensorrt_cu12_bindings for Python API support...")
             # Force --upgrade so existing (possibly stale) dirs get replaced.
-            # Only install bindings — DLLs (2.2 GB) are already present.
             _pip(["tensorrt_cu12_bindings<11"], upgrade=True)
             verify_installation()
         else:
