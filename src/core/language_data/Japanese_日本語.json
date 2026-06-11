@@ -211,5 +211,8 @@
     "smart_jitter_threshold_desc": "ボックスの高さが検出範囲のこの%を下回るとジッターが発動",
     "smart_jitter_level_low": "低 (±1px)",
     "smart_jitter_level_med": "中 (±3px)",
-    "smart_jitter_level_high": "高 (±6px)"
+    "smart_jitter_level_high": "高 (±6px)",
+    "tab_model": "モデル",
+    "model_info": "モデル情報",
+    "model_inspecting": "検査中…"
 }

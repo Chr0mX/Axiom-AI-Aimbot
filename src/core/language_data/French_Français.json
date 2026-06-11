@@ -202,5 +202,8 @@
     "smart_jitter_threshold_desc": "Le jitter se déclenche quand la hauteur de la boîte est inférieure à ce % de la plage de détection",
     "smart_jitter_level_low": "Faible (±1px)",
     "smart_jitter_level_med": "Moyen (±3px)",
-    "smart_jitter_level_high": "Élevé (±6px)"
+    "smart_jitter_level_high": "Élevé (±6px)",
+    "tab_model": "Modèle",
+    "model_info": "Info modèle",
+    "model_inspecting": "Inspection…"
 }
