@@ -208,10 +208,12 @@ class MakcuMouse:
                 n = ser.in_waiting
                 if n:
                     buf.extend(ser.read(n))
+                    if len(buf) > 256:
+                        buf.clear()
                     while len(buf) >= 4:
                         idx = buf.find(_KM_PREFIX)
                         if idx == -1:
-                            del buf[:-3]
+                            del buf[:1]
                             break
                         if idx + 3 >= len(buf):
                             del buf[:idx]
@@ -219,7 +221,7 @@ class MakcuMouse:
                         self._btn_mask = buf[idx + 3]
                         del buf[:idx + 4]
                 else:
-                    time.sleep(0.003)
+                    time.sleep(0.001)
             except Exception:
                 break
 
