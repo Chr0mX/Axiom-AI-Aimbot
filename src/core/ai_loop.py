@@ -345,7 +345,10 @@ def ai_logic_loop(
                     time.sleep(0.001)
                     continue
                 last_frame_id = frame_id
-                tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(frame, config.model_input_size)
+                _frame_is_square = frame.shape[0] == frame.shape[1]
+                tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
+                    frame, config.model_input_size, fast_resize=_frame_is_square
+                )
                 try:
                     _tensor_queue.put((tensor, lb_scale, lb_pad_x, lb_pad_y, region), timeout=0.05)
                 except queue.Full:
