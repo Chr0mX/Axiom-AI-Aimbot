@@ -249,7 +249,13 @@ def main() -> None:
     log("")
 
     if is_tensorrt_available():
-        log("TensorrtExecutionProvider already available — nothing to do.")
+        if _BINDINGS_SUPPORTED and not is_tensorrt_importable():
+            log("TensorrtExecutionProvider is available but Python bindings are missing.")
+            log("Installing tensorrt_cu12_bindings for Python API support...")
+            install_tensorrt()
+            verify_installation()
+        else:
+            log("TensorrtExecutionProvider already available — nothing to do.")
         print_next_steps()
         return
 
