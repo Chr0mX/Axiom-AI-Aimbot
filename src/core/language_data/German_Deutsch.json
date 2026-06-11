@@ -211,5 +211,8 @@
     "smart_jitter_threshold_desc": "Zittern wird ausgelöst, wenn die Box-Höhe unter diesem % des Erkennungsbereichs liegt",
     "smart_jitter_level_low": "Niedrig (±1px)",
     "smart_jitter_level_med": "Mittel (±3px)",
-    "smart_jitter_level_high": "Hoch (±6px)"
+    "smart_jitter_level_high": "Hoch (±6px)",
+    "tab_model": "Modell",
+    "model_info": "Modell-Info",
+    "model_inspecting": "Prüfen…"
 }

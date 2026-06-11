@@ -261,5 +261,8 @@
     "smart_jitter_threshold_desc": "當框高低於偵測範圍此百分比時觸發抖動",
     "smart_jitter_level_low": "低 (±1px)",
     "smart_jitter_level_med": "中 (±3px)",
-    "smart_jitter_level_high": "高 (±6px)"
+    "smart_jitter_level_high": "高 (±6px)",
+    "tab_model": "模型",
+    "model_info": "模型信息",
+    "model_inspecting": "检测中…"
 }

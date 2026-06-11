@@ -202,5 +202,8 @@
     "smart_jitter_threshold_desc": "O jitter é ativado quando a altura da caixa está abaixo desta % do alcance de detecção",
     "smart_jitter_level_low": "Baixo (±1px)",
     "smart_jitter_level_med": "Médio (±3px)",
-    "smart_jitter_level_high": "Alto (±6px)"
+    "smart_jitter_level_high": "Alto (±6px)",
+    "tab_model": "Modelo",
+    "model_info": "Info do Modelo",
+    "model_inspecting": "Inspecionando…"
 }
