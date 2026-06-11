@@ -50,6 +50,21 @@ class OtherPage(BasePage):
         self.languageCard.hBoxLayout.addWidget(self.languageBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.languageCard.hBoxLayout.addSpacing(16)
 
+        # === Performance ===
+        self.perfGroup = SettingCardGroup(t("performance_settings", "Performance"), self.scrollWidget)
+
+        self.threadPriorityCombo = ComboBox()
+        self.threadPriorityCombo.addItems(["Normal", "Above Normal", "High", "Time Critical"])
+        self.threadPriorityCombo.setMinimumWidth(150)
+        self.threadPriorityCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("thread_priority", "Thread Priority"),
+            t("thread_priority_desc", "CPU priority for inference, capture and preprocess threads. Takes effect on next inference start."),
+            self.perfGroup
+        )
+        self.threadPriorityCard.hBoxLayout.addWidget(self.threadPriorityCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.threadPriorityCard.hBoxLayout.addSpacing(16)
+
         # === 程式控制 ===
         self.programGroup = SettingCardGroup(t("program_control"), self.scrollWidget)
 
@@ -71,21 +86,6 @@ class OtherPage(BasePage):
         )
         self.exitSaveCard.hBoxLayout.addWidget(self.exitSaveBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.exitSaveCard.hBoxLayout.addSpacing(16)
-
-        # === Performance ===
-        self.perfGroup = SettingCardGroup(t("performance_settings", "Performance"), self.scrollWidget)
-
-        self.threadPriorityCombo = ComboBox()
-        self.threadPriorityCombo.addItems(["Normal", "Above Normal", "High", "Time Critical"])
-        self.threadPriorityCombo.setMinimumWidth(150)
-        self.threadPriorityCard = SettingCard(
-            FluentIcon.SPEED_HIGH,
-            t("thread_priority", "Thread Priority"),
-            t("thread_priority_desc", "CPU priority for inference, capture and NDI receive threads. Takes effect on next inference start."),
-            self.perfGroup,
-        )
-        self.threadPriorityCard.hBoxLayout.addWidget(self.threadPriorityCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.threadPriorityCard.hBoxLayout.addSpacing(16)
 
         # === Environment — TensorRT ===
         self.trtGroup = SettingCardGroup(t("env_trt", "TensorRT"), self.scrollWidget)
@@ -216,14 +216,14 @@ class OtherPage(BasePage):
         self.appSettingsGroup.addSettingCard(self.languageCard)
         self.addContent(self.appSettingsGroup)
 
+        # Performance
+        self.perfGroup.addSettingCard(self.threadPriorityCard)
+        self.addContent(self.perfGroup)
+
         # 程式控制
         self.programGroup.addSettingCard(self.showConsoleCard)
         self.programGroup.addSettingCard(self.exitSaveCard)
         self.addContent(self.programGroup)
-
-        # Performance
-        self.perfGroup.addSettingCard(self.threadPriorityCard)
-        self.addContent(self.perfGroup)
 
         # Environment — TensorRT
         self.trtGroup.addSettingCard(self.trtStatusCard)

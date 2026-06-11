@@ -674,3 +674,9 @@ def _validate_thread_priority(config: Config) -> None:
     valid = ("normal", "above_normal", "high", "time_critical")
     if getattr(config, "thread_priority", "high") not in valid:
         config.thread_priority = "high"
+
+
+def _validate_thread_priority(config: Config) -> None:
+    valid = ("normal", "above_normal", "high", "time_critical")
+    if getattr(config, "thread_priority", "high") not in valid:
+        config.thread_priority = "high"
