@@ -121,9 +121,22 @@ def run(cmd: list) -> None:
 
 
 def _run_check(snippet: str) -> str:
-    """Run a Python snippet with PACKAGES_DIR injected into sys.path."""
+    """Run a Python snippet with PACKAGES_DIR on sys.path and nvidia DLL dirs registered."""
+    _nvidia_subs = ["cuda_runtime", "cublas", "cufft", "curand", "cusolver", "cusparse", "cudnn"]
+    _dll_dirs = (
+        [str(PACKAGES_DIR / "tensorrt_libs")]
+        + [str(PACKAGES_DIR / "nvidia" / sub / "bin") for sub in _nvidia_subs]
+    )
+    _dll_reg = (
+        "import os; "
+        + "".join(
+            f"os.path.isdir({p!r}) and os.add_dll_directory({p!r}); "
+            for p in _dll_dirs
+        )
+    )
     inject = (
         f"import sys; sys.path.insert(0, {str(PACKAGES_DIR)!r}); "
+        + _dll_reg
         + snippet
     )
     result = subprocess.run(
