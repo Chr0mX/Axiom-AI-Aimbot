@@ -9,6 +9,8 @@ from qfluentwidgets import (
     PushButton, BodyLabel, ComboBox,
 )
 
+from ..components.slider_spin_card import SliderDoubleSpinCard
+
 from ..base_page import BasePage
 from ..language_manager import t
 
@@ -414,6 +416,18 @@ class KeysPage(BasePage):
         self.makcuAimModeCard.hBoxLayout.addWidget(self.makcuAimModeCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuAimModeCard.hBoxLayout.addSpacing(16)
 
+        # Disengage delay — how long aim stays active after releasing the aim button
+        self.makcuDisengageDelayCard = SliderDoubleSpinCard(
+            FluentIcon.HISTORY,
+            t("makcu_disengage_delay", "Disengage Delay"),
+            0.0, 20.0,
+            decimals=1,
+            step=0.1,
+            suffix="s",
+            description=t("makcu_disengage_delay_desc", "Keep aiming after releasing the aim button (0 = off)"),
+            parent=self.makcuKeysGroup
+        )
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -436,6 +450,7 @@ class KeysPage(BasePage):
         self.makcuKeysGroup.addSettingCard(self.makcuInferenceCard)
         self.makcuKeysGroup.addSettingCard(self.makcuTriggerCard)
         self.makcuKeysGroup.addSettingCard(self.makcuAimModeCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuDisengageDelayCard)
         self.addContent(self.makcuKeysGroup)
         self.makcuKeysGroup.setVisible(False)
 
@@ -457,6 +472,7 @@ class KeysPage(BasePage):
         self.makcuInferenceCombo.currentIndexChanged.connect(self._onMakcuInferenceKeyChanged)
         self.makcuTriggerCombo.currentIndexChanged.connect(self._onMakcuTriggerKeyChanged)
         self.makcuAimModeCombo.currentIndexChanged.connect(self._onMakcuAimModeChanged)
+        self.makcuDisengageDelayCard.valueChanged.connect(self._onMakcuDisengageDelayChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -517,6 +533,10 @@ class KeysPage(BasePage):
                 self.makcuAimModeCombo.blockSignals(False)
                 break
 
+        # Disengage delay
+        delay = float(getattr(self._config, 'makcu_disengage_delay', 0.0) or 0.0)
+        self.makcuDisengageDelayCard.setValue(delay)
+
         self._refreshMakcuVisibility()
 
     def _refreshMakcuVisibility(self):
@@ -527,9 +547,10 @@ class KeysPage(BasePage):
         keep_detecting = bool(getattr(self._config, 'keep_detecting', True))
         # Inference card: hidden when keep_detecting is on (no need to hold a button)
         self.makcuInferenceCard.setVisible(not keep_detecting)
-        # Auto Aim Key + Mode: hidden when always_aim is on (aim is always active)
+        # Auto Aim Key + Mode + delay: hidden when always_aim is on (aim is always active)
         self.makcuTriggerCard.setVisible(not always_aim)
         self.makcuAimModeCard.setVisible(not always_aim)
+        self.makcuDisengageDelayCard.setVisible(not always_aim)
 
     # ──────────────────────────────────────────────
     # Callbacks
@@ -567,6 +588,10 @@ class KeysPage(BasePage):
     def _onMakcuAimModeChanged(self, idx: int):
         if self._config and 0 <= idx < len(self._AIM_MODE_OPTIONS):
             self._config.makcu_aim_mode = self._AIM_MODE_OPTIONS[idx][1]
+
+    def _onMakcuDisengageDelayChanged(self, value: float):
+        if self._config:
+            self._config.makcu_disengage_delay = float(value)
 
     # ──────────────────────────────────────────────
     # Retranslate
