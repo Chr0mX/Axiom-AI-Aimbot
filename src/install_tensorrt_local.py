@@ -252,7 +252,9 @@ def main() -> None:
         if _BINDINGS_SUPPORTED and not is_tensorrt_importable():
             log("TensorrtExecutionProvider is available but Python bindings are missing.")
             log("Installing tensorrt_cu12_bindings for Python API support...")
-            install_tensorrt()
+            # Force --upgrade so existing (possibly stale) dirs get replaced.
+            # Only install bindings — DLLs (2.2 GB) are already present.
+            _pip(["tensorrt_cu12_bindings<11"], upgrade=True)
             verify_installation()
         else:
             log("TensorrtExecutionProvider already available — nothing to do.")
