@@ -36,19 +36,42 @@ _embedded_pkgs = os.path.join(_SRC_DIR, "python", "Lib", "site-packages")
 if os.path.isdir(_embedded_pkgs) and _embedded_pkgs not in sys.path:
     sys.path.insert(0, _embedded_pkgs)
 
-# Inject AxiomAI AppData packages (TensorRT lives here)
-_localappdata = os.environ.get("LOCALAPPDATA", "")
-if _localappdata:
-    _axiom_pkgs = os.path.join(_localappdata, "AxiomAI", "site-packages")
-    if os.path.isdir(_axiom_pkgs) and _axiom_pkgs not in sys.path:
-        sys.path.insert(0, _axiom_pkgs)
-    # Also add TRT DLL directory so Windows can find nvinfer*.dll
-    _trt_libs = os.path.join(_axiom_pkgs, "tensorrt_libs")
-    if os.path.isdir(_trt_libs) and hasattr(os, "add_dll_directory"):
-        try:
-            os.add_dll_directory(_trt_libs)
-        except Exception:
-            pass
+# Inject TensorRT from every known location and register their DLL dirs.
+# Mirrors the search order used by other_page.py._findTrtDllPath().
+def _inject_tensorrt_paths() -> None:
+    import site as _site
+    candidates: list[str] = []
+
+    # 1. AxiomAI AppData (primary installer location)
+    _lad = os.environ.get("LOCALAPPDATA", "")
+    if _lad:
+        candidates.append(os.path.join(_lad, "AxiomAI", "site-packages"))
+
+    # 2. All site-packages known to the current interpreter
+    try:
+        candidates.extend(_site.getsitepackages())
+    except Exception:
+        pass
+    try:
+        candidates.append(_site.getusersitepackages())
+    except Exception:
+        pass
+
+    for _pkg_dir in candidates:
+        if not os.path.isdir(_pkg_dir):
+            continue
+        if _pkg_dir not in sys.path:
+            sys.path.insert(0, _pkg_dir)
+        # Register tensorrt_libs DLL directory (nvinfer*.dll etc.)
+        for _dll_subdir in ("tensorrt_libs", os.path.join("nvidia", "cuda_runtime", "bin")):
+            _dll_path = os.path.join(_pkg_dir, _dll_subdir)
+            if os.path.isdir(_dll_path) and hasattr(os, "add_dll_directory"):
+                try:
+                    os.add_dll_directory(_dll_path)
+                except Exception:
+                    pass
+
+_inject_tensorrt_paths()
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -144,10 +167,12 @@ def inspect_engine(path: str) -> dict:
     """Inspect a TensorRT engine file."""
     try:
         import tensorrt as trt  # noqa: F401
-    except ImportError:
+    except ImportError as _e:
+        _searched = [p for p in sys.path if "tensorrt" in p.lower() or "axiom" in p.lower() or "nvidia" in p.lower()]
+        _hint = f"\nSearched: {_searched}" if _searched else "\nNo tensorrt-related paths found in sys.path."
         raise RuntimeError(
-            "TensorRT is not installed or not found in AppData. "
-            "Cannot inspect .engine files without TensorRT."
+            f"Cannot import tensorrt: {_e}{_hint}\n"
+            "Install TensorRT via the Axiom installer or pip install tensorrt-cu12."
         )
 
     logger  = trt.Logger(trt.Logger.WARNING)
