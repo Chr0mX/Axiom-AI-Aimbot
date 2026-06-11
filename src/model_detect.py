@@ -36,8 +36,13 @@ _embedded_pkgs = os.path.join(_SRC_DIR, "python", "Lib", "site-packages")
 if os.path.isdir(_embedded_pkgs) and _embedded_pkgs not in sys.path:
     sys.path.insert(0, _embedded_pkgs)
 
-# Inject TensorRT from every known location and register their DLL dirs.
-# Mirrors the search order used by other_page.py._findTrtDllPath().
+# Inject TensorRT + CUDA DLL dirs — mirrors main.py's _register_nvidia_dll_dirs().
+# Must register ALL nvidia sub-package bin dirs; TensorRT bindings won't import
+# without cublas/cudnn/etc DLLs being findable first.
+_NVIDIA_SUBPKGS = [
+    "cuda_runtime", "cublas", "cufft", "curand", "cusolver", "cusparse", "cudnn",
+]
+
 def _inject_tensorrt_paths() -> None:
     import site as _site
     candidates: list[str] = []
@@ -57,19 +62,26 @@ def _inject_tensorrt_paths() -> None:
     except Exception:
         pass
 
+    def _add_dll(path: str) -> None:
+        if not os.path.isdir(path):
+            return
+        os.environ["PATH"] = f"{path};{os.environ.get('PATH', '')}"
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(path)
+            except Exception:
+                pass
+
     for _pkg_dir in candidates:
         if not os.path.isdir(_pkg_dir):
             continue
         if _pkg_dir not in sys.path:
             sys.path.insert(0, _pkg_dir)
-        # Register tensorrt_libs DLL directory (nvinfer*.dll etc.)
-        for _dll_subdir in ("tensorrt_libs", os.path.join("nvidia", "cuda_runtime", "bin")):
-            _dll_path = os.path.join(_pkg_dir, _dll_subdir)
-            if os.path.isdir(_dll_path) and hasattr(os, "add_dll_directory"):
-                try:
-                    os.add_dll_directory(_dll_path)
-                except Exception:
-                    pass
+        # nvidia/<sub>/bin/ — cublas64_12.dll, cudnn*.dll, cudart64_12.dll, etc.
+        for _sub in _NVIDIA_SUBPKGS:
+            _add_dll(os.path.join(_pkg_dir, "nvidia", _sub, "bin"))
+        # tensorrt_libs/ — nvinfer_10.dll, nvonnxparser_10.dll, etc.
+        _add_dll(os.path.join(_pkg_dir, "tensorrt_libs"))
 
 _inject_tensorrt_paths()
 
