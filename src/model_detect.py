@@ -180,11 +180,25 @@ def inspect_engine(path: str) -> dict:
     try:
         import tensorrt as trt  # noqa: F401
     except ImportError as _e:
+        # Check if TRT DLLs are present (ORT TRT EP works) but Python bindings are missing
+        _trt_dlls_present = any(
+            os.path.isdir(os.path.join(p, "tensorrt_libs"))
+            for p in sys.path
+            if os.path.isdir(p)
+        )
+        if _trt_dlls_present:
+            raise RuntimeError(
+                "TensorRT DLLs are installed (TensorrtExecutionProvider works in-app) "
+                "but the Python bindings package is missing.\n"
+                "Fix: run the Axiom TRT installer with the embedded Python:\n"
+                "  src\\python\\python.exe src\\install_tensorrt_local.py\n"
+                "This installs tensorrt_cu12_bindings needed for engine file inspection."
+            )
         _searched = [p for p in sys.path if "tensorrt" in p.lower() or "axiom" in p.lower() or "nvidia" in p.lower()]
         _hint = f"\nSearched: {_searched}" if _searched else "\nNo tensorrt-related paths found in sys.path."
         raise RuntimeError(
             f"Cannot import tensorrt: {_e}{_hint}\n"
-            "Install TensorRT via the Axiom installer or pip install tensorrt-cu12."
+            "Run: src\\python\\python.exe src\\install_tensorrt_local.py"
         )
 
     logger  = trt.Logger(trt.Logger.WARNING)
