@@ -120,11 +120,12 @@ def run(cmd: list) -> None:
 
 def _run_check(snippet: str) -> str:
     """Run a Python snippet with PACKAGES_DIR on sys.path and nvidia DLL dirs registered."""
-    _nvidia_subs = ["cuda_runtime", "cublas", "cufft", "cudnn"]
-    _dll_dirs = (
-        [str(PACKAGES_DIR / "tensorrt_libs")]
-        + [str(PACKAGES_DIR / "nvidia" / sub / "bin") for sub in _nvidia_subs]
-    )
+    # Scan all nvidia/*/bin/ dirs that actually exist — covers transitive deps like
+    # nvjitlink and cuda_nvrtc that are not in any hardcoded list.
+    _nvidia_base = PACKAGES_DIR / "nvidia"
+    _dll_dirs = [str(PACKAGES_DIR / "tensorrt_libs")]
+    if _nvidia_base.is_dir():
+        _dll_dirs += [str(p / "bin") for p in _nvidia_base.iterdir() if (p / "bin").is_dir()]
     _dll_reg = (
         "import os; "
         + "".join(
@@ -194,7 +195,7 @@ def install_onnxruntime_gpu() -> None:
 def install_tensorrt() -> None:
     pkgs = ", ".join(TENSORRT_PACKAGES)
     log(f"Installing TensorRT packages: {pkgs}")
-    _pip(TENSORRT_PACKAGES, upgrade=False)
+    _pip(TENSORRT_PACKAGES, upgrade=True)
 
 
 # ── Verification ──────────────────────────────────────────────────────────────
