@@ -128,6 +128,26 @@ def _sleep_precise(seconds: float) -> None:
                 time.sleep(0)
 
 
+_PRIORITY_MAP = {
+    "normal":        0,
+    "above_normal":  1,
+    "high":          2,
+    "time_critical": 15,
+}
+
+
+def _set_thread_priority(level: str) -> None:
+    if os.name != 'nt':
+        return
+    try:
+        ctypes.windll.kernel32.SetThreadPriority(
+            ctypes.windll.kernel32.GetCurrentThread(),
+            _PRIORITY_MAP.get(level, 2),
+        )
+    except Exception:
+        pass
+
+
 def _set_windows_timer_resolution_1ms(enable: bool) -> bool:
     """Enable/disable 1ms timer resolution on Windows. Returns success status."""
 
@@ -176,12 +196,7 @@ def ai_logic_loop(
 
     _io_binding[0] = _setup_io_binding(model)
 
-    if os.name == 'nt':
-        try:
-            ctypes.windll.kernel32.SetThreadPriority(
-                ctypes.windll.kernel32.GetCurrentThread(), 1)  # ABOVE_NORMAL
-        except Exception:
-            pass
+    _set_thread_priority(getattr(config, 'thread_priority', 'high'))
 
     current_model_path = config.model_path
     current_backend = str(getattr(config, "inference_backend", "auto")).lower()
@@ -221,6 +236,7 @@ def ai_logic_loop(
     _preprocess_stop: threading.Event = threading.Event()
 
     def _capture_worker() -> None:
+        _set_thread_priority(getattr(config, 'thread_priority', 'high'))
         _capture_backend[0] = initialize_screen_capture(config)
         _active_method[0] = _detect_active_capture_method(
             _capture_backend[0],
@@ -292,6 +308,7 @@ def ai_logic_loop(
                 _cleanup_capture(_capture_backend[0])
 
     def _preprocess_worker() -> None:
+        _set_thread_priority(getattr(config, 'thread_priority', 'high'))
         last_frame_id: int = -1
         while not _preprocess_stop.is_set() and config.Running:
             try:
