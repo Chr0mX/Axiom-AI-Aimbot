@@ -204,6 +204,8 @@
     "smart_jitter_level_med": "Medio (±3px)",
     "smart_jitter_level_high": "Alto (±6px)",
     "tab_model": "Modelo",
+    "tab_capture": "Captura",
+    "tab_hardware_output": "Salida",
     "model_info": "Info del modelo",
     "model_inspecting": "Inspeccionando…"
 }

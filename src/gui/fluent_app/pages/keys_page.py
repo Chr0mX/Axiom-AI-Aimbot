@@ -1,5 +1,5 @@
 # keys_page.py
-"""按鍵綁定頁面 - 瞄準鍵、自動射擊鍵設定"""
+"""Hardware Output page — keybinds, MAKCU connection + keys"""
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QHBoxLayout
@@ -253,19 +253,27 @@ class KeyBindButton(PushButton):
 
 
 class KeysPage(BasePage):
-    """按鍵綁定頁面"""
+    """Hardware Output page — keybinds, MAKCU connection + keys"""
 
     def __init__(self, parent=None):
-        super().__init__("tab_keys", parent)
+        super().__init__("tab_hardware_output", parent)
         self._config = None
+        self._isMakcuConnected = False
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
+
+        # Aim-status poll timer (250 ms)
+        self._aimStatusTimer = QTimer(self)
+        self._aimStatusTimer.setInterval(250)
+        self._aimStatusTimer.timeout.connect(self._updateMakcuAimStatus)
+        self._aimStatusTimer.start()
 
     def setConfig(self, config):
         """設定 Config 實例並載入值"""
         self._config = config
         self._loadFromConfig()
+        self._loadMakcuConnFromConfig()
         self._updateMakcuVisibility()
 
     def showEvent(self, event):
@@ -284,7 +292,8 @@ class KeysPage(BasePage):
             card.setVisible(not is_makcu)
         # Fire keys group hidden in MAKCU mode
         self.fireKeysGroup.setVisible(not is_makcu)
-        # MAKCU keys group visible only in MAKCU mode
+        # MAKCU connection + keys groups visible only in MAKCU mode
+        self.makcuConnGroup.setVisible(is_makcu)
         self.makcuKeysGroup.setVisible(is_makcu)
 
     # ──────────────────────────────────────────────
@@ -366,6 +375,77 @@ class KeysPage(BasePage):
         self.fireKey2Card.hBoxLayout.addWidget(self.fireKey2Btn, 0, Qt.AlignmentFlag.AlignRight)
         self.fireKey2Card.hBoxLayout.addSpacing(16)
 
+        # === MAKCU Connection (shown only when mouse_move_method == "makcu") ===
+        self.makcuConnGroup = SettingCardGroup(t("makcu_connection_group", "MAKCU Connection"), self.scrollWidget)
+
+        # COM port selector + refresh button
+        self.makcuComPortCombo = ComboBox()
+        self.makcuComPortCombo.setMinimumWidth(120)
+        self.makcuComPortCombo.addItem(t("no_com_port", "No COM Port"))
+        self._refreshMakcuComPorts()
+
+        self.makcuComRefreshBtn = PushButton(t("refresh", "Refresh"))
+        self.makcuComRefreshBtn.setFixedWidth(80)
+
+        self.makcuComPortCard = SettingCard(
+            FluentIcon.CONNECT,
+            t("makcu_com_port", "COM Port:"),
+            "",
+            self.makcuConnGroup
+        )
+        self.makcuComPortCard.hBoxLayout.addWidget(self.makcuComPortCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuComPortCard.hBoxLayout.addWidget(self.makcuComRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuComPortCard.hBoxLayout.addSpacing(16)
+
+        # Baud rate
+        self.makcuBaudCombo = ComboBox()
+        self.makcuBaudCombo.addItems(["115200", "460800", "1000000", "2000000", "4000000"])
+        self.makcuBaudCombo.setMinimumWidth(120)
+        self.makcuBaudCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("arduino_baud_rate", "Baud Rate"),
+            "",
+            self.makcuConnGroup
+        )
+        self.makcuBaudCard.hBoxLayout.addWidget(self.makcuBaudCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuBaudCard.hBoxLayout.addSpacing(16)
+
+        # Connection status label
+        self.makcuConnectionLabel = BodyLabel(t("disconnected", "Disconnected"))
+        self.makcuConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.makcuConnectionCard = SettingCard(
+            FluentIcon.WIFI,
+            t("connected", "Connected") + " / " + t("disconnected", "Disconnected"),
+            "",
+            self.makcuConnGroup
+        )
+        self.makcuConnectionCard.hBoxLayout.addWidget(self.makcuConnectionLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuConnectionCard.hBoxLayout.addSpacing(16)
+
+        # Connect / Disconnect button
+        self.makcuConnectBtn = PushButton(t("makcu_connect", "Connect MAKCU"))
+        self.makcuConnectBtn.setFixedWidth(160)
+        self.makcuConnectBtnCard = SettingCard(
+            FluentIcon.LINK,
+            t("makcu_connect", "Connect MAKCU"),
+            t("makcu_connect_desc", "Select COM port then click to connect"),
+            self.makcuConnGroup
+        )
+        self.makcuConnectBtnCard.hBoxLayout.addWidget(self.makcuConnectBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuConnectBtnCard.hBoxLayout.addSpacing(16)
+
+        # Aim status label
+        self.makcuAimStatusLabel = BodyLabel("—")
+        self.makcuAimStatusLabel.setStyleSheet("font-weight: bold;")
+        self.makcuAimStatusCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            t("aim_status", "Aim Status"),
+            "",
+            self.makcuConnGroup
+        )
+        self.makcuAimStatusCard.hBoxLayout.addWidget(self.makcuAimStatusLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuAimStatusCard.hBoxLayout.addSpacing(16)
+
         # === MAKCU Keys (shown only when mouse_move_method == "makcu") ===
         self.makcuKeysGroup = SettingCardGroup(t("makcu_keys_group", "MAKCU Keys"), self.scrollWidget)
 
@@ -446,6 +526,15 @@ class KeysPage(BasePage):
         self.fireKeysGroup.addSettingCard(self.fireKey2Card)
         self.addContent(self.fireKeysGroup)
 
+        # MAKCU Connection group (hidden by default until setConfig runs)
+        self.makcuConnGroup.addSettingCard(self.makcuComPortCard)
+        self.makcuConnGroup.addSettingCard(self.makcuBaudCard)
+        self.makcuConnGroup.addSettingCard(self.makcuConnectionCard)
+        self.makcuConnGroup.addSettingCard(self.makcuConnectBtnCard)
+        self.makcuConnGroup.addSettingCard(self.makcuAimStatusCard)
+        self.addContent(self.makcuConnGroup)
+        self.makcuConnGroup.setVisible(False)
+
         # MAKCU Keys (hidden by default until setConfig runs)
         self.makcuKeysGroup.addSettingCard(self.makcuInferenceCard)
         self.makcuKeysGroup.addSettingCard(self.makcuTriggerCard)
@@ -468,6 +557,11 @@ class KeysPage(BasePage):
         self.toggleKeyBtn.keyBound.connect(self._onToggleKeyChanged)
         self.fireKey1Btn.keyBound.connect(self._onFireKey1Changed)
         self.fireKey2Btn.keyBound.connect(self._onFireKey2Changed)
+
+        self.makcuComPortCombo.currentTextChanged.connect(self._onMakcuComPortChanged)
+        self.makcuComRefreshBtn.clicked.connect(self._refreshMakcuComPorts)
+        self.makcuBaudCombo.currentTextChanged.connect(self._onMakcuBaudChanged)
+        self.makcuConnectBtn.clicked.connect(self._onMakcuConnectToggle)
 
         self.makcuInferenceCombo.currentIndexChanged.connect(self._onMakcuInferenceKeyChanged)
         self.makcuTriggerCombo.currentIndexChanged.connect(self._onMakcuTriggerKeyChanged)
@@ -593,6 +687,130 @@ class KeysPage(BasePage):
         if self._config:
             self._config.makcu_disengage_delay = float(value)
 
+    def _loadMakcuConnFromConfig(self):
+        """Load MAKCU COM port and baud rate from config."""
+        if not self._config:
+            return
+
+        saved_port = getattr(self._config, 'makcu_com_port', '')
+        if saved_port:
+            idx = self.makcuComPortCombo.findText(saved_port)
+            if idx >= 0:
+                self.makcuComPortCombo.blockSignals(True)
+                self.makcuComPortCombo.setCurrentIndex(idx)
+                self.makcuComPortCombo.blockSignals(False)
+
+        saved_baud = str(getattr(self._config, 'makcu_baud_rate', 4000000))
+        baud_idx = self.makcuBaudCombo.findText(saved_baud)
+        if baud_idx >= 0:
+            self.makcuBaudCombo.blockSignals(True)
+            self.makcuBaudCombo.setCurrentIndex(baud_idx)
+            self.makcuBaudCombo.blockSignals(False)
+        else:
+            # Default to 4000000
+            four_m_idx = self.makcuBaudCombo.findText("4000000")
+            if four_m_idx >= 0:
+                self.makcuBaudCombo.blockSignals(True)
+                self.makcuBaudCombo.setCurrentIndex(four_m_idx)
+                self.makcuBaudCombo.blockSignals(False)
+
+        self._updateMakcuConnectionStatus()
+
+    # ──────────────────────────────────────────────
+    # MAKCU connection helpers
+    # ──────────────────────────────────────────────
+
+    def _refreshMakcuComPorts(self):
+        """Refresh MAKCU COM port list."""
+        try:
+            import serial.tools.list_ports
+            ports = [p.device for p in serial.tools.list_ports.comports()]
+        except Exception:
+            ports = []
+
+        current = self.makcuComPortCombo.currentText()
+        self.makcuComPortCombo.blockSignals(True)
+        self.makcuComPortCombo.clear()
+        self.makcuComPortCombo.addItem(t("no_com_port", "No COM Port"))
+        for p in ports:
+            self.makcuComPortCombo.addItem(p)
+
+        idx = self.makcuComPortCombo.findText(current)
+        if idx >= 0:
+            self.makcuComPortCombo.setCurrentIndex(idx)
+        self.makcuComPortCombo.blockSignals(False)
+
+    def _onMakcuComPortChanged(self, text: str):
+        if self._config:
+            self._config.makcu_com_port = text
+
+    def _onMakcuBaudChanged(self, text: str):
+        if self._config:
+            try:
+                self._config.makcu_baud_rate = int(text)
+            except ValueError:
+                pass
+
+    def _onMakcuConnectToggle(self):
+        """Connect or disconnect MAKCU."""
+        try:
+            from win_utils.makcu_mouse import connect_makcu, disconnect_makcu, is_makcu_connected
+        except ImportError:
+            return
+
+        if self._isMakcuConnected or is_makcu_connected():
+            disconnect_makcu()
+            self._isMakcuConnected = False
+        else:
+            port = self.makcuComPortCombo.currentText()
+            if not port or port == t("no_com_port", "No COM Port"):
+                return
+            try:
+                baud = int(self.makcuBaudCombo.currentText())
+            except ValueError:
+                baud = 4_000_000
+            ok = connect_makcu(port, baud)
+            self._isMakcuConnected = ok
+
+        self._updateMakcuConnectionStatus()
+
+    def _updateMakcuConnectionStatus(self):
+        """Refresh connection label and connect button text."""
+        try:
+            from win_utils.makcu_mouse import is_makcu_connected
+            connected = is_makcu_connected()
+        except Exception:
+            connected = False
+
+        self._isMakcuConnected = connected
+        if connected:
+            self.makcuConnectionLabel.setText(t("connected", "Connected"))
+            self.makcuConnectionLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+            self.makcuConnectBtn.setText(t("makcu_disconnect", "Disconnect MAKCU"))
+        else:
+            self.makcuConnectionLabel.setText(t("disconnected", "Disconnected"))
+            self.makcuConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.makcuConnectBtn.setText(t("makcu_connect", "Connect MAKCU"))
+
+    def _updateMakcuAimStatus(self):
+        """Poll aim status (250 ms timer)."""
+        try:
+            from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
+            if not is_makcu_connected():
+                self.makcuAimStatusLabel.setText("—")
+                self.makcuAimStatusLabel.setStyleSheet("font-weight: bold;")
+                return
+            aiming = getattr(_mm, 'lmb_held', False) or getattr(_mm, 'rmb_held', False)
+            if aiming:
+                self.makcuAimStatusLabel.setText(t("aiming", "Aiming"))
+                self.makcuAimStatusLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+            else:
+                self.makcuAimStatusLabel.setText(t("idle", "Idle"))
+                self.makcuAimStatusLabel.setStyleSheet("color: #aaaaaa; font-weight: bold;")
+        except Exception:
+            self.makcuAimStatusLabel.setText("—")
+            self.makcuAimStatusLabel.setStyleSheet("font-weight: bold;")
+
     # ──────────────────────────────────────────────
     # Retranslate
     # ──────────────────────────────────────────────
@@ -604,7 +822,17 @@ class KeysPage(BasePage):
         # 群組標題
         self.aimKeysGroup.titleLabel.setText(t("auto_aim"))
         self.fireKeysGroup.titleLabel.setText(t("keys_and_auto_fire"))
+        self.makcuConnGroup.titleLabel.setText(t("makcu_connection_group", "MAKCU Connection"))
         self.makcuKeysGroup.titleLabel.setText(t("makcu_keys_group", "MAKCU Keys"))
+
+        # MAKCU Connection cards
+        self.makcuComPortCard.titleLabel.setText(t("makcu_com_port", "COM Port:"))
+        self.makcuBaudCard.titleLabel.setText(t("arduino_baud_rate", "Baud Rate"))
+        self.makcuConnectionCard.titleLabel.setText(t("connected", "Connected") + " / " + t("disconnected", "Disconnected"))
+        self.makcuConnectBtnCard.titleLabel.setText(t("makcu_connect", "Connect MAKCU"))
+        self.makcuConnectBtnCard.contentLabel.setText(t("makcu_connect_desc", "Select COM port then click to connect"))
+        self.makcuAimStatusCard.titleLabel.setText(t("aim_status", "Aim Status"))
+        self._updateMakcuConnectionStatus()
 
         # 瞄準按鍵
         self.aimKey1Card.titleLabel.setText(t("aim_key_1"))
