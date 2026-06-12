@@ -87,11 +87,27 @@ def _try_hot_swap_model(
 
         input_name = new_model.get_inputs()[0].name
         _inp_shape = new_model.get_inputs()[0].shape
+        _detected_size = 0
         if len(_inp_shape) >= 4:
-            _h = _inp_shape[2]
-            if isinstance(_h, int) and _h > 0:
-                config.model_input_size = _h
-                print(f"[模型熱切換] 模型輸入尺寸自動偵測: {_h}")
+            try:
+                _h = int(_inp_shape[2])
+                if _h > 0:
+                    _detected_size = _h
+            except (TypeError, ValueError):
+                pass
+        if not _detected_size:
+            # TRT EP exposes dims as None — probe with a throwaway CPU session
+            try:
+                _probe = _ort.InferenceSession(abs_model_path, providers=["CPUExecutionProvider"])
+                _ps = _probe.get_inputs()[0].shape
+                if len(_ps) >= 4 and isinstance(_ps[2], int) and _ps[2] > 0:
+                    _detected_size = _ps[2]
+                del _probe
+            except Exception:
+                pass
+        if _detected_size:
+            config.model_input_size = _detected_size
+            print(f"[模型熱切換] 模型輸入尺寸自動偵測: {_detected_size}")
         actual_providers = new_model.get_providers()
         if actual_providers:
             config.current_provider = actual_providers[0]
