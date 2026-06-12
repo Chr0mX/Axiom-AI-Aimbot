@@ -100,11 +100,12 @@ def _try_hot_swap_model(
             try:
                 _probe = _ort.InferenceSession(abs_model_path, providers=["CPUExecutionProvider"])
                 _ps = _probe.get_inputs()[0].shape
+                print(f"[模型熱切換] CPU probe shape: {_ps}")
                 if len(_ps) >= 4 and isinstance(_ps[2], int) and _ps[2] > 0:
                     _detected_size = _ps[2]
                 del _probe
-            except Exception:
-                pass
+            except Exception as _probe_err:
+                print(f"[模型熱切換] CPU probe 失敗: {_probe_err}")
         if _detected_size:
             config.model_input_size = _detected_size
             print(f"[模型熱切換] 模型輸入尺寸自動偵測: {_detected_size}")
