@@ -366,7 +366,7 @@ class AxiomWindow(FluentWindow):
         
         self.nav_trigger = self.addSubInterface(self.triggerInterface, QIcon(os.path.join(self.base_path, "assets", "trigger.svg")), t("tab_auto_features"))
         
-        self.nav_keys = self.addSubInterface(self.keysInterface, QIcon(os.path.join(self.base_path, "assets", "mouse.svg")), t("tab_hardware_output", "Hardware Output"))
+        self.nav_keys = self.addSubInterface(self.keysInterface, QIcon(os.path.join(self.base_path, "assets", "mouse.svg")), t("tab_hardware_output", "Output"))
         
         self.nav_display = self.addSubInterface(self.displayInterface, QIcon(os.path.join(self.base_path, "assets", "eye.svg")), t("tab_display"))
 
@@ -726,7 +726,7 @@ class AxiomWindow(FluentWindow):
         if hasattr(self, 'nav_inference'): self.nav_inference.setText(t("tab_inference"))
         if hasattr(self, 'nav_aim'): self.nav_aim.setText(t("tab_aim_control"))
         if hasattr(self, 'nav_trigger'): self.nav_trigger.setText(t("tab_auto_features"))
-        if hasattr(self, 'nav_keys'): self.nav_keys.setText(t("tab_hardware_output", "Hardware Output"))
+        if hasattr(self, 'nav_keys'): self.nav_keys.setText(t("tab_hardware_output", "Output"))
         if hasattr(self, 'nav_config'): self.nav_config.setText(t("tab_config_management"))
         if hasattr(self, 'nav_convert'): self.nav_convert.setText(t("tab_convert"))
         if hasattr(self, 'nav_other'): self.nav_other.setText(t("tab_program_control"))

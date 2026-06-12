@@ -204,6 +204,8 @@
     "smart_jitter_level_med": "मध्यम (±3px)",
     "smart_jitter_level_high": "उच्च (±6px)",
     "tab_model": "मॉडल",
+    "tab_capture": "कैप्चर",
+    "tab_hardware_output": "आउटपुट",
     "model_info": "मॉडल जानकारी",
     "model_inspecting": "जाँच रही है…"
 }

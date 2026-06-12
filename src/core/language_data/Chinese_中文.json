@@ -263,6 +263,8 @@
     "smart_jitter_level_med": "中 (±3px)",
     "smart_jitter_level_high": "高 (±6px)",
     "tab_model": "模型",
+    "tab_capture": "擷取",
+    "tab_hardware_output": "輸出",
     "model_info": "模型信息",
     "model_inspecting": "检测中…"
 }

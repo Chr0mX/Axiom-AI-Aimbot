@@ -213,6 +213,8 @@
     "smart_jitter_level_med": "중간 (±3px)",
     "smart_jitter_level_high": "높음 (±6px)",
     "tab_model": "모델",
+    "tab_capture": "캡처",
+    "tab_hardware_output": "출력",
     "model_info": "모델 정보",
     "model_inspecting": "검사 중…"
 }

@@ -53,6 +53,8 @@
     "screenshot_interval": "Capture Interval (ms)",
     "auto_match_fps_label": "Sync Detection & Capture Interval",
     "tab_model": "Model",
+    "tab_capture": "Capture",
+    "tab_hardware_output": "Output",
     "model_info": "Model Info",
     "model_inspecting": "Inspecting…",
     "tab_inference": "Inference",
