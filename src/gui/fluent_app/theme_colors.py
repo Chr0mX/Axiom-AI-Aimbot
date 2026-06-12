@@ -791,45 +791,9 @@ class ThemeColors:
 # 輔助函數
 # ============================================================
 
-def get_color(color_pair: ColorPair) -> str:
-    """獲取當前主題對應的顏色 (HEX 字串)"""
-    return color_pair.get()
-
-
-def get_qcolor(color_pair: ColorPair) -> QColor:
-    """獲取當前主題對應的 QColor 對象"""
-    return color_pair.qcolor()
-
-
-def get_rgba_color(color_pair: ColorPairWithAlpha) -> tuple:
-    """獲取當前主題對應的 RGBA 元組"""
-    return color_pair.get()
-
-
-def get_rgba_qcolor(color_pair: ColorPairWithAlpha) -> QColor:
-    """獲取當前主題對應的 QColor 對象 (含透明度)"""
-    return color_pair.qcolor()
-
-
-def hex_to_rgb(hex_color: str) -> tuple:
-    """將 HEX 顏色轉換為 RGB 元組"""
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-
-
-def rgb_to_hex(r: int, g: int, b: int) -> str:
-    """將 RGB 轉換為 HEX 顏色字串"""
-    return f"#{r:02X}{g:02X}{b:02X}"
-
-
 def to_css_rgba(color: QColor) -> str:
     """將 QColor 轉換為 CSS rgba() 字串"""
     return f"rgba({color.red()}, {color.green()}, {color.blue()}, {color.alpha() / 255.0:.2f})"
-
-
-def to_css_rgb(color: QColor) -> str:
-    """將 QColor 轉換為 CSS rgb() 字串"""
-    return f"rgb({color.red()}, {color.green()}, {color.blue()})"
 
 
 # ============================================================
@@ -1025,15 +989,8 @@ class StyleSheetGenerator:
 # 導出常用顏色類和函數
 __all__ = [
     'ThemeColors',
-    'ColorPair', 
+    'ColorPair',
     'ColorPairWithAlpha',
     'StyleSheetGenerator',
-    'get_color',
-    'get_qcolor',
-    'get_rgba_color',
-    'get_rgba_qcolor',
-    'hex_to_rgb',
-    'rgb_to_hex',
     'to_css_rgba',
-    'to_css_rgb',
 ]

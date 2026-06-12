@@ -335,13 +335,6 @@ class InferencePage(BasePage):
     def _onDetectIntervalChanged(self, value):
         if self._config:
             self._config.detect_interval = value / 1000.0
-            if getattr(self._config, 'auto_match_fps', False):
-                self._config.screenshot_interval = self._config.detect_interval
-                try:
-                    cap = self.window().captureInterface
-                    cap.screenshotIntervalCard.setValue(value)
-                except Exception:
-                    pass
 
     def _onConfidenceChanged(self, value):
         if self._config:

@@ -7,7 +7,6 @@ idempotent: calling setup_logging multiple times will not duplicate handlers.
 
 import logging
 from logging import Handler
-from typing import Optional
 
 
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"

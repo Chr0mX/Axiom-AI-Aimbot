@@ -23,7 +23,7 @@ from .pages.other_page import OtherPage
 from .pages.convert_page import ConvertPage
 from .components.language_dialog import LanguageDialog
 from .language_manager import getLanguageManager, t
-from .theme_colors import ThemeColors, get_color
+from .theme_colors import ThemeColors
 from .theme_manager import get_theme_manager, apply_theme_to_app
 from core.updater import UpdateChecker, open_update_url
 from version import __version__

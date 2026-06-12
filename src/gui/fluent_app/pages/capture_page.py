@@ -59,12 +59,6 @@ class CapturePage(BasePage):
             parent=self.captureGroup
         )
 
-        self.autoMatchFpsCard = SwitchSettingCard(
-            FluentIcon.SYNC,
-            t("auto_match_fps_label", "Sync Detection & Capture Interval"),
-            t("auto_match_fps_desc", "Lock capture interval to detection interval"),
-            parent=self.captureGroup
-        )
 
         # === UVC Camera ===
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
@@ -239,7 +233,6 @@ class CapturePage(BasePage):
     def _initLayout(self):
         self.captureGroup.addSettingCard(self.screenshotMethodCard)
         self.captureGroup.addSettingCard(self.screenshotIntervalCard)
-        self.captureGroup.addSettingCard(self.autoMatchFpsCard)
         self.addContent(self.captureGroup)
 
         self.uvcGroup.addSettingCard(self.uvcDeviceCard)
@@ -275,7 +268,6 @@ class CapturePage(BasePage):
     def _connectSignals(self):
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)
         self.screenshotIntervalCard.valueChanged.connect(self._onScreenshotIntervalChanged)
-        self.autoMatchFpsCard.checkedChanged.connect(self._onAutoMatchFpsChanged)
         self.uvcDeviceCard.valueChanged.connect(self._onUvcDeviceChanged)
         self.uvcResolutionCombo.currentTextChanged.connect(self._onUvcResolutionChanged)
         self.uvcRefreshResolutionBtn.clicked.connect(self._refreshUvcResolutions)
@@ -309,9 +301,6 @@ class CapturePage(BasePage):
                         getattr(self._config, 'detect_interval', 0.01)) * 1000
             )
             self.screenshotIntervalCard.setValue(screenshot_interval_ms)
-            _auto_match = bool(getattr(self._config, 'auto_match_fps', False))
-            self.autoMatchFpsCard.setChecked(_auto_match)
-            self.screenshotIntervalCard.setEnabled(not _auto_match)
 
             self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
@@ -494,14 +483,6 @@ class CapturePage(BasePage):
         if self._config:
             self._config.screenshot_interval = value / 1000.0
 
-    def _onAutoMatchFpsChanged(self, checked):
-        if self._config:
-            self._config.auto_match_fps = bool(checked)
-            self.screenshotIntervalCard.setEnabled(not checked)
-            if checked:
-                self._config.screenshot_interval = self._config.detect_interval
-                self.screenshotIntervalCard.setValue(int(self._config.detect_interval * 1000))
-
     def _onUvcDeviceChanged(self, value):
         if self._config:
             self._config.uvc_device_index = int(value)
@@ -610,7 +591,6 @@ class CapturePage(BasePage):
         self.captureGroup.titleLabel.setText(t("capture_method_group", "Capture"))
         self.screenshotMethodCard.titleLabel.setText(t("screenshot_method"))
         self.screenshotIntervalCard.titleLabel.setText(t("screenshot_interval"))
-        self.autoMatchFpsCard.titleLabel.setText(t("auto_match_fps_label", "Sync Detection & Capture Interval"))
         self.uvcDeviceCard.titleLabel.setText("UVC Device Index")
         self.uvcResolutionCard.titleLabel.setText("UVC Resolution")
         self.uvcRefreshResolutionCard.titleLabel.setText("Refresh UVC Resolution List")

@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import queue
 import time
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt, QTimer
 import ctypes
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 # Import theme color definitions
 try:
-    from gui.fluent_app.theme_colors import ThemeColors, get_rgba_qcolor
+    from gui.fluent_app.theme_colors import ThemeColors
     HAS_THEME_COLORS = True
 except ImportError:
     HAS_THEME_COLORS = False

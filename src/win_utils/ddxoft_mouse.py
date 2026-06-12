@@ -213,20 +213,13 @@ class DDXoftMouse:
 # 創建全局 ddxoft_mouse 實例
 ddxoft_mouse = DDXoftMouse()
 
-# ddxoft 統計控制變量
-_ddxoft_move_count = 0
-
 
 def send_mouse_move_ddxoft(dx, dy):
     """ddxoft 移動（最隱蔽）"""
-    global _ddxoft_move_count
-
     if not ddxoft_mouse.ensure_initialized():
         send_mouse_move_mouse_event(dx, dy)
         return
 
-    _ddxoft_move_count += 1
-    
     # 嘗試使用 ddxoft
     if ddxoft_mouse.move_relative(dx, dy):
         return  # 成功，直接返回

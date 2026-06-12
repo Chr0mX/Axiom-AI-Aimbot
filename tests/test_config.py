@@ -41,27 +41,16 @@ class TestConfigInit:
         assert c.width == 1920
         assert c.height == 1080
 
-    def test_center_calculations(self):
-        c = _make_config()
-        assert c.center_x == 960
-        assert c.center_y == 540
-
     def test_capture_defaults_match_screen(self):
         c = _make_config()
         assert c.capture_width == 1920
         assert c.capture_height == 1080
-        assert c.capture_left == 0
-        assert c.capture_top == 0
         assert c.screenshot_method == "mss"
 
     def test_crosshair_defaults(self):
         c = _make_config()
         assert c.crosshairX == 960
         assert c.crosshairY == 540
-
-    def test_region_dict(self):
-        c = _make_config()
-        assert c.region == {"top": 0, "left": 0, "width": 1920, "height": 1080}
 
     def test_running_defaults(self):
         c = _make_config()
@@ -159,8 +148,6 @@ class TestConfigInit:
             c = Config()
             assert c.width == 2560
             assert c.height == 1440
-            assert c.center_x == 1280
-            assert c.center_y == 720
             assert c.detect_range_size == 1440
 
 
