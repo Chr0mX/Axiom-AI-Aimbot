@@ -212,42 +212,48 @@ def build_provider_list(config) -> list:
     for provider in filtered:
         if provider == "TensorrtExecutionProvider":
             fp16_enabled = bool(getattr(config, 'trt_fp16_enabled', True))
-            result.append((
-                "TensorrtExecutionProvider",
-                {
-                    # ── Engine cache ─────────────────────────────────────────
-                    # Persist the compiled engine so the 1-5 min build cost is
-                    # paid only on the first run.  Subsequent launches are instant.
-                    "trt_engine_cache_enable": True,
-                    "trt_engine_cache_path": trt_cache,
+            _model_stem = os.path.splitext(
+                os.path.basename(getattr(config, 'model_path', '') or '')
+            )[0]
+            trt_opts: dict = {
+                # ── Engine cache ─────────────────────────────────────────
+                # Persist the compiled engine so the 1-5 min build cost is
+                # paid only on the first run.  Subsequent launches are instant.
+                "trt_engine_cache_enable": True,
+                "trt_engine_cache_path": trt_cache,
 
-                    # ── Timing cache ─────────────────────────────────────────
-                    # Reuse layer-timing data across engine rebuilds (e.g. after
-                    # a model update).  Drastically reduces re-build time.
-                    "trt_timing_cache_enable": True,
-                    "trt_timing_cache_path": trt_cache,
+                # ── Timing cache ─────────────────────────────────────────
+                # Reuse layer-timing data across engine rebuilds (e.g. after
+                # a model update).  Drastically reduces re-build time.
+                "trt_timing_cache_enable": True,
+                "trt_timing_cache_path": trt_cache,
 
-                    # ── Precision ────────────────────────────────────────────
-                    # FP16 is native on RTX (Turing+) and roughly 2x faster than
-                    # FP32 with negligible accuracy loss for YOLO detection.
-                    # Controlled by config.trt_fp16_enabled.
-                    "trt_fp16_enable": fp16_enabled,
+                # ── Precision ────────────────────────────────────────────
+                # FP16 is native on RTX (Turing+) and roughly 2x faster than
+                # FP32 with negligible accuracy loss for YOLO detection.
+                # Controlled by config.trt_fp16_enabled.
+                "trt_fp16_enable": fp16_enabled,
 
-                    # ── Builder memory budget ────────────────────────────────
-                    # 2 GiB is enough for YOLOv8-n/s.  Increase to 4 GiB for
-                    # larger models (YOLOv8-m/l/x) if the build OOMs.
-                    "trt_max_workspace_size": 2 * 1024 * 1024 * 1024,
+                # ── Builder memory budget ────────────────────────────────
+                # 2 GiB is enough for YOLOv8-n/s.  Increase to 4 GiB for
+                # larger models (YOLOv8-m/l/x) if the build OOMs.
+                "trt_max_workspace_size": 2 * 1024 * 1024 * 1024,
 
-                    # ── Optimization level ───────────────────────────────────
-                    # 3 = good balance of build time vs runtime speed (range 0-5).
-                    # Use 5 only when you can afford a multi-hour build.
-                    "trt_builder_optimization_level": 3,
+                # ── Optimization level ───────────────────────────────────
+                # 3 = good balance of build time vs runtime speed (range 0-5).
+                # Use 5 only when you can afford a multi-hour build.
+                "trt_builder_optimization_level": 3,
 
-                    # ── Auxiliary streams ────────────────────────────────────
-                    # -1 = TRT manages its own CUDA streams automatically.
-                    "trt_auxiliary_streams": -1,
-                },
-            ))
+                # ── Auxiliary streams ────────────────────────────────────
+                # -1 = TRT manages its own CUDA streams automatically.
+                "trt_auxiliary_streams": -1,
+            }
+            # Prefix engine cache filenames with the model stem so files are
+            # human-readable (e.g. Roblox_8n_<hash>_sm75_fp16.engine).
+            # Must match the prefix used during convert_to_engine.py pre-build.
+            if _model_stem:
+                trt_opts["trt_engine_cache_prefix"] = _model_stem
+            result.append(("TensorrtExecutionProvider", trt_opts))
         elif provider == "CUDAExecutionProvider":
             result.append((
                 "CUDAExecutionProvider",
