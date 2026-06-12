@@ -86,6 +86,12 @@ def _try_hot_swap_model(
             new_model = _ort.InferenceSession(abs_model_path, providers=providers)
 
         input_name = new_model.get_inputs()[0].name
+        _inp_shape = new_model.get_inputs()[0].shape
+        if len(_inp_shape) >= 4:
+            _h = _inp_shape[2]
+            if isinstance(_h, int) and _h > 0:
+                config.model_input_size = _h
+                print(f"[模型熱切換] 模型輸入尺寸自動偵測: {_h}")
         actual_providers = new_model.get_providers()
         if actual_providers:
             config.current_provider = actual_providers[0]
