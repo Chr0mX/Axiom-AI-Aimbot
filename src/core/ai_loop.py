@@ -87,6 +87,7 @@ def _try_hot_swap_model(
 
         input_name = new_model.get_inputs()[0].name
         _inp_shape = new_model.get_inputs()[0].shape
+        print(f"[模型熱切換] raw shape: {_inp_shape!r}  types: {[type(d).__name__ for d in _inp_shape]}")
         _detected_size = 0
         if len(_inp_shape) >= 4:
             try:
