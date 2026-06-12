@@ -85,11 +85,10 @@ class Config:
 
         # Aiming and display settings
         self.AimKeys: List[int] = [0x01, 0x06, 0x02]  # Left Click + X2 Key + Right Click
-        self.fov_size: int = 222
+        self.fov_size: int = 200
 
         # AI detection range (square edge length): Separated from fov_size, but must not be smaller than fov_size, and must not be larger than screen height
-        # Defaults to screen height (same as legacy behavior)
-        self.detect_range_size: int = self.height # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）
+        self.detect_range_size: int = 320 # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）
         self.show_confidence: bool = True # 是否在框上顯示置信度
         self.min_confidence: float = 0.80  # 最小置信度，範圍 0~1
         self.aim_part: str = "head"
@@ -270,7 +269,7 @@ class Config:
         self.sticky_adaptive_iou: bool = True  # adaptive IoU scaling by box area (Someone_idea)
 
         # FOV filter mode
-        self.fov_circle_filter_enabled: bool = True  # circular FOV test instead of square
+        self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square
 
         # Aim shaping (ported from Someone_idea)
         self.aim_deadzone_enabled: bool = False
@@ -284,7 +283,7 @@ class Config:
         self.max_move_per_frame_px: float = 85.0
 
         # Semantic false-positive filter (ported from Someone_idea)
-        self.detect_semantic_filter_enabled: bool = True
+        self.detect_semantic_filter_enabled: bool = False
 
         # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
         self.display_locked_box: list | None = None

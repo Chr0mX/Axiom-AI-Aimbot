@@ -21,15 +21,16 @@ _PROJECT_DIR = os.path.dirname(_SRC_DIR)
 # The embedded Python at src/python/python.exe already has onnxruntime and
 # its native DLLs wired up correctly — sys.path injection alone is not enough
 # for native extension modules (.pyd) that depend on co-located DLLs.
-_embedded_python = os.path.join(_SRC_DIR, "python", "python.exe")
-if (
-    os.name == "nt"
-    and os.path.exists(_embedded_python)
-    and os.path.abspath(sys.executable) != os.path.abspath(_embedded_python)
-):
-    import subprocess
-    result = subprocess.run([_embedded_python, os.path.abspath(__file__)] + sys.argv[1:])
-    sys.exit(result.returncode)
+if __name__ == "__main__":
+    _embedded_python = os.path.join(_SRC_DIR, "python", "python.exe")
+    if (
+        os.name == "nt"
+        and os.path.exists(_embedded_python)
+        and os.path.abspath(sys.executable) != os.path.abspath(_embedded_python)
+    ):
+        import subprocess as _subprocess
+        _result = _subprocess.run([_embedded_python, os.path.abspath(__file__)] + sys.argv[1:])
+        sys.exit(_result.returncode)
 
 # ── from here we are running under the embedded Python (or non-Windows) ─────
 
@@ -248,6 +249,17 @@ def inspect_engine(path: str) -> dict:
                 elif dtype == trt.DataType.INT8:
                     precision = "INT8"
 
+    # YOLO output tensors are always FP32 regardless of compute precision,
+    # so the binding dtype check above always returns FP32 for detection models.
+    # Override with filename which encodes the build-time precision explicitly.
+    fn_lc = os.path.basename(path).lower()
+    if "_fp16" in fn_lc:
+        precision = "FP16"
+    elif "_int8" in fn_lc:
+        precision = "INT8"
+    elif "_fp32" in fn_lc:
+        precision = "FP32"
+
     h = input_shape[2] if input_shape and len(input_shape) >= 4 else None
     w = input_shape[3] if input_shape and len(input_shape) >= 4 else None
     input_size = f"{h}×{w}" if (h and w) else str(input_shape)
@@ -320,6 +332,7 @@ def main() -> None:
                 "  python src/model_detect.py trt_cache/model.engine"),
     )
     parser.add_argument("model", help="Path to .onnx or .engine file")
+    parser.add_argument("--json", action="store_true", help="Output as JSON instead of formatted text")
     args = parser.parse_args()
 
     # Resolve relative to CWD first, then to project root
@@ -331,12 +344,24 @@ def main() -> None:
 
     try:
         info = inspect_model(path)
-        print_model_info(path, info)
+        if args.json:
+            import json
+            print(json.dumps(info))
+        else:
+            print_model_info(path, info)
     except (FileNotFoundError, ValueError, RuntimeError) as e:
-        print(f"Error: {e}", file=sys.stderr)
+        if args.json:
+            import json
+            print(json.dumps({"error": str(e)}))
+        else:
+            print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Unexpected error: {e}", file=sys.stderr)
+        if args.json:
+            import json
+            print(json.dumps({"error": str(e)}))
+        else:
+            print(f"Unexpected error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

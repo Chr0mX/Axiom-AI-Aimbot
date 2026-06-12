@@ -3,20 +3,48 @@
 
 import glob
 import os
-import sys
 import subprocess
-import threading
-from PyQt6.QtCore import Qt, QTimer
+import sys
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from qfluentwidgets import (
     SettingCardGroup,
     FluentIcon,
-    BodyLabel, ComboBox, PrimaryPushButton, SettingCard,
+    ComboBox, PrimaryPushButton, SettingCard,
     InfoBar, InfoBarPosition
 )
 
 from ..base_page import BasePage
 from ..language_manager import t
+
+
+class _ModelInspectWorker(QThread):
+    """Background worker that inspects a model file and emits the result as a string."""
+
+    resultReady = pyqtSignal(str)
+
+    def __init__(self, inspect_path: str, parent=None):
+        super().__init__(parent)
+        self._inspect_path = inspect_path
+
+    def run(self) -> None:
+        try:
+            from model_detect import inspect_model
+            info = inspect_model(self._inspect_path)
+            parts = []
+            if info.get("format"):
+                parts.append(info["format"])
+            parts.append(f"Input: {info['input_size']}")
+            if info.get("num_classes"):
+                parts.append(f"Classes: {info['num_classes']}")
+            if info.get("precision"):
+                parts.append(f"Precision: {info['precision']}")
+            if info.get("file_size"):
+                parts.append(info["file_size"])
+            text = "  •  ".join(parts)
+        except BaseException as exc:
+            text = str(exc)[:120]
+        self.resultReady.emit(text)
 
 
 class ModelPage(BasePage):
@@ -27,6 +55,7 @@ class ModelPage(BasePage):
         self._config = None
         self._isLoadingConfig = False
         self._trt_installer_launched = False
+        self._inspect_worker = None
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -53,17 +82,14 @@ class ModelPage(BasePage):
         self.modelCard.hBoxLayout.addWidget(self.modelCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.modelCard.hBoxLayout.addSpacing(16)
 
-        # Live model info (input size, classes, precision, file size)
-        self.modelInfoLabel = BodyLabel("", self.modelGroup)
-        self.modelInfoLabel.setWordWrap(True)
+        # Live model info — displayed as the card subtitle (contentLabel)
         self.modelInfoCard = SettingCard(
             FluentIcon.INFO,
             t("model_info", "Model Info"),
-            "",
-            self.modelGroup
+            t("model_inspecting", "Inspecting…"),
+            self.modelGroup,
         )
-        self.modelInfoCard.hBoxLayout.addWidget(self.modelInfoLabel, 1, Qt.AlignmentFlag.AlignRight)
-        self.modelInfoCard.hBoxLayout.addSpacing(16)
+        self.modelInfoCard.contentLabel.setWordWrap(True)
 
         self.inferenceBackendCombo = ComboBox()
         self.inferenceBackendCombo.addItems(["Auto", "TensorRT", "DirectML", "CPU"])
@@ -165,32 +191,51 @@ class ModelPage(BasePage):
     # ──────────────────────────────────────────────
 
     def _updateModelInfo(self, model_path: str) -> None:
-        """Inspect the selected model in a background thread and update the info card."""
-        self.modelInfoLabel.setText(t("model_inspecting", "Inspecting…"))
+        """Inspect the selected model in a QThread and update the info card via signal."""
+        if not model_path:
+            self.modelInfoCard.contentLabel.setText(t("model_no_model", "No model selected."))
+            return
 
-        def _worker():
-            try:
-                if not os.path.isabs(model_path):
-                    src = os.path.dirname(os.path.abspath(__file__))
-                    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(src))))
-                    full = os.path.join(root, model_path)
-                else:
-                    full = model_path
-                from model_detect import inspect_model
-                info = inspect_model(full)
-                parts = [f"Input: {info['input_size']}"]
-                if info.get("num_classes"):
-                    parts.append(f"Classes: {info['num_classes']}")
-                if info.get("precision"):
-                    parts.append(f"Precision: {info['precision']}")
-                if info.get("file_size"):
-                    parts.append(info["file_size"])
-                text = "  •  ".join(parts)
-            except Exception as exc:
-                text = str(exc)[:120]
-            QTimer.singleShot(0, lambda t=text: self.modelInfoLabel.setText(t))
+        # Resolve paths on the main thread so the worker only gets an absolute path
+        if not os.path.isabs(model_path):
+            _pages = os.path.dirname(os.path.abspath(__file__))
+            _src   = os.path.dirname(os.path.dirname(os.path.dirname(_pages)))
+            _root  = os.path.dirname(_src)
+            full_onnx = os.path.join(_root, model_path)
+        else:
+            _src   = os.path.dirname(os.path.dirname(os.path.dirname(
+                         os.path.dirname(os.path.abspath(__file__)))))
+            _root  = os.path.dirname(_src)
+            full_onnx = model_path
 
-        threading.Thread(target=_worker, daemon=True).start()
+        # When TRT is active, prefer the matching cached engine file
+        inspect_path = full_onnx
+        provider = getattr(self._config, 'current_provider', '') if self._config else ''
+        if provider == 'TensorrtExecutionProvider':
+            trt_cache = os.path.join(_root, "trt_cache")
+            if os.path.isdir(trt_cache):
+                model_stem = os.path.splitext(os.path.basename(full_onnx))[0]
+                engine_files = glob.glob(os.path.join(trt_cache, f"{model_stem}*.engine"))
+                if engine_files:
+                    inspect_path = sorted(engine_files)[-1]
+
+        self.modelInfoCard.contentLabel.setText(t("model_inspecting", "Inspecting…"))
+
+        # Stop any in-flight worker safely — do NOT use deleteLater; let Python GC own lifetime
+        if self._inspect_worker is not None:
+            if self._inspect_worker.isRunning():
+                self._inspect_worker.quit()
+                self._inspect_worker.wait(200)
+            self._inspect_worker = None
+
+        self._inspect_worker = _ModelInspectWorker(inspect_path)
+        self._inspect_worker.resultReady.connect(self.modelInfoCard.contentLabel.setText)
+        self._inspect_worker.finished.connect(self._onInspectWorkerDone)
+        self._inspect_worker.start()
+
+    def _onInspectWorkerDone(self) -> None:
+        """Clear the worker reference once finished so isRunning() is never called on a dead object."""
+        self._inspect_worker = None
 
     # ──────────────────────────────────────────────
     # Helpers
