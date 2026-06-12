@@ -21,15 +21,16 @@ _PROJECT_DIR = os.path.dirname(_SRC_DIR)
 # The embedded Python at src/python/python.exe already has onnxruntime and
 # its native DLLs wired up correctly — sys.path injection alone is not enough
 # for native extension modules (.pyd) that depend on co-located DLLs.
-_embedded_python = os.path.join(_SRC_DIR, "python", "python.exe")
-if (
-    os.name == "nt"
-    and os.path.exists(_embedded_python)
-    and os.path.abspath(sys.executable) != os.path.abspath(_embedded_python)
-):
-    import subprocess
-    result = subprocess.run([_embedded_python, os.path.abspath(__file__)] + sys.argv[1:])
-    sys.exit(result.returncode)
+if __name__ == "__main__":
+    _embedded_python = os.path.join(_SRC_DIR, "python", "python.exe")
+    if (
+        os.name == "nt"
+        and os.path.exists(_embedded_python)
+        and os.path.abspath(sys.executable) != os.path.abspath(_embedded_python)
+    ):
+        import subprocess as _subprocess
+        _result = _subprocess.run([_embedded_python, os.path.abspath(__file__)] + sys.argv[1:])
+        sys.exit(_result.returncode)
 
 # ── from here we are running under the embedded Python (or non-Windows) ─────
 

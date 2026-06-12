@@ -4,9 +4,7 @@
 import glob
 import os
 import sys
-import subprocess
-import threading
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QThread, QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from qfluentwidgets import (
     SettingCardGroup,
@@ -14,9 +12,39 @@ from qfluentwidgets import (
     BodyLabel, ComboBox, PrimaryPushButton, SettingCard,
     InfoBar, InfoBarPosition
 )
+from PyQt6.QtCore import pyqtSignal
 
 from ..base_page import BasePage
 from ..language_manager import t
+
+
+class _ModelInspectWorker(QThread):
+    """Background worker that inspects a model file and emits the result as a string."""
+
+    resultReady = pyqtSignal(str)
+
+    def __init__(self, inspect_path: str, parent=None):
+        super().__init__(parent)
+        self._inspect_path = inspect_path
+
+    def run(self) -> None:
+        try:
+            from model_detect import inspect_model
+            info = inspect_model(self._inspect_path)
+            parts = []
+            if info.get("format"):
+                parts.append(info["format"])
+            parts.append(f"Input: {info['input_size']}")
+            if info.get("num_classes"):
+                parts.append(f"Classes: {info['num_classes']}")
+            if info.get("precision"):
+                parts.append(f"Precision: {info['precision']}")
+            if info.get("file_size"):
+                parts.append(info["file_size"])
+            text = "  •  ".join(parts)
+        except BaseException as exc:
+            text = str(exc)[:120]
+        self.resultReady.emit(text)
 
 
 class ModelPage(BasePage):
@@ -27,6 +55,7 @@ class ModelPage(BasePage):
         self._config = None
         self._isLoadingConfig = False
         self._trt_installer_launched = False
+        self._inspect_worker = None
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -165,82 +194,45 @@ class ModelPage(BasePage):
     # ──────────────────────────────────────────────
 
     def _updateModelInfo(self, model_path: str) -> None:
-        """Inspect the selected model in a background thread and update the info card."""
+        """Inspect the selected model in a QThread and update the info card via signal."""
         if not model_path:
             self.modelInfoLabel.setText(t("model_no_model", "No model selected."))
             return
+
+        # Resolve paths on the main thread so the worker only gets an absolute path
+        if not os.path.isabs(model_path):
+            _pages = os.path.dirname(os.path.abspath(__file__))
+            _src   = os.path.dirname(os.path.dirname(os.path.dirname(_pages)))
+            _root  = os.path.dirname(_src)
+            full_onnx = os.path.join(_root, model_path)
+        else:
+            _src   = os.path.dirname(os.path.dirname(os.path.dirname(
+                         os.path.dirname(os.path.abspath(__file__)))))
+            _root  = os.path.dirname(_src)
+            full_onnx = model_path
+
+        # When TRT is active, prefer the matching cached engine file
+        inspect_path = full_onnx
+        provider = getattr(self._config, 'current_provider', '') if self._config else ''
+        if provider == 'TensorrtExecutionProvider':
+            trt_cache = os.path.join(_root, "trt_cache")
+            if os.path.isdir(trt_cache):
+                model_stem = os.path.splitext(os.path.basename(full_onnx))[0]
+                engine_files = glob.glob(os.path.join(trt_cache, f"{model_stem}*.engine"))
+                if engine_files:
+                    inspect_path = sorted(engine_files)[-1]
+
         self.modelInfoLabel.setText(t("model_inspecting", "Inspecting…"))
 
-        config = self._config
+        # Stop any in-flight worker to avoid stale results on rapid model changes
+        if self._inspect_worker and self._inspect_worker.isRunning():
+            self._inspect_worker.quit()
+            self._inspect_worker.wait(200)
 
-        def _worker():
-            import json as _json
-            text = t("model_inspect_failed", "Inspection failed.")
-            try:
-                # Resolve the ONNX path to an absolute path
-                if not os.path.isabs(model_path):
-                    _pages = os.path.dirname(os.path.abspath(__file__))
-                    _src = os.path.dirname(os.path.dirname(os.path.dirname(_pages)))
-                    _root = os.path.dirname(_src)
-                    full_onnx = os.path.join(_root, model_path)
-                else:
-                    _src = os.path.dirname(os.path.dirname(os.path.dirname(
-                        os.path.dirname(os.path.abspath(__file__)))))
-                    _root = os.path.dirname(_src)
-                    full_onnx = model_path
-
-                model_stem = os.path.splitext(os.path.basename(full_onnx))[0]
-
-                # When TRT is the active provider, inspect the cached engine file instead
-                inspect_path = full_onnx
-                provider = getattr(config, 'current_provider', '') if config else ''
-                if provider == 'TensorrtExecutionProvider':
-                    trt_cache = os.path.join(_root, "trt_cache")
-                    if os.path.isdir(trt_cache):
-                        engine_files = glob.glob(os.path.join(trt_cache, f"{model_stem}*.engine"))
-                        if engine_files:
-                            inspect_path = sorted(engine_files)[-1]
-
-                # Run model_detect.py as a subprocess — avoids import-path and
-                # re-launch-guard issues; this is the same code path the user uses from CLI.
-                script = os.path.join(_src, "model_detect.py")
-                result = subprocess.run(
-                    [sys.executable, script, "--json", inspect_path],
-                    capture_output=True, text=True, timeout=120,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-                info = _json.loads(result.stdout) if result.stdout.strip() else {}
-
-                if "error" in info:
-                    # Engine file found but TRT bindings unavailable — show filename info
-                    if inspect_path.endswith(".engine"):
-                        engine_name = os.path.basename(inspect_path)
-                        size_mb = os.path.getsize(inspect_path) / (1024 * 1024)
-                        precision = "FP16" if "_fp16" in engine_name.lower() else (
-                            "INT8" if "_int8" in engine_name.lower() else "FP32")
-                        text = f"TensorRT Engine  •  {precision}  •  {size_mb:.1f} MiB  •  {engine_name}"
-                    else:
-                        text = info["error"][:120]
-                elif info:
-                    parts = [f"Input: {info['input_size']}"]
-                    if info.get("format"):
-                        parts[0] = f"{info['format']}  •  Input: {info['input_size']}"
-                    if info.get("num_classes"):
-                        parts.append(f"Classes: {info['num_classes']}")
-                    if info.get("precision"):
-                        parts.append(f"Precision: {info['precision']}")
-                    if info.get("file_size"):
-                        parts.append(info["file_size"])
-                    text = "  •  ".join(parts)
-                else:
-                    text = result.stderr.strip()[:120] or t("model_inspect_failed", "Inspection failed.")
-            except subprocess.TimeoutExpired:
-                text = t("model_inspect_timeout", "Inspection timed out.")
-            except Exception as exc:
-                text = str(exc)[:120]
-            QTimer.singleShot(0, lambda t=text: self.modelInfoLabel.setText(t))
-
-        threading.Thread(target=_worker, daemon=True).start()
+        self._inspect_worker = _ModelInspectWorker(inspect_path)
+        self._inspect_worker.resultReady.connect(self.modelInfoLabel.setText)
+        self._inspect_worker.finished.connect(self._inspect_worker.deleteLater)
+        self._inspect_worker.start()
 
     # ──────────────────────────────────────────────
     # Helpers
