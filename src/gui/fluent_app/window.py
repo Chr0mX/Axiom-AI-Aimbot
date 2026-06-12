@@ -13,6 +13,7 @@ from qfluentwidgets.components.settings.setting_card import SettingCard
 from .pages.visuals_page import VisualsPage
 
 from .pages.model_page import ModelPage
+from .pages.capture_page import CapturePage
 from .pages.inference_page import InferencePage
 from .pages.aim_page import AimPage
 from .pages.trigger_page import TriggerPage
@@ -110,6 +111,7 @@ class AxiomWindow(FluentWindow):
 
         self.displayInterface = VisualsPage(self)  # tab_display
         self.modelInterface = ModelPage(self)       # tab_model
+        self.captureInterface = CapturePage(self)   # tab_capture
         self.inferenceInterface = InferencePage(self)  # tab_inference
         self.aimInterface = AimPage(self)           # tab_aim_control
         self.triggerInterface = TriggerPage(self)   # tab_auto_features
@@ -121,6 +123,7 @@ class AxiomWindow(FluentWindow):
 
         self.displayInterface.setObjectName("displayInterface")
         self.modelInterface.setObjectName("modelInterface")
+        self.captureInterface.setObjectName("captureInterface")
         self.inferenceInterface.setObjectName("inferenceInterface")
         self.aimInterface.setObjectName("aimInterface")
         self.triggerInterface.setObjectName("triggerInterface")
@@ -291,9 +294,10 @@ class AxiomWindow(FluentWindow):
         """設定 Config 實例並傳遞給所有頁面"""
         self._config = config
         pages = [
-            self.displayInterface, self.modelInterface, self.inferenceInterface,
-            self.aimInterface, self.triggerInterface, self.keysInterface,
-            self.configInterface, self.convertInterface, self.otherInterface
+            self.displayInterface, self.modelInterface, self.captureInterface,
+            self.inferenceInterface, self.aimInterface, self.triggerInterface,
+            self.keysInterface, self.configInterface, self.convertInterface,
+            self.otherInterface
         ]
         for page in pages:
             if hasattr(page, 'setConfig'):
@@ -354,13 +358,15 @@ class AxiomWindow(FluentWindow):
         
         self.nav_model = self.addSubInterface(self.modelInterface, FluentIcon.ROBOT, t("tab_model"))
 
+        self.nav_capture = self.addSubInterface(self.captureInterface, FluentIcon.CAMERA, t("tab_capture", "Capture"))
+
         self.nav_inference = self.addSubInterface(self.inferenceInterface, FluentIcon.COMMAND_PROMPT, t("tab_inference"))
 
         self.nav_aim = self.addSubInterface(self.aimInterface, QIcon(os.path.join(self.base_path, "assets", "aim.svg")), t("tab_aim_control"))
         
         self.nav_trigger = self.addSubInterface(self.triggerInterface, QIcon(os.path.join(self.base_path, "assets", "trigger.svg")), t("tab_auto_features"))
         
-        self.nav_keys = self.addSubInterface(self.keysInterface, QIcon(os.path.join(self.base_path, "assets", "mouse.svg")), t("tab_keys"))
+        self.nav_keys = self.addSubInterface(self.keysInterface, QIcon(os.path.join(self.base_path, "assets", "mouse.svg")), t("tab_hardware_output", "Hardware Output"))
         
         self.nav_display = self.addSubInterface(self.displayInterface, QIcon(os.path.join(self.base_path, "assets", "eye.svg")), t("tab_display"))
 
@@ -539,6 +545,7 @@ class AxiomWindow(FluentWindow):
         pages = [
             getattr(self, 'displayInterface', None),
             getattr(self, 'modelInterface', None),
+            getattr(self, 'captureInterface', None),
             getattr(self, 'inferenceInterface', None),
             getattr(self, 'aimInterface', None),
             getattr(self, 'triggerInterface', None),
@@ -715,10 +722,11 @@ class AxiomWindow(FluentWindow):
 
         if hasattr(self, 'nav_display'): self.nav_display.setText(t("tab_display"))
         if hasattr(self, 'nav_model'): self.nav_model.setText(t("tab_model"))
+        if hasattr(self, 'nav_capture'): self.nav_capture.setText(t("tab_capture", "Capture"))
         if hasattr(self, 'nav_inference'): self.nav_inference.setText(t("tab_inference"))
         if hasattr(self, 'nav_aim'): self.nav_aim.setText(t("tab_aim_control"))
         if hasattr(self, 'nav_trigger'): self.nav_trigger.setText(t("tab_auto_features"))
-        if hasattr(self, 'nav_keys'): self.nav_keys.setText(t("tab_keys"))
+        if hasattr(self, 'nav_keys'): self.nav_keys.setText(t("tab_hardware_output", "Hardware Output"))
         if hasattr(self, 'nav_config'): self.nav_config.setText(t("tab_config_management"))
         if hasattr(self, 'nav_convert'): self.nav_convert.setText(t("tab_convert"))
         if hasattr(self, 'nav_other'): self.nav_other.setText(t("tab_program_control"))
@@ -732,9 +740,10 @@ class AxiomWindow(FluentWindow):
         
         # Update all pages
         pages = [
-            self.displayInterface, self.modelInterface, self.inferenceInterface,
-            self.aimInterface, self.triggerInterface, self.keysInterface,
-            self.configInterface, self.convertInterface, self.otherInterface
+            self.displayInterface, self.modelInterface, self.captureInterface,
+            self.inferenceInterface, self.aimInterface, self.triggerInterface,
+            self.keysInterface, self.configInterface, self.convertInterface,
+            self.otherInterface
         ]
 
         for page in pages:

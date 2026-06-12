@@ -1,15 +1,22 @@
 # aim_page.py
-"""Aim Assist Page - PID, Smart Jitter, Target Priority, Target Tracking"""
+"""Aim Assist Page - Move Method, Arduino, Xbox, PID, Smart Jitter, Target Priority, Target Tracking"""
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget
+import os
+import re
+import sys
+import subprocess
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox
+from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import Qt
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon,
     ComboBox, SettingCard,
     SegmentedWidget,
+    BodyLabel, PushButton,
 )
 from ..components.no_wheel_widgets import NoWheelDoubleSpinBox as DoubleSpinBox
-from ..components.slider_spin_card import SliderLabelCard
+from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
@@ -22,6 +29,8 @@ class AimPage(BasePage):
         super().__init__("tab_aim_control", parent)
         self._config = None
         self._isLoadingConfig = False
+        self._isArduinoConnected = False
+        self._isXboxConnected = False
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -33,6 +42,171 @@ class AimPage(BasePage):
 
     def _initWidgets(self):
         """Initializes all controls"""
+
+        # === General (Aim Part + Move Method) ===
+        self.generalGroup = SettingCardGroup(t("general_params"), self.scrollWidget)
+
+        self.aimPartCombo = ComboBox()
+        self.aimPartCombo.addItems([t("head"), t("body"), t("both")])
+        self.aimPartCombo.setMinimumWidth(120)
+        self.aimPartCard = SettingCard(
+            FluentIcon.PEOPLE,
+            t("aim_part"),
+            "",
+            self.generalGroup
+        )
+        self.aimPartCard.hBoxLayout.addWidget(self.aimPartCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.aimPartCard.hBoxLayout.addSpacing(16)
+
+        self.mouseMoveCombo = ComboBox()
+        self.mouseMoveCombo.addItems(["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"])
+        self.mouseMoveCombo.setMinimumWidth(150)
+        self.mouseMoveCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            t("mouse_move_method"),
+            "",
+            self.generalGroup
+        )
+        self.mouseMoveCard.hBoxLayout.addWidget(self.mouseMoveCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.mouseMoveCard.hBoxLayout.addSpacing(16)
+
+        # === Arduino Settings ===
+        self.arduinoGroup = SettingCardGroup("Arduino", self.scrollWidget)
+
+        self.comPortCombo = ComboBox()
+        self.comPortCombo.setMinimumWidth(120)
+        self.comPortCombo.addItem(t("no_com_port"))
+        self._refreshComPorts()
+
+        self.comRefreshBtn = PushButton(t("refresh"))
+        self.comRefreshBtn.setFixedWidth(80)
+
+        self.comPortCard = SettingCard(
+            FluentIcon.CONNECT,
+            t("arduino_com_port"),
+            "",
+            self.arduinoGroup
+        )
+        self.comPortCard.hBoxLayout.addWidget(self.comPortCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.comPortCard.hBoxLayout.addWidget(self.comRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.comPortCard.hBoxLayout.addSpacing(16)
+
+        self.arduinoBaudCombo = ComboBox()
+        self.arduinoBaudCombo.addItems(["115200", "500000", "1000000", "2000000", "4000000"])
+        self.arduinoBaudCombo.setMinimumWidth(120)
+        self.arduinoBaudCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("arduino_baud_rate", "Baud Rate"),
+            t("arduino_baud_rate_desc", "⚠ Must match the baud rate in your Arduino sketch"),
+            self.arduinoGroup
+        )
+        self.arduinoBaudCard.hBoxLayout.addWidget(self.arduinoBaudCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.arduinoBaudCard.hBoxLayout.addSpacing(16)
+
+        self.connectionLabel = BodyLabel(t("disconnected"))
+        self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.connectionCard = SettingCard(
+            FluentIcon.WIFI,
+            t("connected") + " / " + t("disconnected"),
+            "",
+            self.arduinoGroup
+        )
+        self.connectionCard.hBoxLayout.addWidget(self.connectionLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.connectionCard.hBoxLayout.addSpacing(16)
+
+        self.arduinoConnectBtn = PushButton(t("arduino_connect"))
+        self.arduinoConnectBtn.setFixedWidth(120)
+        self.arduinoConnectCard = SettingCard(
+            FluentIcon.LINK,
+            t("arduino_connect"),
+            t("arduino_connect_desc"),
+            self.arduinoGroup
+        )
+        self.arduinoConnectCard.hBoxLayout.addWidget(self.arduinoConnectBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.arduinoConnectCard.hBoxLayout.addSpacing(16)
+
+        self.guideBtn = PushButton(t("arduino_guide"))
+        self.guideCard = SettingCard(
+            FluentIcon.BOOK_SHELF,
+            t("arduino_guide"),
+            "",
+            self.arduinoGroup
+        )
+        self.guideCard.hBoxLayout.addWidget(self.guideBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.guideCard.hBoxLayout.addSpacing(16)
+
+        self.spoofBtn = PushButton(t("spoof_device"))
+        self.spoofCard = SettingCard(
+            FluentIcon.VPN,
+            t("spoof_device"),
+            "",
+            self.arduinoGroup
+        )
+        self.spoofCard.hBoxLayout.addWidget(self.spoofBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.spoofCard.hBoxLayout.addSpacing(16)
+
+        self.verifySpoofBtn = PushButton(t("verify_spoof"))
+        self.verifySpoofCard = SettingCard(
+            FluentIcon.ACCEPT,
+            t("verify_spoof"),
+            "",
+            self.arduinoGroup
+        )
+        self.verifySpoofCard.hBoxLayout.addWidget(self.verifySpoofBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.verifySpoofCard.hBoxLayout.addSpacing(16)
+
+        self.testHeartBtn = PushButton(t("test_move_heart"))
+        self.testHeartCard = SettingCard(
+            FluentIcon.HEART,
+            t("test_move_heart"),
+            "",
+            self.arduinoGroup
+        )
+        self.testHeartCard.hBoxLayout.addWidget(self.testHeartBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.testHeartCard.hBoxLayout.addSpacing(16)
+
+        # === Xbox 360 Controller ===
+        self.xboxGroup = SettingCardGroup("Xbox 360 Controller", self.scrollWidget)
+
+        self.xboxSensitivityCard = SliderSpinCard(
+            FluentIcon.SPEED_HIGH,
+            t("xbox_sensitivity"),
+            10, 500,
+            suffix="%",
+            description="",
+            parent=self.xboxGroup
+        )
+
+        self.xboxDeadzoneCard = SliderSpinCard(
+            FluentIcon.REMOVE,
+            t("xbox_deadzone"),
+            0, 50,
+            suffix="%",
+            description="",
+            parent=self.xboxGroup
+        )
+
+        self.xboxConnectionLabel = BodyLabel(t("disconnected"))
+        self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.xboxConnectionCard = SettingCard(
+            FluentIcon.GAME,
+            t("connected") + " / " + t("disconnected"),
+            "",
+            self.xboxGroup
+        )
+        self.xboxConnectionCard.hBoxLayout.addWidget(self.xboxConnectionLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.xboxConnectionCard.hBoxLayout.addSpacing(16)
+
+        self.xboxConnectBtn = PushButton(t("xbox_connect"))
+        self.xboxConnectBtn.setFixedWidth(120)
+        self.xboxConnectCard = SettingCard(
+            FluentIcon.WIFI,
+            t("xbox_connect"),
+            t("xbox_connect_desc"),
+            self.xboxGroup
+        )
+        self.xboxConnectCard.hBoxLayout.addWidget(self.xboxConnectBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.xboxConnectCard.hBoxLayout.addSpacing(16)
 
         # === PID Parameters ===
         self.pidGroup = SettingCardGroup(t("aim_speed_pid"), self.scrollWidget)
@@ -285,6 +459,31 @@ class AimPage(BasePage):
 
     def _initLayout(self):
         """Layout all controls"""
+        # General
+        self.generalGroup.addSettingCard(self.aimPartCard)
+        self.generalGroup.addSettingCard(self.mouseMoveCard)
+        self.addContent(self.generalGroup)
+
+        # Arduino
+        self.arduinoGroup.addSettingCard(self.comPortCard)
+        self.arduinoGroup.addSettingCard(self.arduinoBaudCard)
+        self.arduinoGroup.addSettingCard(self.connectionCard)
+        self.arduinoGroup.addSettingCard(self.arduinoConnectCard)
+        self.arduinoGroup.addSettingCard(self.guideCard)
+        self.arduinoGroup.addSettingCard(self.spoofCard)
+        self.arduinoGroup.addSettingCard(self.verifySpoofCard)
+        self.arduinoGroup.addSettingCard(self.testHeartCard)
+        self.addContent(self.arduinoGroup)
+        self.arduinoGroup.setVisible(False)
+
+        # Xbox
+        self.xboxGroup.addSettingCard(self.xboxSensitivityCard)
+        self.xboxGroup.addSettingCard(self.xboxDeadzoneCard)
+        self.xboxGroup.addSettingCard(self.xboxConnectionCard)
+        self.xboxGroup.addSettingCard(self.xboxConnectCard)
+        self.addContent(self.xboxGroup)
+        self.xboxGroup.setVisible(False)
+
         # PID - tabbed X/Y layout
         pivotWidget = QWidget()
         pivotLayout = QHBoxLayout(pivotWidget)
@@ -348,6 +547,25 @@ class AimPage(BasePage):
 
     def _connectSignals(self):
         """Connect signals"""
+        # General
+        self.aimPartCombo.currentIndexChanged.connect(self._onAimPartChanged)
+        self.mouseMoveCombo.currentTextChanged.connect(self._onMouseMoveChanged)
+
+        # Arduino
+        self.comRefreshBtn.clicked.connect(self._refreshComPorts)
+        self.comPortCombo.currentTextChanged.connect(self._onComPortChanged)
+        self.arduinoConnectBtn.clicked.connect(self._onArduinoConnectToggle)
+        self.guideBtn.clicked.connect(self._onOpenGuide)
+        self.spoofBtn.clicked.connect(self._onSpoofDevice)
+        self.verifySpoofBtn.clicked.connect(self._onVerifySpoof)
+        self.testHeartBtn.clicked.connect(self._onTestHeart)
+        self.arduinoBaudCombo.currentTextChanged.connect(self._onArduinoBaudChanged)
+
+        # Xbox
+        self.xboxSensitivityCard.valueChanged.connect(self._onXboxSensitivityChanged)
+        self.xboxDeadzoneCard.valueChanged.connect(self._onXboxDeadzoneChanged)
+        self.xboxConnectBtn.clicked.connect(self._onXboxConnectToggle)
+
         # PID
         self.pidPxCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kp_x', v))
         self.pidIxCard.valueChanged.connect(lambda v: self._onPidChanged('pid_ki_x', v))
@@ -388,6 +606,38 @@ class AimPage(BasePage):
             return
         self._isLoadingConfig = True
         try:
+            # General
+            aim_parts = ["head", "body", "both"]
+            if self._config.aim_part in aim_parts:
+                self.aimPartCombo.setCurrentIndex(aim_parts.index(self._config.aim_part))
+
+            mouse_methods = ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]
+            if self._config.mouse_move_method in mouse_methods:
+                self.mouseMoveCombo.setCurrentIndex(mouse_methods.index(self._config.mouse_move_method))
+
+            self._updateMethodGroupVisibility(self._config.mouse_move_method)
+
+            # Arduino
+            if self._config.arduino_com_port:
+                idx = self.comPortCombo.findText(self._config.arduino_com_port)
+                if idx >= 0:
+                    self.comPortCombo.setCurrentIndex(idx)
+                elif self.comPortCombo.count() > 1:
+                    self.comPortCombo.setCurrentIndex(1)
+            elif self.comPortCombo.count() > 1:
+                self.comPortCombo.setCurrentIndex(1)
+
+            arduino_baud = str(getattr(self._config, 'arduino_baud_rate', 115200))
+            if self.arduinoBaudCombo.findText(arduino_baud) < 0:
+                arduino_baud = "115200"
+            self.arduinoBaudCombo.setCurrentText(arduino_baud)
+            self._updateArduinoConnectionStatus()
+
+            # Xbox
+            self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
+            self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
+            self._updateXboxConnectionStatus()
+
             # PID
             self.pidPxCard.setValue(int(self._config.pid_kp_x * 100))
             self.pidIxCard.setValue(int(self._config.pid_ki_x * 100))
@@ -439,6 +689,279 @@ class AimPage(BasePage):
                     self._config.ema_enabled = False
         finally:
             self._isLoadingConfig = False
+
+    # ── Helpers ──────────────────────────────────
+
+    @staticmethod
+    def _sorted_com_ports(ports):
+        def _num(p):
+            m = re.search(r'(\d+)$', p.device)
+            return int(m.group(1)) if m else 0
+        return sorted(ports, key=_num, reverse=True)
+
+    def _getEmbeddedPythonExe(self) -> str:
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        python_exe = os.path.join(src_dir, "python", "python.exe")
+        if os.path.exists(python_exe):
+            return python_exe
+        return sys.executable
+
+    def _runLocalInstallerScript(self, script_name: str, feature_name: str, capture_output: bool = True) -> bool:
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        script_path = os.path.join(src_dir, script_name)
+        if not os.path.exists(script_path):
+            QMessageBox.warning(self, f"{feature_name} install failed", f"Missing installer script:\n{script_path}")
+            return False
+        python_exe = self._getEmbeddedPythonExe()
+        install_cmd = [python_exe, script_path]
+        try:
+            if capture_output:
+                result = subprocess.run(install_cmd, check=True, text=True, capture_output=True)
+                if result.stdout:
+                    print(f"[Dependency][{feature_name}][stdout]\n{result.stdout}")
+            else:
+                subprocess.run(install_cmd, check=True, text=True)
+            return True
+        except subprocess.CalledProcessError as exc:
+            parts = []
+            if getattr(exc, 'stderr', None):
+                parts.append(exc.stderr.strip())
+            if getattr(exc, 'stdout', None):
+                parts.append(exc.stdout.strip())
+            error_text = "\n".join(parts) if parts else str(exc)
+            QMessageBox.warning(
+                self, f"{feature_name} install failed",
+                f"Failed command: {' '.join(install_cmd)}\n\n{error_text}\n\nPlease run the installer script manually and try again."
+            )
+            return False
+
+    def _refreshComPorts(self):
+        self.comPortCombo.clear()
+        self.comPortCombo.addItem(t("no_com_port"))
+        try:
+            import serial.tools.list_ports
+            for port in self._sorted_com_ports(serial.tools.list_ports.comports()):
+                self.comPortCombo.addItem(port.device)
+        except ImportError:
+            pass
+
+    def _updateMethodGroupVisibility(self, method):
+        self.arduinoGroup.setVisible(method == "arduino")
+        self.xboxGroup.setVisible(method == "xbox")
+
+    # ── General Callbacks ────────────────────────
+
+    def _onAimPartChanged(self, index):
+        if self._config:
+            parts = ["head", "body", "both"]
+            self._config.aim_part = parts[index]
+
+    def _onMouseMoveChanged(self, text):
+        if self._config:
+            self._config.mouse_move_method = text
+            if text == "makcu":
+                self._config.mouse_click_method = "makcu"
+            if text == "ddxoft":
+                try:
+                    from win_utils import ensure_ddxoft_ready
+                    ensure_ddxoft_ready()
+                except ImportError:
+                    pass
+        self._updateMethodGroupVisibility(text)
+        # Notify keys page to update MAKCU group visibility
+        try:
+            win = self.window()
+            if hasattr(win, 'keysInterface'):
+                win.keysInterface._updateMakcuVisibility()
+        except Exception:
+            pass
+
+    # ── Arduino Callbacks ────────────────────────
+
+    def _onComPortChanged(self, text):
+        if self._config and text != t("no_com_port"):
+            self._config.arduino_com_port = text
+
+    def _onArduinoBaudChanged(self, text):
+        if self._config and not self._isLoadingConfig:
+            try:
+                self._config.arduino_baud_rate = int(text)
+            except ValueError:
+                pass
+
+    def _onArduinoConnectToggle(self):
+        try:
+            from win_utils import is_arduino_connected, connect_arduino, disconnect_arduino
+            if is_arduino_connected():
+                disconnect_arduino()
+            else:
+                com_port = self.comPortCombo.currentText()
+                if not com_port or com_port == t("no_com_port"):
+                    QMessageBox.warning(self, t("config_error"), t("no_com_port"))
+                    return
+                success = connect_arduino(com_port)
+                if not success:
+                    QMessageBox.warning(self, t("config_error"),
+                                        f"Arduino {t('disconnected')}: {com_port}")
+            self._updateArduinoConnectionStatus()
+        except ImportError:
+            QMessageBox.warning(self, t("config_error"), "pyserial not installed.\npip install pyserial")
+
+    def _updateArduinoConnectionStatus(self):
+        try:
+            from win_utils import is_arduino_connected
+            if is_arduino_connected():
+                self._isArduinoConnected = True
+                self.connectionLabel.setText(t("connected"))
+                self.connectionLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+                self.arduinoConnectBtn.setText(t("arduino_disconnect"))
+            else:
+                self._isArduinoConnected = False
+                self.connectionLabel.setText(t("disconnected"))
+                self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.arduinoConnectBtn.setText(t("arduino_connect"))
+        except ImportError:
+            self.connectionLabel.setText("pyserial N/A")
+            self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+
+    def _onOpenGuide(self):
+        from PyQt6.QtCore import QUrl
+        guide_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+            "Arduino_User_Guide.html"
+        )
+        if os.path.exists(guide_path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(guide_path))
+
+    def _onSpoofDevice(self):
+        reply = QMessageBox.question(
+            self, t("spoof_confirm_title"),
+            t("spoof_confirm_msg").replace("\\n", "\n"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                from win_utils.arduino_spoofer import spoof_arduino_board
+                success, boards_path = spoof_arduino_board()
+                if success:
+                    QMessageBox.information(self, t("spoof_success_title"),
+                                            t("spoof_success_msg").replace("\\n", "\n"))
+                else:
+                    QMessageBox.warning(self, t("spoof_error_title"),
+                                        f"Spoof operation returned unsuccessful.\nFile: {boards_path}")
+            except FileNotFoundError as e:
+                QMessageBox.warning(self, t("spoof_error_title"), str(e))
+            except Exception as e:
+                QMessageBox.critical(self, t("spoof_error_title"), f"Error: {e}")
+
+    def _onVerifySpoof(self):
+        try:
+            from win_utils.arduino_spoofer import verify_spoof
+            specific_port = None
+            if self._config and self._config.arduino_com_port:
+                specific_port = self._config.arduino_com_port
+            is_spoofed, message = verify_spoof(specific_port)
+            if is_spoofed:
+                QMessageBox.information(self, t("verify_success_title"), message)
+            else:
+                QMessageBox.warning(self, t("verify_fail_title"), message)
+        except Exception as e:
+            QMessageBox.critical(self, t("verify_fail_title"), f"Error: {e}")
+
+    def _onTestHeart(self):
+        import math as _math
+        import threading as _threading
+        import time as _time
+        reply = QMessageBox.question(
+            self, t("test_heart_confirm_title"),
+            t("test_heart_confirm_msg").replace("\\n", "\n"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            from win_utils.arduino_mouse import arduino_mouse
+            if not arduino_mouse.is_connected():
+                com_port = self._config.arduino_com_port if self._config else ""
+                if not com_port:
+                    QMessageBox.warning(self, t("test_heart_confirm_title"),
+                                        "Arduino not connected. Please set COM port first.")
+                    return
+                if not arduino_mouse.connect(com_port):
+                    QMessageBox.warning(self, t("test_heart_confirm_title"),
+                                        f"Failed to connect to {com_port}.")
+                    return
+
+            def _draw_heart():
+                num_steps = 120
+                scale = 3.0
+                points = []
+                for i in range(num_steps + 1):
+                    angle = 2 * _math.pi * i / num_steps
+                    x = 16 * (_math.sin(angle) ** 3)
+                    y = -(13 * _math.cos(angle) - 5 * _math.cos(2 * angle)
+                           - 2 * _math.cos(3 * angle) - _math.cos(4 * angle))
+                    points.append((x * scale, y * scale))
+                for i in range(1, len(points)):
+                    dx = int(round(points[i][0] - points[i - 1][0]))
+                    dy = int(round(points[i][1] - points[i - 1][1]))
+                    if dx != 0 or dy != 0:
+                        arduino_mouse.move(dx, dy)
+                    _time.sleep(0.015)
+
+            _threading.Thread(target=_draw_heart, daemon=True).start()
+
+    # ── Xbox Callbacks ───────────────────────────
+
+    def _onXboxSensitivityChanged(self, value):
+        if self._config:
+            self._config.xbox_sensitivity = value / 100.0
+            try:
+                from win_utils import set_xbox_sensitivity
+                set_xbox_sensitivity(value / 100.0)
+            except ImportError:
+                pass
+
+    def _onXboxDeadzoneChanged(self, value):
+        if self._config:
+            self._config.xbox_deadzone = value / 100.0
+            try:
+                from win_utils import set_xbox_deadzone
+                set_xbox_deadzone(value / 100.0)
+            except ImportError:
+                pass
+
+    def _onXboxConnectToggle(self):
+        try:
+            from win_utils import is_xbox_connected, connect_xbox, disconnect_xbox
+            if is_xbox_connected():
+                disconnect_xbox()
+            else:
+                connect_xbox()
+            self._updateXboxConnectionStatus()
+        except ImportError:
+            QMessageBox.warning(self, t("config_error"),
+                                 "vgamepad not installed.\npip install vgamepad\nInstall ViGEmBus driver.")
+
+    def _updateXboxConnectionStatus(self):
+        try:
+            from win_utils import is_xbox_connected, is_xbox_available
+            if not is_xbox_available():
+                self.xboxConnectionLabel.setText("vgamepad " + t("disconnected"))
+                self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.xboxConnectBtn.setText(t("xbox_connect"))
+                return
+            if is_xbox_connected():
+                self._isXboxConnected = True
+                self.xboxConnectionLabel.setText(t("connected"))
+                self.xboxConnectionLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+                self.xboxConnectBtn.setText(t("xbox_disconnect"))
+            else:
+                self._isXboxConnected = False
+                self.xboxConnectionLabel.setText(t("disconnected"))
+                self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.xboxConnectBtn.setText(t("xbox_connect"))
+        except ImportError:
+            self.xboxConnectionLabel.setText("vgamepad N/A")
+            self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
 
     # === PID Callbacks ===
 
@@ -553,6 +1076,31 @@ class AimPage(BasePage):
         """Refresh translations"""
         super().retranslateUi()
 
+        self.generalGroup.titleLabel.setText(t("general_params"))
+        self.aimPartCard.titleLabel.setText(t("aim_part"))
+        self.mouseMoveCard.titleLabel.setText(t("mouse_move_method"))
+
+        self.comPortCard.titleLabel.setText(t("arduino_com_port"))
+        self.comRefreshBtn.setText(t("refresh"))
+        self.connectionCard.titleLabel.setText(t("connected") + " / " + t("disconnected"))
+        self.arduinoConnectCard.titleLabel.setText(t("arduino_connect"))
+        self.arduinoConnectCard.contentLabel.setText(t("arduino_connect_desc"))
+        self._updateArduinoConnectionStatus()
+        self.guideCard.titleLabel.setText(t("arduino_guide"))
+        self.guideBtn.setText(t("arduino_guide"))
+        self.spoofCard.titleLabel.setText(t("spoof_device"))
+        self.spoofBtn.setText(t("spoof_device"))
+        self.verifySpoofCard.titleLabel.setText(t("verify_spoof"))
+        self.verifySpoofBtn.setText(t("verify_spoof"))
+        self.testHeartCard.titleLabel.setText(t("test_move_heart"))
+        self.testHeartBtn.setText(t("test_move_heart"))
+
+        self.xboxSensitivityCard.titleLabel.setText(t("xbox_sensitivity"))
+        self.xboxDeadzoneCard.titleLabel.setText(t("xbox_deadzone"))
+        self.xboxConnectionCard.titleLabel.setText(t("connected") + " / " + t("disconnected"))
+        self.xboxConnectCard.titleLabel.setText(t("xbox_connect"))
+        self.xboxConnectCard.contentLabel.setText(t("xbox_connect_desc"))
+
         self.pidGroup.titleLabel.setText(t("aim_speed_pid"))
         self.pidAxisPivot.setItemText('x', t("horizontal_x"))
         self.pidAxisPivot.setItemText('y', t("vertical_y"))
@@ -581,3 +1129,8 @@ class AimPage(BasePage):
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
+
+        current_aim = self.aimPartCombo.currentIndex()
+        self.aimPartCombo.clear()
+        self.aimPartCombo.addItems([t("head"), t("body"), t("both")])
+        self.aimPartCombo.setCurrentIndex(current_aim)
