@@ -8,7 +8,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
 try:
-    from qfluentwidgets import isDarkTheme, setThemeColor, qconfig, Theme
+    from qfluentwidgets import isDarkTheme
     HAS_FLUENT_WIDGETS = True
 except ImportError:
     HAS_FLUENT_WIDGETS = False

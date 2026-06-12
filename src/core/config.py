@@ -38,14 +38,9 @@ class Config:
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
         
-        self.center_x: int = self.width // 2
-        self.center_y: int = self.height // 2
-        
         # Full screen detection
         self.capture_width: int = self.width
         self.capture_height: int = self.height
-        self.capture_left: int = 0
-        self.capture_top: int = 0
         self.screenshot_method: str = "dxcam"  # 螢幕截圖方式
         self.uvc_device_index: int = 0
         self.uvc_width: int = self.width
@@ -63,10 +58,6 @@ class Config:
         self.ndi_height: int = self.height
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
-        self.region: Dict[str, int] = {
-            "top": 0, "left": 0, 
-            "width": self.width, "height": self.height
-        }
 
         # Program execution state
         self.Running: bool = True
@@ -172,7 +163,6 @@ class Config:
         # - idle_detect_interval: 未瞄準但 keep_detecting=True 時的間隔（降低占用）
         self.detect_interval: float = 0.01       # 秒，預設 10ms
         self.screenshot_interval: float = 0.01   # 秒，預設 10ms
-        self.auto_match_fps: bool = False         # 截圖間隔自動跟隨推理間隔
         self.idle_detect_interval: float = 0.05  # 秒，預設 50ms
         self.idle_detect_enabled: bool = False     # 是否啟用未瞄準時降低偵測頻率
         self.aim_toggle_key: int = 45       # Insert 鍵
@@ -405,7 +395,6 @@ class Config:
             'trt_fp16_enabled': self.trt_fp16_enabled,
             'cuda_io_binding_enabled': self.cuda_io_binding_enabled,
             'skip_letterbox': self.skip_letterbox,
-            'auto_match_fps': self.auto_match_fps,
 
             'kalman_enabled': self.kalman_enabled,
             'kalman_process_noise': self.kalman_process_noise,
@@ -669,12 +658,6 @@ def _validate_inference_backend(config: Config) -> None:
     valid_backends = ("auto", "tensorrt", "cuda", "directml", "cpu")
     if getattr(config, "inference_backend", "auto") not in valid_backends:
         config.inference_backend = "auto"
-
-
-def _validate_thread_priority(config: Config) -> None:
-    valid = ("normal", "above_normal", "high", "time_critical")
-    if getattr(config, "thread_priority", "high") not in valid:
-        config.thread_priority = "high"
 
 
 def _validate_thread_priority(config: Config) -> None:

@@ -4,11 +4,11 @@
 import os
 import sys
 import subprocess
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QMessageBox
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, FluentIcon,
-    ComboBox, PushButton, SettingCard,
+    ComboBox, PushButton, SettingCard, BodyLabel,
 )
 from ..components.slider_spin_card import SliderSpinCard
 from ..base_page import BasePage
@@ -59,12 +59,6 @@ class CapturePage(BasePage):
             parent=self.captureGroup
         )
 
-        self.autoMatchFpsCard = SwitchSettingCard(
-            FluentIcon.SYNC,
-            t("auto_match_fps_label", "Sync Detection & Capture Interval"),
-            t("auto_match_fps_desc", "Lock capture interval to detection interval"),
-            parent=self.captureGroup
-        )
 
         # === UVC Camera ===
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
@@ -140,6 +134,19 @@ class CapturePage(BasePage):
         self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcCaptureMethodCard.hBoxLayout.addSpacing(16)
 
+        self.uvcHwInfoLabel = BodyLabel("—")
+        self.uvcQueryBtn = PushButton("Query Device")
+        self.uvcQueryBtn.setFixedWidth(110)
+        self.uvcHwInfoCard = SettingCard(
+            FluentIcon.INFO,
+            "Device Resolution & FPS",
+            "Actual values reported by the driver",
+            self.uvcGroup
+        )
+        self.uvcHwInfoCard.hBoxLayout.addWidget(self.uvcHwInfoLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcHwInfoCard.hBoxLayout.addWidget(self.uvcQueryBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcHwInfoCard.hBoxLayout.addSpacing(16)
+
         # === NDI ===
         self.ndiGroup = SettingCardGroup("NDI", self.scrollWidget)
 
@@ -177,6 +184,19 @@ class CapturePage(BasePage):
         self.ndiBandwidthCard.hBoxLayout.addWidget(self.ndiBandwidthCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.ndiBandwidthCard.hBoxLayout.addSpacing(16)
 
+        self.ndiHwInfoLabel = BodyLabel("—")
+        self.ndiRefreshInfoBtn = PushButton("Refresh Info")
+        self.ndiRefreshInfoBtn.setFixedWidth(100)
+        self.ndiHwInfoCard = SettingCard(
+            FluentIcon.INFO,
+            "Stream Resolution & FPS",
+            "Actual values from the active NDI source",
+            self.ndiGroup
+        )
+        self.ndiHwInfoCard.hBoxLayout.addWidget(self.ndiHwInfoLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.ndiHwInfoCard.hBoxLayout.addWidget(self.ndiRefreshInfoBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.ndiHwInfoCard.hBoxLayout.addSpacing(16)
+
         # === Preview ===
         self.previewGroup = SettingCardGroup(t("preview_group", "Preview"), self.scrollWidget)
 
@@ -213,7 +233,6 @@ class CapturePage(BasePage):
     def _initLayout(self):
         self.captureGroup.addSettingCard(self.screenshotMethodCard)
         self.captureGroup.addSettingCard(self.screenshotIntervalCard)
-        self.captureGroup.addSettingCard(self.autoMatchFpsCard)
         self.addContent(self.captureGroup)
 
         self.uvcGroup.addSettingCard(self.uvcDeviceCard)
@@ -223,12 +242,14 @@ class CapturePage(BasePage):
         self.uvcGroup.addSettingCard(self.uvcHeightCard)
         self.uvcGroup.addSettingCard(self.uvcFpsCard)
         self.uvcGroup.addSettingCard(self.uvcCaptureMethodCard)
+        self.uvcGroup.addSettingCard(self.uvcHwInfoCard)
         self.addContent(self.uvcGroup)
         self.uvcGroup.setVisible(False)
 
         self.ndiGroup.addSettingCard(self.ndiSourceCard)
         self.ndiGroup.addSettingCard(self.ndiRefreshCard)
         self.ndiGroup.addSettingCard(self.ndiBandwidthCard)
+        self.ndiGroup.addSettingCard(self.ndiHwInfoCard)
         self.addContent(self.ndiGroup)
         self.ndiGroup.setVisible(False)
 
@@ -247,12 +268,13 @@ class CapturePage(BasePage):
     def _connectSignals(self):
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)
         self.screenshotIntervalCard.valueChanged.connect(self._onScreenshotIntervalChanged)
-        self.autoMatchFpsCard.checkedChanged.connect(self._onAutoMatchFpsChanged)
         self.uvcDeviceCard.valueChanged.connect(self._onUvcDeviceChanged)
         self.uvcResolutionCombo.currentTextChanged.connect(self._onUvcResolutionChanged)
         self.uvcRefreshResolutionBtn.clicked.connect(self._refreshUvcResolutions)
         self.uvcFpsCard.valueChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
+        self.uvcQueryBtn.clicked.connect(self._queryUvcHwInfo)
+        self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
         self.previewCropCard.checkedChanged.connect(self._onPreviewCropChanged)
         self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
@@ -279,9 +301,6 @@ class CapturePage(BasePage):
                         getattr(self._config, 'detect_interval', 0.01)) * 1000
             )
             self.screenshotIntervalCard.setValue(screenshot_interval_ms)
-            _auto_match = bool(getattr(self._config, 'auto_match_fps', False))
-            self.autoMatchFpsCard.setChecked(_auto_match)
-            self.screenshotIntervalCard.setEnabled(not _auto_match)
 
             self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
@@ -464,18 +483,11 @@ class CapturePage(BasePage):
         if self._config:
             self._config.screenshot_interval = value / 1000.0
 
-    def _onAutoMatchFpsChanged(self, checked):
-        if self._config:
-            self._config.auto_match_fps = bool(checked)
-            self.screenshotIntervalCard.setEnabled(not checked)
-            if checked:
-                self._config.screenshot_interval = self._config.detect_interval
-                self.screenshotIntervalCard.setValue(int(self._config.detect_interval * 1000))
-
     def _onUvcDeviceChanged(self, value):
         if self._config:
             self._config.uvc_device_index = int(value)
         self._refreshUvcResolutions()
+        QTimer.singleShot(400, self._queryUvcHwInfo)
 
     def _onUvcResolutionChanged(self, value):
         if self._config:
@@ -489,6 +501,7 @@ class CapturePage(BasePage):
                 self._config.uvc_resolution = f"{self._config.uvc_width}x{self._config.uvc_height}"
             except ValueError:
                 return
+        QTimer.singleShot(400, self._queryUvcHwInfo)
 
     def _onUvcFpsChanged(self, value):
         if self._config:
@@ -498,6 +511,7 @@ class CapturePage(BasePage):
         if self._config:
             self._config.uvc_capture_method = str(text)
         self._refreshUvcResolutions()
+        QTimer.singleShot(400, self._queryUvcHwInfo)
 
     def _onUvcPreviewChanged(self, checked):
         if self._config:
@@ -523,6 +537,51 @@ class CapturePage(BasePage):
             source_name = str(text).strip()
         self._config.ndi_source_name = source_name.strip()
 
+    def _queryUvcHwInfo(self):
+        """Open a temporary VideoCapture to read the driver's actual resolution and FPS."""
+        if not self._config:
+            self.uvcHwInfoLabel.setText("—")
+            return
+        try:
+            import cv2
+            idx = int(getattr(self._config, 'uvc_device_index', 0))
+            method_str = str(getattr(self._config, 'uvc_capture_method', 'msmf')).lower()
+            backend_map = {'msmf': cv2.CAP_MSMF, 'dshow': cv2.CAP_DSHOW}
+            backend = backend_map.get(method_str, cv2.CAP_ANY)
+            # Apply requested settings so the driver reports accurate values
+            w_req = int(getattr(self._config, 'uvc_width', 1920))
+            h_req = int(getattr(self._config, 'uvc_height', 1080))
+            fps_req = int(getattr(self._config, 'uvc_fps', 60))
+            cap = cv2.VideoCapture(idx, backend)
+            if not cap.isOpened():
+                self.uvcHwInfoLabel.setText("—  (device not available)")
+                return
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w_req)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h_req)
+            cap.set(cv2.CAP_PROP_FPS, fps_req)
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            cap.release()
+            fps_str = f"{fps:.1f}" if fps > 0 else "?"
+            self.uvcHwInfoLabel.setText(f"{w} × {h} @ {fps_str} fps")
+        except Exception as exc:
+            self.uvcHwInfoLabel.setText(f"—  ({exc})")
+
+    def _refreshNdiHwInfo(self):
+        """Read NDI stream resolution/FPS from config fields written by NDICapture."""
+        if not self._config:
+            self.ndiHwInfoLabel.setText("—")
+            return
+        w = int(getattr(self._config, 'ndi_width', 0) or 0)
+        h = int(getattr(self._config, 'ndi_height', 0) or 0)
+        fps = float(getattr(self._config, 'source_nominal_fps', 0.0) or 0.0)
+        if w > 0 and h > 0:
+            fps_str = f"{fps:.1f}" if fps > 0 else "?"
+            self.ndiHwInfoLabel.setText(f"{w} × {h} @ {fps_str} fps")
+        else:
+            self.ndiHwInfoLabel.setText("—  (connect source to see info)")
+
     # ──────────────────────────────────────────────
     # Retranslate
     # ──────────────────────────────────────────────
@@ -532,17 +591,20 @@ class CapturePage(BasePage):
         self.captureGroup.titleLabel.setText(t("capture_method_group", "Capture"))
         self.screenshotMethodCard.titleLabel.setText(t("screenshot_method"))
         self.screenshotIntervalCard.titleLabel.setText(t("screenshot_interval"))
-        self.autoMatchFpsCard.titleLabel.setText(t("auto_match_fps_label", "Sync Detection & Capture Interval"))
         self.uvcDeviceCard.titleLabel.setText("UVC Device Index")
         self.uvcResolutionCard.titleLabel.setText("UVC Resolution")
         self.uvcRefreshResolutionCard.titleLabel.setText("Refresh UVC Resolution List")
         self.uvcRefreshResolutionBtn.setText(t("refresh"))
         self.uvcFpsCard.titleLabel.setText("UVC FPS")
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
+        self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
+        self.uvcQueryBtn.setText("Query Device")
         self.ndiSourceCard.titleLabel.setText("NDI Stream")
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
         self.ndiRefreshBtn.setText(t("refresh"))
         self.ndiBandwidthCard.titleLabel.setText("NDI Bandwidth")
+        self.ndiHwInfoCard.titleLabel.setText("Stream Resolution & FPS")
+        self.ndiRefreshInfoBtn.setText("Refresh Info")
         self.previewGroup.titleLabel.setText(t("preview_group", "Preview"))
         self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
         self.previewCropCard.titleLabel.setText(t("preview_crop_label"))

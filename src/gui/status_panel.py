@@ -118,15 +118,6 @@ class FluentColors:
             return ThemeColors.ERROR.qcolor()
         return QColor(255, 59, 48) if not isDarkTheme() else QColor(255, 69, 58)
          
-    # Keep static properties for backward compatibility
-    @property
-    def SUCCESS(self):
-        return self.get_success_color()
-    
-    @property
-    def ERROR(self):
-        return self.get_error_color()
-
 # Create a global instance for attribute access
 _fluent_colors_instance = FluentColors()
 FluentColors.SUCCESS = _fluent_colors_instance.get_success_color()

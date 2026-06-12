@@ -252,6 +252,12 @@ class KeyBindButton(PushButton):
         return mapping.get(qtKey, 0)
 
 
+# Known USB identifiers for MAKCU devices
+_MAKCU_VID = 0x1A86
+_MAKCU_PID = 0x55D3
+_MAKCU_DESC_KEYWORDS = ("USB-Enhanced-SERIAL CH343", "USB Single Serial")
+
+
 class KeysPage(BasePage):
     """Hardware Output page — keybinds, MAKCU connection + keys"""
 
@@ -688,13 +694,19 @@ class KeysPage(BasePage):
             self._config.makcu_disengage_delay = float(value)
 
     def _loadMakcuConnFromConfig(self):
-        """Load MAKCU COM port and baud rate from config."""
+        """Load MAKCU COM port and baud rate from config, then auto-connect if device found."""
         if not self._config:
             return
 
+        # Auto-detect MAKCU port; fall back to saved port
+        auto_port = self._findMakcuPort()
         saved_port = getattr(self._config, 'makcu_com_port', '')
-        if saved_port:
-            idx = self.makcuComPortCombo.findText(saved_port)
+        effective_port = auto_port or saved_port
+
+        if effective_port:
+            if auto_port:
+                self._config.makcu_com_port = auto_port
+            idx = self.makcuComPortCombo.findText(effective_port)
             if idx >= 0:
                 self.makcuComPortCombo.blockSignals(True)
                 self.makcuComPortCombo.setCurrentIndex(idx)
@@ -707,7 +719,6 @@ class KeysPage(BasePage):
             self.makcuBaudCombo.setCurrentIndex(baud_idx)
             self.makcuBaudCombo.blockSignals(False)
         else:
-            # Default to 4000000
             four_m_idx = self.makcuBaudCombo.findText("4000000")
             if four_m_idx >= 0:
                 self.makcuBaudCombo.blockSignals(True)
@@ -716,15 +727,40 @@ class KeysPage(BasePage):
 
         self._updateMakcuConnectionStatus()
 
+        # Auto-connect if a MAKCU device is detected and not yet connected
+        if effective_port:
+            try:
+                from win_utils.makcu_mouse import is_makcu_connected, connect_makcu
+                if not is_makcu_connected():
+                    ok = connect_makcu(effective_port, 4_000_000)
+                    self._isMakcuConnected = ok
+                    self._updateMakcuConnectionStatus()
+            except Exception:
+                pass
+
     # ──────────────────────────────────────────────
     # MAKCU connection helpers
     # ──────────────────────────────────────────────
 
-    def _refreshMakcuComPorts(self):
-        """Refresh MAKCU COM port list."""
+    def _findMakcuPort(self) -> str | None:
+        """Return the first serial port that matches the MAKCU USB VID/PID or description."""
         try:
             import serial.tools.list_ports
-            ports = [p.device for p in serial.tools.list_ports.comports()]
+            for p in serial.tools.list_ports.comports():
+                if p.vid == _MAKCU_VID and p.pid == _MAKCU_PID:
+                    return p.device
+                desc = f"{p.description or ''} {p.product or ''}"
+                if any(kw in desc for kw in _MAKCU_DESC_KEYWORDS):
+                    return p.device
+        except Exception:
+            pass
+        return None
+
+    def _refreshMakcuComPorts(self):
+        """Refresh MAKCU COM port list and auto-select a detected MAKCU device."""
+        try:
+            import serial.tools.list_ports
+            ports = list(serial.tools.list_ports.comports())
         except Exception:
             ports = []
 
@@ -733,12 +769,18 @@ class KeysPage(BasePage):
         self.makcuComPortCombo.clear()
         self.makcuComPortCombo.addItem(t("no_com_port", "No COM Port"))
         for p in ports:
-            self.makcuComPortCombo.addItem(p)
+            self.makcuComPortCombo.addItem(p.device)
 
-        idx = self.makcuComPortCombo.findText(current)
+        # Prefer previously selected port, otherwise auto-detect MAKCU
+        auto_port = self._findMakcuPort()
+        preferred = current if current and current != t("no_com_port", "No COM Port") else (auto_port or '')
+        idx = self.makcuComPortCombo.findText(preferred)
         if idx >= 0:
             self.makcuComPortCombo.setCurrentIndex(idx)
         self.makcuComPortCombo.blockSignals(False)
+
+        if auto_port and self._config:
+            self._config.makcu_com_port = auto_port
 
     def _onMakcuComPortChanged(self, text: str):
         if self._config:

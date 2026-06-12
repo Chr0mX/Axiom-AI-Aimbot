@@ -8,10 +8,6 @@ from .theme_colors import (
     ColorPair,
     ColorPairWithAlpha,
     StyleSheetGenerator,
-    get_color,
-    get_qcolor,
-    get_rgba_color,
-    get_rgba_qcolor,
 )
 
 from .theme_manager import (
@@ -24,12 +20,8 @@ from .theme_manager import (
 __all__ = [
     'ThemeColors',
     'ColorPair',
-    'ColorPairWithAlpha', 
+    'ColorPairWithAlpha',
     'StyleSheetGenerator',
-    'get_color',
-    'get_qcolor',
-    'get_rgba_color',
-    'get_rgba_qcolor',
     'ThemeManager',
     'get_theme_manager',
     'apply_theme_to_app',
