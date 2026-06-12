@@ -174,45 +174,68 @@ class ModelPage(BasePage):
         config = self._config
 
         def _worker():
+            import json as _json
+            text = t("model_inspect_failed", "Inspection failed.")
             try:
+                # Resolve the ONNX path to an absolute path
                 if not os.path.isabs(model_path):
-                    src = os.path.dirname(os.path.abspath(__file__))
-                    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(src))))
-                    full = os.path.join(root, model_path)
+                    _pages = os.path.dirname(os.path.abspath(__file__))
+                    _src = os.path.dirname(os.path.dirname(os.path.dirname(_pages)))
+                    _root = os.path.dirname(_src)
+                    full_onnx = os.path.join(_root, model_path)
                 else:
-                    full = model_path
+                    _src = os.path.dirname(os.path.dirname(os.path.dirname(
+                        os.path.dirname(os.path.abspath(__file__)))))
+                    _root = os.path.dirname(_src)
+                    full_onnx = model_path
 
-                model_stem = os.path.splitext(os.path.basename(full))[0]
+                model_stem = os.path.splitext(os.path.basename(full_onnx))[0]
 
-                # When TRT is the active provider, look up the cached engine instead
+                # When TRT is the active provider, inspect the cached engine file instead
+                inspect_path = full_onnx
                 provider = getattr(config, 'current_provider', '') if config else ''
                 if provider == 'TensorrtExecutionProvider':
-                    src_dir = os.path.dirname(os.path.abspath(__file__))
-                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(src_dir))))
-                    trt_cache = os.path.join(project_root, "trt_cache")
-                    engine_files = []
+                    trt_cache = os.path.join(_root, "trt_cache")
                     if os.path.isdir(trt_cache):
-                        import glob as _glob
-                        engine_files = _glob.glob(os.path.join(trt_cache, f"{model_stem}*.engine"))
-                    if engine_files:
-                        engine_file = sorted(engine_files)[-1]
-                        engine_name = os.path.basename(engine_file)
-                        size_mb = os.path.getsize(engine_file) / (1024 * 1024)
-                        precision = "FP16" if "_fp16" in engine_name.lower() else "FP32"
-                        text = f"TensorRT Engine  •  {precision}  •  {size_mb:.1f} MiB  •  {engine_name}"
-                        QTimer.singleShot(0, lambda t=text: self.modelInfoLabel.setText(t))
-                        return
+                        engine_files = glob.glob(os.path.join(trt_cache, f"{model_stem}*.engine"))
+                        if engine_files:
+                            inspect_path = sorted(engine_files)[-1]
 
-                from model_detect import inspect_model
-                info = inspect_model(full)
-                parts = [f"Input: {info['input_size']}"]
-                if info.get("num_classes"):
-                    parts.append(f"Classes: {info['num_classes']}")
-                if info.get("precision"):
-                    parts.append(f"Precision: {info['precision']}")
-                if info.get("file_size"):
-                    parts.append(info["file_size"])
-                text = "  •  ".join(parts)
+                # Run model_detect.py as a subprocess — avoids import-path and
+                # re-launch-guard issues; this is the same code path the user uses from CLI.
+                script = os.path.join(_src, "model_detect.py")
+                result = subprocess.run(
+                    [sys.executable, script, "--json", inspect_path],
+                    capture_output=True, text=True, timeout=120,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                info = _json.loads(result.stdout) if result.stdout.strip() else {}
+
+                if "error" in info:
+                    # Engine file found but TRT bindings unavailable — show filename info
+                    if inspect_path.endswith(".engine"):
+                        engine_name = os.path.basename(inspect_path)
+                        size_mb = os.path.getsize(inspect_path) / (1024 * 1024)
+                        precision = "FP16" if "_fp16" in engine_name.lower() else (
+                            "INT8" if "_int8" in engine_name.lower() else "FP32")
+                        text = f"TensorRT Engine  •  {precision}  •  {size_mb:.1f} MiB  •  {engine_name}"
+                    else:
+                        text = info["error"][:120]
+                elif info:
+                    parts = [f"Input: {info['input_size']}"]
+                    if info.get("format"):
+                        parts[0] = f"{info['format']}  •  Input: {info['input_size']}"
+                    if info.get("num_classes"):
+                        parts.append(f"Classes: {info['num_classes']}")
+                    if info.get("precision"):
+                        parts.append(f"Precision: {info['precision']}")
+                    if info.get("file_size"):
+                        parts.append(info["file_size"])
+                    text = "  •  ".join(parts)
+                else:
+                    text = result.stderr.strip()[:120] or t("model_inspect_failed", "Inspection failed.")
+            except subprocess.TimeoutExpired:
+                text = t("model_inspect_timeout", "Inspection timed out.")
             except Exception as exc:
                 text = str(exc)[:120]
             QTimer.singleShot(0, lambda t=text: self.modelInfoLabel.setText(t))

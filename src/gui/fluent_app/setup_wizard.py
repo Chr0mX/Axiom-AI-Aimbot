@@ -640,6 +640,7 @@ class SetupWizard(QDialog):
             if _is_rtx20_or_newer(self._detected_gpu):
                 auto_idx = 0  # TensorRT
                 self._config.inference_backend = 'tensorrt'
+                self._config.trt_fp16_enabled = True  # RTX 20+ has native FP16 support
             else:
                 auto_idx = 1  # DirectML
                 self._config.inference_backend = 'directml'
