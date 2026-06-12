@@ -839,6 +839,9 @@ class InferencePage(BasePage):
         finally:
             self._isLoadingConfig = False
 
+        self._updateFovCircleVisibility()
+        self._updateProviderDependentWidgets()
+
     # ──────────────────────────────────────────────
     # Helper methods
     # ──────────────────────────────────────────────
@@ -1005,6 +1008,28 @@ class InferencePage(BasePage):
     def _onFovCircleChanged(self, checked):
         if self._config:
             self._config.fov_circle_filter_enabled = bool(checked)
+        self._updateFovCircleVisibility()
+
+    def _updateFovCircleVisibility(self):
+        """Hide Skip Letterbox Padding when Circular FOV is active (they conflict)."""
+        circle_on = bool(self.fovCircleCard.isChecked())
+        self.skipLetterboxCard.setVisible(not circle_on)
+        if circle_on and self._config:
+            self._config.skip_letterbox = False
+            self.skipLetterboxCard.setChecked(False)
+
+    def _updateProviderDependentWidgets(self):
+        """Show/hide and auto-configure CUDA IO Binding based on the active ORT provider."""
+        if not self._config:
+            return
+        provider = getattr(self._config, 'current_provider', '')
+        is_trt = provider == 'TensorrtExecutionProvider'
+        is_cuda = provider == 'CUDAExecutionProvider'
+        hide = not (is_trt or is_cuda)
+        self.cudaIoBindingCard.setVisible(not hide)
+        if is_trt and not bool(getattr(self._config, 'cuda_io_binding_enabled', False)):
+            self._config.cuda_io_binding_enabled = True
+            self.cudaIoBindingCard.setChecked(True)
 
     def _onDetectRangeChanged(self, value):
         if self._config:

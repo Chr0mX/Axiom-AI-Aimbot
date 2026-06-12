@@ -166,7 +166,12 @@ class ModelPage(BasePage):
 
     def _updateModelInfo(self, model_path: str) -> None:
         """Inspect the selected model in a background thread and update the info card."""
+        if not model_path:
+            self.modelInfoLabel.setText(t("model_no_model", "No model selected."))
+            return
         self.modelInfoLabel.setText(t("model_inspecting", "Inspecting…"))
+
+        config = self._config
 
         def _worker():
             try:
@@ -176,6 +181,28 @@ class ModelPage(BasePage):
                     full = os.path.join(root, model_path)
                 else:
                     full = model_path
+
+                model_stem = os.path.splitext(os.path.basename(full))[0]
+
+                # When TRT is the active provider, look up the cached engine instead
+                provider = getattr(config, 'current_provider', '') if config else ''
+                if provider == 'TensorrtExecutionProvider':
+                    src_dir = os.path.dirname(os.path.abspath(__file__))
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(src_dir))))
+                    trt_cache = os.path.join(project_root, "trt_cache")
+                    engine_files = []
+                    if os.path.isdir(trt_cache):
+                        import glob as _glob
+                        engine_files = _glob.glob(os.path.join(trt_cache, f"{model_stem}*.engine"))
+                    if engine_files:
+                        engine_file = sorted(engine_files)[-1]
+                        engine_name = os.path.basename(engine_file)
+                        size_mb = os.path.getsize(engine_file) / (1024 * 1024)
+                        precision = "FP16" if "_fp16" in engine_name.lower() else "FP32"
+                        text = f"TensorRT Engine  •  {precision}  •  {size_mb:.1f} MiB  •  {engine_name}"
+                        QTimer.singleShot(0, lambda t=text: self.modelInfoLabel.setText(t))
+                        return
+
                 from model_detect import inspect_model
                 info = inspect_model(full)
                 parts = [f"Input: {info['input_size']}"]
