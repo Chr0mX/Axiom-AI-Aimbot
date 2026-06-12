@@ -40,12 +40,14 @@ class _ConvertWorker(QThread):
 
     def run(self) -> None:
         import subprocess
+        model_stem = os.path.splitext(os.path.basename(self._onnx_path))[0]
         cmd = [
             self._python_exe, "-u", self._script_path,
             "--model", self._onnx_path,
             "--output", self._cache_dir,
             "--workspace", str(self._workspace_mb),
             "--method", "ort",
+            "--engine-prefix", model_stem,
         ]
         if not self._fp16:
             cmd.append("--no-fp16")
@@ -281,6 +283,13 @@ class ConvertPage(BasePage):
             self._config.inference_paused = False
         if success:
             self.logView.append(f"✓ Done. Engine cache written to: {message}")
+            if self._config is not None:
+                self._config.trt_fp16_enabled = self.fp16Card.isChecked()
+                try:
+                    from core.config import save_config
+                    save_config(self._config)
+                except Exception:
+                    pass
             InfoBar.success(
                 t("trt_convert_ok", "Conversion complete"),
                 message, duration=6000, isClosable=True,

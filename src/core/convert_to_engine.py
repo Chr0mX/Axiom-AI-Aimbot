@@ -197,6 +197,7 @@ def build_engine_via_ort(
     cache_dir: str,
     fp16: bool = True,
     workspace_mb: int = 2048,
+    engine_prefix: str = "",
 ) -> bool:
     """Trigger TRT engine build through ORT's TensorrtExecutionProvider.
 
@@ -229,19 +230,23 @@ def build_engine_via_ort(
 
     os.makedirs(cache_dir, exist_ok=True)
 
+    trt_opts: dict = {
+        "trt_fp16_enable": fp16,
+        "trt_engine_cache_enable": True,
+        "trt_engine_cache_path": cache_dir,
+        "trt_timing_cache_enable": True,
+        "trt_timing_cache_path": cache_dir,
+        "trt_max_workspace_size": workspace_mb * 1024 * 1024,
+        "trt_builder_optimization_level": 3,
+        "trt_auxiliary_streams": -1,
+    }
+    if engine_prefix:
+        trt_opts["trt_engine_cache_prefix"] = engine_prefix
+
     providers = [
         (
             "TensorrtExecutionProvider",
-            {
-                "trt_fp16_enable": fp16,
-                "trt_engine_cache_enable": True,
-                "trt_engine_cache_path": cache_dir,
-                "trt_timing_cache_enable": True,
-                "trt_timing_cache_path": cache_dir,
-                "trt_max_workspace_size": workspace_mb * 1024 * 1024,
-                "trt_builder_optimization_level": 3,
-                "trt_auxiliary_streams": -1,
-            },
+            trt_opts,
         ),
         (
             "CUDAExecutionProvider",
@@ -329,6 +334,11 @@ def main() -> None:
              "'trt' uses the tensorrt Python API directly",
     )
     ap.add_argument(
+        "--engine-prefix", default="",
+        help="Prefix added to ORT TRT engine cache filenames (e.g. model stem). "
+             "Must match the prefix used at runtime for the cache to be reused.",
+    )
+    ap.add_argument(
         "--print-trtexec", action="store_true",
         help="Print equivalent trtexec shell command and exit",
     )
@@ -372,7 +382,8 @@ def main() -> None:
         )
     else:
         ok = build_engine_via_ort(
-            onnx_path, output_dir, fp16=fp16, workspace_mb=args.workspace
+            onnx_path, output_dir, fp16=fp16, workspace_mb=args.workspace,
+            engine_prefix=args.engine_prefix,
         )
 
     if not ok:
