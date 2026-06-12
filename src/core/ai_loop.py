@@ -87,7 +87,6 @@ def _try_hot_swap_model(
 
         input_name = new_model.get_inputs()[0].name
         _inp_shape = new_model.get_inputs()[0].shape
-        print(f"[模型熱切換] raw shape: {_inp_shape!r}  types: {[type(d).__name__ for d in _inp_shape]}")
         _detected_size = 0
         if len(_inp_shape) >= 4:
             try:
@@ -101,12 +100,11 @@ def _try_hot_swap_model(
             try:
                 _probe = _ort.InferenceSession(abs_model_path, providers=["CPUExecutionProvider"])
                 _ps = _probe.get_inputs()[0].shape
-                print(f"[模型熱切換] CPU probe shape: {_ps}")
                 if len(_ps) >= 4 and isinstance(_ps[2], int) and _ps[2] > 0:
                     _detected_size = _ps[2]
                 del _probe
-            except Exception as _probe_err:
-                print(f"[模型熱切換] CPU probe 失敗: {_probe_err}")
+            except Exception:
+                pass
         if _detected_size:
             config.model_input_size = _detected_size
             print(f"[模型熱切換] 模型輸入尺寸自動偵測: {_detected_size}")
@@ -417,6 +415,13 @@ def ai_logic_loop(
                 )
                 if model is not prev_model:
                     _io_binding[0] = _setup_io_binding(model)
+                    # Drain tensors sized for the old model so the next inference
+                    # always receives a tensor matching the new model_input_size.
+                    while True:
+                        try:
+                            _tensor_queue.get_nowait()
+                        except queue.Empty:
+                            break
                     # Refresh ONNX class-name metadata for semantic FP filter (Someone_idea).
                     try:
                         from .detection_semantics import sync_detection_class_names_from_backend
@@ -517,6 +522,8 @@ def ai_logic_loop(
                 except queue.Empty:
                     continue
                 input_tensor, lb_scale, lb_pad_x, lb_pad_y, latest_region = _pre_result
+                if input_tensor.shape[2] != config.model_input_size:
+                    continue  # stale tensor from a size transition; discard silently
                 t1 = time.perf_counter()
                 t2 = t3 = t4 = None
 
