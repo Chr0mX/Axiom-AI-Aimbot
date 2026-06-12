@@ -602,7 +602,7 @@ class NDICapture:
             if arr.size < expected:
                 return None, 0, 0
             if is_uyvy:
-                return arr[:expected].reshape(height, width * 2), width, height
+                return arr[:expected].reshape(height, width, 2), width, height
             return arr[:expected].reshape(height, width, 4), width, height
         except Exception:
             return None, 0, 0
@@ -733,11 +733,11 @@ class NDICapture:
                     return None
 
                 if recv_fourcc == 'uyvy':
-                    # UYVY 4:2:2: raw shape is (H, W*2) bytes; horizontal crop must
+                    # UYVY 4:2:2: raw shape is (H, W, 2); horizontal crop must
                     # align to even-pixel boundary so each macropixel stays intact.
                     left  = left  & ~1
                     right = (right + 1) & ~1
-                    crop_raw = raw[top:bottom, left * 2:right * 2]
+                    crop_raw = raw[top:bottom, left:right, :]
                     expected_shape = (bottom - top, right - left, 4)
                     if self._bgra_shape != expected_shape:
                         self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
