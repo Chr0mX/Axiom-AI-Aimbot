@@ -3,16 +3,16 @@
 
 import glob
 import os
+import subprocess
 import sys
-from PyQt6.QtCore import Qt, QThread, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from qfluentwidgets import (
     SettingCardGroup,
     FluentIcon,
-    BodyLabel, ComboBox, PrimaryPushButton, SettingCard,
+    ComboBox, PrimaryPushButton, SettingCard,
     InfoBar, InfoBarPosition
 )
-from PyQt6.QtCore import pyqtSignal
 
 from ..base_page import BasePage
 from ..language_manager import t
@@ -82,17 +82,14 @@ class ModelPage(BasePage):
         self.modelCard.hBoxLayout.addWidget(self.modelCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.modelCard.hBoxLayout.addSpacing(16)
 
-        # Live model info (input size, classes, precision, file size)
-        self.modelInfoLabel = BodyLabel("", self.modelGroup)
-        self.modelInfoLabel.setWordWrap(True)
+        # Live model info — displayed as the card subtitle (contentLabel)
         self.modelInfoCard = SettingCard(
             FluentIcon.INFO,
             t("model_info", "Model Info"),
-            "",
-            self.modelGroup
+            t("model_inspecting", "Inspecting…"),
+            self.modelGroup,
         )
-        self.modelInfoCard.hBoxLayout.addWidget(self.modelInfoLabel, 1, Qt.AlignmentFlag.AlignRight)
-        self.modelInfoCard.hBoxLayout.addSpacing(16)
+        self.modelInfoCard.contentLabel.setWordWrap(True)
 
         self.inferenceBackendCombo = ComboBox()
         self.inferenceBackendCombo.addItems(["Auto", "TensorRT", "DirectML", "CPU"])
@@ -196,7 +193,7 @@ class ModelPage(BasePage):
     def _updateModelInfo(self, model_path: str) -> None:
         """Inspect the selected model in a QThread and update the info card via signal."""
         if not model_path:
-            self.modelInfoLabel.setText(t("model_no_model", "No model selected."))
+            self.modelInfoCard.contentLabel.setText(t("model_no_model", "No model selected."))
             return
 
         # Resolve paths on the main thread so the worker only gets an absolute path
@@ -222,17 +219,23 @@ class ModelPage(BasePage):
                 if engine_files:
                     inspect_path = sorted(engine_files)[-1]
 
-        self.modelInfoLabel.setText(t("model_inspecting", "Inspecting…"))
+        self.modelInfoCard.contentLabel.setText(t("model_inspecting", "Inspecting…"))
 
-        # Stop any in-flight worker to avoid stale results on rapid model changes
-        if self._inspect_worker and self._inspect_worker.isRunning():
-            self._inspect_worker.quit()
-            self._inspect_worker.wait(200)
+        # Stop any in-flight worker safely — do NOT use deleteLater; let Python GC own lifetime
+        if self._inspect_worker is not None:
+            if self._inspect_worker.isRunning():
+                self._inspect_worker.quit()
+                self._inspect_worker.wait(200)
+            self._inspect_worker = None
 
         self._inspect_worker = _ModelInspectWorker(inspect_path)
-        self._inspect_worker.resultReady.connect(self.modelInfoLabel.setText)
-        self._inspect_worker.finished.connect(self._inspect_worker.deleteLater)
+        self._inspect_worker.resultReady.connect(self.modelInfoCard.contentLabel.setText)
+        self._inspect_worker.finished.connect(self._onInspectWorkerDone)
         self._inspect_worker.start()
+
+    def _onInspectWorkerDone(self) -> None:
+        """Clear the worker reference once finished so isRunning() is never called on a dead object."""
+        self._inspect_worker = None
 
     # ──────────────────────────────────────────────
     # Helpers
