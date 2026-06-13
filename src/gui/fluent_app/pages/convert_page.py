@@ -263,13 +263,17 @@ class ConvertPage(BasePage):
             python_exe = sys.executable
         script_path = os.path.join(self._src_dir, "core", "convert_to_engine.py")
 
+        self._pending_model_stem = os.path.splitext(os.path.basename(onnx_path))[0]
         self._worker = _ConvertWorker(
             onnx_path, self._cache_dir, fp16, workspace_mb,
             python_exe, script_path, parent=self)
         self._worker.logLine.connect(self._onLogLine)
         self._worker.finishedResult.connect(self._onConvertFinished)
         if self._config:
+            # Halt both the inference loop and screen-capture pipeline so TRT
+            # has the full GPU memory budget during the build.
             self._config.inference_paused = True
+            self._config.capture_paused = True
         self._worker.start()
 
     def _onLogLine(self, line: str):
@@ -281,10 +285,22 @@ class ConvertPage(BasePage):
         self.convertBtn.setText(t("trt_convert", "Convert"))
         if self._config:
             self._config.inference_paused = False
+            self._config.capture_paused = False
         if success:
             self.logView.append(f"✓ Done. Engine cache written to: {message}")
             if self._config is not None:
                 self._config.trt_fp16_enabled = self.fp16Card.isChecked()
+                # Auto-switch to the freshly built engine so inference resumes
+                # on TRT immediately without requiring a manual model change.
+                stem = getattr(self, '_pending_model_stem', '')
+                if stem:
+                    engines = sorted(glob.glob(os.path.join(message, f"{stem}*.engine")))
+                    if engines:
+                        self._config.model_path = engines[-1]
+                        self._config.inference_backend = "tensorrt"
+                        self.logView.append(
+                            f"→ Auto-switched model to: {os.path.basename(engines[-1])}"
+                        )
                 try:
                     from core.config import save_config
                     save_config(self._config)

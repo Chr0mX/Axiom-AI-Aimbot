@@ -314,6 +314,11 @@ def ai_logic_loop(
 
         try:
             while config.Running and not capture_stop_event.is_set():
+                # Pause capture (and ONNX preprocessing) during model conversion
+                # so TensorRT can use the full GPU memory budget.
+                if getattr(config, 'capture_paused', False):
+                    time.sleep(0.05)
+                    continue
                 screenshot_interval = max(0.001, float(getattr(config, 'screenshot_interval', config.detect_interval)))
                 should_use_high_res_timer = screenshot_interval <= 0.002
 
