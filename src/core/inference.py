@@ -214,9 +214,15 @@ def postprocess_outputs(
         (boxes, confidences) with boxes as [[x1, y1, x2, y2], …] in absolute
         screen coordinates.
     """
-    predictions = outputs[0][0].T
+    raw = outputs[0][0]
+    # Layout B (features × anchors): shape[0] < shape[1], needs .T to become (anchors, features)
+    # Layout A (anchors × features): shape[0] > shape[1], already correct
+    predictions = raw.T if raw.ndim == 2 and raw.shape[0] < raw.shape[1] else raw
 
-    conf_mask = predictions[:, 4] >= min_confidence
+    # Use max class score (cols 4+) so any model layout reports a real 0-1 confidence.
+    # Reading col 4 raw would yield a bbox coordinate (~thousands) for Layout A models.
+    _conf_scores = predictions[:, 4:].max(axis=1)
+    conf_mask = _conf_scores >= min_confidence
     filtered_predictions = predictions[conf_mask]
 
     if len(filtered_predictions) == 0:
@@ -242,7 +248,7 @@ def postprocess_outputs(
     y2 = cy + h / 2 + offset_y
 
     boxes = np.stack([x1, y1, x2, y2], axis=1).tolist()
-    confidences = filtered_predictions[:, 4].tolist()
+    confidences = _conf_scores[conf_mask].tolist()
 
     # Extract class IDs for multi-class models (>5 output columns).
     # Single-class models (5 cols: cx,cy,w,h,conf) get all-zeros — no behaviour change.
