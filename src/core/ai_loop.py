@@ -41,6 +41,31 @@ if TYPE_CHECKING:
     from .config import Config
 
 
+def _probe_model_input_size(session, abs_model_path: str) -> int:
+    """Return spatial H (=W) from a loaded ORT session, 0 if not determinable.
+
+    TRT EP exposes dims as None even for static-shape models, so fall back to
+    a throwaway CPUExecutionProvider session reading the ONNX file directly.
+    """
+    import onnxruntime as _ort
+    shape = session.get_inputs()[0].shape
+    if len(shape) >= 4:
+        try:
+            h = int(shape[2])
+            if h > 0:
+                return h
+        except (TypeError, ValueError):
+            pass
+    try:
+        probe = _ort.InferenceSession(abs_model_path, providers=["CPUExecutionProvider"])
+        ps = probe.get_inputs()[0].shape
+        if len(ps) >= 4 and isinstance(ps[2], int) and ps[2] > 0:
+            return ps[2]
+    except Exception:
+        pass
+    return 0
+
+
 def _try_hot_swap_model(
     config: Config,
     model: ort.InferenceSession,
@@ -86,25 +111,7 @@ def _try_hot_swap_model(
             new_model = _ort.InferenceSession(abs_model_path, providers=providers)
 
         input_name = new_model.get_inputs()[0].name
-        _inp_shape = new_model.get_inputs()[0].shape
-        _detected_size = 0
-        if len(_inp_shape) >= 4:
-            try:
-                _h = int(_inp_shape[2])
-                if _h > 0:
-                    _detected_size = _h
-            except (TypeError, ValueError):
-                pass
-        if not _detected_size:
-            # TRT EP exposes dims as None — probe with a throwaway CPU session
-            try:
-                _probe = _ort.InferenceSession(abs_model_path, providers=["CPUExecutionProvider"])
-                _ps = _probe.get_inputs()[0].shape
-                if len(_ps) >= 4 and isinstance(_ps[2], int) and _ps[2] > 0:
-                    _detected_size = _ps[2]
-                del _probe
-            except Exception:
-                pass
+        _detected_size = _probe_model_input_size(new_model, abs_model_path)
         if _detected_size:
             config.model_input_size = _detected_size
             print(f"[模型熱切換] 模型輸入尺寸自動偵測: {_detected_size}")
@@ -216,6 +223,17 @@ def ai_logic_loop(
     """AI 推理和滑鼠控制的主要循環"""
 
     input_name = model.get_inputs()[0].name
+
+    # Auto-detect model input size from the initial session (same probe as hot-swap).
+    # Ensures 320/416/448/512/640 models all work without manual config.
+    _init_model_path = config.model_path
+    if not os.path.isabs(_init_model_path):
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        _init_model_path = os.path.join(_project_root, _init_model_path)
+    _init_size = _probe_model_input_size(model, _init_model_path)
+    if _init_size:
+        config.model_input_size = _init_size
+        print(f"[AI Loop] 初始模型輸入尺寸: {_init_size}")
 
     pid_x = PIDController(config.pid_kp_x, config.pid_ki_x, config.pid_kd_x)
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
