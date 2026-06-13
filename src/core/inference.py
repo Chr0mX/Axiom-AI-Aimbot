@@ -214,13 +214,38 @@ def postprocess_outputs(
         (boxes, confidences) with boxes as [[x1, y1, x2, y2], …] in absolute
         screen coordinates.
     """
-    predictions = outputs[0][0].T
+    raw = outputs[0][0]
+    # Layout B (features × anchors): shape[0] < shape[1], needs .T to become (anchors, features)
+    # Layout A (anchors × features): shape[0] > shape[1], already correct
+    _is_layout_b = raw.ndim == 2 and raw.shape[0] < raw.shape[1]
+    predictions = raw.T if _is_layout_b else raw
 
-    conf_mask = predictions[:, 4] >= min_confidence
+    # Use max class score (cols 4+) so any model layout reports a real 0-1 confidence.
+    # Reading col 4 raw would yield a bbox coordinate (~thousands) for Layout A models.
+    _conf_scores = predictions[:, 4:].max(axis=1)
+    conf_mask = _conf_scores >= min_confidence
     filtered_predictions = predictions[conf_mask]
 
     if len(filtered_predictions) == 0:
         return [], [], []
+
+    # Layout A models may export in xyxy (x1,y1,x2,y2) instead of cxcywh.
+    # xyxy is identified by x2 > x1 and y2 > y1 holding for every detection.
+    # Layout B models are always cxcywh after the transpose above.
+    if not _is_layout_b and (
+        np.all(filtered_predictions[:, 2] > filtered_predictions[:, 0]) and
+        np.all(filtered_predictions[:, 3] > filtered_predictions[:, 1])
+    ):
+        fp = filtered_predictions
+        _cx = (fp[:, 0] + fp[:, 2]) * 0.5
+        _cy = (fp[:, 1] + fp[:, 3]) * 0.5
+        _w  =  fp[:, 2] - fp[:, 0]
+        _h  =  fp[:, 3] - fp[:, 1]
+        filtered_predictions = filtered_predictions.copy()
+        filtered_predictions[:, 0] = _cx
+        filtered_predictions[:, 1] = _cy
+        filtered_predictions[:, 2] = _w
+        filtered_predictions[:, 3] = _h
 
     cx = filtered_predictions[:, 0]
     cy = filtered_predictions[:, 1]
@@ -242,13 +267,13 @@ def postprocess_outputs(
     y2 = cy + h / 2 + offset_y
 
     boxes = np.stack([x1, y1, x2, y2], axis=1).tolist()
-    confidences = filtered_predictions[:, 4].tolist()
+    confidences = _conf_scores[conf_mask].tolist()
 
-    # Extract class IDs for multi-class models (>5 output columns).
-    # Single-class models (5 cols: cx,cy,w,h,conf) get all-zeros — no behaviour change.
+    # Class IDs: argmax over class columns (cols 4+).
+    # Using [:, 4:] not [:, 5:] so class 0 (col 4) is correctly included.
     num_cols = filtered_predictions.shape[1]
     if num_cols > 5:
-        class_ids = filtered_predictions[:, 5:].argmax(axis=1).tolist()
+        class_ids = filtered_predictions[:, 4:].argmax(axis=1).tolist()
         class_ids = [int(c) for c in class_ids]
     else:
         class_ids = [0] * len(boxes)

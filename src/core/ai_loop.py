@@ -41,6 +41,31 @@ if TYPE_CHECKING:
     from .config import Config
 
 
+def _probe_model_input_size(session, abs_model_path: str) -> int:
+    """Return spatial H (=W) from a loaded ORT session, 0 if not determinable.
+
+    TRT EP exposes dims as None even for static-shape models, so fall back to
+    a throwaway CPUExecutionProvider session reading the ONNX file directly.
+    """
+    import onnxruntime as _ort
+    shape = session.get_inputs()[0].shape
+    if len(shape) >= 4:
+        try:
+            h = int(shape[2])
+            if h > 0:
+                return h
+        except (TypeError, ValueError):
+            pass
+    try:
+        probe = _ort.InferenceSession(abs_model_path, providers=["CPUExecutionProvider"])
+        ps = probe.get_inputs()[0].shape
+        if len(ps) >= 4 and isinstance(ps[2], int) and ps[2] > 0:
+            return ps[2]
+    except Exception:
+        pass
+    return 0
+
+
 def _try_hot_swap_model(
     config: Config,
     model: ort.InferenceSession,
@@ -86,6 +111,10 @@ def _try_hot_swap_model(
             new_model = _ort.InferenceSession(abs_model_path, providers=providers)
 
         input_name = new_model.get_inputs()[0].name
+        _detected_size = _probe_model_input_size(new_model, abs_model_path)
+        if _detected_size:
+            config.model_input_size = _detected_size
+            print(f"[模型熱切換] 模型輸入尺寸自動偵測: {_detected_size}")
         actual_providers = new_model.get_providers()
         if actual_providers:
             config.current_provider = actual_providers[0]
@@ -194,6 +223,17 @@ def ai_logic_loop(
     """AI 推理和滑鼠控制的主要循環"""
 
     input_name = model.get_inputs()[0].name
+
+    # Auto-detect model input size from the initial session (same probe as hot-swap).
+    # Ensures 320/416/448/512/640 models all work without manual config.
+    _init_model_path = config.model_path
+    if not os.path.isabs(_init_model_path):
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        _init_model_path = os.path.join(_project_root, _init_model_path)
+    _init_size = _probe_model_input_size(model, _init_model_path)
+    if _init_size:
+        config.model_input_size = _init_size
+        print(f"[AI Loop] 初始模型輸入尺寸: {_init_size}")
 
     pid_x = PIDController(config.pid_kp_x, config.pid_ki_x, config.pid_kd_x)
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
@@ -393,6 +433,13 @@ def ai_logic_loop(
                 )
                 if model is not prev_model:
                     _io_binding[0] = _setup_io_binding(model)
+                    # Drain tensors sized for the old model so the next inference
+                    # always receives a tensor matching the new model_input_size.
+                    while True:
+                        try:
+                            _tensor_queue.get_nowait()
+                        except queue.Empty:
+                            break
                     # Refresh ONNX class-name metadata for semantic FP filter (Someone_idea).
                     try:
                         from .detection_semantics import sync_detection_class_names_from_backend
@@ -493,6 +540,8 @@ def ai_logic_loop(
                 except queue.Empty:
                     continue
                 input_tensor, lb_scale, lb_pad_x, lb_pad_y, latest_region = _pre_result
+                if input_tensor.shape[2] != config.model_input_size:
+                    continue  # stale tensor from a size transition; discard silently
                 t1 = time.perf_counter()
                 t2 = t3 = t4 = None
 

@@ -269,9 +269,9 @@ class KeysPage(BasePage):
         self._initLayout()
         self._connectSignals()
 
-        # Aim-status poll timer (250 ms)
+        # Aim-status poll timer (50 ms)
         self._aimStatusTimer = QTimer(self)
-        self._aimStatusTimer.setInterval(250)
+        self._aimStatusTimer.setInterval(50)
         self._aimStatusTimer.timeout.connect(self._updateMakcuAimStatus)
         self._aimStatusTimer.start()
 
@@ -835,14 +835,14 @@ class KeysPage(BasePage):
             self.makcuConnectBtn.setText(t("makcu_connect", "Connect MAKCU"))
 
     def _updateMakcuAimStatus(self):
-        """Poll aim status (250 ms timer)."""
+        """Poll aim status (50 ms timer)."""
         try:
-            from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
+            from win_utils.makcu_mouse import is_makcu_connected
             if not is_makcu_connected():
                 self.makcuAimStatusLabel.setText("—")
                 self.makcuAimStatusLabel.setStyleSheet("font-weight: bold;")
                 return
-            aiming = getattr(_mm, 'lmb_held', False) or getattr(_mm, 'rmb_held', False)
+            aiming = bool(getattr(self._config, 'makcu_aim_active', False))
             if aiming:
                 self.makcuAimStatusLabel.setText(t("aiming", "Aiming"))
                 self.makcuAimStatusLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
