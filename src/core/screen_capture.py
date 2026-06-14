@@ -484,6 +484,7 @@ class NDICapture:
         # Shared refs for the preview thread — reader writes, preview/grab() reads
         self._ndi_frame_lock: threading.Lock = threading.Lock()
         self._ndi_frame_ref: list = [None]    # list[np.ndarray | None]
+        self._ndi_frame_seq: list = [0]       # monotonic counter; incremented by reader each new frame
         self._ndi_region_ref: list = [None]
         self._ndi_stop: threading.Event = threading.Event()
         # FPS caching — read once from frame metadata, then skip per-frame probe
@@ -513,6 +514,7 @@ class NDICapture:
                 preview_width=self.preview_width or 1920,
                 preview_height=self.preview_height or 1080,
                 config=self.config,
+                seq_ref=self._ndi_frame_seq,
             )
             self._ndi_preview_thread.start()
             print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
@@ -729,9 +731,12 @@ class NDICapture:
             # ── Convert full frame to BGRA and publish ────────────────────────
             # Pointer swap under lock — preview and grab() each hold a reference
             # to the previous array via Python ref-counting, so no data races.
+            # Increment seq counter so the preview thread can detect new frames
+            # without relying on id() (which is reused by CPython at high FPS).
             full_bgra = self._convert_to_bgra(raw)
             with self._ndi_frame_lock:
                 self._ndi_frame_ref[0] = full_bgra
+                self._ndi_frame_seq[0] += 1
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return the latest BGRA frame from the NDI reader thread, cropped to region.
@@ -982,6 +987,7 @@ class _UVCPreviewThread(threading.Thread):
         preview_width: int = 1920,
         preview_height: int = 1080,
         config=None,
+        seq_ref: list | None = None,
     ) -> None:
         super().__init__(daemon=True, name='UVCPreview')
         self._window_name    = window_name
@@ -995,6 +1001,11 @@ class _UVCPreviewThread(threading.Thread):
         self._preview_width  = preview_width
         self._preview_height = preview_height
         self._config         = config
+        # Monotonic counter written by the frame-producing thread each time a new
+        # frame arrives.  Using id() is unreliable at high FPS (120+) because Python
+        # immediately reuses freed memory, so id(new_frame) == id(old_frame) causes
+        # the preview to treat every new frame as stale and freeze.
+        self._seq_ref        = seq_ref        # list[int] | None
 
     def run(self) -> None:
         # All OpenCV GUI operations for this window must happen on this thread.
@@ -1004,7 +1015,7 @@ class _UVCPreviewThread(threading.Thread):
         except Exception:
             pass
 
-        _last_frame_id: int = -1
+        _last_seq: int = -1
         _shown = 0
         _dropped = 0
         _title_ts = time.perf_counter()
@@ -1013,16 +1024,18 @@ class _UVCPreviewThread(threading.Thread):
             t0 = time.perf_counter()
             with self._lock:
                 frame = self._frame_ref[0]
+                # Read seq counter under the same lock so writer's increment and
+                # frame pointer swap are always observed atomically.
+                cur_seq = self._seq_ref[0] if self._seq_ref is not None else id(frame)
 
             if frame is None:
                 _dropped += 1
             else:
-                frame_id = id(frame)
-                if frame_id == _last_frame_id:
+                if cur_seq == _last_seq:
                     # Source didn't deliver a new frame this tick
                     _dropped += 1
                 else:
-                    _last_frame_id = frame_id
+                    _last_seq = cur_seq
                     _shown += 1
                     try:
                         region  = self._region_ref[0]
@@ -1164,6 +1177,7 @@ class UVCCapture:
         # grab() can return the newest frame without blocking the inference loop.
         self._latest_frame_lock = threading.Lock()
         self._latest_frame_ref: list = [None]   # list[np.ndarray | None]
+        self._frame_seq: list = [0]             # monotonic counter; incremented by reader each new frame
         self._region_ref: list = [None]         # list[dict | None]
         self._reader_stop = threading.Event()
         self._preview_stop = threading.Event()  # independent — closing the window doesn't kill the reader
@@ -1190,6 +1204,7 @@ class UVCCapture:
                 preview_width=self.preview_width,
                 preview_height=self.preview_height,
                 config=self.config,
+                seq_ref=self._frame_seq,
             )
             self._preview_thread.start()
 
@@ -1199,6 +1214,7 @@ class UVCCapture:
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
+                    self._frame_seq[0] += 1
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
