@@ -136,8 +136,8 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
 def _ndi_signature(config: Config) -> tuple[str, bool, str, str]:
     return (
         str(getattr(config, 'ndi_source_name', '')).strip(),
-        bool(getattr(config, 'uvc_show_window', False)),
-        str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
+        bool(getattr(config, 'ndi_show_window', getattr(config, 'uvc_show_window', False))),
+        str(getattr(config, 'ndi_preview_scale_mode', '')).lower().strip(),
         str(getattr(config, 'ndi_bandwidth', 'highest')).lower(),
     )
 
@@ -274,6 +274,144 @@ def _extract_ndi_source_video_meta(source: Any) -> tuple[int | None, int | None,
     return width, height, fps
 
 
+def _draw_detection_overlay(
+    frame: np.ndarray,
+    region: dict | None,
+    config: Any,
+    *,
+    has_alpha: bool = False,
+) -> np.ndarray:
+    """Shared overlay renderer used by both UVCCapture and NDICapture preview threads.
+
+    Args:
+        frame:     BGR or BGRA frame to draw on (modified in place).
+        region:    Detection region dict with 'left', 'top', 'width', 'height'.
+        config:    Live Config object.
+        has_alpha: True for BGRA frames (NDI); False for BGR frames (UVC).
+                   Controls whether color tuples include a 4th alpha byte.
+    """
+    cfg = config
+    if not bool(getattr(cfg, 'AimToggle', True)):
+        return frame
+
+    h, w = frame.shape[:2]
+    region_left   = int(region.get('left',   0)) if region else 0
+    region_top    = int(region.get('top',    0)) if region else 0
+    region_width  = int(region.get('width',  w)) if region else w
+    region_height = int(region.get('height', h)) if region else h
+
+    cx = int(getattr(cfg, 'crosshairX', w // 2))
+    cy = int(getattr(cfg, 'crosshairY', h // 2))
+
+    def _c(b: int, g: int, r: int, a: int = 255) -> tuple:
+        return (b, g, r, a) if has_alpha else (b, g, r)
+
+    if bool(getattr(cfg, 'show_detect_range', False)):
+        x1 = max(0, region_left)
+        y1 = max(0, region_top)
+        x2 = min(w - 1, region_left + region_width)
+        y2 = min(h - 1, region_top + region_height)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), _c(255, 140, 0), 1, cv2.LINE_AA)
+
+    if bool(getattr(cfg, 'show_fov', True)):
+        fov = int(getattr(cfg, 'fov_size', 220))
+        half = max(1, fov // 2)
+        x1, y1 = cx - half, cy - half
+        x2, y2 = cx + half, cy + half
+        color = _c(0, 0, 255)
+        if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
+            cv2.circle(frame, (cx, cy), half, color, 2, cv2.LINE_AA)
+        else:
+            corner = max(8, min(20, fov // 6))
+            cv2.line(frame, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
+
+    if bool(getattr(cfg, 'show_boxes', True)):
+        boxes       = list(getattr(cfg, 'latest_boxes',       []) or [])
+        confidences = list(getattr(cfg, 'latest_confidences', []) or [])
+        show_conf   = bool(getattr(cfg, 'show_confidence', True))
+        _theme = {
+            'cyan':   _c(255, 220, 0),
+            'red':    _c(60,  60,  255),
+            'yellow': _c(0,   210, 255),
+            'white':  _c(255, 255, 255),
+            'purple': _c(255, 60,  180),
+        }
+        box_color = _theme.get(str(getattr(cfg, 'box_color_theme', 'default')).lower(), _c(0, 255, 0))
+        speed = float(getattr(cfg, 'chroma_box_speed', 1.0))
+        hue = (time.monotonic() * speed * 60.0) % 360.0
+        r_f, g_f, b_f = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
+        chroma_color = _c(int(b_f * 255), int(g_f * 255), int(r_f * 255), 220)
+        use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
+        fov_half   = float(getattr(cfg, 'fov_size', 220)) / 2.0
+        for i, box in enumerate(boxes):
+            try:
+                x1, y1, x2, y2 = [int(v) for v in box]
+            except Exception:
+                continue
+            if x2 <= 0 or y2 <= 0 or x1 >= w or y1 >= h:
+                continue
+            x1 = max(0, min(w - 1, x1))
+            y1 = max(0, min(h - 1, y1))
+            x2 = max(0, min(w - 1, x2))
+            y2 = max(0, min(h - 1, y2))
+            conf      = float(confidences[i]) if i < len(confidences) else 0.5
+            thickness = max(1, min(3, 1 + round(conf * 2)))
+            clen      = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
+            if use_circle:
+                nx = min(max(float(cx), float(x1)), float(x2))
+                ny = min(max(float(cy), float(y1)), float(y2))
+                in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
+            else:
+                in_fov = (x1 < cx + fov_half and x2 > cx - fov_half and
+                          y1 < cy + fov_half and y2 > cy - fov_half)
+            dc = chroma_color if in_fov else box_color
+            cv2.line(frame, (x1, y1), (x1 + clen, y1), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x1, y1), (x1, y1 + clen), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2 - clen, y1), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2, y1 + clen), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1 + clen, y2), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1, y2 - clen), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2 - clen, y2), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2, y2 - clen), dc, thickness, cv2.LINE_AA)
+            if show_conf and i < len(confidences):
+                cv2.putText(frame, f"{conf * 100:.0f}%",
+                            (max(0, x1 - 5), max(15, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            _c(0, 255, 255), 1, cv2.LINE_AA)
+
+    if bool(getattr(cfg, 'show_tracer_line', False)):
+        tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
+        fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
+        for box in tracer_boxes:
+            try:
+                x1, y1, x2, y2 = [int(v) for v in box]
+            except Exception:
+                continue
+            bx = (x1 + x2) // 2
+            by = (y1 + y2) // 2
+            if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
+                cv2.line(frame, (cx, cy), (bx, by), _c(255, 255, 255), 2, cv2.LINE_AA)
+
+    decay_box = getattr(cfg, 'display_locked_box', None)
+    if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
+        try:
+            x1, y1, x2, y2 = [int(v) for v in decay_box]
+            x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
+            x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
+            cv2.rectangle(frame, (x1, y1), (x2, y2), _c(0, 140, 255), 1, cv2.LINE_AA)
+        except Exception:
+            pass
+
+    return frame
+
+
 def _render_preview_frame(window_name: str, mode: str, frame_bgr: np.ndarray) -> np.ndarray:
     """Render capture preview according to configured preview mode."""
 
@@ -381,7 +519,8 @@ class NDICapture:
         self.config = config
         self.config_signature = _ndi_signature(config)
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
-        self.show_window = bool(getattr(config, 'uvc_show_window', False))
+        self.show_window = bool(getattr(config, 'ndi_show_window',
+                                        getattr(config, 'uvc_show_window', False)))
         self.window_name = str(getattr(config, 'ndi_window_name', 'Axiom NDI Preview'))
         # NDI preview prioritizes minimal display latency by default.
         ndi_preview_scale_mode = str(getattr(config, 'ndi_preview_scale_mode', '')).lower().strip()
@@ -607,14 +746,6 @@ class NDICapture:
         except Exception:
             return None, 0, 0
 
-    @staticmethod
-    def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
-        """Legacy wrapper — converts full frame RGBA→BGRA. Use _raw_array_from_cyndilib_frame for crop-first path."""
-        arr, w, h = NDICapture._raw_array_from_cyndilib_frame(frame)
-        if arr is None:
-            return None
-        return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
-
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         if not self._receiver.is_connected():
             now = time.perf_counter()
@@ -736,7 +867,7 @@ class NDICapture:
                         self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
                         self._bgra_shape = expected_shape
                     cv2.cvtColor(crop_raw, cv2.COLOR_YUV2BGRA_UYVY, self._bgra_buf)
-                    frame = self._bgra_buf
+                    frame = self._bgra_buf.copy()
                 elif recv_fourcc == 'bgra':
                     frame = raw[top:bottom, left:right]
                 else:
@@ -746,7 +877,7 @@ class NDICapture:
                         self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
                         self._bgra_shape = expected_shape
                     cv2.cvtColor(crop_raw, cv2.COLOR_RGBA2BGRA, self._bgra_buf)
-                    frame = self._bgra_buf
+                    frame = self._bgra_buf.copy()
             else:
                 frame = _to_bgra(raw)
 
@@ -757,134 +888,7 @@ class NDICapture:
         return None
 
     def _draw_overlay(self, frame_bgra: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
-        """Draw overlay visuals in NDI preview window using active capture coordinates."""
-
-        cfg = self.config
-        if not bool(getattr(cfg, 'AimToggle', True)):
-            return frame_bgra
-
-        h, w = frame_bgra.shape[:2]
-        region_left = int(region.get('left', 0)) if region else 0
-        region_top = int(region.get('top', 0)) if region else 0
-        region_width = int(region.get('width', w)) if region else w
-        region_height = int(region.get('height', h)) if region else h
-
-        cx = int(getattr(cfg, 'crosshairX', w // 2))
-        cy = int(getattr(cfg, 'crosshairY', h // 2))
-
-        if bool(getattr(cfg, 'show_detect_range', False)):
-            x1 = max(0, region_left)
-            y1 = max(0, region_top)
-            x2 = min(w - 1, region_left + region_width)
-            y2 = min(h - 1, region_top + region_height)
-            cv2.rectangle(frame_bgra, (x1, y1), (x2, y2), (255, 140, 0, 255), 1, cv2.LINE_AA)
-
-        if bool(getattr(cfg, 'show_fov', True)):
-            fov = int(getattr(cfg, 'fov_size', 220))
-            half = max(1, fov // 2)
-            x1, y1 = cx - half, cy - half
-            x2, y2 = cx + half, cy + half
-            color = (0, 0, 255, 255)
-            if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
-                cv2.circle(frame_bgra, (cx, cy), half, color, 2, cv2.LINE_AA)
-            else:
-                corner = max(8, min(20, fov // 6))
-                cv2.line(frame_bgra, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
-
-        if bool(getattr(cfg, 'show_boxes', True)):
-            boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-            confidences = list(getattr(cfg, 'latest_confidences', []) or [])
-            show_conf = bool(getattr(cfg, 'show_confidence', True))
-            # BGRA colors per theme (B, G, R, A)
-            _theme_bgra = {
-                'cyan':   (255, 220, 0, 255),
-                'red':    (60, 60, 255, 255),
-                'yellow': (0, 210, 255, 255),
-                'white':  (255, 255, 255, 255),
-                'purple': (255, 60, 180, 255),
-            }
-            theme_key = str(getattr(cfg, 'box_color_theme', 'default')).lower()
-            box_color_bgra = _theme_bgra.get(theme_key, (0, 255, 0, 255))
-            speed = float(getattr(cfg, 'chroma_box_speed', 1.0))
-            hue = (time.monotonic() * speed * 60.0) % 360.0
-            r, g, b = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
-            chroma_bgra = (int(b * 255), int(g * 255), int(r * 255), 220)
-            use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
-            fov_half = float(getattr(cfg, 'fov_size', 220)) / 2.0
-            for i, box in enumerate(boxes):
-                try:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                except Exception:
-                    continue
-                if x2 <= 0 or y2 <= 0 or x1 >= w or y1 >= h:
-                    continue
-                x1 = max(0, min(w - 1, x1))
-                y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w - 1, x2))
-                y2 = max(0, min(h - 1, y2))
-                conf = float(confidences[i]) if i < len(confidences) else 0.5
-                thickness = max(1, min(3, 1 + round(conf * 2)))
-                corner_len = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
-                bx1, by1, bx2, by2 = float(x1), float(y1), float(x2), float(y2)
-                if use_circle:
-                    nx = min(max(float(cx), bx1), bx2)
-                    ny = min(max(float(cy), by1), by2)
-                    in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
-                else:
-                    in_fov = (bx1 < cx + fov_half and bx2 > cx - fov_half and
-                              by1 < cy + fov_half and by2 > cy - fov_half)
-                draw_color = chroma_bgra if in_fov else box_color_bgra
-                cv2.line(frame_bgra, (x1, y1), (x1 + corner_len, y1), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2 - corner_len, y1), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1 + corner_len, y2), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2 - corner_len, y2), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
-                if show_conf and i < len(confidences):
-                    cv2.putText(
-                        frame_bgra,
-                        f"{conf * 100:.0f}%",
-                        (max(0, x1 - 5), max(15, y1 - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 255, 255, 255),
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-        if bool(getattr(cfg, 'show_tracer_line', False)):
-            tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-            fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
-            for box in tracer_boxes:
-                try:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                except Exception:
-                    continue
-                bx = (x1 + x2) // 2
-                by = (y1 + y2) // 2
-                if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
-                    cv2.line(frame_bgra, (cx, cy), (bx, by), (255, 255, 255, 255), 2, cv2.LINE_AA)
-
-        decay_box = getattr(cfg, 'display_locked_box', None)
-        if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
-            try:
-                x1, y1, x2, y2 = [int(v) for v in decay_box]
-                x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
-                cv2.rectangle(frame_bgra, (x1, y1), (x2, y2), (0, 140, 255, 255), 1, cv2.LINE_AA)
-            except Exception:
-                pass
-
-        return frame_bgra
+        return _draw_detection_overlay(frame_bgra, region, self.config, has_alpha=True)
 
     def close(self) -> None:
         for method_name in ('disconnect', 'close', 'release', 'stop', 'shutdown'):
@@ -949,6 +953,35 @@ def list_supported_uvc_resolutions(
     return sorted(supported, key=lambda item: (item[0] * item[1], item[0]))
 
 
+def list_supported_uvc_fps(
+    device_index: int,
+    width: int,
+    height: int,
+    capture_method: str = 'dshow',
+) -> list[int]:
+    """Probe common FPS values at the given resolution and return supported ones."""
+    backend_map = {'dshow': cv2.CAP_DSHOW, 'msmf': cv2.CAP_MSMF, 'any': cv2.CAP_ANY}
+    backend = backend_map.get(str(capture_method).lower(), cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(int(device_index), backend)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(int(device_index))
+    if not cap.isOpened():
+        return [30, 60]
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    common = [24, 30, 60, 90, 120, 144, 240]
+    supported: list[int] = []
+    try:
+        for fps in common:
+            cap.set(cv2.CAP_PROP_FPS, fps)
+            actual = cap.get(cv2.CAP_PROP_FPS)
+            if actual > 0 and abs(actual - fps) <= 2:
+                supported.append(fps)
+    finally:
+        cap.release()
+    return supported or [30, 60]
+
+
 class _UVCPreviewThread(threading.Thread):
     """Dedicated thread that refreshes the UVC preview window at a fixed rate.
 
@@ -993,6 +1026,8 @@ class _UVCPreviewThread(threading.Thread):
         except Exception:
             pass
 
+        _crop_active = False
+
         while not self._stop.is_set():
             t0 = time.perf_counter()
             with self._lock:
@@ -1004,7 +1039,20 @@ class _UVCPreviewThread(threading.Thread):
 
                     # Crop to detection region when requested so the user sees
                     # exactly what the model infers on.
-                    if region is not None and getattr(self._config, 'preview_crop_to_detection', False):
+                    crop = bool(region is not None and getattr(self._config, 'preview_crop_to_detection', False))
+                    if crop != _crop_active:
+                        _crop_active = crop
+                        try:
+                            if crop and region is not None:
+                                rw = max(64, int(region.get('width', self._preview_width)))
+                                rh = max(64, int(region.get('height', self._preview_height)))
+                                cv2.resizeWindow(self._window_name, rw, rh)
+                            else:
+                                cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
+                        except Exception:
+                            pass
+
+                    if crop and region is not None:
                         _l = max(0, int(region.get('left', 0)))
                         _t = max(0, int(region.get('top', 0)))
                         _w = max(1, int(region.get('width', preview.shape[1])))
@@ -1140,6 +1188,8 @@ class UVCCapture:
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
+            else:
+                time.sleep(0.005)
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
@@ -1173,138 +1223,7 @@ class UVCCapture:
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
 
     def _draw_overlay(self, frame_bgr: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
-        """Draw overlay.py-equivalent visuals into UVC preview window."""
-
-        cfg = self.config
-        if not bool(getattr(cfg, 'AimToggle', True)):
-            return frame_bgr
-
-        h, w = frame_bgr.shape[:2]
-        region_left = int(region.get('left', 0)) if region else 0
-        region_top = int(region.get('top', 0)) if region else 0
-        region_width = int(region.get('width', w)) if region else w
-        region_height = int(region.get('height', h)) if region else h
-
-        cx = int(getattr(cfg, 'crosshairX', w // 2))
-        cy = int(getattr(cfg, 'crosshairY', h // 2))
-
-        if bool(getattr(cfg, 'show_detect_range', False)):
-            x1 = max(0, region_left)
-            y1 = max(0, region_top)
-            x2 = min(w - 1, region_left + region_width)
-            y2 = min(h - 1, region_top + region_height)
-            cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (255, 140, 0), 1, cv2.LINE_AA)
-
-        if bool(getattr(cfg, 'show_fov', True)):
-            fov = int(getattr(cfg, 'fov_size', 220))
-            half = max(1, fov // 2)
-            x1, y1 = cx - half, cy - half
-            x2, y2 = cx + half, cy + half
-            color = (0, 0, 255)
-            if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
-                cv2.circle(frame_bgr, (cx, cy), half, color, 2, cv2.LINE_AA)
-            else:
-                corner = max(8, min(20, fov // 6))
-                cv2.line(frame_bgr, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
-
-        if bool(getattr(cfg, 'show_boxes', True)):
-            boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-            confidences = list(getattr(cfg, 'latest_confidences', []) or [])
-            show_conf = bool(getattr(cfg, 'show_confidence', True))
-            # BGR colors per theme (B, G, R)
-            _theme_bgr = {
-                'cyan':   (255, 220, 0),
-                'red':    (60, 60, 255),
-                'yellow': (0, 210, 255),
-                'white':  (255, 255, 255),
-                'purple': (255, 60, 180),
-            }
-            theme_key = str(getattr(cfg, 'box_color_theme', 'default')).lower()
-            box_color_bgr = _theme_bgr.get(theme_key, (0, 255, 0))
-            speed = float(getattr(cfg, 'chroma_box_speed', 1.0))
-            hue = (time.monotonic() * speed * 60.0) % 360.0
-            r, g, b = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
-            chroma_bgr = (int(b * 255), int(g * 255), int(r * 255))
-            use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
-            fov_half = float(getattr(cfg, 'fov_size', 220)) / 2.0
-            for i, box in enumerate(boxes):
-                try:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                except Exception:
-                    continue
-                if x2 <= 0 or y2 <= 0 or x1 >= w or y1 >= h:
-                    continue
-                x1 = max(0, min(w - 1, x1))
-                y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w - 1, x2))
-                y2 = max(0, min(h - 1, y2))
-                conf = float(confidences[i]) if i < len(confidences) else 0.5
-                thickness = max(1, min(3, 1 + round(conf * 2)))
-                corner_len = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
-                bx1, by1, bx2, by2 = float(x1), float(y1), float(x2), float(y2)
-                if use_circle:
-                    nx = min(max(float(cx), bx1), bx2)
-                    ny = min(max(float(cy), by1), by2)
-                    in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
-                else:
-                    in_fov = (bx1 < cx + fov_half and bx2 > cx - fov_half and
-                              by1 < cy + fov_half and by2 > cy - fov_half)
-                draw_color = chroma_bgr if in_fov else box_color_bgr
-                cv2.line(frame_bgr, (x1, y1), (x1 + corner_len, y1), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2 - corner_len, y1), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1 + corner_len, y2), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2 - corner_len, y2), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
-                if show_conf and i < len(confidences):
-                    cv2.putText(
-                        frame_bgr,
-                        f"{conf * 100:.0f}%",
-                        (max(0, x1 - 5), max(15, y1 - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 255, 255),
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-        if bool(getattr(cfg, 'show_tracer_line', False)):
-            tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-            fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
-            for box in tracer_boxes:
-                try:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                except Exception:
-                    continue
-                bx = (x1 + x2) // 2
-                by = (y1 + y2) // 2
-                if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
-                    cv2.line(frame_bgr, (cx, cy), (bx, by), (255, 255, 255), 2, cv2.LINE_AA)
-
-        # Locked-target decay box — drawn when sticky lock is holding position
-        # after detection was lost, so the user sees a visual indicator.
-        decay_box = getattr(cfg, 'display_locked_box', None)
-        if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
-            try:
-                x1, y1, x2, y2 = [int(v) for v in decay_box]
-                x1 = max(0, min(w - 1, x1))
-                y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w - 1, x2))
-                y2 = max(0, min(h - 1, y2))
-                cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (0, 140, 255), 1, cv2.LINE_AA)
-            except Exception:
-                pass
-
-        return frame_bgr
+        return _draw_detection_overlay(frame_bgr, region, self.config, has_alpha=False)
 
     def _render_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
         return _render_preview_frame(self.window_name, self.preview_scale_mode, frame_bgr)

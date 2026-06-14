@@ -113,14 +113,18 @@ class CapturePage(BasePage):
         self.uvcWidthCard.setVisible(False)
         self.uvcHeightCard.setVisible(False)
 
-        self.uvcFpsCard = SliderSpinCard(
+        self.uvcFpsCombo = ComboBox()
+        self.uvcFpsCombo.addItems(["24", "30", "60", "90", "120", "144", "240"])
+        self.uvcFpsCombo.setCurrentText("60")
+        self.uvcFpsCombo.setMinimumWidth(120)
+        self.uvcFpsCard = SettingCard(
             FluentIcon.SPEED_MEDIUM,
             "UVC FPS",
-            1, 240,
-            suffix="",
-            description="",
-            parent=self.uvcGroup
+            "",
+            self.uvcGroup
         )
+        self.uvcFpsCard.hBoxLayout.addWidget(self.uvcFpsCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcFpsCard.hBoxLayout.addSpacing(16)
 
         self.uvcCaptureMethodCombo = ComboBox()
         self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto", "any"])
@@ -271,7 +275,7 @@ class CapturePage(BasePage):
         self.uvcDeviceCard.valueChanged.connect(self._onUvcDeviceChanged)
         self.uvcResolutionCombo.currentTextChanged.connect(self._onUvcResolutionChanged)
         self.uvcRefreshResolutionBtn.clicked.connect(self._refreshUvcResolutions)
-        self.uvcFpsCard.valueChanged.connect(self._onUvcFpsChanged)
+        self.uvcFpsCombo.currentTextChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
         self.uvcQueryBtn.clicked.connect(self._queryUvcHwInfo)
         self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
@@ -319,7 +323,7 @@ class CapturePage(BasePage):
                 self.uvcResolutionCombo.clear()
                 self.uvcResolutionCombo.addItem(resolution_text)
                 self.uvcResolutionCombo.blockSignals(False)
-            self.uvcFpsCard.setValue(int(getattr(self._config, 'uvc_fps', 60)))
+            self.uvcFpsCombo.setCurrentText(str(int(getattr(self._config, 'uvc_fps', 60))))
             self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
             self.previewCropCard.setChecked(bool(getattr(self._config, 'preview_crop_to_detection', False)))
             self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
@@ -392,6 +396,30 @@ class CapturePage(BasePage):
             if idx >= 0:
                 self.uvcResolutionCombo.setCurrentIndex(idx)
         self.uvcResolutionCombo.blockSignals(False)
+
+    def _refreshUvcFps(self):
+        if not self._config:
+            return
+        try:
+            from core.screen_capture import list_supported_uvc_fps
+            w = int(getattr(self._config, 'uvc_width', 1920))
+            h = int(getattr(self._config, 'uvc_height', 1080))
+            fps_list = list_supported_uvc_fps(
+                int(getattr(self._config, 'uvc_device_index', 0)),
+                w, h,
+                str(getattr(self._config, 'uvc_capture_method', 'msmf')),
+            )
+        except Exception:
+            fps_list = [24, 30, 60, 90, 120, 144, 240]
+        current_fps = self.uvcFpsCombo.currentText()
+        self.uvcFpsCombo.blockSignals(True)
+        self.uvcFpsCombo.clear()
+        for fps in fps_list:
+            self.uvcFpsCombo.addItem(str(fps))
+        idx = self.uvcFpsCombo.findText(current_fps)
+        if idx >= 0:
+            self.uvcFpsCombo.setCurrentIndex(idx)
+        self.uvcFpsCombo.blockSignals(False)
 
     def _refreshNdiSources(self):
         if not self._config:
@@ -469,6 +497,8 @@ class CapturePage(BasePage):
     def _onScreenshotMethodChanged(self, text):
         if self._config:
             self._config.screenshot_method = text
+        if str(text).strip().lower() == 'uvc' and not self._isLoadingConfig:
+            self._refreshUvcResolutions()
         if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "ndi_installer_ran_once", False))
             if not has_ran:
@@ -487,6 +517,7 @@ class CapturePage(BasePage):
         if self._config:
             self._config.uvc_device_index = int(value)
         self._refreshUvcResolutions()
+        self._refreshUvcFps()
         QTimer.singleShot(400, self._queryUvcHwInfo)
 
     def _onUvcResolutionChanged(self, value):
@@ -501,11 +532,15 @@ class CapturePage(BasePage):
                 self._config.uvc_resolution = f"{self._config.uvc_width}x{self._config.uvc_height}"
             except ValueError:
                 return
+        self._refreshUvcFps()
         QTimer.singleShot(400, self._queryUvcHwInfo)
 
     def _onUvcFpsChanged(self, value):
         if self._config:
-            self._config.uvc_fps = int(value)
+            try:
+                self._config.uvc_fps = int(value)
+            except (ValueError, TypeError):
+                pass
 
     def _onUvcCaptureMethodChanged(self, text):
         if self._config:
@@ -595,7 +630,7 @@ class CapturePage(BasePage):
         self.uvcResolutionCard.titleLabel.setText("UVC Resolution")
         self.uvcRefreshResolutionCard.titleLabel.setText("Refresh UVC Resolution List")
         self.uvcRefreshResolutionBtn.setText(t("refresh"))
-        self.uvcFpsCard.titleLabel.setText("UVC FPS")
+        self.uvcFpsCard.titleLabel.setText("UVC FPS")  # type: ignore[attr-defined]
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
         self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
         self.uvcQueryBtn.setText("Query Device")
