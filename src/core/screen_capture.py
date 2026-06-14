@@ -971,7 +971,6 @@ class _UVCPreviewThread(threading.Thread):
         preview_width: int = 1920,
         preview_height: int = 1080,
         config=None,
-        seq_ref: list | None = None,
     ) -> None:
         super().__init__(daemon=True, name='UVCPreview')
         self._window_name    = window_name
@@ -985,11 +984,6 @@ class _UVCPreviewThread(threading.Thread):
         self._preview_width  = preview_width
         self._preview_height = preview_height
         self._config         = config
-        # Monotonic counter written by the frame-producing thread each time a new
-        # frame arrives.  Using id() is unreliable at high FPS (120+) because Python
-        # immediately reuses freed memory, so id(new_frame) == id(old_frame) causes
-        # the preview to treat every new frame as stale and freeze.
-        self._seq_ref        = seq_ref        # list[int] | None
 
     def run(self) -> None:
         # All OpenCV GUI operations for this window must happen on this thread.
@@ -999,82 +993,33 @@ class _UVCPreviewThread(threading.Thread):
         except Exception:
             pass
 
-        _last_seq: int = -1
-        _shown = 0
-        _dropped = 0
-        _title_ts = time.perf_counter()
-
         while not self._stop.is_set():
             t0 = time.perf_counter()
             with self._lock:
                 frame = self._frame_ref[0]
-                # Read seq counter under the same lock so writer's increment and
-                # frame pointer swap are always observed atomically.
-                cur_seq = self._seq_ref[0] if self._seq_ref is not None else id(frame)
-
-            if frame is None:
-                _dropped += 1
-            else:
-                if cur_seq == _last_seq:
-                    # Source didn't deliver a new frame this tick
-                    _dropped += 1
-                else:
-                    _last_seq = cur_seq
-                    _shown += 1
-                    try:
-                        region  = self._region_ref[0]
-                        preview = self._draw_overlay(frame.copy(), region)
-
-                        # Crop to detection region when requested so the user sees
-                        # exactly what the model infers on.
-                        if region is not None and getattr(self._config, 'preview_crop_to_detection', False):
-                            _l = max(0, int(region.get('left', 0)))
-                            _t = max(0, int(region.get('top', 0)))
-                            _w = max(1, int(region.get('width', preview.shape[1])))
-                            _h = max(1, int(region.get('height', preview.shape[0])))
-                            _r = min(preview.shape[1], _l + _w)
-                            _b = min(preview.shape[0], _t + _h)
-                            if _r > _l and _b > _t:
-                                preview = preview[_t:_b, _l:_r]
-
-                        rendered = _render_preview_frame(
-                            self._window_name, self._scale_mode, preview)
-                        cv2.imshow(self._window_name, rendered)
-
-                        # Track time spent in waitKey — Win32's modal drag loop
-                        # blocks this call for the entire drag duration.
-                        t_wait = time.perf_counter()
-                        cv2.waitKey(1)
-                        drag_elapsed = time.perf_counter() - t_wait
-                        if drag_elapsed > 0.05:
-                            # Thread was frozen (window drag/resize); count missed frames
-                            _dropped += max(0, int(drag_elapsed / self._interval) - 1)
-
-                        # Detect user closing the window via the X button
-                        try:
-                            if cv2.getWindowProperty(self._window_name, cv2.WND_PROP_VISIBLE) < 1:
-                                self._stop.set()
-                                break
-                        except Exception:
-                            self._stop.set()
-                            break
-                    except Exception:
-                        pass
-
-            # Update title with live throughput stats once per second
-            now = time.perf_counter()
-            if now - _title_ts >= 1.0:
+            if frame is not None:
                 try:
-                    cv2.setWindowTitle(
-                        self._window_name,
-                        f"{self._window_name}  |  {_shown} fps  |  Dropped: {_dropped}",
-                    )
+                    region  = self._region_ref[0]
+                    preview = self._draw_overlay(frame.copy(), region)
+
+                    # Crop to detection region when requested so the user sees
+                    # exactly what the model infers on.
+                    if region is not None and getattr(self._config, 'preview_crop_to_detection', False):
+                        _l = max(0, int(region.get('left', 0)))
+                        _t = max(0, int(region.get('top', 0)))
+                        _w = max(1, int(region.get('width', preview.shape[1])))
+                        _h = max(1, int(region.get('height', preview.shape[0])))
+                        _r = min(preview.shape[1], _l + _w)
+                        _b = min(preview.shape[0], _t + _h)
+                        if _r > _l and _b > _t:
+                            preview = preview[_t:_b, _l:_r]
+
+                    rendered = _render_preview_frame(
+                        self._window_name, self._scale_mode, preview)
+                    cv2.imshow(self._window_name, rendered)
+                    cv2.waitKey(1)
                 except Exception:
                     pass
-                _shown = 0
-                _dropped = 0
-                _title_ts = now
-
             remaining = self._interval - (time.perf_counter() - t0)
             if remaining > 0.001:
                 time.sleep(remaining)
@@ -1161,10 +1106,8 @@ class UVCCapture:
         # grab() can return the newest frame without blocking the inference loop.
         self._latest_frame_lock = threading.Lock()
         self._latest_frame_ref: list = [None]   # list[np.ndarray | None]
-        self._frame_seq: list = [0]             # monotonic counter; incremented by reader each new frame
         self._region_ref: list = [None]         # list[dict | None]
         self._reader_stop = threading.Event()
-        self._preview_stop = threading.Event()  # independent — closing the window doesn't kill the reader
         self._reader_thread = threading.Thread(
             target=self._reader_worker, name='UVCReader', daemon=True
         )
@@ -1181,14 +1124,13 @@ class UVCCapture:
                 scale_mode=self.preview_scale_mode,
                 frame_lock=self._latest_frame_lock,
                 frame_ref=self._latest_frame_ref,
-                stop_event=self._preview_stop,
+                stop_event=self._reader_stop,
                 draw_overlay_fn=self._draw_overlay,
                 region_ref=self._region_ref,
                 target_fps=self.preview_fps,
                 preview_width=self.preview_width,
                 preview_height=self.preview_height,
                 config=self.config,
-                seq_ref=self._frame_seq,
             )
             self._preview_thread.start()
 
@@ -1198,7 +1140,6 @@ class UVCCapture:
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
-                    self._frame_seq[0] += 1
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
@@ -1370,7 +1311,6 @@ class UVCCapture:
 
     def close(self) -> None:
         self._reader_stop.set()
-        self._preview_stop.set()
         if self._preview_thread is not None and self._preview_thread.is_alive():
             self._preview_thread.join(timeout=1.0)
         if self._reader_thread.is_alive():
