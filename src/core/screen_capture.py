@@ -649,7 +649,6 @@ class NDICapture:
             except Exception:
                 return None
             frame_obj = self._video_frame_sync
-            # Validate frame has actual data using proper API when available
             try:
                 _res = frame_obj.get_resolution()
                 if min(_res) <= 0 or frame_obj.get_data_size() == 0:
@@ -670,14 +669,12 @@ class NDICapture:
         if raw is None:
             return None
 
-        # Metadata update must use full dims before any crop
         if frame_w > 0 and frame_h > 0:
             self.preview_width = frame_w
             self.preview_height = frame_h
             self.config.ndi_width = frame_w
             self.config.ndi_height = frame_h
 
-        # Cache FPS from frame metadata — read once via proper API, skip every subsequent frame
         if not self._fps_cached:
             _frame_fps: float = 0.0
             try:
@@ -707,7 +704,6 @@ class NDICapture:
             return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
 
         if self.show_window:
-            # Preview needs the full frame — convert once, then slice for inference
             full_bgra = _to_bgra(raw)
             with self._ndi_frame_lock:
                 self._ndi_frame_ref[0] = full_bgra
@@ -723,7 +719,6 @@ class NDICapture:
             else:
                 frame = full_bgra
         else:
-            # No preview — crop raw first, convert only the small region
             if region is not None:
                 left   = max(0, int(region.get('left',   0)))
                 top    = max(0, int(region.get('top',     0)))
@@ -733,8 +728,6 @@ class NDICapture:
                     return None
 
                 if recv_fourcc == 'uyvy':
-                    # UYVY 4:2:2: raw shape is (H, W, 2); horizontal crop must
-                    # align to even-pixel boundary so each macropixel stays intact.
                     left  = left  & ~1
                     right = (right + 1) & ~1
                     crop_raw = raw[top:bottom, left:right, :]
@@ -745,10 +738,8 @@ class NDICapture:
                     cv2.cvtColor(crop_raw, cv2.COLOR_YUV2BGRA_UYVY, self._bgra_buf)
                     frame = self._bgra_buf
                 elif recv_fourcc == 'bgra':
-                    # Already BGRA — slice only, no conversion
                     frame = raw[top:bottom, left:right]
                 else:
-                    # RGBA — convert only the crop region; pre-alloc dst to avoid malloc
                     crop_raw = raw[top:bottom, left:right]
                     expected_shape = (bottom - top, right - left, 4)
                     if self._bgra_shape != expected_shape:
