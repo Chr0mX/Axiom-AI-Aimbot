@@ -481,24 +481,16 @@ class NDICapture:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
         print('[Capture][NDI] Receiver connected and video stream is ready.')
 
-        # Shared refs for the preview thread — reader writes, preview/grab() reads
+        # Shared refs for the preview thread — grab() writes, thread reads
         self._ndi_frame_lock: threading.Lock = threading.Lock()
         self._ndi_frame_ref: list = [None]    # list[np.ndarray | None]
-        self._ndi_frame_seq: list = [0]       # monotonic counter; incremented by reader each new frame
         self._ndi_region_ref: list = [None]
         self._ndi_stop: threading.Event = threading.Event()
         # FPS caching — read once from frame metadata, then skip per-frame probe
         self._fps_cached: bool = False
-        self._last_reconnect_attempt: float = 0.0
-
-        # Dedicated reader thread — decouples NDI frame delivery from inference rate.
-        # Mirrors the UVC _reader_worker pattern: runs at source FPS (120 fps),
-        # so preview and grab() both see the latest frame regardless of inference speed.
-        self._ndi_reader_stop: threading.Event = threading.Event()
-        self._ndi_reader_thread = threading.Thread(
-            target=self._ndi_reader_worker, name='NDIReader', daemon=True,
-        )
-        self._ndi_reader_thread.start()
+        # Pre-allocated BGRA output buffer for the crop-path (avoids per-frame malloc)
+        self._bgra_buf: np.ndarray | None = None
+        self._bgra_shape: tuple = ()
 
         self._ndi_preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
@@ -514,7 +506,6 @@ class NDICapture:
                 preview_width=self.preview_width or 1920,
                 preview_height=self.preview_height or 1080,
                 config=self.config,
-                seq_ref=self._ndi_frame_seq,
             )
             self._ndi_preview_thread.start()
             print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
@@ -624,146 +615,146 @@ class NDICapture:
             return None
         return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
 
-    def _convert_to_bgra(self, arr: np.ndarray) -> np.ndarray:
-        """Convert a raw NDI frame array to BGRA regardless of receive colour format."""
-        fourcc = getattr(self, '_recv_fourcc', 'rgba')
-        if fourcc == 'uyvy':
-            return cv2.cvtColor(arr, cv2.COLOR_YUV2BGRA_UYVY)
-        if fourcc == 'bgra':
-            return arr
-        return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
-
-    def _ndi_reader_worker(self) -> None:
-        """Dedicated thread that pulls frames from the NDI receiver at source FPS.
-
-        Mirrors UVCCapture._reader_worker: writes _ndi_frame_ref[0] under lock so
-        that both grab() (inference) and _UVCPreviewThread (display) always see the
-        latest full-resolution BGRA frame, fully decoupled from each other's rate.
-        """
-        while not self._ndi_reader_stop.is_set():
-            # ── Connection guard ──────────────────────────────────────────────
-            if not self._receiver.is_connected():
-                now = time.perf_counter()
-                if now - self._last_reconnect_attempt > 1.0:
-                    self._last_reconnect_attempt = now
-                    source = self._resolve_source()
-                    if source is not None:
-                        try:
-                            self._receiver.set_source(source)
-                            self._source_assigned = True
-                            print(f"[Capture][NDI] Reconnecting receiver "
-                                  f"using configured source '{self.source_name}'.")
-                            _wait_for_receiver_connection(
-                                self._receiver,
-                                getattr(self._receiver, 'frame_sync', None),
-                                getattr(self, '_video_frame_sync', None),
-                                getattr(self._receiver, 'receive', None),
-                                getattr(self._ReceiveFrameType, 'recv_video', None),
-                                attempts=5,
-                                interval_seconds=0.05,
-                            )
-                        except Exception:
-                            pass
-                    elif not self.source_name and not self._source_assigned:
-                        self._assign_first_available_source()
-                time.sleep(0.05)
-                continue
-
-            # ── Receive one video frame ───────────────────────────────────────
-            frame_obj: Any | None = None
-            if (getattr(self, '_video_frame_sync', None) is not None and
-                    getattr(self._receiver, 'frame_sync', None) is not None):
-                try:
-                    self._receiver.frame_sync.capture_video()
-                except Exception:
-                    continue
-                frame_obj = self._video_frame_sync
-                try:
-                    _res = frame_obj.get_resolution()
-                    if min(_res) <= 0 or frame_obj.get_data_size() == 0:
-                        continue
-                except Exception:
-                    if int(getattr(frame_obj, 'xres', 0) or 0) <= 0:
-                        continue
-            else:
-                try:
-                    recv_result = self._receiver.receive(
-                        self._ReceiveFrameType.recv_video, 10)
-                except Exception:
-                    continue
-                if not (recv_result & self._ReceiveFrameType.recv_video):
-                    continue
-                frame_obj = self._receiver.video_frame or self._video_frame
-
-            # ── Extract raw array ─────────────────────────────────────────────
-            raw, frame_w, frame_h = self._raw_array_from_cyndilib_frame(frame_obj)
-            if raw is None:
-                continue
-
-            # ── Update dimension metadata ─────────────────────────────────────
-            if frame_w > 0 and frame_h > 0:
-                self.preview_width = frame_w
-                self.preview_height = frame_h
-                self.config.ndi_width = frame_w
-                self.config.ndi_height = frame_h
-
-            # ── Cache FPS once from frame metadata ────────────────────────────
-            if not self._fps_cached:
-                _frame_fps: float = 0.0
-                try:
-                    _frame_fps = float(frame_obj.get_frame_rate())
-                except Exception:
-                    for _attr in ('frame_rate', 'framerate', 'fps', 'video_fps'):
-                        _v = getattr(frame_obj, _attr, None)
-                        if isinstance(_v, (int, float)) and float(_v) > 0:
-                            _frame_fps = float(_v)
-                            break
-                    if _frame_fps <= 0:
-                        _num = getattr(frame_obj, 'frame_rate_N', None)
-                        _den = getattr(frame_obj, 'frame_rate_D', None)
-                        if (isinstance(_num, (int, float)) and
-                                isinstance(_den, (int, float)) and float(_den) > 0):
-                            _frame_fps = float(_num) / float(_den)
-                if _frame_fps > 0:
-                    self.config.source_nominal_fps = _frame_fps
-                    self._fps_cached = True
-
-            # ── Convert full frame to BGRA and publish ────────────────────────
-            # Pointer swap under lock — preview and grab() each hold a reference
-            # to the previous array via Python ref-counting, so no data races.
-            # Increment seq counter so the preview thread can detect new frames
-            # without relying on id() (which is reused by CPython at high FPS).
-            full_bgra = self._convert_to_bgra(raw)
-            with self._ndi_frame_lock:
-                self._ndi_frame_ref[0] = full_bgra
-                self._ndi_frame_seq[0] += 1
-
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
-        """Return the latest BGRA frame from the NDI reader thread, cropped to region.
+        if not self._receiver.is_connected():
+            now = time.perf_counter()
+            if now - float(getattr(self, '_last_reconnect_attempt', 0.0) or 0.0) > 1.0:
+                self._last_reconnect_attempt = now
+                source = self._resolve_source()
+                if source is not None:
+                    try:
+                        self._receiver.set_source(source)
+                        self._source_assigned = True
+                        print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
+                        _wait_for_receiver_connection(
+                            self._receiver,
+                            getattr(self._receiver, 'frame_sync', None),
+                            getattr(self, '_video_frame_sync', None),
+                            getattr(self._receiver, 'receive', None),
+                            getattr(self._ReceiveFrameType, 'recv_video', None),
+                            attempts=5,
+                            interval_seconds=0.05,
+                        )
+                    except Exception:
+                        pass
+                elif not self.source_name and not self._source_assigned:
+                    self._assign_first_available_source()
+            if not self._receiver.is_connected():
+                return None
 
-        Non-blocking — mirrors UVCCapture.grab().  All receiver I/O and colour
-        conversion happen in _ndi_reader_worker so this call never stalls the
-        inference pipeline waiting on the NDI source.
-        """
-        with self._ndi_frame_lock:
-            full_bgra = self._ndi_frame_ref[0]
+        frame_obj: Any | None = None
+        if getattr(self, '_video_frame_sync', None) is not None and getattr(self._receiver, 'frame_sync', None) is not None:
+            try:
+                self._receiver.frame_sync.capture_video()
+            except Exception:
+                return None
+            frame_obj = self._video_frame_sync
+            try:
+                _res = frame_obj.get_resolution()
+                if min(_res) <= 0 or frame_obj.get_data_size() == 0:
+                    return None
+            except Exception:
+                if int(getattr(frame_obj, 'xres', 0) or 0) <= 0 or int(getattr(frame_obj, 'yres', 0) or 0) <= 0:
+                    return None
+        else:
+            try:
+                recv_result = self._receiver.receive(self._ReceiveFrameType.recv_video, 10)
+            except Exception:
+                return None
+            if not (recv_result & self._ReceiveFrameType.recv_video):
+                return None
+            frame_obj = self._receiver.video_frame or self._video_frame
 
-        if full_bgra is None:
+        raw, frame_w, frame_h = self._raw_array_from_cyndilib_frame(frame_obj)
+        if raw is None:
             return None
 
-        self._ndi_region_ref[0] = region
+        if frame_w > 0 and frame_h > 0:
+            self.preview_width = frame_w
+            self.preview_height = frame_h
+            self.config.ndi_width = frame_w
+            self.config.ndi_height = frame_h
 
-        if region is not None:
-            frame_h, frame_w = full_bgra.shape[:2]
-            left   = max(0, int(region.get('left',   0)))
-            top    = max(0, int(region.get('top',     0)))
-            right  = min(frame_w, left + max(0, int(region.get('width',  frame_w))))
-            bottom = min(frame_h, top  + max(0, int(region.get('height', frame_h))))
-            if right <= left or bottom <= top:
-                return None
-            return full_bgra[top:bottom, left:right]
+        if not self._fps_cached:
+            _frame_fps: float = 0.0
+            try:
+                _frame_fps = float(frame_obj.get_frame_rate())
+            except Exception:
+                for _attr in ('frame_rate', 'framerate', 'fps', 'video_fps'):
+                    _v = getattr(frame_obj, _attr, None)
+                    if isinstance(_v, (int, float)) and float(_v) > 0:
+                        _frame_fps = float(_v)
+                        break
+                if _frame_fps <= 0:
+                    _num = getattr(frame_obj, 'frame_rate_N', None)
+                    _den = getattr(frame_obj, 'frame_rate_D', None)
+                    if isinstance(_num, (int, float)) and isinstance(_den, (int, float)) and float(_den) > 0:
+                        _frame_fps = float(_num) / float(_den)
+            if _frame_fps > 0:
+                self.config.source_nominal_fps = _frame_fps
+                self._fps_cached = True
 
-        return full_bgra
+        recv_fourcc: str = getattr(self, '_recv_fourcc', 'rgba')
+
+        def _to_bgra(arr: np.ndarray) -> np.ndarray:
+            if recv_fourcc == 'uyvy':
+                return cv2.cvtColor(arr, cv2.COLOR_YUV2BGRA_UYVY)
+            if recv_fourcc == 'bgra':
+                return arr
+            return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
+
+        if self.show_window:
+            full_bgra = _to_bgra(raw)
+            with self._ndi_frame_lock:
+                self._ndi_frame_ref[0] = full_bgra
+            self._ndi_region_ref[0] = region
+            if region is not None:
+                left   = max(0, int(region.get('left',   0)))
+                top    = max(0, int(region.get('top',     0)))
+                right  = min(frame_w, left + max(0, int(region.get('width',  frame_w))))
+                bottom = min(frame_h, top  + max(0, int(region.get('height', frame_h))))
+                if right <= left or bottom <= top:
+                    return None
+                frame = full_bgra[top:bottom, left:right]
+            else:
+                frame = full_bgra
+        else:
+            if region is not None:
+                left   = max(0, int(region.get('left',   0)))
+                top    = max(0, int(region.get('top',     0)))
+                right  = min(frame_w, left + max(0, int(region.get('width',  frame_w))))
+                bottom = min(frame_h, top  + max(0, int(region.get('height', frame_h))))
+                if right <= left or bottom <= top:
+                    return None
+
+                if recv_fourcc == 'uyvy':
+                    left  = left  & ~1
+                    right = (right + 1) & ~1
+                    crop_raw = raw[top:bottom, left:right, :]
+                    expected_shape = (bottom - top, right - left, 4)
+                    if self._bgra_shape != expected_shape:
+                        self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
+                        self._bgra_shape = expected_shape
+                    cv2.cvtColor(crop_raw, cv2.COLOR_YUV2BGRA_UYVY, self._bgra_buf)
+                    frame = self._bgra_buf
+                elif recv_fourcc == 'bgra':
+                    frame = raw[top:bottom, left:right]
+                else:
+                    crop_raw = raw[top:bottom, left:right]
+                    expected_shape = (bottom - top, right - left, 4)
+                    if self._bgra_shape != expected_shape:
+                        self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
+                        self._bgra_shape = expected_shape
+                    cv2.cvtColor(crop_raw, cv2.COLOR_RGBA2BGRA, self._bgra_buf)
+                    frame = self._bgra_buf
+            else:
+                frame = _to_bgra(raw)
+
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            return frame
+        if frame.ndim == 3 and frame.shape[2] == 3:
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+        return None
 
     def _draw_overlay(self, frame_bgra: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
         """Draw overlay visuals in NDI preview window using active capture coordinates."""
@@ -896,13 +887,6 @@ class NDICapture:
         return frame_bgra
 
     def close(self) -> None:
-        # Stop reader thread first — it holds a reference to the receiver.
-        if getattr(self, '_ndi_reader_stop', None) is not None:
-            self._ndi_reader_stop.set()
-        rt = getattr(self, '_ndi_reader_thread', None)
-        if rt is not None and rt.is_alive():
-            rt.join(timeout=1.0)
-
         for method_name in ('disconnect', 'close', 'release', 'stop', 'shutdown'):
             method = getattr(self._receiver, method_name, None)
             if callable(method):
