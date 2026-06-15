@@ -120,14 +120,17 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
     }
 
 
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str]:
+# Fixed title for the UVC/NDI preview window (not user-configurable).
+_UVC_WINDOW_NAME = "Axiom UVC Preview"
+
+
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str]:
     return (
         int(getattr(config, 'uvc_device_index', 0)),
         int(getattr(config, 'uvc_width', 0)),
         int(getattr(config, 'uvc_height', 0)),
         int(getattr(config, 'uvc_fps', 0)),
         bool(getattr(config, 'uvc_show_window', False)),
-        str(getattr(config, 'uvc_window_name', 'Axiom UVC Preview')),
         str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
     )
@@ -1138,7 +1141,7 @@ class UVCCapture:
         height = int(getattr(config, 'uvc_height', 1080))
         fps = int(getattr(config, 'uvc_fps', 60))
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
-        self.window_name = str(getattr(config, 'uvc_window_name', 'Axiom UVC Preview'))
+        self.window_name = _UVC_WINDOW_NAME
         self.config_signature = _uvc_signature(config)
 
         capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()

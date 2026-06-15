@@ -41,6 +41,10 @@ if TYPE_CHECKING:
     from .config import Config
 
 
+# EMA smoothing factor for latency stats (internal; not user-configurable).
+_LATENCY_STATS_ALPHA = 0.2
+
+
 def _probe_model_input_size(session, abs_model_path: str) -> int:
     """Return spatial H (=W) from a loaded ORT session, 0 if not determinable.
 
@@ -633,7 +637,7 @@ def ai_logic_loop(
                 )
 
                 if getattr(config, 'enable_latency_stats', False):
-                    alpha = float(getattr(config, 'latency_stats_alpha', 0.2))
+                    alpha = _LATENCY_STATS_ALPHA
                     total_ms = (time.perf_counter() - loop_start) * 1000.0
                     cap_ms = (t0 - loop_start) * 1000.0
                     pre_ms = (t1 - t0) * 1000.0

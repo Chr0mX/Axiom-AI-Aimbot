@@ -76,8 +76,7 @@ class ConfigManager:
             'idle_detect_interval': getattr(config_instance, 'idle_detect_interval', 0.05),
             'model_path': config_instance.model_path,
             'model_input_size': config_instance.model_input_size,
-            'current_provider': config_instance.current_provider,
-            
+
             # PID控制器參數
             'pid_kp_x': config_instance.pid_kp_x,
             'pid_ki_x': config_instance.pid_ki_x,
@@ -145,7 +144,6 @@ class ConfigManager:
             'uvc_device_index': getattr(config_instance, 'uvc_device_index', 0),
             'uvc_width': getattr(config_instance, 'uvc_width', getattr(config_instance, 'width', 1920)),
             'uvc_height': getattr(config_instance, 'uvc_height', getattr(config_instance, 'height', 1080)),
-            'uvc_resolution': getattr(config_instance, 'uvc_resolution', ''),
             'uvc_fps': getattr(config_instance, 'uvc_fps', 60),
             'uvc_capture_method': getattr(config_instance, 'uvc_capture_method', 'dshow'),
             'uvc_show_window': getattr(config_instance, 'uvc_show_window', True),
@@ -158,7 +156,6 @@ class ConfigManager:
             # 延遲統計
             'enable_latency_stats': getattr(config_instance, 'enable_latency_stats', False),
             'latency_stats_interval': getattr(config_instance, 'latency_stats_interval', 1.0),
-            'latency_stats_alpha': getattr(config_instance, 'latency_stats_alpha', 0.2),
         }
     
     def load_config(self, config_instance: Config, config_name: str) -> bool:

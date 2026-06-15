@@ -149,28 +149,31 @@ class TestConfigSerialization:
     def test_to_dict_has_all_expected_keys(self):
         c = _make_config()
         d = c.to_dict()
-        expected_keys = [
-            'fov_size', 'detect_range_size', 'model_path', 'model_input_size',
-            'current_provider', 'dml_cpu_fallback', 'pid_kp_x', 'pid_ki_x',
-            'pid_kd_x', 'pid_kp_y', 'pid_ki_y', 'pid_kd_y', 'aim_part',
-            'AimKeys', 'auto_fire_key', 'always_auto_fire', 'auto_fire_delay',
-            'auto_fire_interval', 'auto_fire_target_part', 'min_confidence',
-            'show_confidence', 'screenshot_method', 'mouse_move_method', 'mouse_click_method',
-            'screenshot_interval',
-            'arduino_com_port', 'xbox_sensitivity', 'xbox_deadzone',
-            'xbox_auto_connect', 'dark_mode', 'config_version',
-            'enable_acrylic',
-        ]
-        for key in expected_keys:
-            assert key in d, f"Missing key: {key}"
+        # v2 grouped schema: top-level sections present, config_version stays top-level.
+        for section in ('model', 'capture', 'aim', 'autofire', 'tracking',
+                        'performance', 'display', 'hardware', 'ui', 'humanization'):
+            assert section in d, f"Missing section: {section}"
+        assert d['config_version'] == 2
+        # Spot-check nested paths.
+        assert 'fov_size' in d['aim']
+        assert d['aim']['pid']['x']['kp'] == c.pid_kp_x
+        assert d['model']['backend'] == c.inference_backend
+        assert d['hardware']['devices']['makcu']['port'] == c.makcu_com_port
+        assert d['display']['crosshair']['color'] == [
+            c.crosshair_color_r, c.crosshair_color_g, c.crosshair_color_b]
+        # Dropped/derived/state keys must NOT be persisted.
+        assert 'model_input_size' not in d['model']
+        assert 'current_provider' not in d['model']
+        for state_key in ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_once'):
+            assert state_key not in json.dumps(d), f"state key {state_key} leaked into config"
 
     def test_to_dict_values_match_instance(self):
         c = _make_config()
         c.fov_size = 333
         c.pid_kp_x = 0.5
         d = c.to_dict()
-        assert d['fov_size'] == 333
-        assert d['pid_kp_x'] == 0.5
+        assert d['aim']['fov_size'] == 333
+        assert d['aim']['pid']['x']['kp'] == 0.5
 
     def test_from_dict_updates_attributes(self):
         c = _make_config()
@@ -229,9 +232,12 @@ class TestConfigFileIO:
             assert os.path.exists(filepath)
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            assert 'fov_size' in data
+            assert 'fov_size' in data['aim']
         finally:
             os.unlink(filepath)
+            _sp = os.path.join(os.path.dirname(filepath), 'state.json')
+            if os.path.exists(_sp):
+                os.unlink(_sp)
 
     def test_load_config_reads_file(self):
         from core.config import save_config, load_config
@@ -282,10 +288,72 @@ class TestConfigFileIO:
             # Orphaned keys must not survive a save — that's the whole point of the cleanup.
             assert 'language' not in data
             assert 'ghost_key' not in data
-            # config_version must be present
-            assert data.get('config_version') == 1
+            # config_version must be present (v2 grouped schema)
+            assert data.get('config_version') == 2
         finally:
             os.unlink(filepath)
+            _sp = os.path.join(os.path.dirname(filepath), 'state.json')
+            if os.path.exists(_sp):
+                os.unlink(_sp)
+
+    def test_migration_v1_flat_to_v2_nested(self):
+        """A legacy flat config.json loads correctly and re-saves as nested v2."""
+        from core.config import load_config, save_config
+        c = _make_config()
+        flat = {
+            'config_version': 1,
+            'fov_size': 277,
+            'pid_kp_x': 0.42,
+            'makcu_com_port': 'COM9',
+            'crosshair_color_r': 10, 'crosshair_color_g': 20, 'crosshair_color_b': 30,
+            'inference_backend': 'tensorrt',
+            'disclaimer_agreed': True,
+        }
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+            json.dump(flat, f)
+            filepath = f.name
+        statepath = os.path.join(os.path.dirname(filepath), 'state.json')
+        try:
+            load_config(c, filepath)
+            assert c.fov_size == 277
+            assert c.pid_kp_x == 0.42
+            assert c.makcu_com_port == 'COM9'
+            assert (c.crosshair_color_r, c.crosshair_color_g, c.crosshair_color_b) == (10, 20, 30)
+            assert c.inference_backend == 'tensorrt'
+            # state field read via legacy back-compat
+            assert c.disclaimer_agreed is True
+            # re-save → on disk is now nested v2 without state keys
+            save_config(c, filepath)
+            with open(filepath, 'r', encoding='utf-8') as f:
+                nested = json.load(f)
+            assert nested['config_version'] == 2
+            assert nested['aim']['fov_size'] == 277
+            assert nested['model']['backend'] == 'tensorrt'
+            assert 'disclaimer_agreed' not in json.dumps(nested)
+        finally:
+            os.unlink(filepath)
+            if os.path.exists(statepath):
+                os.unlink(statepath)
+
+    def test_state_json_roundtrip(self):
+        """save_state/load_state persist the state flags independently of config."""
+        from core.config import save_state, load_state
+        c = _make_config()
+        c.disclaimer_agreed = True
+        c.first_run_complete = True
+        c.ndi_installer_ran_once = True
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+            statepath = f.name
+        try:
+            save_state(c, statepath)
+            c2 = _make_config()
+            assert c2.disclaimer_agreed is False  # default
+            load_state(c2, statepath)
+            assert c2.disclaimer_agreed is True
+            assert c2.first_run_complete is True
+            assert c2.ndi_installer_ran_once is True
+        finally:
+            os.unlink(statepath)
 
 
 # ============================================================

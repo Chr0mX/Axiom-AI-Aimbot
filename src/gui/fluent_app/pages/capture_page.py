@@ -328,8 +328,9 @@ class CapturePage(BasePage):
 
             self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
-            resolution_text = str(getattr(self._config, 'uvc_resolution',
-                f"{getattr(self._config, 'uvc_width', self._config.width)}x{getattr(self._config, 'uvc_height', self._config.height)}"))
+            resolution_text = (
+                f"{getattr(self._config, 'uvc_width', self._config.width)}"
+                f"x{getattr(self._config, 'uvc_height', self._config.height)}")
             if screenshot_method == 'uvc':
                 self._refreshUvcResolutions()
                 idx = self.uvcResolutionCombo.findText(resolution_text)
@@ -567,7 +568,6 @@ class CapturePage(BasePage):
             try:
                 self._config.uvc_width = int(width_str)
                 self._config.uvc_height = int(height_str)
-                self._config.uvc_resolution = f"{self._config.uvc_width}x{self._config.uvc_height}"
             except ValueError:
                 return
         self._refreshUvcFps()
