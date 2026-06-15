@@ -51,6 +51,7 @@ class Config:
         self.uvc_show_window: bool = True
         self.uvc_window_name: str = "Axiom UVC Preview"
         self.uvc_preview_scale_mode: str = "scale_to_fit"
+        self.uvc_always_on_top: bool = True
         self.preview_crop_to_detection: bool = False
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
@@ -349,6 +350,7 @@ class Config:
             'uvc_show_window': self.uvc_show_window,
             'uvc_window_name': self.uvc_window_name,
             'uvc_preview_scale_mode': self.uvc_preview_scale_mode,
+            'uvc_always_on_top': self.uvc_always_on_top,
             'preview_crop_to_detection': self.preview_crop_to_detection,
             'ndi_source_name': self.ndi_source_name,
             'ndi_bandwidth': self.ndi_bandwidth,

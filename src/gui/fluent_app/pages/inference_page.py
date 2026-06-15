@@ -104,13 +104,6 @@ class InferencePage(BasePage):
             parent=self.generalGroup
         )
 
-        self.alwaysAimCard = SwitchSettingCard(
-            FluentIcon.FINGERPRINT,
-            t("always_aim"),
-            "",
-            parent=self.generalGroup
-        )
-
         self.keepDetectingCard = SwitchSettingCard(
             FluentIcon.UPDATE,
             t("keep_detecting"),
@@ -189,7 +182,6 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.detectIntervalCard)
         self.generalGroup.addSettingCard(self.confidenceCard)
         self.generalGroup.addSettingCard(self.semanticFilterCard)
-        self.generalGroup.addSettingCard(self.alwaysAimCard)
         self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
         self.generalGroup.addSettingCard(self.idleDetectIntervalCard)
@@ -217,7 +209,6 @@ class InferencePage(BasePage):
         self.detectIntervalCard.valueChanged.connect(self._onDetectIntervalChanged)
         self.confidenceCard.valueChanged.connect(self._onConfidenceChanged)
         self.semanticFilterCard.checkedChanged.connect(self._onSemanticFilterChanged)
-        self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
         self.idleDetectIntervalCard.valueChanged.connect(self._onIdleDetectIntervalChanged)
@@ -248,7 +239,6 @@ class InferencePage(BasePage):
             self.confidenceCard.setValue(confidence_pct)
             self.semanticFilterCard.setChecked(bool(getattr(self._config, 'detect_semantic_filter_enabled', False)))
 
-            self.alwaysAimCard.setChecked(getattr(self._config, 'always_aim', False))
             self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
             self.idleDetectEnableCard.setChecked(getattr(self._config, 'idle_detect_enabled', True))
             idle_ms = int(getattr(self._config, 'idle_detect_interval', 0.05) * 1000)
@@ -344,14 +334,6 @@ class InferencePage(BasePage):
         if self._config:
             self._config.detect_semantic_filter_enabled = bool(checked)
 
-    def _onAlwaysAimChanged(self, checked):
-        if self._config:
-            self._config.always_aim = checked
-            if checked:
-                self._config.idle_detect_enabled = False
-                self.idleDetectEnableCard.setChecked(False)
-        self._notifyKeysPageVisibility()
-
     def _onKeepDetectingChanged(self, checked):
         if self._config:
             self._config.keep_detecting = checked
@@ -404,7 +386,6 @@ class InferencePage(BasePage):
         self.detectIntervalCard.titleLabel.setText(t("detect_interval"))
         self.confidenceCard.titleLabel.setText(t("min_confidence"))
         self.semanticFilterCard.titleLabel.setText(t("semantic_filter_enabled", "Semantic FP Filter"))
-        self.alwaysAimCard.titleLabel.setText(t("always_aim"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))

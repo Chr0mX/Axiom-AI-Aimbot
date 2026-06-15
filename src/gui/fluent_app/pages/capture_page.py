@@ -4,6 +4,7 @@
 import os
 import sys
 import subprocess
+import time
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QMessageBox
 from qfluentwidgets import (
@@ -22,6 +23,7 @@ class CapturePage(BasePage):
         super().__init__("tab_capture", parent)
         self._config = None
         self._isLoadingConfig = False
+        self._last_probe_time: float = 0.0
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -29,6 +31,15 @@ class CapturePage(BasePage):
     def setConfig(self, config):
         self._config = config
         self._loadFromConfig()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if (self._config
+                and str(getattr(self._config, 'screenshot_method', '')).lower() == 'uvc'
+                and (time.time() - self._last_probe_time) > 8):
+            self._refreshUvcResolutions()
+            self._refreshUvcFps()
+            self._last_probe_time = time.time()
 
     # ──────────────────────────────────────────────
     # Widget initialisation
@@ -230,6 +241,13 @@ class CapturePage(BasePage):
         self.uvcPreviewScaleCard.hBoxLayout.addWidget(self.uvcPreviewScaleCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcPreviewScaleCard.hBoxLayout.addSpacing(16)
 
+        self.uvcAlwaysOnTopCard = SwitchSettingCard(
+            FluentIcon.PIN,
+            "Always On Top",
+            "",
+            parent=self.previewGroup
+        )
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -260,6 +278,7 @@ class CapturePage(BasePage):
         self.previewGroup.addSettingCard(self.uvcPreviewCard)
         self.previewGroup.addSettingCard(self.previewCropCard)
         self.previewGroup.addSettingCard(self.uvcPreviewScaleCard)
+        self.previewGroup.addSettingCard(self.uvcAlwaysOnTopCard)
         self.addContent(self.previewGroup)
         self.previewGroup.setVisible(False)
 
@@ -282,6 +301,7 @@ class CapturePage(BasePage):
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
         self.previewCropCard.checkedChanged.connect(self._onPreviewCropChanged)
         self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
+        self.uvcAlwaysOnTopCard.checkedChanged.connect(self._onAlwaysOnTopChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
         self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
@@ -327,6 +347,7 @@ class CapturePage(BasePage):
             self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
             self.previewCropCard.setChecked(bool(getattr(self._config, 'preview_crop_to_detection', False)))
             self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
+            self.uvcAlwaysOnTopCard.setChecked(bool(getattr(self._config, 'uvc_always_on_top', True)))
 
             ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
             if screenshot_method == 'ndi':
@@ -583,6 +604,10 @@ class CapturePage(BasePage):
             self._config.uvc_preview_scale_mode = str(text)
         print(f"[Capture][Preview] Scale mode set to '{text}'.")
 
+    def _onAlwaysOnTopChanged(self, checked):
+        if self._config:
+            self._config.uvc_always_on_top = bool(checked)
+
     def _onNdiBandwidthChanged(self, text):
         if self._config:
             self._config.ndi_bandwidth = str(text).lower()
@@ -675,3 +700,4 @@ class CapturePage(BasePage):
         self.previewCropCard.titleLabel.setText(t("preview_crop_label"))
         self.previewCropCard.contentLabel.setText(t("preview_crop_desc"))
         self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
+        self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")

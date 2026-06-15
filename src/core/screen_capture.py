@@ -994,6 +994,23 @@ def list_supported_uvc_fps(
     return supported or [30, 60]
 
 
+def _set_window_topmost(window_name: str, topmost: bool) -> None:
+    """Set an OpenCV window always-on-top via Win32 SetWindowPos."""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.FindWindowW(None, window_name)
+        if hwnd:
+            HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+            SWP_NOMOVE, SWP_NOSIZE = 0x0002, 0x0001
+            ctypes.windll.user32.SetWindowPos(
+                hwnd,
+                HWND_TOPMOST if topmost else HWND_NOTOPMOST,
+                0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE,
+            )
+    except Exception:
+        pass
+
+
 class _UVCPreviewThread(threading.Thread):
     """Dedicated thread that refreshes the UVC preview window at a fixed rate.
 
@@ -1039,6 +1056,7 @@ class _UVCPreviewThread(threading.Thread):
             pass
 
         _crop_active = False
+        _topmost_active: bool | None = None
 
         while not self._stop.is_set():
             t0 = time.perf_counter()
@@ -1078,6 +1096,10 @@ class _UVCPreviewThread(threading.Thread):
                         self._window_name, self._scale_mode, preview)
                     cv2.imshow(self._window_name, rendered)
                     cv2.waitKey(1)
+                    topmost = bool(getattr(self._config, 'uvc_always_on_top', True))
+                    if topmost != _topmost_active:
+                        _topmost_active = topmost
+                        _set_window_topmost(self._window_name, topmost)
                 except Exception:
                     pass
             remaining = self._interval - (time.perf_counter() - t0)
