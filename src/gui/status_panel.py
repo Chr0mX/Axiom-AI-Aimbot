@@ -685,7 +685,25 @@ class StatusPanel(QWidget):
             self._applyAcrylicEffect()
 
         # 3. 獲取數據
-        current_aim = self.config.AimToggle and getattr(self.config, 'makcu_aim_active', False)
+        # In MAKCU hold mode read the stream directly so the indicator reflects
+        # the physical button state immediately, not system key state.
+        _mm_method = getattr(self.config, 'mouse_move_method', '')
+        _mm_btn    = getattr(self.config, 'makcu_aim_button', 'lmb')
+        _mm_mode   = getattr(self.config, 'makcu_aim_mode', 'hold')
+        if _mm_method == 'makcu' and _mm_btn != 'off' and _mm_mode != 'toggle':
+            try:
+                from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mmd
+                if is_makcu_connected():
+                    _btn_held = _mmd.rmb_held if _mm_btn == 'rmb' else _mmd.lmb_held
+                    current_aim = self.config.AimToggle and (
+                        bool(getattr(self.config, 'always_aim', False)) or _btn_held
+                    )
+                else:
+                    current_aim = False
+            except Exception:
+                current_aim = self.config.AimToggle and getattr(self.config, 'makcu_aim_active', False)
+        else:
+            current_aim = self.config.AimToggle and getattr(self.config, 'makcu_aim_active', False)
         current_model = getattr(self.config, 'model_path', '')
         current_method = getattr(self.config, 'mouse_move_method', 'ddxoft')
         current_screenshot_method = getattr(self.config, 'screenshot_method', 'mss')
