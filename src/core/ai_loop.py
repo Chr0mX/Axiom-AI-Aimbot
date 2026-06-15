@@ -465,11 +465,20 @@ def ai_logic_loop(
                 capture_width, capture_height = get_capture_dimensions(config)
                 update_crosshair_position(config, capture_width // 2, capture_height // 2)
 
-                is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
-                _makcu_btn = getattr(config, 'makcu_aim_button', 'lmb')
+                _makcu_btn  = getattr(config, 'makcu_aim_button', 'lmb')
                 _makcu_mode = getattr(config, 'makcu_aim_mode', 'hold')
-                if _makcu_btn != 'off' \
-                        and getattr(config, 'mouse_move_method', '') == 'makcu':
+                _use_makcu  = (
+                    _makcu_btn != 'off'
+                    and getattr(config, 'mouse_move_method', '') == 'makcu'
+                )
+                if _use_makcu:
+                    # MAKCU mode: aim state driven purely by the stream button so
+                    # that AimKeys (which may include other mouse buttons) cannot
+                    # bleed through and fire aim on the wrong button.
+                    is_aiming = bool(getattr(config, 'always_aim', False))
+                else:
+                    is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
+                if _use_makcu:
                     try:
                         from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
                         if is_makcu_connected():
