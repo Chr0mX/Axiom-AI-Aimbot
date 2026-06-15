@@ -532,6 +532,7 @@ class NDICapture:
         self.preview_scale_mode = ndi_preview_scale_mode or 'low_latency'
         self._finder: Any | None = None
         self._source_assigned = False
+        self._reconnect_logged = False
         self.preview_width = int(getattr(config, 'ndi_width', getattr(config, 'width', 0)) or 0)
         self.preview_height = int(getattr(config, 'ndi_height', getattr(config, 'height', 0)) or 0)
 
@@ -661,20 +662,23 @@ class NDICapture:
             self._ndi_preview_thread.start()
             print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
 
-    def _resolve_source(self) -> Any | None:
+    def _resolve_source(self, log: bool = True) -> Any | None:
         if not self.source_name:
             return None
         try:
             if self._finder is None:
                 self._finder = self._Finder()
-                print('[Capture][NDI] Finder instance created.')
+                if log:
+                    print('[Capture][NDI] Finder instance created.')
             finder = self._finder
             if not getattr(finder, "is_open", False):
                 finder.open()
-                print('[Capture][NDI] Finder opened for network source discovery.')
+                if log:
+                    print('[Capture][NDI] Finder opened for network source discovery.')
             source = _find_ndi_source_by_name(finder, self.source_name)
             if source is not None:
-                print(f"[Capture][NDI] Matched configured source '{self.source_name}'.")
+                if log:
+                    print(f"[Capture][NDI] Matched configured source '{self.source_name}'.")
                 return source
             for _ in range(6):
                 try:
@@ -683,12 +687,15 @@ class NDICapture:
                     changed = finder.wait_for_sources(timeout=0.5)
                 if changed:
                     finder.update_sources()
-                    print('[Capture][NDI] Source list changed while searching for configured source.')
+                    if log:
+                        print('[Capture][NDI] Source list changed while searching for configured source.')
                 source = _find_ndi_source_by_name(finder, self.source_name)
                 if source is not None:
-                    print(f"[Capture][NDI] Found configured source after refresh: '{self.source_name}'.")
+                    if log:
+                        print(f"[Capture][NDI] Found configured source after refresh: '{self.source_name}'.")
                     return source
-            print(f"[Capture][NDI] Could not find configured source '{self.source_name}' after retries.")
+            if log:
+                print(f"[Capture][NDI] Could not find configured source '{self.source_name}' after retries.")
             return None
         except Exception:
             return None
@@ -763,12 +770,17 @@ class NDICapture:
             now = time.perf_counter()
             if now - float(getattr(self, '_last_reconnect_attempt', 0.0) or 0.0) > 1.0:
                 self._last_reconnect_attempt = now
-                source = self._resolve_source()
+                # Only log the first attempt of a disconnect episode so a
+                # persistently-unconnected receiver doesn't spam the console.
+                log = not self._reconnect_logged
+                source = self._resolve_source(log=log)
                 if source is not None:
                     try:
                         self._receiver.set_source(source)
                         self._source_assigned = True
-                        print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
+                        if log:
+                            print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
+                            self._reconnect_logged = True
                         _wait_for_receiver_connection(
                             self._receiver,
                             getattr(self._receiver, 'frame_sync', None),
@@ -784,6 +796,10 @@ class NDICapture:
                     self._assign_first_available_source()
             if not self._receiver.is_connected():
                 return None
+        elif self._reconnect_logged:
+            # Recovered from a disconnect episode — re-arm logging for next time.
+            print(f"[Capture][NDI] Receiver connected to '{self.source_name}'.")
+            self._reconnect_logged = False
 
         frame_obj: Any | None = None
         if getattr(self, '_video_frame_sync', None) is not None and getattr(self._receiver, 'frame_sync', None) is not None:
