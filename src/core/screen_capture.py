@@ -635,6 +635,7 @@ class NDICapture:
         if not connected:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
         print('[Capture][NDI] Receiver connected and video stream is ready.')
+        self._last_frame_time: float = time.perf_counter()
 
         # Shared refs for the preview thread — grab() writes, thread reads
         self._ndi_frame_lock: threading.Lock = threading.Lock()
@@ -769,36 +770,40 @@ class NDICapture:
             return None, 0, 0
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
+        now = time.perf_counter()
         if not self._receiver.is_connected():
-            now = time.perf_counter()
-            if now - float(getattr(self, '_last_reconnect_attempt', 0.0) or 0.0) > 1.0:
-                self._last_reconnect_attempt = now
-                # Only log the first attempt of a disconnect episode so a
-                # persistently-unconnected receiver doesn't spam the console.
-                log = not self._reconnect_logged
-                source = self._resolve_source(log=log)
-                if source is not None:
-                    try:
-                        self._receiver.set_source(source)
-                        self._source_assigned = True
-                        if log:
-                            print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
-                            self._reconnect_logged = True
-                        _wait_for_receiver_connection(
-                            self._receiver,
-                            getattr(self._receiver, 'frame_sync', None),
-                            getattr(self, '_video_frame_sync', None),
-                            getattr(self._receiver, 'receive', None),
-                            getattr(self._ReceiveFrameType, 'recv_video', None),
-                            attempts=5,
-                            interval_seconds=0.05,
-                        )
-                    except Exception:
-                        pass
-                elif not self.source_name and not self._source_assigned:
-                    self._assign_first_available_source()
-            if not self._receiver.is_connected():
-                return None
+            # is_connected() can return False transiently on healthy streams in some
+            # cyndilib builds. Only reconnect when frames have genuinely stopped flowing.
+            if now - self._last_frame_time > 3.0:
+                if now - float(getattr(self, '_last_reconnect_attempt', 0.0) or 0.0) > 1.0:
+                    self._last_reconnect_attempt = now
+                    # Only log the first attempt of a disconnect episode so a
+                    # persistently-unconnected receiver doesn't spam the console.
+                    log = not self._reconnect_logged
+                    source = self._resolve_source(log=log)
+                    if source is not None:
+                        try:
+                            self._receiver.set_source(source)
+                            self._source_assigned = True
+                            if log:
+                                print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
+                                self._reconnect_logged = True
+                            _wait_for_receiver_connection(
+                                self._receiver,
+                                getattr(self._receiver, 'frame_sync', None),
+                                getattr(self, '_video_frame_sync', None),
+                                getattr(self._receiver, 'receive', None),
+                                getattr(self._ReceiveFrameType, 'recv_video', None),
+                                attempts=5,
+                                interval_seconds=0.05,
+                            )
+                        except Exception:
+                            pass
+                    elif not self.source_name and not self._source_assigned:
+                        self._assign_first_available_source()
+                if not self._receiver.is_connected():
+                    return None
+            # else: is_connected() flickered but frames are recent — fall through and attempt capture
         elif self._reconnect_logged:
             # Recovered from a disconnect episode — re-arm logging for next time.
             print(f"[Capture][NDI] Receiver connected to '{self.source_name}'.")
@@ -913,8 +918,10 @@ class NDICapture:
                 frame = _to_bgra(raw)
 
         if frame.ndim == 3 and frame.shape[2] == 4:
+            self._last_frame_time = now
             return frame
         if frame.ndim == 3 and frame.shape[2] == 3:
+            self._last_frame_time = now
             return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
         return None
 
