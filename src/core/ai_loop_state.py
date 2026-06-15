@@ -28,3 +28,7 @@ class LoopState:
     # Sticky target lock — hold the selected target across short detection gaps.
     locked_box: Optional[List[float]] = field(default=None)
     no_detection_frames: int = 0
+
+    # Y-reduce velocity gate — track target Y position across frames to estimate vy.
+    aim_y_last_target_y: float = 0.0
+    aim_y_last_target_t: float = 0.0

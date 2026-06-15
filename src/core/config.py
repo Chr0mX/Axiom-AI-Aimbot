@@ -125,6 +125,10 @@ class Config:
         # Y軸壓槍速度逐漸歸零
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能
         self.aim_y_reduce_delay: float = 0.6      # 按下瞄準鍵後多久開始歸零 (秒)
+        self.aim_y_reduce_floor: float = 0.0      # Minimum Y multiplier after ramp (0.0=full cut, 1.0=no suppression)
+        self.aim_y_reduce_ramp: float = 0.0       # Seconds to ramp from 1.0 → floor (0=instant, backwards compat)
+        self.aim_y_reduce_settle_px: float = 0.0  # Skip suppression if |errorY| > this px (0=disabled)
+        self.aim_y_vel_restore_px_s: float = 0.0  # Restore full Y if target vy > this px/s (0=disabled)
 
         # Target priority scoring
         self.target_priority_mode: str = "distance"       # "distance" | "confidence" | "composite"
@@ -327,6 +331,10 @@ class Config:
             'pid_kd_y': self.pid_kd_y,
             'aim_y_reduce_enabled': self.aim_y_reduce_enabled,
             'aim_y_reduce_delay': self.aim_y_reduce_delay,
+            'aim_y_reduce_floor': self.aim_y_reduce_floor,
+            'aim_y_reduce_ramp': self.aim_y_reduce_ramp,
+            'aim_y_reduce_settle_px': self.aim_y_reduce_settle_px,
+            'aim_y_vel_restore_px_s': self.aim_y_vel_restore_px_s,
             'aim_part': self.aim_part,
             'AimKeys': self.AimKeys,
             'auto_fire_key': self.auto_fire_key,

@@ -282,6 +282,42 @@ class AimPage(BasePage):
             parent=self.pidGroup
         )
 
+        self.pidYReduceFloorCard = SliderLabelCard(
+            FluentIcon.CARE_DOWN_SOLID,
+            "Y Floor",
+            0, 100,
+            format_func=lambda v: f"{v/100:.2f}",
+            description="Min Y multiplier after ramp — 0.00 = full cut, 1.00 = no suppression",
+            parent=self.pidGroup
+        )
+
+        self.pidYReduceRampCard = SliderLabelCard(
+            FluentIcon.STOP_WATCH,
+            "Y Ramp Window",
+            0, 200,
+            format_func=lambda v: f"{v/100:.2f} s",
+            description="Time to fade 1.0 → floor after delay (0 = instant cut)",
+            parent=self.pidGroup
+        )
+
+        self.pidYReduceSettleCard = SliderLabelCard(
+            FluentIcon.ALIGNMENT,
+            "Y Settle Threshold",
+            0, 50,
+            format_func=lambda v: "Off" if v == 0 else f"{v} px",
+            description="Skip suppression while vertical error > this — waits until aim is settled (0 = off)",
+            parent=self.pidGroup
+        )
+
+        self.pidYReduceVelCard = SliderLabelCard(
+            FluentIcon.SPEED_MEDIUM,
+            "Y Velocity Restore",
+            0, 500,
+            format_func=lambda v: "Off" if v == 0 else f"{v} px/s",
+            description="Restore full Y tracking if target moves vertically faster than this (0 = off)",
+            parent=self.pidGroup
+        )
+
         # === Anti-Detection (Smart Jitter only) ===
         self.antiDetectionGroup = SettingCardGroup(t("anti_detection", "Anti-Detection"), self.scrollWidget)
 
@@ -508,6 +544,10 @@ class AimPage(BasePage):
         yPageLayout.addWidget(self.pidDyCard)
         yPageLayout.addWidget(self.pidYReduceEnableCard)
         yPageLayout.addWidget(self.pidYReduceDelayCard)
+        yPageLayout.addWidget(self.pidYReduceFloorCard)
+        yPageLayout.addWidget(self.pidYReduceRampCard)
+        yPageLayout.addWidget(self.pidYReduceSettleCard)
+        yPageLayout.addWidget(self.pidYReduceVelCard)
 
         self.pidStackedWidget.addWidget(self.pidXPage)
         self.pidStackedWidget.addWidget(self.pidYPage)
@@ -575,6 +615,12 @@ class AimPage(BasePage):
         self.pidDyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kd_y', v))
         self.pidYReduceEnableCard.checkedChanged.connect(lambda checked: self._onPidChanged('aim_y_reduce_enabled', checked, is_bool=True))
         self.pidYReduceDelayCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_delay', v))
+        self.pidYReduceFloorCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_floor', v))
+        self.pidYReduceRampCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_ramp', v))
+        self.pidYReduceSettleCard.valueChanged.connect(
+            lambda v: setattr(self._config, 'aim_y_reduce_settle_px', float(v)) if self._config else None)
+        self.pidYReduceVelCard.valueChanged.connect(
+            lambda v: setattr(self._config, 'aim_y_vel_restore_px_s', float(v)) if self._config else None)
 
         # Smart Jitter
         self.smartJitterEnableCard.checkedChanged.connect(self._onSmartJitterEnableChanged)
@@ -647,6 +693,10 @@ class AimPage(BasePage):
             self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
             self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
             self.pidYReduceDelayCard.setValue(int(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100))
+            self.pidYReduceFloorCard.setValue(int(getattr(self._config, 'aim_y_reduce_floor', 0.0) * 100))
+            self.pidYReduceRampCard.setValue(int(getattr(self._config, 'aim_y_reduce_ramp', 0.0) * 100))
+            self.pidYReduceSettleCard.setValue(int(getattr(self._config, 'aim_y_reduce_settle_px', 0.0)))
+            self.pidYReduceVelCard.setValue(int(getattr(self._config, 'aim_y_vel_restore_px_s', 0.0)))
 
             # Smart Jitter
             sj_on = bool(getattr(self._config, 'smart_jitter_enabled', False))
@@ -1112,6 +1162,10 @@ class AimPage(BasePage):
         self.pidDyCard.titleLabel.setText(t("stability_suppression_d"))
         self.pidYReduceEnableCard.titleLabel.setText(t("aim_y_reduce_enable"))
         self.pidYReduceDelayCard.titleLabel.setText(t("aim_y_reduce_delay"))
+        self.pidYReduceFloorCard.titleLabel.setText("Y Floor")
+        self.pidYReduceRampCard.titleLabel.setText("Y Ramp Window")
+        self.pidYReduceSettleCard.titleLabel.setText("Y Settle Threshold")
+        self.pidYReduceVelCard.titleLabel.setText("Y Velocity Restore")
 
         self.antiDetectionGroup.titleLabel.setText(t("anti_detection", "Anti-Detection"))
         self.smartJitterEnableCard.titleLabel.setText(t("smart_jitter_label", "Smart Jitter"))

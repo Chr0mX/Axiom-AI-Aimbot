@@ -278,12 +278,38 @@ def process_aiming(
 
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
 
+        # Track target Y velocity for the velocity-restore gate (independent of prediction_enabled)
+        if state.aim_y_last_target_t > 0:
+            _y_dt = current_time - state.aim_y_last_target_t
+            _vy = (target_y - state.aim_y_last_target_y) / _y_dt if _y_dt > 0 else 0.0
+        else:
+            _vy = 0.0
+        state.aim_y_last_target_y = target_y
+        state.aim_y_last_target_t = current_time
+
         if getattr(config, 'aim_y_reduce_enabled', False) and state.aiming_start_time > 0:
             aim_duration = current_time - state.aiming_start_time
             delay = getattr(config, 'aim_y_reduce_delay', 0.6)
-
             if aim_duration > delay:
-                dy = 0.0
+                suppress = True
+                # Error-based gate: skip suppression until crosshair has settled vertically
+                settle_px = float(getattr(config, 'aim_y_reduce_settle_px', 0.0))
+                if settle_px > 0 and abs(errorY) > settle_px:
+                    suppress = False
+                # Velocity-aware gate: restore full Y if target is moving vertically fast enough
+                if suppress:
+                    vel_restore = float(getattr(config, 'aim_y_vel_restore_px_s', 0.0))
+                    if vel_restore > 0 and abs(_vy) > vel_restore:
+                        suppress = False
+                if suppress:
+                    floor = float(getattr(config, 'aim_y_reduce_floor', 0.0))
+                    ramp = float(getattr(config, 'aim_y_reduce_ramp', 0.0))
+                    if ramp > 0:
+                        t_past = aim_duration - delay
+                        factor = 1.0 - min(1.0, t_past / ramp) * (1.0 - floor)
+                    else:
+                        factor = floor
+                    dy *= factor
 
         # Apply humanization layer (post-PID, pre-rounding, pre-injection).
         # Operates only on dx/dy; never touches PID state or coordinate space.
@@ -347,5 +373,7 @@ def process_aiming(
             config.display_locked_box_is_decaying = False
         pid_x.reset()
         pid_y.reset()
+        state.aim_y_last_target_y = 0.0
+        state.aim_y_last_target_t = 0.0
         if _kalman is not None:
             _kalman.reset()
