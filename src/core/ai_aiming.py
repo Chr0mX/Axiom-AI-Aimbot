@@ -232,9 +232,7 @@ def process_aiming(
             predictor = _get_predictor(config)
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
             target_x, target_y = predictor.update(target_x, target_y, time.perf_counter(), horizon_s)
-            config.tracker_has_prediction = True
         else:
-            config.tracker_has_prediction = False
             if _predictor is not None:
                 _predictor.reset()
 

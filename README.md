@@ -267,7 +267,6 @@ Axiom/
 │   │   ├── auto_fire.py      # Triggerbot logic
 │   │   ├── config.py         # Configuration class & save/load
 │   │   ├── inference.py      # ONNX inference & PID controller
-│   │   ├── smart_tracker.py  # Velocity-based prediction tracker
 │   │   ├── key_listener.py   # Global hotkey listener
 │   │   ├── updater.py        # Auto-update checker
 │   │   └── language_data/    # Multi-language JSON files

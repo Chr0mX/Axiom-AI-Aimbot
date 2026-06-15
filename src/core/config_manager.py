@@ -93,11 +93,6 @@ class ConfigManager:
             'head_height_ratio': config_instance.head_height_ratio,
             'body_width_ratio': config_instance.body_width_ratio,
 
-            # 瞄準曲線平滑
-            'bezier_curve_enabled': getattr(config_instance, 'bezier_curve_enabled', False),
-            'bezier_curve_strength': getattr(config_instance, 'bezier_curve_strength', 0.35),
-            'bezier_curve_steps': getattr(config_instance, 'bezier_curve_steps', 4),
-            
             # 按鍵設定
             'AimKeys': config_instance.AimKeys,
             'aim_toggle_key': config_instance.aim_toggle_key,
@@ -159,13 +154,6 @@ class ConfigManager:
             # Y軸壓槍速度歸零
             'aim_y_reduce_enabled': getattr(config_instance, 'aim_y_reduce_enabled', False),
             'aim_y_reduce_delay': getattr(config_instance, 'aim_y_reduce_delay', 0.6),
-
-            # 智慧追蹤預判
-            'tracker_enabled': getattr(config_instance, 'tracker_enabled', False),
-            'tracker_prediction_time': getattr(config_instance, 'tracker_prediction_time', 0.025),
-            'tracker_smoothing_factor': getattr(config_instance, 'tracker_smoothing_factor', 0.66),
-            'tracker_stop_threshold': getattr(config_instance, 'tracker_stop_threshold', 10.0),
-            'tracker_show_prediction': getattr(config_instance, 'tracker_show_prediction', True),
 
             # 延遲統計
             'enable_latency_stats': getattr(config_instance, 'enable_latency_stats', False),

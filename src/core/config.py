@@ -91,20 +91,6 @@ class Config:
         # Single target mode
         self.single_target_mode: bool = True  # 啟用單一目標模式（只瞄準置信度最高的目標）
         
-        # Smart tracking prediction settings (replaces Kalman)
-        self.tracker_enabled: bool = False          # SmartTracker removed; kept for config compatibility
-        self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
-        self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
-        self.tracker_stop_threshold: float = 10.0    # Low speed zeroing threshold (pixels/sec)
-        self.tracker_show_prediction: bool = True    # Show prediction visualization
-
-        # Tracker prediction data (updated by ai_loop, read by overlay)
-        self.tracker_predicted_x: float = 0.0        # Predicted X coordinate
-        self.tracker_predicted_y: float = 0.0        # Predicted Y coordinate
-        self.tracker_current_x: float = 0.0          # Current observed X coordinate
-        self.tracker_current_y: float = 0.0          # Current observed Y coordinate
-        self.tracker_has_prediction: bool = False    # Whether a valid prediction exists
-
         # Disclaimer agreement status
         self.disclaimer_agreed: bool = False 
 
@@ -230,11 +216,6 @@ class Config:
         self.kalman_enabled: bool = False
         self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
         self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier
-
-        # Bezier curve mouse movement
-        self.bezier_curve_enabled: bool = False
-        self.bezier_curve_strength: float = 0.5   # 0.0–1.0 curve bend amount
-        self.bezier_curve_steps: int = 10          # 2–20 interpolation steps
 
         # Basic jitter
         self.jitter_enabled: bool = False
@@ -414,9 +395,6 @@ class Config:
             'kalman_process_noise': self.kalman_process_noise,
             'kalman_measurement_noise': self.kalman_measurement_noise,
 
-            'bezier_curve_enabled': self.bezier_curve_enabled,
-            'bezier_curve_strength': self.bezier_curve_strength,
-            'bezier_curve_steps': self.bezier_curve_steps,
             'jitter_enabled': self.jitter_enabled,
             'jitter_strength': self.jitter_strength,
             'frame_skip_enabled': self.frame_skip_enabled,
@@ -467,12 +445,6 @@ class Config:
             'crosshair_size': self.crosshair_size,
             'disclaimer_agreed': self.disclaimer_agreed,
             'first_run_complete': self.first_run_complete,
-
-            'tracker_enabled': self.tracker_enabled,
-            'tracker_prediction_time': self.tracker_prediction_time,
-            'tracker_smoothing_factor': self.tracker_smoothing_factor,
-            'tracker_stop_threshold': self.tracker_stop_threshold,
-            'tracker_show_prediction': self.tracker_show_prediction,
 
             'dark_mode': self.dark_mode,
 

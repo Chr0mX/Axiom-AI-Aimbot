@@ -104,18 +104,6 @@ class TestConfigInit:
         assert c.auto_fire_interval == 0.08
         assert c.auto_fire_target_part == "both"
 
-    def test_bezier_defaults(self):
-        c = _make_config()
-        assert c.bezier_curve_enabled is False
-        assert c.bezier_curve_strength == 0.35
-        assert c.bezier_curve_steps == 4
-
-    def test_tracker_defaults(self):
-        c = _make_config()
-        assert c.tracker_enabled is False
-        assert c.tracker_prediction_time == 0.025
-        assert c.tracker_smoothing_factor == 0.66
-
     def test_display_switch_defaults(self):
         c = _make_config()
         assert c.show_fov is True
@@ -170,8 +158,8 @@ class TestConfigSerialization:
             'show_confidence', 'screenshot_method', 'mouse_move_method', 'mouse_click_method',
             'screenshot_interval',
             'arduino_com_port', 'xbox_sensitivity', 'xbox_deadzone',
-            'xbox_auto_connect', 'dark_mode', 'bezier_curve_enabled',
-            'tracker_enabled', 'enable_acrylic',
+            'xbox_auto_connect', 'dark_mode', 'config_version',
+            'enable_acrylic',
         ]
         for key in expected_keys:
             assert key in d, f"Missing key: {key}"
@@ -212,7 +200,7 @@ class TestConfigSerialization:
         c1.fov_size = 555
         c1.pid_kp_x = 0.99
         c1.mouse_click_method = "xbox"
-        c1.bezier_curve_enabled = True
+        c1.jitter_enabled = True
         d = c1.to_dict()
 
         c2 = _make_config()
@@ -220,7 +208,7 @@ class TestConfigSerialization:
         assert c2.fov_size == 555
         assert c2.pid_kp_x == 0.99
         assert c2.mouse_click_method == "xbox"
-        assert c2.bezier_curve_enabled is True
+        assert c2.jitter_enabled is True
 
 
 # ============================================================

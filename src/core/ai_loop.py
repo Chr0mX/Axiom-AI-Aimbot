@@ -505,7 +505,6 @@ def ai_logic_loop(
 
                 if not config.AimToggle or (not config.keep_detecting and not is_aiming):
                     clear_queues(overlay_boxes_queue, overlay_confidences_queue)
-                    config.tracker_has_prediction = False
                     time.sleep(0.05)
                     continue
 
@@ -615,7 +614,6 @@ def ai_logic_loop(
                         confidences=confidences,
                     )
                 else:
-                    config.tracker_has_prediction = False
                     pid_x.reset()
                     pid_y.reset()
                     state.smooth_x = 0.0
