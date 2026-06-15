@@ -54,6 +54,7 @@ class Config:
         self.preview_crop_to_detection: bool = False
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
+        self.ndi_force_reconnect: bool = False
         self.ndi_width: int = self.width
         self.ndi_height: int = self.height
         self.crosshairX: int = self.width // 2

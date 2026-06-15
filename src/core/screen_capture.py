@@ -133,12 +133,13 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
     )
 
 
-def _ndi_signature(config: Config) -> tuple[str, bool, str, str]:
+def _ndi_signature(config: Config) -> tuple[str, bool, str, str, bool]:
     return (
         str(getattr(config, 'ndi_source_name', '')).strip(),
         bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
         str(getattr(config, 'ndi_bandwidth', 'highest')).lower(),
+        bool(getattr(config, 'ndi_force_reconnect', False)),
     )
 
 
@@ -517,6 +518,9 @@ class NDICapture:
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        # Clear reconnect flag before computing signature so the stored
+        # signature reflects the settled state (no pending reconnect).
+        config.ndi_force_reconnect = False
         self.config_signature = _ndi_signature(config)
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
         # The GUI exposes a single shared "Capture Preview Window" toggle that

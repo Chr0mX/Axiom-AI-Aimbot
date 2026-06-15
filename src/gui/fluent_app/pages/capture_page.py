@@ -461,6 +461,16 @@ class CapturePage(BasePage):
                     break
         self.ndiSourceCombo.blockSignals(False)
 
+        # After repopulating, grab whichever source is now selected and
+        # force a reconnect so the backend switches immediately (~0.5 s).
+        selected_name = self.ndiSourceCombo.currentData()
+        if not isinstance(selected_name, str) or not selected_name.strip():
+            selected_name = self.ndiSourceCombo.currentText().strip()
+        if selected_name:
+            self._config.ndi_source_name = selected_name
+            self._config.ndi_force_reconnect = True
+            print(f"[Capture][NDI] Reconnecting to '{selected_name}'...")
+
     def _getEmbeddedPythonExe(self) -> str:
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         python_exe = os.path.join(src_dir, "python", "python.exe")
@@ -578,12 +588,19 @@ class CapturePage(BasePage):
             self._config.ndi_bandwidth = str(text).lower()
 
     def _onNdiSourceChanged(self, text):
-        if not self._config:
+        if not self._config or self._isLoadingConfig:
             return
         source_name = self.ndiSourceCombo.currentData()
         if not isinstance(source_name, str) or not source_name.strip():
             source_name = str(text).strip()
-        self._config.ndi_source_name = source_name.strip()
+        source_name = source_name.strip()
+        if not source_name:
+            return
+        old_name = str(getattr(self._config, 'ndi_source_name', '')).strip()
+        self._config.ndi_source_name = source_name
+        if source_name != old_name:
+            self._config.ndi_force_reconnect = True
+            print(f"[Capture][NDI] Source changed to '{source_name}' — reconnecting...")
 
     def _queryUvcHwInfo(self):
         """Open a temporary VideoCapture to read the driver's actual resolution and FPS."""
