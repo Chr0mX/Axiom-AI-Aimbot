@@ -2,20 +2,118 @@
 """Model Page — model selection, inference backend, and model inspector."""
 
 import glob
+import json
 import os
 import subprocess
 import sys
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtWidgets import (
+    QApplication, QHBoxLayout, QLabel, QMessageBox, QTextEdit, QVBoxLayout,
+)
 from qfluentwidgets import (
+    CardWidget,
     SettingCardGroup,
     FluentIcon,
-    ComboBox, PrimaryPushButton, SettingCard,
+    ComboBox, PrimaryPushButton, PushButton, SettingCard,
     InfoBar, InfoBarPosition
 )
 
 from ..base_page import BasePage
 from ..language_manager import t
+
+
+# ──────────────────────────────────────────────
+# model_info.json helpers
+# ──────────────────────────────────────────────
+
+def _notes_path() -> str:
+    src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    return os.path.join(os.path.dirname(src), "model_info.json")
+
+
+def _load_notes() -> dict:
+    p = _notes_path()
+    if os.path.exists(p):
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_notes(data: dict) -> None:
+    with open(_notes_path(), 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _default_template(model_name: str) -> str:
+    return (
+        f"### Recommend settings for {model_name}\n"
+        "**Game Settings**\n"
+        "Enter settings here\n\n"
+        "**AI Settings**\n"
+        "Enter settings here"
+    )
+
+
+# ──────────────────────────────────────────────
+# Model notes card widget
+# ──────────────────────────────────────────────
+
+class _ModelNotesCard(CardWidget):
+    """Per-model notes card with view/edit mode, saved to model_info.json."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._current_model = ""
+        self._notes_data: dict = {}
+
+        self._titleLabel = QLabel("Model Notes")
+        self._titleLabel.setStyleSheet("font-size: 14px; font-weight: 600;")
+
+        self._editBtn = PushButton("Edit")
+        self._editBtn.setFixedWidth(80)
+        self._editBtn.clicked.connect(self._onEditSaveClicked)
+
+        headerRow = QHBoxLayout()
+        headerRow.addWidget(self._titleLabel)
+        headerRow.addStretch(1)
+        headerRow.addWidget(self._editBtn)
+
+        self._textEdit = QTextEdit()
+        self._textEdit.setReadOnly(True)
+        self._textEdit.setFixedHeight(160)
+        self._textEdit.setAcceptRichText(False)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+        layout.addLayout(headerRow)
+        layout.addWidget(self._textEdit)
+
+    def setModel(self, model_name: str) -> None:
+        self._current_model = model_name
+        self._notes_data = _load_notes()
+        text = self._notes_data.get(model_name) if model_name else ""
+        if not text:
+            text = _default_template(model_name) if model_name else ""
+        self._textEdit.setPlainText(text)
+        self._textEdit.setReadOnly(True)
+        self._editBtn.setText("Edit")
+
+    def _onEditSaveClicked(self) -> None:
+        if self._textEdit.isReadOnly():
+            self._textEdit.setReadOnly(False)
+            self._editBtn.setText("Save")
+            self._textEdit.setFocus()
+        else:
+            text = self._textEdit.toPlainText()
+            if self._current_model:
+                self._notes_data[self._current_model] = text
+                _save_notes(self._notes_data)
+            self._textEdit.setReadOnly(True)
+            self._editBtn.setText("Edit")
 
 
 class _ModelInspectWorker(QThread):
@@ -113,6 +211,8 @@ class ModelPage(BasePage):
         self.openModelFolderCard.hBoxLayout.addWidget(self.openModelFolderBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.openModelFolderCard.hBoxLayout.addSpacing(16)
 
+        self.modelNotesCard = _ModelNotesCard(self.scrollWidget)
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -123,6 +223,7 @@ class ModelPage(BasePage):
         self.modelGroup.addSettingCard(self.inferenceBackendCard)
         self.modelGroup.addSettingCard(self.openModelFolderCard)
         self.addContent(self.modelGroup)
+        self.scrollLayout.addWidget(self.modelNotesCard)
         self.scrollLayout.addStretch(1)
 
     # ──────────────────────────────────────────────
@@ -183,8 +284,9 @@ class ModelPage(BasePage):
         finally:
             self._isLoadingConfig = False
 
-        # Kick off model inspection after load
+        # Kick off model inspection and load notes after config load
         self._updateModelInfo(self._config.model_path)
+        self.modelNotesCard.setModel(os.path.basename(self._config.model_path or ""))
 
     # ──────────────────────────────────────────────
     # Model inspector
@@ -367,6 +469,7 @@ class ModelPage(BasePage):
         if self._config and text:
             self._config.model_path = os.path.join("Model", text)
             self._updateModelInfo(self._config.model_path)
+            self.modelNotesCard.setModel(os.path.basename(text))
 
     def _onInferenceBackendChanged(self, text):
         if not self._config:
