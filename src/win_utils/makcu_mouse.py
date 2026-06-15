@@ -33,6 +33,7 @@ _BAUD_CHANGE_FRAME = bytes([0xDE, 0xAD, 0x05, 0x00, 0xA5, 0x00, 0x09, 0x3D, 0x00
 # Button stream parsing — prefix emitted before each mask byte
 # Do NOT use \n/\r splitting: mask 0x0A (R+S1) and 0x0D (L+M+S1) collide with newlines
 _KM_PREFIX = bytes([0x6B, 0x6D, 0x2E])  # "km."
+_BTN_BITS = 0x1F  # bits 0-4 = L,R,M,S1,S2 — everything else is noise/wheel/high-byte
 
 
 class MakcuMouse:
@@ -194,12 +195,19 @@ class MakcuMouse:
         self._btn_mask = 0
 
     def _stream_reader(self):
-        """Daemon thread: reads km. prefix + mask bytes from serial, updates _btn_mask.
+        """Daemon thread: parse km. + 2-byte LE button mask frames, update _btn_mask.
+
+        Frame layout (firmware buttons stream): 0x6B 0x6D 0x2E <maskLO> <maskHI>.
+        The mask is little-endian; only bits 0-4 are real buttons (L,R,M,S1,S2).
+        Masking to _BTN_BITS prevents a desynced wheel/data byte — e.g. a scroll
+        delta of +1 (0x01) or -1 (0xFF), both of which carry bit 0 — from being
+        misread as a held left button.
 
         km.echo(0) means the device sends nothing in response to move/click writes,
         so all incoming bytes are button stream events — no lock needed on reads.
         """
         buf = bytearray()
+        FRAME_LEN = len(_KM_PREFIX) + 2  # km. + 2-byte mask
         while not self._stream_stop.is_set():
             try:
                 ser = self._serial
@@ -210,16 +218,20 @@ class MakcuMouse:
                     buf.extend(ser.read(n))
                     if len(buf) > 256:
                         buf.clear()
-                    while len(buf) >= 4:
+                    while len(buf) >= FRAME_LEN:
                         idx = buf.find(_KM_PREFIX)
                         if idx == -1:
-                            del buf[:1]
+                            # No prefix in buffer; keep only a possible partial tail
+                            del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
                             break
-                        if idx + 3 >= len(buf):
+                        if idx + FRAME_LEN > len(buf):
+                            # Full frame not yet arrived; drop bytes before prefix and wait
                             del buf[:idx]
                             break
-                        self._btn_mask = buf[idx + 3]
-                        del buf[:idx + 4]
+                        lo = buf[idx + 3]
+                        hi = buf[idx + 4]
+                        self._btn_mask = (lo | (hi << 8)) & _BTN_BITS
+                        del buf[:idx + FRAME_LEN]
                 else:
                     time.sleep(0.001)
             except Exception:
