@@ -581,9 +581,15 @@ class NDICapture:
                     receiver_kwargs['bandwidth'] = bw_value
                     print(f'[Capture][NDI] Bandwidth set to: {bw_pref}')
             if source is not None:
-                receiver_kwargs['source'] = source
-                self._source_assigned = True
-                print(f"[Capture][NDI] Receiver will start with source '{_extract_ndi_source_name(source)}'.")
+                # NOTE: do NOT pass the source to the Receiver constructor.
+                # Assigning it both in the ctor and again via set_source() below
+                # double-assigns the source and disrupts the initial connection
+                # (observed as a fall-back to MSS on the second launch, when a
+                # source name is already saved in config). The auto-select path
+                # — which connects reliably — only ever calls set_source() once,
+                # so the configured-source path now mirrors it.
+                print(f"[Capture][NDI] Resolved source '{_extract_ndi_source_name(source)}'; "
+                      f"assigning after receiver creation.")
             self._receiver = Receiver(**receiver_kwargs)
             print('[Capture][NDI] Receiver object created successfully.')
 
@@ -611,13 +617,14 @@ class NDICapture:
         except Exception as exc:
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
 
+        print('[Capture][NDI] Waiting for receiver to connect and deliver first video frame (up to 6s)...')
         connected = _wait_for_receiver_connection(
             self._receiver,
             getattr(self._receiver, 'frame_sync', None),
             getattr(self, '_video_frame_sync', None),
             getattr(self._receiver, 'receive', None),
             getattr(self._ReceiveFrameType, 'recv_video', None),
-            attempts=30,
+            attempts=60,
             interval_seconds=0.1,
         )
 
@@ -1353,10 +1360,9 @@ def initialize_screen_capture(config: Config) -> Any:
             print('[Capture] NDI backend initialized via cyndilib and is now active.')
             return ndi_capture
         except Exception as exc:
-            _warn_once(
-                'ndi_fallback_mss',
-                f'[Capture][NDI] Initialization failed with "{exc}". Falling back to MSS backend.',
-            )
+            # Always print (not _warn_once): NDI is (re)connected interactively and
+            # the failure reason must stay visible across repeated attempts.
+            print(f'[Capture][NDI] Initialization failed with "{exc}". Falling back to MSS backend.')
     elif screenshot_method != 'mss':
         _warn_once(
             'invalid_screenshot_method',
