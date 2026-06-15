@@ -53,3 +53,4 @@ Model/*.engine
 # Runtime / crash artifacts
 crash_reports/
 *.dmp
+*.json
