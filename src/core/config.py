@@ -35,6 +35,8 @@ class Config:
     """
     
     def __init__(self) -> None:
+        self.config_version: int = 1
+
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
         
@@ -314,6 +316,7 @@ class Config:
     def to_dict(self) -> Dict[str, Any]:
         """將可儲存的配置轉為字典"""
         return {
+            'config_version': self.config_version,
             'fov_size': self.fov_size,
             'detect_range_size': self.detect_range_size,
             'model_path': self.model_path,
@@ -496,30 +499,14 @@ class Config:
 def save_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     """
     將配置儲存到 JSON 檔案
-    
-    Args:
-        config_instance: Config 實例
-        filepath: 儲存路徑
-        
-    Returns:
-        是否成功儲存
+
+    Writes only the fields declared in to_dict() — no stale keys from previous
+    versions survive. Language preference is stored separately in language.json
+    by LanguageManager, so no merge is needed here.
     """
     try:
-        # 先讀取現有的 config.json，保留不在 Config 類中的欄位（如 language）
-        existing_data = {}
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                existing_data = {}
-        
-        # 將新的配置資料合併到現有資料上（新值覆蓋舊值，但保留額外欄位）
-        data = config_instance.to_dict()
-        existing_data.update(data)
-        
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+            json.dump(config_instance.to_dict(), f, ensure_ascii=False, indent=2)
         print("設定已儲存")
         return True
     except OSError as e:
@@ -528,6 +515,20 @@ def save_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     except (TypeError, ValueError) as e:
         print(f"設定儲存失敗 (序列化錯誤): {e}")
         return False
+
+
+def _migrate_config(data: dict) -> dict:
+    """Apply forward migrations keyed by config_version.
+
+    When a field is renamed or removed, add a block here and bump
+    config_version in Config.__init__. The migrated dict is passed to
+    from_dict(), so field names must match the current schema on exit.
+    """
+    # Example (not yet needed):
+    # if data.get('config_version', 0) < 2:
+    #     data['new_field'] = data.pop('old_field', default_value)
+    #     data['config_version'] = 2
+    return data
 
 
 def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
@@ -544,7 +545,8 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
+
+        data = _migrate_config(data)
         config_instance.from_dict(data)
         
         # 向後兼容：確保檢測間隔在合理範圍內 (1-100ms)

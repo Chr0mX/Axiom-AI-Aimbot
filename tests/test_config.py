@@ -278,19 +278,24 @@ class TestConfigFileIO:
         finally:
             os.unlink(filepath)
 
-    def test_save_config_preserves_extra_fields(self):
-        """save_config 應保留 config.json 中不屬於 Config 的欄位（如 language）"""
+    def test_save_config_drops_extra_fields(self):
+        """save_config 應只寫入 to_dict() 的欄位，不保留舊版殘留的未知欄位。
+        語言偏好現在儲存在 language.json（由 LanguageManager 管理），不再混入 config.json。
+        """
         from core.config import save_config
         c = _make_config()
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-            json.dump({"language": "zh_tw", "extra_field": 42}, f)
+            json.dump({"language": "zh_tw", "ghost_key": 42}, f)
             filepath = f.name
         try:
             save_config(c, filepath)
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            assert data.get('language') == 'zh_tw'
-            assert data.get('extra_field') == 42
+            # Orphaned keys must not survive a save — that's the whole point of the cleanup.
+            assert 'language' not in data
+            assert 'ghost_key' not in data
+            # config_version must be present
+            assert data.get('config_version') == 1
         finally:
             os.unlink(filepath)
 
