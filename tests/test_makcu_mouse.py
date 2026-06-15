@@ -265,9 +265,9 @@ def _run_stream(payload):
     return m
 
 
-def _frame(lo):
+def _frame(lo, hi=0x00):
     from win_utils.makcu_mouse import _KM_PREFIX
-    return bytes(_KM_PREFIX) + bytes([lo])
+    return bytes(_KM_PREFIX) + bytes([lo, hi])
 
 
 class TestMakcuStreamReader:
@@ -293,15 +293,13 @@ class TestMakcuStreamReader:
         assert m.lmb_held is False
         assert m.rmb_held is True
 
-    def test_high_bits_masked_off(self):
-        """高位元雜訊應被 _BTN_BITS 遮罩，僅保留真實按鍵位元 (bits 0-4)"""
-        # 0xFF & 0x1F = 0x1F — only button bits survive, no overflow
-        m = _run_stream(_frame(0xFF))
-        assert m._btn_mask == 0x1F  # all 5 button bits set, nothing beyond
-        m2 = _run_stream(_frame(0x02))
-        assert m2._btn_mask == 0x02
-        assert m2.rmb_held is True
-        assert m2.lmb_held is False
+    def test_high_byte_noise_masked_off(self):
+        """高位元組雜訊應被 _BTN_BITS 遮罩，僅保留真實按鍵位元"""
+        # mask LO=0x02 (R), HI=0xFF (noise) → only 0x02 survives
+        m = _run_stream(_frame(0x02, 0xFF))
+        assert m._btn_mask == 0x02
+        assert m.rmb_held is True
+        assert m.lmb_held is False
 
     def test_scroll_byte_cannot_fake_lmb(self):
         """滾輪位元組 (0xFF) 落入遮罩位置時不得偽造任何按鍵以外的位元。
@@ -319,10 +317,10 @@ class TestMakcuStreamReader:
         assert m._btn_mask == 0x00
 
     def test_partial_frame_not_consumed(self):
-        """不足一幀 (4 bytes) 的資料不應更新狀態"""
+        """不足一幀 (5 bytes) 的資料不應更新狀態"""
         from win_utils.makcu_mouse import _KM_PREFIX
-        # only the km. prefix (3 bytes), missing the mask byte
-        m = _run_stream(bytes(_KM_PREFIX))
+        # only km. + 1 mask byte = 4 bytes, missing the HI byte
+        m = _run_stream(bytes(_KM_PREFIX) + bytes([0x01]))
         assert m._btn_mask == 0x00  # untouched — never reached FRAME_LEN
 
 

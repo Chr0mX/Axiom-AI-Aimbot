@@ -207,7 +207,7 @@ class MakcuMouse:
         so all incoming bytes are button stream events — no lock needed on reads.
         """
         buf = bytearray()
-        FRAME_LEN = len(_KM_PREFIX) + 1  # km. + 1-byte mask = 4 bytes (per MAKCU spec)
+        FRAME_LEN = len(_KM_PREFIX) + 2  # km. + 2-byte mask
         while not self._stream_stop.is_set():
             try:
                 ser = self._serial
@@ -228,7 +228,9 @@ class MakcuMouse:
                             # Full frame not yet arrived; drop bytes before prefix and wait
                             del buf[:idx]
                             break
-                        self._btn_mask = buf[idx + 3] & _BTN_BITS
+                        lo = buf[idx + 3]
+                        hi = buf[idx + 4]
+                        self._btn_mask = (lo | (hi << 8)) & _BTN_BITS
                         del buf[:idx + FRAME_LEN]
                 else:
                     time.sleep(0.001)
