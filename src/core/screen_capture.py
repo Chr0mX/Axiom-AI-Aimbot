@@ -136,8 +136,8 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
 def _ndi_signature(config: Config) -> tuple[str, bool, str, str]:
     return (
         str(getattr(config, 'ndi_source_name', '')).strip(),
-        bool(getattr(config, 'ndi_show_window', getattr(config, 'uvc_show_window', False))),
-        str(getattr(config, 'ndi_preview_scale_mode', '')).lower().strip(),
+        bool(getattr(config, 'uvc_show_window', False)),
+        str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
         str(getattr(config, 'ndi_bandwidth', 'highest')).lower(),
     )
 
@@ -519,8 +519,9 @@ class NDICapture:
         self.config = config
         self.config_signature = _ndi_signature(config)
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
-        self.show_window = bool(getattr(config, 'ndi_show_window',
-                                        getattr(config, 'uvc_show_window', False)))
+        # The GUI exposes a single shared "Capture Preview Window" toggle that
+        # writes uvc_show_window for both UVC and NDI backends.
+        self.show_window = bool(getattr(config, 'uvc_show_window', False))
         self.window_name = str(getattr(config, 'ndi_window_name', 'Axiom NDI Preview'))
         # NDI preview prioritizes minimal display latency by default.
         ndi_preview_scale_mode = str(getattr(config, 'ndi_preview_scale_mode', '')).lower().strip()

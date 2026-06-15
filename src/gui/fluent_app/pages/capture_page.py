@@ -374,14 +374,16 @@ class CapturePage(BasePage):
     def _refreshUvcResolutions(self):
         if not self._config:
             return
+        device = int(getattr(self._config, 'uvc_device_index', 0))
+        method = str(getattr(self._config, 'uvc_capture_method', 'msmf'))
+        print(f"[Capture][UVC] Refreshing supported resolutions (device={device}, method={method})...")
         try:
             from core.screen_capture import list_supported_uvc_resolutions
-            resolutions = list_supported_uvc_resolutions(
-                int(getattr(self._config, 'uvc_device_index', 0)),
-                str(getattr(self._config, 'uvc_capture_method', 'msmf')),
-            )
-        except Exception:
+            resolutions = list_supported_uvc_resolutions(device, method)
+        except Exception as exc:
+            print(f"[Capture][UVC] Resolution probe failed: {exc}")
             resolutions = []
+        print(f"[Capture][UVC] Found {len(resolutions)} supported resolution(s): {resolutions}")
         current_text = self.uvcResolutionCombo.currentText().strip()
         self.uvcResolutionCombo.blockSignals(True)
         self.uvcResolutionCombo.clear()
@@ -400,17 +402,18 @@ class CapturePage(BasePage):
     def _refreshUvcFps(self):
         if not self._config:
             return
+        w = int(getattr(self._config, 'uvc_width', 1920))
+        h = int(getattr(self._config, 'uvc_height', 1080))
+        device = int(getattr(self._config, 'uvc_device_index', 0))
+        method = str(getattr(self._config, 'uvc_capture_method', 'msmf'))
+        print(f"[Capture][UVC] Refreshing supported FPS (device={device}, {w}x{h}, method={method})...")
         try:
             from core.screen_capture import list_supported_uvc_fps
-            w = int(getattr(self._config, 'uvc_width', 1920))
-            h = int(getattr(self._config, 'uvc_height', 1080))
-            fps_list = list_supported_uvc_fps(
-                int(getattr(self._config, 'uvc_device_index', 0)),
-                w, h,
-                str(getattr(self._config, 'uvc_capture_method', 'msmf')),
-            )
-        except Exception:
+            fps_list = list_supported_uvc_fps(device, w, h, method)
+        except Exception as exc:
+            print(f"[Capture][UVC] FPS probe failed: {exc}")
             fps_list = [24, 30, 60, 90, 120, 144, 240]
+        print(f"[Capture][UVC] Supported FPS: {fps_list}")
         current_fps = self.uvcFpsCombo.currentText()
         self.uvcFpsCombo.blockSignals(True)
         self.uvcFpsCombo.clear()
@@ -424,11 +427,15 @@ class CapturePage(BasePage):
     def _refreshNdiSources(self):
         if not self._config:
             return
+        print("[Capture][NDI] Refreshing available NDI sources...")
         try:
             from core.screen_capture import list_available_ndi_source_details
             source_details = list_available_ndi_source_details()
-        except Exception:
+        except Exception as exc:
+            print(f"[Capture][NDI] Source discovery failed: {exc}")
             source_details = []
+        print(f"[Capture][NDI] Found {len(source_details)} source(s): "
+              f"{[d.get('name', '') for d in source_details]}")
         current_name = self.ndiSourceCombo.currentData()
         if not isinstance(current_name, str):
             current_name = self.ndiSourceCombo.currentText().strip()
@@ -551,14 +558,20 @@ class CapturePage(BasePage):
     def _onUvcPreviewChanged(self, checked):
         if self._config:
             self._config.uvc_show_window = bool(checked)
+        method = str(getattr(self._config, 'screenshot_method', '?')) if self._config else '?'
+        print(f"[Capture][Preview] Preview window {'ENABLED' if checked else 'DISABLED'} "
+              f"(method={method}); applies on next capture re-init (~0.5s).")
 
     def _onPreviewCropChanged(self, checked):
         if self._config:
             self._config.preview_crop_to_detection = bool(checked)
+        print(f"[Capture][Preview] Crop-to-detection {'ENABLED' if checked else 'DISABLED'}; "
+              f"preview window resizes live.")
 
     def _onUvcPreviewScaleModeChanged(self, text):
         if self._config:
             self._config.uvc_preview_scale_mode = str(text)
+        print(f"[Capture][Preview] Scale mode set to '{text}'.")
 
     def _onNdiBandwidthChanged(self, text):
         if self._config:

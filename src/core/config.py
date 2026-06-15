@@ -56,8 +56,6 @@ class Config:
         self.ndi_bandwidth: str = "highest"
         self.ndi_width: int = self.width
         self.ndi_height: int = self.height
-        self.ndi_show_window: bool = False
-        self.ndi_preview_scale_mode: str = ""
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
 
@@ -353,8 +351,6 @@ class Config:
             'preview_crop_to_detection': self.preview_crop_to_detection,
             'ndi_source_name': self.ndi_source_name,
             'ndi_bandwidth': self.ndi_bandwidth,
-            'ndi_show_window': self.ndi_show_window,
-            'ndi_preview_scale_mode': self.ndi_preview_scale_mode,
             'keep_detecting': self.keep_detecting,
             'always_aim': self.always_aim,
             'makcu_aim_button': self.makcu_aim_button,
