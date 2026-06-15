@@ -68,6 +68,7 @@ class _ModelNotesCard(CardWidget):
         super().__init__(parent)
         self._current_model = ""
         self._notes_data: dict = {}
+        self._raw_text = ""
 
         self._titleLabel = QLabel("Model Notes")
         self._titleLabel.setStyleSheet("font-size: 14px; font-weight: 600;")
@@ -98,22 +99,32 @@ class _ModelNotesCard(CardWidget):
         text = self._notes_data.get(model_name) if model_name else ""
         if not text:
             text = _default_template(model_name) if model_name else ""
-        self._textEdit.setPlainText(text)
-        self._textEdit.setReadOnly(True)
+        self._raw_text = text
         self._editBtn.setText("Edit")
+        self._showRendered()
+
+    def _showRendered(self) -> None:
+        """View mode: render the raw markdown source as formatted text."""
+        self._textEdit.setReadOnly(True)
+        self._textEdit.setMarkdown(self._raw_text)
+
+    def _showEditable(self) -> None:
+        """Edit mode: show the raw markdown source for editing."""
+        self._textEdit.setReadOnly(False)
+        self._textEdit.setPlainText(self._raw_text)
+        self._textEdit.setFocus()
 
     def _onEditSaveClicked(self) -> None:
         if self._textEdit.isReadOnly():
-            self._textEdit.setReadOnly(False)
             self._editBtn.setText("Save")
-            self._textEdit.setFocus()
+            self._showEditable()
         else:
-            text = self._textEdit.toPlainText()
+            self._raw_text = self._textEdit.toPlainText()
             if self._current_model:
-                self._notes_data[self._current_model] = text
+                self._notes_data[self._current_model] = self._raw_text
                 _save_notes(self._notes_data)
-            self._textEdit.setReadOnly(True)
             self._editBtn.setText("Edit")
+            self._showRendered()
 
 
 class _ModelInspectWorker(QThread):
