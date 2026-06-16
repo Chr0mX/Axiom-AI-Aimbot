@@ -296,8 +296,8 @@ class Config:
         self.aim_y_vel_restore_px_s: float = 0.0  # Restore full Y if target vy > this px/s (0=disabled)
 
         # Target priority scoring
-        self.target_priority_mode: str = "distance"       # "distance" | "confidence" | "composite"
-        self.target_priority_confidence_weight: float = 0.5  # Weight for confidence in composite mode
+        self.target_priority_mode: str = "composite"      # "distance" | "confidence" | "composite"
+        self.target_priority_confidence_weight: float = 0.75  # Weight for confidence in composite mode
 
         # Confidence box color theme
         self.box_color_theme: str = "default"  # "default" | "cyan" | "red" | "yellow" | "white" | "purple"

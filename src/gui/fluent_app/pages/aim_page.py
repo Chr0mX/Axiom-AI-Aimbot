@@ -534,6 +534,7 @@ class AimPage(BasePage):
         xPageLayout.addWidget(self.pidPxCard)
         xPageLayout.addWidget(self.pidIxCard)
         xPageLayout.addWidget(self.pidDxCard)
+        xPageLayout.addStretch(1)
 
         self.pidYPage = QWidget()
         yPageLayout = QVBoxLayout(self.pidYPage)
