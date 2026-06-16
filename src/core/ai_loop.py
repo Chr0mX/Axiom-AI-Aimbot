@@ -41,6 +41,10 @@ if TYPE_CHECKING:
     from .config import Config
 
 
+# EMA smoothing factor for latency stats (internal; not user-configurable).
+_LATENCY_STATS_ALPHA = 0.2
+
+
 def _probe_model_input_size(session, abs_model_path: str) -> int:
     """Return spatial H (=W) from a loaded ORT session, 0 if not determinable.
 
@@ -461,11 +465,20 @@ def ai_logic_loop(
                 capture_width, capture_height = get_capture_dimensions(config)
                 update_crosshair_position(config, capture_width // 2, capture_height // 2)
 
-                is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
-                _makcu_btn = getattr(config, 'makcu_aim_button', 'lmb')
+                _makcu_btn  = getattr(config, 'makcu_aim_button', 'lmb')
                 _makcu_mode = getattr(config, 'makcu_aim_mode', 'hold')
-                if _makcu_btn != 'off' \
-                        and getattr(config, 'mouse_move_method', '') == 'makcu':
+                _use_makcu  = (
+                    _makcu_btn != 'off'
+                    and getattr(config, 'mouse_move_method', '') == 'makcu'
+                )
+                if _use_makcu:
+                    # MAKCU mode: aim state driven purely by the stream button so
+                    # that AimKeys (which may include other mouse buttons) cannot
+                    # bleed through and fire aim on the wrong button.
+                    is_aiming = bool(getattr(config, 'always_aim', False))
+                else:
+                    is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
+                if _use_makcu:
                     try:
                         from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
                         if is_makcu_connected():
@@ -505,7 +518,6 @@ def ai_logic_loop(
 
                 if not config.AimToggle or (not config.keep_detecting and not is_aiming):
                     clear_queues(overlay_boxes_queue, overlay_confidences_queue)
-                    config.tracker_has_prediction = False
                     time.sleep(0.05)
                     continue
 
@@ -615,7 +627,6 @@ def ai_logic_loop(
                         confidences=confidences,
                     )
                 else:
-                    config.tracker_has_prediction = False
                     pid_x.reset()
                     pid_y.reset()
                     state.smooth_x = 0.0
@@ -635,7 +646,7 @@ def ai_logic_loop(
                 )
 
                 if getattr(config, 'enable_latency_stats', False):
-                    alpha = float(getattr(config, 'latency_stats_alpha', 0.2))
+                    alpha = _LATENCY_STATS_ALPHA
                     total_ms = (time.perf_counter() - loop_start) * 1000.0
                     cap_ms = (t0 - loop_start) * 1000.0
                     pre_ms = (t1 - t0) * 1000.0

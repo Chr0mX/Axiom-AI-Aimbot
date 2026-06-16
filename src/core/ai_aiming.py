@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 import random
 import time
@@ -28,6 +29,15 @@ def _box_iou(a: List[float], b: List[float]) -> float:
 
 # Module-level singletons — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
+
+# Jitter pattern iterator cache: reloaded whenever jitter_pattern_file changes.
+_jitter_pattern_cache: dict = {"file": None, "iter": None}
+
+
+def _load_jitter_pattern(path_str: str) -> list:
+    from pathlib import Path
+    from core.jitter_recorder import _load_pattern
+    return _load_pattern(Path(path_str))["frames"]
 _kalman: Optional[KalmanFilter2D] = None
 
 
@@ -232,9 +242,7 @@ def process_aiming(
             predictor = _get_predictor(config)
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
             target_x, target_y = predictor.update(target_x, target_y, time.perf_counter(), horizon_s)
-            config.tracker_has_prediction = True
         else:
-            config.tracker_has_prediction = False
             if _predictor is not None:
                 _predictor.reset()
 
@@ -278,12 +286,38 @@ def process_aiming(
 
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
 
+        # Track target Y velocity for the velocity-restore gate (independent of prediction_enabled)
+        if state.aim_y_last_target_t > 0:
+            _y_dt = current_time - state.aim_y_last_target_t
+            _vy = (target_y - state.aim_y_last_target_y) / _y_dt if _y_dt > 0 else 0.0
+        else:
+            _vy = 0.0
+        state.aim_y_last_target_y = target_y
+        state.aim_y_last_target_t = current_time
+
         if getattr(config, 'aim_y_reduce_enabled', False) and state.aiming_start_time > 0:
             aim_duration = current_time - state.aiming_start_time
             delay = getattr(config, 'aim_y_reduce_delay', 0.6)
-
             if aim_duration > delay:
-                dy = 0.0
+                suppress = True
+                # Error-based gate: skip suppression until crosshair has settled vertically
+                settle_px = float(getattr(config, 'aim_y_reduce_settle_px', 0.0))
+                if settle_px > 0 and abs(errorY) > settle_px:
+                    suppress = False
+                # Velocity-aware gate: restore full Y if target is moving vertically fast enough
+                if suppress:
+                    vel_restore = float(getattr(config, 'aim_y_vel_restore_px_s', 0.0))
+                    if vel_restore > 0 and abs(_vy) > vel_restore:
+                        suppress = False
+                if suppress:
+                    floor = float(getattr(config, 'aim_y_reduce_floor', 0.0))
+                    ramp = float(getattr(config, 'aim_y_reduce_ramp', 0.0))
+                    if ramp > 0:
+                        t_past = aim_duration - delay
+                        factor = 1.0 - min(1.0, t_past / ramp) * (1.0 - floor)
+                    else:
+                        factor = floor
+                    dy *= factor
 
         # Apply humanization layer (post-PID, pre-rounding, pre-injection).
         # Operates only on dx/dy; never touches PID state or coordinate space.
@@ -324,10 +358,31 @@ def process_aiming(
                 threshold_pct = float(getattr(config, 'smart_jitter_box_threshold_pct', 15.0))
                 if detect_size > 0 and (box_h / detect_size) * 100.0 < threshold_pct:
                     sj = max(0.0, float(getattr(config, 'smart_jitter_strength', 6.0)))
-                    angle = random.uniform(0, math.tau)
-                    r = random.uniform(0, sj)
-                    move_x += int(r * math.cos(angle))
-                    move_y += int(r * math.sin(angle))
+                    pattern_file = getattr(config, 'jitter_pattern_file', '')
+                    if pattern_file:
+                        cache = _jitter_pattern_cache
+                        if cache["file"] != pattern_file:
+                            try:
+                                frames = _load_jitter_pattern(pattern_file)
+                                cache["iter"] = itertools.cycle(frames)
+                                cache["file"] = pattern_file
+                            except Exception:
+                                cache["iter"] = None
+                                cache["file"] = None
+                        if cache["iter"]:
+                            f = next(cache["iter"])
+                            move_x += int(f["dx"])
+                            move_y += int(f["dy"])
+                        else:
+                            angle = random.uniform(0, math.tau)
+                            r = random.uniform(0, sj)
+                            move_x += int(r * math.cos(angle))
+                            move_y += int(r * math.sin(angle))
+                    else:
+                        angle = random.uniform(0, math.tau)
+                        r = random.uniform(0, sj)
+                        move_x += int(r * math.cos(angle))
+                        move_y += int(r * math.sin(angle))
 
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)
@@ -347,5 +402,7 @@ def process_aiming(
             config.display_locked_box_is_decaying = False
         pid_x.reset()
         pid_y.reset()
+        state.aim_y_last_target_y = 0.0
+        state.aim_y_last_target_t = 0.0
         if _kalman is not None:
             _kalman.reset()

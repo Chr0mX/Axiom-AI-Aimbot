@@ -232,6 +232,99 @@ class TestMakcuMouseClick:
 
 
 # ============================================================
+# 1b. 按鍵事件流解析測試 (_stream_reader)
+# ============================================================
+
+class _FakeStreamSerial:
+    """Minimal serial stand-in that feeds a fixed byte payload once, then
+    signals the reader thread to stop so _stream_reader() returns."""
+
+    def __init__(self, payload, stop_event):
+        self._data = bytearray(payload)
+        self.is_open = True
+        self._stop = stop_event
+
+    @property
+    def in_waiting(self):
+        return len(self._data)
+
+    def read(self, n):
+        chunk = bytes(self._data[:n])
+        del self._data[:n]
+        if not self._data:
+            self._stop.set()  # drained — let the reader loop exit
+        return chunk
+
+
+def _run_stream(payload):
+    """Drive _stream_reader() over `payload` and return the final _btn_mask."""
+    from win_utils.makcu_mouse import MakcuMouse
+    m = MakcuMouse()
+    m._serial = _FakeStreamSerial(payload, m._stream_stop)
+    m._stream_reader()
+    return m
+
+
+def _frame(lo, hi=0x00):
+    from win_utils.makcu_mouse import _KM_PREFIX
+    return bytes(_KM_PREFIX) + bytes([lo, hi])
+
+
+class TestMakcuStreamReader:
+    """測試 km.buttons 事件流的 2-byte LE 解析與按鍵位元遮罩"""
+
+    def test_real_lmb_press_parses(self):
+        """km. + 01 00 → 左鍵按下"""
+        m = _run_stream(_frame(0x01))
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
+        assert m.rmb_held is False
+
+    def test_release_parses(self):
+        """km. + 00 00 → 全部放開"""
+        m = _run_stream(_frame(0x01) + _frame(0x00))
+        assert m._btn_mask == 0x00
+        assert m.lmb_held is False
+
+    def test_rmb_press_parses(self):
+        """km. + 02 00 → 右鍵按下，不誤報左鍵"""
+        m = _run_stream(_frame(0x02))
+        assert m._btn_mask == 0x02
+        assert m.lmb_held is False
+        assert m.rmb_held is True
+
+    def test_high_byte_noise_masked_off(self):
+        """高位元組雜訊應被 _BTN_BITS 遮罩，僅保留真實按鍵位元"""
+        # mask LO=0x02 (R), HI=0xFF (noise) → only 0x02 survives
+        m = _run_stream(_frame(0x02, 0xFF))
+        assert m._btn_mask == 0x02
+        assert m.rmb_held is True
+        assert m.lmb_held is False
+
+    def test_scroll_byte_cannot_fake_lmb(self):
+        """滾輪位元組 (0xFF) 落入遮罩位置時不得偽造任何按鍵以外的位元。
+
+        即使一個失步的 0xFF 進入 LO，遮罩後僅 0x1F 存活；關鍵在於放開幀
+        (00 00) 之後 lmb_held 必須回到 False，不像舊解析會殘留 bit 0。
+        """
+        # A full release frame after any prior state must clear LMB.
+        m = _run_stream(_frame(0x01) + _frame(0x00))
+        assert m.lmb_held is False
+
+    def test_last_frame_wins_in_batch(self):
+        """同一次讀取含多幀時，最後一幀為最終狀態"""
+        m = _run_stream(_frame(0x01) + _frame(0x03) + _frame(0x00))
+        assert m._btn_mask == 0x00
+
+    def test_partial_frame_not_consumed(self):
+        """不足一幀 (5 bytes) 的資料不應更新狀態"""
+        from win_utils.makcu_mouse import _KM_PREFIX
+        # only km. + 1 mask byte = 4 bytes, missing the HI byte
+        m = _run_stream(bytes(_KM_PREFIX) + bytes([0x01]))
+        assert m._btn_mask == 0x00  # untouched — never reached FRAME_LEN
+
+
+# ============================================================
 # 2. 模組級便利函式測試
 # ============================================================
 

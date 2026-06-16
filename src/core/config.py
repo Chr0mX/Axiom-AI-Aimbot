@@ -19,6 +19,186 @@ def _get_screen_size() -> tuple[int, int]:
     return user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 
 
+_MISSING = object()
+
+# One-time app state — persisted to state.json, NOT config.json.
+STATE_FIELDS = ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_once')
+
+# Single source of truth for the grouped (v2) schema: maps each flat Config
+# attribute to its dotted path in the nested JSON. Drives to_dict() and from_dict().
+# Fields intentionally absent (never persisted): runtime-derived (current_provider),
+# auto-detected (model_input_size), derived (uvc_resolution), constants
+# (uvc_window_name, latency_stats_alpha), state (see STATE_FIELDS), and the
+# specially-handled crosshair color triplet + humanization dataclass.
+_FIELD_MAP = {
+    # --- model ---
+    'model_path':                 'model.path',
+    'inference_backend':          'model.backend',
+    'dml_cpu_fallback':           'model.dml_cpu_fallback',
+    'trt_fp16_enabled':           'model.trt_fp16_enabled',
+
+    # --- capture ---
+    'screenshot_method':          'capture.screenshot_method',
+    'uvc_device_index':           'capture.uvc.device_index',
+    'uvc_width':                  'capture.uvc.width',
+    'uvc_height':                 'capture.uvc.height',
+    'uvc_fps':                    'capture.uvc.fps',
+    'uvc_capture_method':         'capture.uvc.capture_method',
+    'ndi_source_name':            'capture.ndi.source_name',
+    'ndi_bandwidth':              'capture.ndi.bandwidth',
+    'uvc_show_window':            'capture.preview.enabled',
+    'uvc_preview_scale_mode':     'capture.preview.scale_mode',
+    'uvc_always_on_top':          'capture.preview.always_on_top',
+    'preview_crop_to_detection':  'capture.preview.crop_to_detection',
+
+    # --- aim ---
+    'fov_size':                   'aim.fov_size',
+    'detect_range_size':          'aim.detect_range_size',
+    'min_confidence':             'aim.min_confidence',
+    'aim_part':                   'aim.aim_part',
+    'AimKeys':                    'aim.aim_keys',
+    'aim_toggle_key':             'aim.aim_toggle_key',
+    'AimToggle':                  'aim.aim_toggle',
+    'always_aim':                 'aim.always_aim',
+    'keep_detecting':             'aim.keep_detecting',
+    'single_target_mode':         'aim.single_target_mode',
+    'fov_follow_mouse':           'aim.fov_follow_mouse',
+    'fov_circle_filter_enabled':  'aim.fov_circle_filter_enabled',
+    'max_move_per_frame_px':      'aim.max_move_per_frame_px',
+    'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
+    'pid_kp_x':                   'aim.pid.x.kp',
+    'pid_ki_x':                   'aim.pid.x.ki',
+    'pid_kd_x':                   'aim.pid.x.kd',
+    'pid_kp_y':                   'aim.pid.y.kp',
+    'pid_ki_y':                   'aim.pid.y.ki',
+    'pid_kd_y':                   'aim.pid.y.kd',
+    'aim_y_reduce_enabled':       'aim.y_reduce.enabled',
+    'aim_y_reduce_delay':         'aim.y_reduce.delay',
+    'aim_y_reduce_floor':         'aim.y_reduce.floor',
+    'aim_y_reduce_ramp':          'aim.y_reduce.ramp',
+    'aim_y_reduce_settle_px':     'aim.y_reduce.settle_px',
+    'aim_y_vel_restore_px_s':     'aim.y_reduce.vel_restore_px_s',
+    'kalman_enabled':             'aim.kalman.enabled',
+    'kalman_process_noise':       'aim.kalman.process_noise',
+    'kalman_measurement_noise':   'aim.kalman.measurement_noise',
+    'ema_enabled':                'aim.ema.enabled',
+    'ema_alpha':                  'aim.ema.alpha',
+    'jitter_enabled':             'aim.jitter.enabled',
+    'jitter_strength':            'aim.jitter.strength',
+    'smart_jitter_enabled':       'aim.smart_jitter.enabled',
+    'smart_jitter_strength':      'aim.smart_jitter.strength',
+    'smart_jitter_box_threshold_pct': 'aim.smart_jitter.box_threshold_pct',
+    'smart_jitter_lmb_gate':      'aim.smart_jitter.lmb_gate',
+    'jitter_pattern_file':        'aim.smart_jitter.pattern_file',
+    'aim_deadzone_enabled':       'aim.deadzone.enabled',
+    'aim_deadzone_min_px':        'aim.deadzone.min_px',
+    'aim_deadzone_close_px':      'aim.deadzone.close_px',
+    'aim_lateral_brake_enabled':  'aim.lateral_brake.enabled',
+    'aim_lateral_brake_strength': 'aim.lateral_brake.strength',
+    'aim_lateral_brake_dom_trigger': 'aim.lateral_brake.dom_trigger',
+    'aim_lateral_brake_dom_max':  'aim.lateral_brake.dom_max',
+    'aim_lateral_brake_min_scale': 'aim.lateral_brake.min_scale',
+    'head_width_ratio':           'aim.target_area.head_width_ratio',
+    'head_height_ratio':          'aim.target_area.head_height_ratio',
+    'body_width_ratio':           'aim.target_area.body_width_ratio',
+
+    # --- autofire ---
+    'auto_fire_key':              'autofire.key',
+    'auto_fire_key2':             'autofire.key2',
+    'always_auto_fire':           'autofire.always',
+    'auto_fire_delay':            'autofire.delay',
+    'auto_fire_interval':         'autofire.interval',
+    'auto_fire_target_part':      'autofire.target_part',
+
+    # --- tracking ---
+    'prediction_enabled':         'tracking.prediction.enabled',
+    'prediction_horizon_ms':      'tracking.prediction.horizon_ms',
+    'prediction_max_velocity':    'tracking.prediction.max_velocity',
+    'prediction_history_len':     'tracking.prediction.history_len',
+    'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
+    'lock_decay_frames':          'tracking.sticky_lock.decay_frames',
+    'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
+    'sticky_adaptive_iou':        'tracking.sticky_lock.adaptive_iou',
+    'target_priority_mode':       'tracking.target_priority.mode',
+    'target_priority_confidence_weight': 'tracking.target_priority.confidence_weight',
+
+    # --- performance ---
+    'thread_priority':            'performance.thread_priority',
+    'performance_mode':           'performance.performance_mode',
+    'max_queue_size':             'performance.max_queue_size',
+    'cuda_io_binding_enabled':    'performance.cuda_io_binding_enabled',
+    'skip_letterbox':             'performance.skip_letterbox',
+    'detect_interval':            'performance.timing.detect_interval',
+    'screenshot_interval':        'performance.timing.capture_interval',
+    'idle_detect_interval':       'performance.timing.idle_interval',
+    'idle_detect_enabled':        'performance.timing.idle_enabled',
+    'frame_skip_enabled':         'performance.frame_skip.enabled',
+    'frame_skip_threshold':       'performance.frame_skip.threshold',
+    'enable_latency_stats':       'performance.latency_stats.enabled',
+    'latency_stats_interval':     'performance.latency_stats.interval',
+
+    # --- display ---
+    'show_fov':                   'display.show_fov',
+    'show_boxes':                 'display.show_boxes',
+    'show_detect_range':          'display.show_detect_range',
+    'show_confidence':            'display.show_confidence',
+    'show_tracer_line':           'display.show_tracer_line',
+    'box_color_theme':            'display.box_color_theme',
+    'chroma_box_speed':           'display.chroma_box_speed',
+    'show_status_panel':          'display.status_panel.show',
+    'status_panel_show_auto_aim': 'display.status_panel.show_auto_aim',
+    'status_panel_show_model':    'display.status_panel.show_model',
+    'status_panel_show_mouse_move': 'display.status_panel.show_mouse_move',
+    'status_panel_show_mouse_click': 'display.status_panel.show_mouse_click',
+    'status_panel_show_screenshot_method': 'display.status_panel.show_screenshot_method',
+    'status_panel_show_screenshot_fps': 'display.status_panel.show_screenshot_fps',
+    'status_panel_show_detection_fps': 'display.status_panel.show_detection_fps',
+    'show_crosshair':             'display.crosshair.show',
+    'crosshair_style':            'display.crosshair.style',
+    'crosshair_size':             'display.crosshair.size',
+
+    # --- hardware ---
+    'mouse_move_method':          'hardware.mouse_move_method',
+    'mouse_click_method':         'hardware.mouse_click_method',
+    'arduino_com_port':           'hardware.devices.arduino.port',
+    'arduino_baud_rate':          'hardware.devices.arduino.baud_rate',
+    'makcu_com_port':             'hardware.devices.makcu.port',
+    'makcu_baud_rate':            'hardware.devices.makcu.baud_rate',
+    'makcu_aim_button':           'hardware.makcu.aim_button',
+    'makcu_aim_mode':             'hardware.makcu.aim_mode',
+    'makcu_disengage_delay':      'hardware.makcu.disengage_delay',
+    'xbox_sensitivity':           'hardware.xbox.sensitivity',
+    'xbox_deadzone':              'hardware.xbox.deadzone',
+    'xbox_auto_connect':          'hardware.xbox.auto_connect',
+
+    # --- ui ---
+    'dark_mode':                  'ui.dark_mode',
+    'enable_acrylic':             'ui.enable_acrylic',
+    'acrylic_window_alpha':       'ui.acrylic_window_alpha',
+    'acrylic_element_alpha':      'ui.acrylic_element_alpha',
+    'show_console':               'ui.show_console',
+}
+
+
+def _set_path(d: Dict[str, Any], path: str, value: Any) -> None:
+    """Set a nested dict value from a dotted path, creating intermediate dicts."""
+    keys = path.split('.')
+    node = d
+    for k in keys[:-1]:
+        node = node.setdefault(k, {})
+    node[keys[-1]] = value
+
+
+def _get_path(d: Dict[str, Any], path: str) -> Any:
+    """Read a nested dict value from a dotted path; returns _MISSING if absent."""
+    node = d
+    for k in path.split('.'):
+        if not isinstance(node, dict) or k not in node:
+            return _MISSING
+        node = node[k]
+    return node
+
+
 class Config:
     """Main configuration class - All configuration items for Axiom
     
@@ -35,6 +215,8 @@ class Config:
     """
     
     def __init__(self) -> None:
+        self.config_version: int = 2
+
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
         
@@ -47,13 +229,13 @@ class Config:
         self.uvc_height: int = self.height
         self.uvc_fps: int = 60
         self.uvc_capture_method: str = "msmf"
-        self.uvc_resolution: str = f"{self.uvc_width}x{self.uvc_height}"
         self.uvc_show_window: bool = True
-        self.uvc_window_name: str = "Axiom UVC Preview"
         self.uvc_preview_scale_mode: str = "scale_to_fit"
+        self.uvc_always_on_top: bool = True
         self.preview_crop_to_detection: bool = False
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
+        self.ndi_force_reconnect: bool = False
         self.ndi_width: int = self.width
         self.ndi_height: int = self.height
         self.crosshairX: int = self.width // 2
@@ -87,20 +269,6 @@ class Config:
         # Single target mode
         self.single_target_mode: bool = True  # 啟用單一目標模式（只瞄準置信度最高的目標）
         
-        # Smart tracking prediction settings (replaces Kalman)
-        self.tracker_enabled: bool = False          # SmartTracker removed; kept for config compatibility
-        self.tracker_prediction_time: float = 0.025   # Prediction time (seconds)
-        self.tracker_smoothing_factor: float = 0.66   # Velocity smoothing factor (0~1)
-        self.tracker_stop_threshold: float = 10.0    # Low speed zeroing threshold (pixels/sec)
-        self.tracker_show_prediction: bool = True    # Show prediction visualization
-
-        # Tracker prediction data (updated by ai_loop, read by overlay)
-        self.tracker_predicted_x: float = 0.0        # Predicted X coordinate
-        self.tracker_predicted_y: float = 0.0        # Predicted Y coordinate
-        self.tracker_current_x: float = 0.0          # Current observed X coordinate
-        self.tracker_current_y: float = 0.0          # Current observed Y coordinate
-        self.tracker_has_prediction: bool = False    # Whether a valid prediction exists
-
         # Disclaimer agreement status
         self.disclaimer_agreed: bool = False 
 
@@ -123,10 +291,14 @@ class Config:
         # Y軸壓槍速度逐漸歸零
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能
         self.aim_y_reduce_delay: float = 0.6      # 按下瞄準鍵後多久開始歸零 (秒)
+        self.aim_y_reduce_floor: float = 0.0      # Minimum Y multiplier after ramp (0.0=full cut, 1.0=no suppression)
+        self.aim_y_reduce_ramp: float = 0.0       # Seconds to ramp from 1.0 → floor (0=instant, backwards compat)
+        self.aim_y_reduce_settle_px: float = 0.0  # Skip suppression if |errorY| > this px (0=disabled)
+        self.aim_y_vel_restore_px_s: float = 0.0  # Restore full Y if target vy > this px/s (0=disabled)
 
         # Target priority scoring
-        self.target_priority_mode: str = "distance"       # "distance" | "confidence" | "composite"
-        self.target_priority_confidence_weight: float = 0.5  # Weight for confidence in composite mode
+        self.target_priority_mode: str = "composite"      # "distance" | "confidence" | "composite"
+        self.target_priority_confidence_weight: float = 0.75  # Weight for confidence in composite mode
 
         # Confidence box color theme
         self.box_color_theme: str = "default"  # "default" | "cyan" | "red" | "yellow" | "white" | "purple"
@@ -223,11 +395,6 @@ class Config:
         self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
         self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier
 
-        # Bezier curve mouse movement
-        self.bezier_curve_enabled: bool = False
-        self.bezier_curve_strength: float = 0.5   # 0.0–1.0 curve bend amount
-        self.bezier_curve_steps: int = 10          # 2–20 interpolation steps
-
         # Basic jitter
         self.jitter_enabled: bool = False
         self.jitter_strength: float = 1.5          # pixel offset radius
@@ -241,6 +408,7 @@ class Config:
         self.smart_jitter_strength: float = 6.0                # max pixel offset radius applied each frame
         self.smart_jitter_box_threshold_pct: float = 15.0   # box_h / detect_range_size < threshold% → jitter
         self.smart_jitter_lmb_gate: bool = True             # only jitter while aim key is held
+        self.jitter_pattern_file: str = ""                  # path to recorded .json; empty = procedural
 
         # EMA 瞄準點平滑（在 PID 前平滑目標座標）
         self.ema_enabled: bool = False
@@ -282,7 +450,6 @@ class Config:
         # 延遲/性能統計（預設關閉，避免輸出干擾）
         self.enable_latency_stats: bool = False
         self.latency_stats_interval: float = 1.0  # 秒
-        self.latency_stats_alpha: float = 0.2     # EMA 平滑係數 (0~1)
 
         # 供統計使用的時間戳（由不同線程更新）
         self.last_screenshot_time: float = 0.0
@@ -306,209 +473,103 @@ class Config:
         self.humanization: HumanizationConfig = HumanizationConfig()
     
     def to_dict(self) -> Dict[str, Any]:
-        """將可儲存的配置轉為字典"""
-        return {
-            'fov_size': self.fov_size,
-            'detect_range_size': self.detect_range_size,
-            'model_path': self.model_path,
-            'model_input_size': self.model_input_size,
-            'current_provider': self.current_provider,
-            'inference_backend': self.inference_backend,
-            'thread_priority': self.thread_priority,
-            'ndi_installer_ran_once': self.ndi_installer_ran_once,
-            'dml_cpu_fallback': self.dml_cpu_fallback,
-            'pid_kp_x': self.pid_kp_x,
-            'pid_ki_x': self.pid_ki_x,
-            'pid_kd_x': self.pid_kd_x,
-            'pid_kp_y': self.pid_kp_y,
-            'pid_ki_y': self.pid_ki_y,
-            'pid_kd_y': self.pid_kd_y,
-            'aim_y_reduce_enabled': self.aim_y_reduce_enabled,
-            'aim_y_reduce_delay': self.aim_y_reduce_delay,
-            'aim_part': self.aim_part,
-            'AimKeys': self.AimKeys,
-            'auto_fire_key': self.auto_fire_key,
-            'always_auto_fire': self.always_auto_fire,
-            'auto_fire_delay': self.auto_fire_delay,
-            'auto_fire_interval': self.auto_fire_interval,
-            'auto_fire_target_part': self.auto_fire_target_part,
-            'min_confidence': self.min_confidence,
-            'show_confidence': self.show_confidence,
-            'detect_interval': self.detect_interval,
-            'screenshot_interval': self.screenshot_interval,
-            'idle_detect_interval': self.idle_detect_interval,
-            'idle_detect_enabled': self.idle_detect_enabled,
-            'screenshot_method': self.screenshot_method,
-            'uvc_device_index': self.uvc_device_index,
-            'uvc_width': self.uvc_width,
-            'uvc_height': self.uvc_height,
-            'uvc_fps': self.uvc_fps,
-            'uvc_capture_method': self.uvc_capture_method,
-            'uvc_resolution': self.uvc_resolution,
-            'uvc_show_window': self.uvc_show_window,
-            'uvc_window_name': self.uvc_window_name,
-            'uvc_preview_scale_mode': self.uvc_preview_scale_mode,
-            'preview_crop_to_detection': self.preview_crop_to_detection,
-            'ndi_source_name': self.ndi_source_name,
-            'ndi_bandwidth': self.ndi_bandwidth,
-            'keep_detecting': self.keep_detecting,
-            'always_aim': self.always_aim,
-            'makcu_aim_button': self.makcu_aim_button,
-            'makcu_aim_mode': self.makcu_aim_mode,
-            'makcu_disengage_delay': self.makcu_disengage_delay,
-            'fov_follow_mouse': self.fov_follow_mouse,
-            'aim_toggle_key': self.aim_toggle_key,
-            'auto_fire_key2': self.auto_fire_key2,
-            'AimToggle': self.AimToggle,
-            'show_fov': self.show_fov,
-            'show_boxes': self.show_boxes,
-            'show_detect_range': self.show_detect_range,
-            'show_status_panel': self.show_status_panel,
-            'status_panel_show_auto_aim': self.status_panel_show_auto_aim,
-            'status_panel_show_model': self.status_panel_show_model,
-            'status_panel_show_mouse_move': self.status_panel_show_mouse_move,
-            'status_panel_show_mouse_click': self.status_panel_show_mouse_click,
-            'status_panel_show_screenshot_method': self.status_panel_show_screenshot_method,
-            'status_panel_show_screenshot_fps': self.status_panel_show_screenshot_fps,
-            'status_panel_show_detection_fps': self.status_panel_show_detection_fps,
-            'single_target_mode': self.single_target_mode,
-            'head_width_ratio': self.head_width_ratio,
-            'head_height_ratio': self.head_height_ratio,
-            'body_width_ratio': self.body_width_ratio,
-            'performance_mode': self.performance_mode,
-            'max_queue_size': self.max_queue_size,
-            'enable_latency_stats': self.enable_latency_stats,
-            'latency_stats_interval': self.latency_stats_interval,
-            'latency_stats_alpha': self.latency_stats_alpha,
+        """Serialize persisted config into the grouped (v2) JSON schema.
 
-            'mouse_move_method': self.mouse_move_method,
-            'mouse_click_method': self.mouse_click_method,
-            'arduino_com_port': self.arduino_com_port,
-            'makcu_com_port': self.makcu_com_port,
-            'makcu_baud_rate': self.makcu_baud_rate,
-            'arduino_baud_rate': self.arduino_baud_rate,
-            'xbox_sensitivity': self.xbox_sensitivity,
-            'xbox_deadzone': self.xbox_deadzone,
-            'xbox_auto_connect': self.xbox_auto_connect,
-            'show_console': self.show_console,
+        State flags (STATE_FIELDS) are written to state.json instead and are
+        intentionally excluded here.
+        """
+        out: Dict[str, Any] = {'config_version': self.config_version}
+        for attr, path in _FIELD_MAP.items():
+            _set_path(out, path, getattr(self, attr))
+        # Crosshair RGB triplet → single [r, g, b] array.
+        _set_path(out, 'display.crosshair.color',
+                  [self.crosshair_color_r, self.crosshair_color_g, self.crosshair_color_b])
+        out['humanization'] = dataclasses.asdict(self.humanization)
+        return out
 
-            'trt_fp16_enabled': self.trt_fp16_enabled,
-            'cuda_io_binding_enabled': self.cuda_io_binding_enabled,
-            'skip_letterbox': self.skip_letterbox,
-
-            'kalman_enabled': self.kalman_enabled,
-            'kalman_process_noise': self.kalman_process_noise,
-            'kalman_measurement_noise': self.kalman_measurement_noise,
-
-            'bezier_curve_enabled': self.bezier_curve_enabled,
-            'bezier_curve_strength': self.bezier_curve_strength,
-            'bezier_curve_steps': self.bezier_curve_steps,
-            'jitter_enabled': self.jitter_enabled,
-            'jitter_strength': self.jitter_strength,
-            'frame_skip_enabled': self.frame_skip_enabled,
-            'frame_skip_threshold': self.frame_skip_threshold,
-            'smart_jitter_enabled': self.smart_jitter_enabled,
-            'smart_jitter_strength': self.smart_jitter_strength,
-            'smart_jitter_box_threshold_pct': self.smart_jitter_box_threshold_pct,
-            'smart_jitter_lmb_gate': self.smart_jitter_lmb_gate,
-
-            'ema_enabled': self.ema_enabled,
-            'ema_alpha': self.ema_alpha,
-            'prediction_enabled': self.prediction_enabled,
-            'prediction_horizon_ms': self.prediction_horizon_ms,
-            'prediction_max_velocity': self.prediction_max_velocity,
-            'prediction_history_len': self.prediction_history_len,
-
-            'sticky_lock_enabled': self.sticky_lock_enabled,
-            'lock_decay_frames': self.lock_decay_frames,
-            'lock_iou_threshold': self.lock_iou_threshold,
-            'sticky_adaptive_iou': self.sticky_adaptive_iou,
-
-            'fov_circle_filter_enabled': self.fov_circle_filter_enabled,
-
-            'aim_deadzone_enabled': self.aim_deadzone_enabled,
-            'aim_deadzone_min_px': self.aim_deadzone_min_px,
-            'aim_deadzone_close_px': self.aim_deadzone_close_px,
-            'aim_lateral_brake_enabled': self.aim_lateral_brake_enabled,
-            'aim_lateral_brake_strength': self.aim_lateral_brake_strength,
-            'aim_lateral_brake_dom_trigger': self.aim_lateral_brake_dom_trigger,
-            'aim_lateral_brake_dom_max': self.aim_lateral_brake_dom_max,
-            'aim_lateral_brake_min_scale': self.aim_lateral_brake_min_scale,
-            'max_move_per_frame_px': self.max_move_per_frame_px,
-
-            'detect_semantic_filter_enabled': self.detect_semantic_filter_enabled,
-
-            'target_priority_mode': self.target_priority_mode,
-            'target_priority_confidence_weight': self.target_priority_confidence_weight,
-
-            'box_color_theme': self.box_color_theme,
-            'chroma_box_speed': self.chroma_box_speed,
-            'show_tracer_line': self.show_tracer_line,
-
-            'show_crosshair': self.show_crosshair,
-            'crosshair_style': self.crosshair_style,
-            'crosshair_color_r': self.crosshair_color_r,
-            'crosshair_color_g': self.crosshair_color_g,
-            'crosshair_color_b': self.crosshair_color_b,
-            'crosshair_size': self.crosshair_size,
-            'disclaimer_agreed': self.disclaimer_agreed,
-            'first_run_complete': self.first_run_complete,
-
-            'tracker_enabled': self.tracker_enabled,
-            'tracker_prediction_time': self.tracker_prediction_time,
-            'tracker_smoothing_factor': self.tracker_smoothing_factor,
-            'tracker_stop_threshold': self.tracker_stop_threshold,
-            'tracker_show_prediction': self.tracker_show_prediction,
-
-            'dark_mode': self.dark_mode,
-
-            'enable_acrylic': self.enable_acrylic,
-            'acrylic_window_alpha': self.acrylic_window_alpha,
-            'acrylic_element_alpha': self.acrylic_element_alpha,
-
-            'humanization': dataclasses.asdict(self.humanization),
-        }
-    
     def from_dict(self, data: Dict[str, Any]) -> None:
-        """從字典載入配置"""
-        for key, value in data.items():
-            if key == 'humanization' and isinstance(value, dict):
-                # Update the dataclass fields in-place rather than replacing the object,
-                # so unknown/future keys in the JSON are ignored gracefully.
-                for hk, hv in value.items():
-                    if hasattr(self.humanization, hk):
-                        setattr(self.humanization, hk, hv)
-            elif hasattr(self, key):
-                setattr(self, key, value)
+        """Load config from either the grouped (v2) or legacy flat (v1) JSON.
+
+        Each field is read from its nested path first, then falls back to the
+        flat key — so old flat config.json files load transparently (the
+        dual-read is the migration).
+        """
+        for attr, path in _FIELD_MAP.items():
+            val = _get_path(data, path)
+            if val is _MISSING:
+                val = data.get(attr, _MISSING)  # legacy flat fallback
+            if val is not _MISSING and hasattr(self, attr):
+                setattr(self, attr, val)
+
+        # Crosshair color: nested [r, g, b], else legacy flat r/g/b.
+        color = _get_path(data, 'display.crosshair.color')
+        if isinstance(color, (list, tuple)) and len(color) >= 3:
+            self.crosshair_color_r = int(color[0])
+            self.crosshair_color_g = int(color[1])
+            self.crosshair_color_b = int(color[2])
+        else:
+            for k in ('crosshair_color_r', 'crosshair_color_g', 'crosshair_color_b'):
+                if k in data:
+                    setattr(self, k, data[k])
+
+        # Legacy flat state fields (back-compat; canonical source is state.json).
+        for f in STATE_FIELDS:
+            if f in data and hasattr(self, f):
+                setattr(self, f, data[f])
+
+        # Humanization dataclass — update in place, ignore unknown keys.
+        hud = data.get('humanization')
+        if isinstance(hud, dict):
+            for hk, hv in hud.items():
+                if hasattr(self.humanization, hk):
+                    setattr(self.humanization, hk, hv)
+
+
+def _state_path_for(config_path: str) -> str:
+    """Return the state.json path that lives alongside the given config file."""
+    return os.path.join(os.path.dirname(config_path), 'state.json')
+
+
+def save_state(config_instance: Config, filepath: str = 'state.json') -> bool:
+    """Persist one-time app state (STATE_FIELDS) to state.json."""
+    try:
+        data = {f: getattr(config_instance, f) for f in STATE_FIELDS}
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        return True
+    except (OSError, TypeError, ValueError) as e:
+        print(f"狀態儲存失敗: {e}")
+        return False
+
+
+def load_state(config_instance: Config, filepath: str = 'state.json') -> bool:
+    """Load one-time app state from state.json (overrides any inline values)."""
+    if not os.path.exists(filepath):
+        return False
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        for f_name in STATE_FIELDS:
+            if f_name in data and hasattr(config_instance, f_name):
+                setattr(config_instance, f_name, data[f_name])
+        return True
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"狀態載入失敗: {e}")
+        return False
 
 
 def save_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     """
     將配置儲存到 JSON 檔案
-    
-    Args:
-        config_instance: Config 實例
-        filepath: 儲存路徑
-        
-    Returns:
-        是否成功儲存
+
+    Writes the grouped (v2) schema via to_dict() — no stale keys survive. One-time
+    app state goes to state.json, and language preference to language.json, so
+    config.json holds only user settings.
     """
     try:
-        # 先讀取現有的 config.json，保留不在 Config 類中的欄位（如 language）
-        existing_data = {}
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                existing_data = {}
-        
-        # 將新的配置資料合併到現有資料上（新值覆蓋舊值，但保留額外欄位）
-        data = config_instance.to_dict()
-        existing_data.update(data)
-        
         with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(existing_data, f, ensure_ascii=False, indent=2)
+            json.dump(config_instance.to_dict(), f, ensure_ascii=False, indent=2)
+        save_state(config_instance, _state_path_for(filepath))
         print("設定已儲存")
         return True
     except OSError as e:
@@ -517,6 +578,20 @@ def save_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     except (TypeError, ValueError) as e:
         print(f"設定儲存失敗 (序列化錯誤): {e}")
         return False
+
+
+def _migrate_config(data: dict) -> dict:
+    """Apply forward migrations keyed by config_version.
+
+    When a field is renamed or removed, add a block here and bump
+    config_version in Config.__init__. The migrated dict is passed to
+    from_dict(), so field names must match the current schema on exit.
+    """
+    # Example (not yet needed):
+    # if data.get('config_version', 0) < 2:
+    #     data['new_field'] = data.pop('old_field', default_value)
+    #     data['config_version'] = 2
+    return data
 
 
 def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
@@ -533,9 +608,13 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
+
+        data = _migrate_config(data)
         config_instance.from_dict(data)
-        
+
+        # One-time app state lives in state.json (overrides any legacy inline values).
+        load_state(config_instance, _state_path_for(filepath))
+
         # 向後兼容：確保檢測間隔在合理範圍內 (1-100ms)
         _validate_detect_interval(config_instance)
 
@@ -563,6 +642,7 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
         
     except FileNotFoundError:
         print("未找到設定檔，使用預設值")
+        load_state(config_instance, _state_path_for(filepath))  # state.json may persist independently
         return False
     except json.JSONDecodeError as e:
         print(f"設定載入失敗 (JSON 格式錯誤): {e}")

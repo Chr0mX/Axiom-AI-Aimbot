@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import subprocess
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox, QInputDialog
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import Qt
 from qfluentwidgets import (
@@ -31,6 +31,8 @@ class AimPage(BasePage):
         self._isLoadingConfig = False
         self._isArduinoConnected = False
         self._isXboxConnected = False
+        self._jitterRecorder = None
+        self._jitterRecording = False
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -282,21 +284,57 @@ class AimPage(BasePage):
             parent=self.pidGroup
         )
 
+        self.pidYReduceFloorCard = SliderLabelCard(
+            FluentIcon.CARE_DOWN_SOLID,
+            "Y Floor",
+            0, 100,
+            format_func=lambda v: f"{v/100:.2f}",
+            description="Min Y multiplier after ramp — 0.00 = full cut, 1.00 = no suppression",
+            parent=self.pidGroup
+        )
+
+        self.pidYReduceRampCard = SliderLabelCard(
+            FluentIcon.STOP_WATCH,
+            "Y Ramp Window",
+            0, 200,
+            format_func=lambda v: f"{v/100:.2f} s",
+            description="Time to fade 1.0 → floor after delay (0 = instant cut)",
+            parent=self.pidGroup
+        )
+
+        self.pidYReduceSettleCard = SliderLabelCard(
+            FluentIcon.ALIGNMENT,
+            "Y Settle Threshold",
+            0, 50,
+            format_func=lambda v: "Off" if v == 0 else f"{v} px",
+            description="Skip suppression while vertical error > this — waits until aim is settled (0 = off)",
+            parent=self.pidGroup
+        )
+
+        self.pidYReduceVelCard = SliderLabelCard(
+            FluentIcon.SPEED_MEDIUM,
+            "Y Velocity Restore",
+            0, 500,
+            format_func=lambda v: "Off" if v == 0 else f"{v} px/s",
+            description="Restore full Y tracking if target moves vertically faster than this (0 = off)",
+            parent=self.pidGroup
+        )
+
         # === Anti-Detection (Smart Jitter only) ===
-        self.antiDetectionGroup = SettingCardGroup(t("anti_detection", "Anti-Detection"), self.scrollWidget)
+        self.antiRecoilGroup = SettingCardGroup(t("anti_recoil", "Anti-Recoil"), self.scrollWidget)
 
         self.smartJitterEnableCard = SwitchSettingCard(
             FluentIcon.MOVE,
             t("smart_jitter_label", "Smart Jitter"),
             t("smart_jitter_desc", "Add jitter when target box is small (far targets). Fires while shooting."),
-            parent=self.antiDetectionGroup
+            parent=self.antiRecoilGroup
         )
 
         self.smartJitterLmbCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
             t("smart_jitter_lmb_label", "Only While Shooting (LMB Held)"),
             t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"),
-            parent=self.antiDetectionGroup
+            parent=self.antiRecoilGroup
         )
 
         self.smartJitterStrengthSpin = DoubleSpinBox()
@@ -309,7 +347,7 @@ class AimPage(BasePage):
             FluentIcon.SPEED_HIGH,
             t("smart_jitter_level_label", "Jitter Strength"),
             t("smart_jitter_level_desc", "Max pixel offset radius applied per frame while jitter fires"),
-            self.antiDetectionGroup
+            self.antiRecoilGroup
         )
         self.smartJitterLevelCard.hBoxLayout.addWidget(self.smartJitterStrengthSpin, 0)
         self.smartJitterLevelCard.hBoxLayout.addSpacing(16)
@@ -321,8 +359,30 @@ class AimPage(BasePage):
             format_func=lambda v: f"{v}%",
             description=t("smart_jitter_threshold_desc", "Jitter fires when box height < this % of detection range"),
             slider_width=160,
-            parent=self.antiDetectionGroup
+            parent=self.antiRecoilGroup
         )
+
+        self.jitterRecordBtn = PushButton("● Record")
+        self.jitterRecordBtn.setFixedWidth(130)
+        self.jitterRecordCard = SettingCard(
+            FluentIcon.MICROPHONE,
+            t("jitter_record_label", "Record Jitter"),
+            t("jitter_record_desc", "Record your mouse shake to create a custom jitter pattern"),
+            self.antiRecoilGroup
+        )
+        self.jitterRecordCard.hBoxLayout.addWidget(self.jitterRecordBtn, 0)
+        self.jitterRecordCard.hBoxLayout.addSpacing(16)
+
+        self.jitterPatternCombo = ComboBox()
+        self.jitterPatternCombo.setMinimumWidth(180)
+        self.jitterPatternCard = SettingCard(
+            FluentIcon.LABEL,
+            t("jitter_pattern_label", "Recorded Pattern"),
+            t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on)"),
+            self.antiRecoilGroup
+        )
+        self.jitterPatternCard.hBoxLayout.addWidget(self.jitterPatternCombo, 0)
+        self.jitterPatternCard.hBoxLayout.addSpacing(16)
 
         # === Target Priority ===
         self.targetPriorityGroup = SettingCardGroup(t("target_priority", "Target Priority"), self.scrollWidget)
@@ -498,6 +558,7 @@ class AimPage(BasePage):
         xPageLayout.addWidget(self.pidPxCard)
         xPageLayout.addWidget(self.pidIxCard)
         xPageLayout.addWidget(self.pidDxCard)
+        xPageLayout.addStretch(1)
 
         self.pidYPage = QWidget()
         yPageLayout = QVBoxLayout(self.pidYPage)
@@ -508,6 +569,10 @@ class AimPage(BasePage):
         yPageLayout.addWidget(self.pidDyCard)
         yPageLayout.addWidget(self.pidYReduceEnableCard)
         yPageLayout.addWidget(self.pidYReduceDelayCard)
+        yPageLayout.addWidget(self.pidYReduceFloorCard)
+        yPageLayout.addWidget(self.pidYReduceRampCard)
+        yPageLayout.addWidget(self.pidYReduceSettleCard)
+        yPageLayout.addWidget(self.pidYReduceVelCard)
 
         self.pidStackedWidget.addWidget(self.pidXPage)
         self.pidStackedWidget.addWidget(self.pidYPage)
@@ -516,12 +581,14 @@ class AimPage(BasePage):
         self.pidGroup.vBoxLayout.addWidget(self.pidStackedWidget)
         self.addContent(self.pidGroup)
 
-        # Anti-Detection (Smart Jitter)
-        self.antiDetectionGroup.addSettingCard(self.smartJitterEnableCard)
-        self.antiDetectionGroup.addSettingCard(self.smartJitterLmbCard)
-        self.antiDetectionGroup.addSettingCard(self.smartJitterLevelCard)
-        self.antiDetectionGroup.addSettingCard(self.smartJitterThreshCard)
-        self.addContent(self.antiDetectionGroup)
+        # Anti-Recoil (Smart Jitter)
+        self.antiRecoilGroup.addSettingCard(self.smartJitterEnableCard)
+        self.antiRecoilGroup.addSettingCard(self.smartJitterLmbCard)
+        self.antiRecoilGroup.addSettingCard(self.smartJitterLevelCard)
+        self.antiRecoilGroup.addSettingCard(self.smartJitterThreshCard)
+        self.antiRecoilGroup.addSettingCard(self.jitterRecordCard)
+        self.antiRecoilGroup.addSettingCard(self.jitterPatternCard)
+        self.addContent(self.antiRecoilGroup)
 
         # Target Priority
         self.targetPriorityGroup.addSettingCard(self.targetPriorityModeCard)
@@ -575,12 +642,20 @@ class AimPage(BasePage):
         self.pidDyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kd_y', v))
         self.pidYReduceEnableCard.checkedChanged.connect(lambda checked: self._onPidChanged('aim_y_reduce_enabled', checked, is_bool=True))
         self.pidYReduceDelayCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_delay', v))
+        self.pidYReduceFloorCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_floor', v))
+        self.pidYReduceRampCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_ramp', v))
+        self.pidYReduceSettleCard.valueChanged.connect(
+            lambda v: setattr(self._config, 'aim_y_reduce_settle_px', float(v)) if self._config else None)
+        self.pidYReduceVelCard.valueChanged.connect(
+            lambda v: setattr(self._config, 'aim_y_vel_restore_px_s', float(v)) if self._config else None)
 
         # Smart Jitter
         self.smartJitterEnableCard.checkedChanged.connect(self._onSmartJitterEnableChanged)
         self.smartJitterLmbCard.checkedChanged.connect(self._onSmartJitterLmbChanged)
         self.smartJitterStrengthSpin.valueChanged.connect(self._onSmartJitterStrengthChanged)
         self.smartJitterThreshCard.valueChanged.connect(self._onSmartJitterThreshChanged)
+        self.jitterRecordBtn.clicked.connect(self._onJitterRecordClicked)
+        self.jitterPatternCombo.currentIndexChanged.connect(self._onJitterPatternChanged)
 
         # Target Priority
         self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
@@ -647,6 +722,10 @@ class AimPage(BasePage):
             self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
             self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
             self.pidYReduceDelayCard.setValue(int(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100))
+            self.pidYReduceFloorCard.setValue(int(getattr(self._config, 'aim_y_reduce_floor', 0.0) * 100))
+            self.pidYReduceRampCard.setValue(int(getattr(self._config, 'aim_y_reduce_ramp', 0.0) * 100))
+            self.pidYReduceSettleCard.setValue(int(getattr(self._config, 'aim_y_reduce_settle_px', 0.0)))
+            self.pidYReduceVelCard.setValue(int(getattr(self._config, 'aim_y_vel_restore_px_s', 0.0)))
 
             # Smart Jitter
             sj_on = bool(getattr(self._config, 'smart_jitter_enabled', False))
@@ -657,6 +736,20 @@ class AimPage(BasePage):
             self.smartJitterLmbCard.setEnabled(sj_on)
             self.smartJitterLevelCard.setEnabled(sj_on)
             self.smartJitterThreshCard.setEnabled(sj_on)
+
+            # Jitter pattern combo — populated fresh each load so new recordings appear
+            from core.jitter_recorder import list_patterns as _list_jitter_patterns
+            self.jitterPatternCombo.blockSignals(True)
+            self.jitterPatternCombo.clear()
+            self.jitterPatternCombo.addItem("(none — procedural)", userData="")
+            for _p in _list_jitter_patterns():
+                self.jitterPatternCombo.addItem(_p["name"], userData=_p["path"])
+            _current_pf = getattr(self._config, 'jitter_pattern_file', '')
+            _idx = self.jitterPatternCombo.findData(_current_pf)
+            self.jitterPatternCombo.setCurrentIndex(max(0, _idx))
+            self.jitterPatternCombo.blockSignals(False)
+            self.jitterRecordCard.setEnabled(sj_on)
+            self.jitterPatternCard.setEnabled(sj_on)
 
             # Target Priority
             mode_map = {"distance": "Distance", "confidence": "Confidence", "composite": "Composite"}
@@ -983,6 +1076,8 @@ class AimPage(BasePage):
         self.smartJitterLmbCard.setEnabled(bool(checked))
         self.smartJitterLevelCard.setEnabled(bool(checked))
         self.smartJitterThreshCard.setEnabled(bool(checked))
+        self.jitterRecordCard.setEnabled(bool(checked))
+        self.jitterPatternCard.setEnabled(bool(checked))
 
     def _onSmartJitterLmbChanged(self, checked):
         if self._config:
@@ -995,6 +1090,49 @@ class AimPage(BasePage):
     def _onSmartJitterThreshChanged(self, value):
         if self._config:
             self._config.smart_jitter_box_threshold_pct = float(value)
+
+    def _onJitterRecordClicked(self) -> None:
+        from core.jitter_recorder import _Recorder, _normalize_frames, _save_pattern, list_patterns
+        if not self._jitterRecording:
+            self._jitterRecorder = _Recorder()
+            self._jitterRecorder.start()
+            self._jitterRecording = True
+            self.jitterRecordBtn.setText("■ Stop & Save")
+        else:
+            frames = self._jitterRecorder.stop()
+            self._jitterRecording = False
+            self.jitterRecordBtn.setText("● Record")
+            if not frames:
+                QMessageBox.information(self, "Jitter Recorder", "No movement detected — nothing saved.")
+                return
+            net_dx = sum(f["dx"] for f in frames)
+            net_dy = sum(f["dy"] for f in frames)
+            frames = _normalize_frames(frames)
+            name, ok = QInputDialog.getText(self, "Save Pattern", "Pattern name:", text="jitter")
+            if not ok or not name.strip():
+                return
+            _save_pattern(name.strip(), frames)
+            # refresh combo
+            if self._config is not None:
+                from core.jitter_recorder import list_patterns as _lp
+                self.jitterPatternCombo.blockSignals(True)
+                current = self.jitterPatternCombo.currentData() or ""
+                self.jitterPatternCombo.clear()
+                self.jitterPatternCombo.addItem("(none — procedural)", userData="")
+                for p in _lp():
+                    self.jitterPatternCombo.addItem(p["name"], userData=p["path"])
+                idx = self.jitterPatternCombo.findData(current)
+                self.jitterPatternCombo.setCurrentIndex(max(0, idx))
+                self.jitterPatternCombo.blockSignals(False)
+
+    def _onJitterPatternChanged(self, _index: int) -> None:
+        if self._isLoadingConfig or not self._config:
+            return
+        path = self.jitterPatternCombo.currentData() or ""
+        self._config.jitter_pattern_file = path
+        from core.ai_aiming import _jitter_pattern_cache
+        _jitter_pattern_cache["file"] = None
+        _jitter_pattern_cache["iter"] = None
 
     # === Target Priority Callbacks ===
 
@@ -1112,12 +1250,18 @@ class AimPage(BasePage):
         self.pidDyCard.titleLabel.setText(t("stability_suppression_d"))
         self.pidYReduceEnableCard.titleLabel.setText(t("aim_y_reduce_enable"))
         self.pidYReduceDelayCard.titleLabel.setText(t("aim_y_reduce_delay"))
+        self.pidYReduceFloorCard.titleLabel.setText("Y Floor")
+        self.pidYReduceRampCard.titleLabel.setText("Y Ramp Window")
+        self.pidYReduceSettleCard.titleLabel.setText("Y Settle Threshold")
+        self.pidYReduceVelCard.titleLabel.setText("Y Velocity Restore")
 
-        self.antiDetectionGroup.titleLabel.setText(t("anti_detection", "Anti-Detection"))
+        self.antiRecoilGroup.titleLabel.setText(t("anti_recoil", "Anti-Recoil"))
         self.smartJitterEnableCard.titleLabel.setText(t("smart_jitter_label", "Smart Jitter"))
         self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Shooting (LMB)"))
         self.smartJitterLevelCard.titleLabel.setText(t("smart_jitter_level_label", "Jitter Strength"))
         self.smartJitterThreshCard.titleLabel.setText(t("smart_jitter_threshold_label", "Box Size Threshold"))
+        self.jitterRecordCard.titleLabel.setText(t("jitter_record_label", "Record Jitter"))
+        self.jitterPatternCard.titleLabel.setText(t("jitter_pattern_label", "Recorded Pattern"))
 
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
         self.targetPriorityModeCard.titleLabel.setText(t("target_priority_mode", "Priority Mode"))

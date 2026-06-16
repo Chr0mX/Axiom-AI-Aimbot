@@ -5,7 +5,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QWidget, QHBoxLayout
 from PyQt6.QtGui import QKeySequence
 from qfluentwidgets import (
-    SettingCardGroup, SettingCard, FluentIcon,
+    SettingCardGroup, SettingCard, SwitchSettingCard, FluentIcon,
     PushButton, BodyLabel, ComboBox,
 )
 
@@ -312,6 +312,13 @@ class KeysPage(BasePage):
         # === 瞄準按鍵 ===
         self.aimKeysGroup = SettingCardGroup(t("auto_aim"), self.scrollWidget)
 
+        self.alwaysAimCard = SwitchSettingCard(
+            FluentIcon.FINGERPRINT,
+            t("always_aim"),
+            "",
+            parent=self.aimKeysGroup
+        )
+
         # 瞄準鍵 1
         self.aimKey1Btn = KeyBindButton()
         self.aimKey1Card = SettingCard(
@@ -521,6 +528,7 @@ class KeysPage(BasePage):
     def _initLayout(self):
         """排版所有控制項"""
         # 瞄準按鍵
+        self.aimKeysGroup.addSettingCard(self.alwaysAimCard)
         self.aimKeysGroup.addSettingCard(self.aimKey1Card)
         self.aimKeysGroup.addSettingCard(self.aimKey2Card)
         self.aimKeysGroup.addSettingCard(self.aimKey3Card)
@@ -557,6 +565,7 @@ class KeysPage(BasePage):
 
     def _connectSignals(self):
         """連接信號"""
+        self.alwaysAimCard.checkedChanged.connect(self._onAlwaysAimChanged)
         self.aimKey1Btn.keyBound.connect(lambda vk: self._onAimKeyChanged(0, vk))
         self.aimKey2Btn.keyBound.connect(lambda vk: self._onAimKeyChanged(1, vk))
         self.aimKey3Btn.keyBound.connect(lambda vk: self._onAimKeyChanged(2, vk))
@@ -582,6 +591,8 @@ class KeysPage(BasePage):
         """從 Config 載入值"""
         if not self._config:
             return
+
+        self.alwaysAimCard.setChecked(bool(getattr(self._config, 'always_aim', False)))
 
         # 瞄準鍵
         if len(self._config.AimKeys) >= 1:
@@ -655,6 +666,13 @@ class KeysPage(BasePage):
     # ──────────────────────────────────────────────
     # Callbacks
     # ──────────────────────────────────────────────
+
+    def _onAlwaysAimChanged(self, checked: bool):
+        if self._config:
+            self._config.always_aim = bool(checked)
+            if checked:
+                self._config.idle_detect_enabled = False
+        self._refreshMakcuVisibility()
 
     def _onAimKeyChanged(self, index: int, vk: int):
         if self._config:
@@ -877,6 +895,7 @@ class KeysPage(BasePage):
         self._updateMakcuConnectionStatus()
 
         # 瞄準按鍵
+        self.alwaysAimCard.titleLabel.setText(t("always_aim"))
         self.aimKey1Card.titleLabel.setText(t("aim_key_1"))
         self.aimKey2Card.titleLabel.setText(t("aim_key_2"))
         self.aimKey3Card.titleLabel.setText(t("aim_key_3"))

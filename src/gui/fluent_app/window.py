@@ -138,7 +138,33 @@ class AxiomWindow(FluentWindow):
 
         self.initNavigation()
         self.initBottomNavigation()
-        
+
+        from .components.capture_preview import CapturePreviewPanel
+        from PyQt6.QtWidgets import QToolButton
+
+        self._previewArrow = QToolButton(self)
+        self._previewArrow.setText("◀")
+        self._previewArrow.setFixedWidth(18)
+        self._previewArrow.setFixedHeight(60)
+        self._previewArrow.setToolTip("Collapse preview")
+        self._previewArrow.setStyleSheet(
+            "QToolButton { border: none; color: #888; font-size: 10px; }"
+            "QToolButton:hover { color: #ccc; }"
+        )
+        self._previewArrow.clicked.connect(self._togglePreviewCollapse)
+        self.widgetLayout.addWidget(self._previewArrow)
+        self._previewArrow.hide()
+
+        self.previewPanel = CapturePreviewPanel(None, self)
+        self.widgetLayout.addWidget(self.previewPanel)
+        self.previewPanel.hide()
+
+        # Stretch: content gets 4x, preview gets 1x; swapped when nav collapses
+        self.widgetLayout.setStretchFactor(self.stackedWidget, 4)
+        self.widgetLayout.setStretchFactor(self.previewPanel, 1)
+
+        self.navigationInterface.displayModeChanged.connect(self._onNavModeChanged)
+
         # 若為深色主題，立即切換圖標為白色版本
         if self._isDarkTheme:
             self.updateIcons()
@@ -331,6 +357,12 @@ class AxiomWindow(FluentWindow):
         if hasattr(self, 'configInterface') and hasattr(self.configInterface, '_applyPanelStyles'):
             self.configInterface._applyPanelStyles()
 
+        if hasattr(self, 'previewPanel'):
+            self.previewPanel.setConfig(config)
+        self.updateVisualsVisibilityForScreenshotMethod(
+            getattr(config, 'screenshot_method', 'mss')
+        )
+
     def updateVisualsVisibilityForScreenshotMethod(self, screenshot_method: str):
         """UVC 模式下隱藏 visual 頁籤，避免與 UVC 預覽重複顯示。"""
         is_uvc = str(screenshot_method).lower() == 'uvc'
@@ -340,6 +372,41 @@ class AxiomWindow(FluentWindow):
 
         if is_uvc and self.stackedWidget.currentWidget() is self.displayInterface:
             self.switchTo(self.aimInterface)
+
+        self.updatePreviewPanelVisibility()
+
+    def updatePreviewPanelVisibility(self) -> None:
+        """Show/hide preview panel based on screenshot method and uvc_show_window toggle."""
+        if not hasattr(self, 'previewPanel') or self._config is None:
+            return
+        method = str(getattr(self._config, 'screenshot_method', 'mss')).lower()
+        show = bool(getattr(self._config, 'uvc_show_window', True))
+        active = method in ('ndi', 'uvc') and show
+        self._previewArrow.setVisible(active)
+        if active:
+            self.previewPanel.show()
+            self.previewPanel.start()
+        else:
+            self.previewPanel.stop()
+            self.previewPanel.hide()
+
+    def _togglePreviewCollapse(self) -> None:
+        """Toggle left navigation collapsed/expanded; preview gains the freed space."""
+        self.navigationInterface.toggle()
+
+    def _onNavModeChanged(self, mode) -> None:
+        from qfluentwidgets import NavigationDisplayMode
+        collapsed = mode in (NavigationDisplayMode.MINIMAL, NavigationDisplayMode.COMPACT)
+        if collapsed:
+            self.widgetLayout.setStretchFactor(self.stackedWidget, 2)
+            self.widgetLayout.setStretchFactor(self.previewPanel, 1)
+            self._previewArrow.setText("▶")
+            self._previewArrow.setToolTip("Expand navigation")
+        else:
+            self.widgetLayout.setStretchFactor(self.stackedWidget, 4)
+            self.widgetLayout.setStretchFactor(self.previewPanel, 1)
+            self._previewArrow.setText("◀")
+            self._previewArrow.setToolTip("Collapse navigation")
     
     def setConfigManager(self, manager):
         """設定 ConfigManager 實例"""

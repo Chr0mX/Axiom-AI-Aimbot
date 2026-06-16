@@ -335,24 +335,6 @@ class ThemeColors:
         default_dark=(0, 140, 255, 90)
     )
     
-    OVERLAY_TRACKER_LINE = ColorPairWithAlpha.from_config(
-        "overlay_colors", "tracker_line",
-        default_light=(200, 200, 200, 40),
-        default_dark=(255, 255, 255, 50)
-    )
-    
-    OVERLAY_TRACKER_CURRENT = ColorPairWithAlpha.from_config(
-        "overlay_colors", "tracker_current",
-        default_light=(0, 200, 200, 50),
-        default_dark=(0, 255, 255, 60)
-    )
-    
-    OVERLAY_TRACKER_PREDICTED = ColorPairWithAlpha.from_config(
-        "overlay_colors", "tracker_predicted",
-        default_light=(200, 0, 200, 70),
-        default_dark=(255, 0, 255, 80)
-    )
-    
     # ============================================================
     # 狀態面板 (Status Panel) 顏色
     # ============================================================

@@ -98,7 +98,10 @@ import json as _json
 _cfg_path = os.path.join(project_root, "config.json")
 try:
     with open(_cfg_path, "r", encoding="utf-8") as _f:
-        _early_backend = _json.load(_f).get("inference_backend", "auto")
+        _cfg_data = _json.load(_f)
+    # v2 schema nests this under model.backend; fall back to legacy flat key.
+    _early_backend = _cfg_data.get("model", {}).get("backend") \
+        or _cfg_data.get("inference_backend", "auto")
 except Exception:
     _early_backend = "auto"
 os.environ.setdefault("AXIOM_BACKEND", _early_backend)

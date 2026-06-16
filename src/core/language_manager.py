@@ -16,7 +16,7 @@ class LanguageManager:
 
     # Default language using filename (without extension)
     DEFAULT_LANGUAGE = "English_English"
-    CONFIG_FILE = "config.json"
+    CONFIG_FILE = "language.json"
     LANGUAGE_DIR = "language_data"
 
     # Legacy code mapping table for migrating old settings
@@ -111,6 +111,17 @@ class LanguageManager:
 
     def load_language_config(self) -> None:
         try:
+            # One-time migration: promote "language" from legacy config.json → language.json
+            if not os.path.exists(self.CONFIG_FILE) and os.path.exists('config.json'):
+                try:
+                    with open('config.json', 'r', encoding='utf-8') as _f:
+                        _legacy = json.load(_f)
+                    if 'language' in _legacy:
+                        self.current_language = _legacy['language']
+                        self.save_language_config()
+                except Exception:
+                    pass
+
             if os.path.exists(self.CONFIG_FILE):
                 with open(self.CONFIG_FILE, "r", encoding="utf-8") as handle:
                     config_data = json.load(handle)

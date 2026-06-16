@@ -19,6 +19,33 @@ if TYPE_CHECKING:
 _WARNED_MESSAGES: set[str] = set()
 _CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
 
+# ---------------------------------------------------------------------------
+# Module-level preview frame — written by capture worker, read by GUI timer.
+# ---------------------------------------------------------------------------
+_preview_lock = threading.Lock()
+_preview_cell: list = [None]   # [np.ndarray | None]
+_preview_region_cell: list = [None]  # [dict | None]
+
+
+def set_preview_frame(frame: np.ndarray) -> None:
+    with _preview_lock:
+        _preview_cell[0] = frame
+
+
+def get_preview_frame() -> "np.ndarray | None":
+    with _preview_lock:
+        return _preview_cell[0]
+
+
+def set_preview_region(region: "dict | None") -> None:
+    with _preview_lock:
+        _preview_region_cell[0] = region
+
+
+def get_preview_region() -> "dict | None":
+    with _preview_lock:
+        return _preview_region_cell[0]
+
 
 def _detect_active_capture_method(screen_capture: Any, fallback_method: str = 'mss') -> str:
     """Best-effort detection of the currently active capture backend name."""
@@ -120,25 +147,29 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
     }
 
 
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str]:
+# Fixed title for the UVC/NDI preview window (not user-configurable).
+_UVC_WINDOW_NAME = "Axiom UVC Preview"
+
+
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str]:
     return (
         int(getattr(config, 'uvc_device_index', 0)),
         int(getattr(config, 'uvc_width', 0)),
         int(getattr(config, 'uvc_height', 0)),
         int(getattr(config, 'uvc_fps', 0)),
         bool(getattr(config, 'uvc_show_window', False)),
-        str(getattr(config, 'uvc_window_name', 'Axiom UVC Preview')),
         str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
     )
 
 
-def _ndi_signature(config: Config) -> tuple[str, bool, str, str]:
+def _ndi_signature(config: Config) -> tuple[str, bool, str, str, bool]:
     return (
         str(getattr(config, 'ndi_source_name', '')).strip(),
         bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
         str(getattr(config, 'ndi_bandwidth', 'highest')).lower(),
+        bool(getattr(config, 'ndi_force_reconnect', False)),
     )
 
 
@@ -274,6 +305,144 @@ def _extract_ndi_source_video_meta(source: Any) -> tuple[int | None, int | None,
     return width, height, fps
 
 
+def _draw_detection_overlay(
+    frame: np.ndarray,
+    region: dict | None,
+    config: Any,
+    *,
+    has_alpha: bool = False,
+) -> np.ndarray:
+    """Shared overlay renderer used by both UVCCapture and NDICapture preview threads.
+
+    Args:
+        frame:     BGR or BGRA frame to draw on (modified in place).
+        region:    Detection region dict with 'left', 'top', 'width', 'height'.
+        config:    Live Config object.
+        has_alpha: True for BGRA frames (NDI); False for BGR frames (UVC).
+                   Controls whether color tuples include a 4th alpha byte.
+    """
+    cfg = config
+    if not bool(getattr(cfg, 'AimToggle', True)):
+        return frame
+
+    h, w = frame.shape[:2]
+    region_left   = int(region.get('left',   0)) if region else 0
+    region_top    = int(region.get('top',    0)) if region else 0
+    region_width  = int(region.get('width',  w)) if region else w
+    region_height = int(region.get('height', h)) if region else h
+
+    cx = int(getattr(cfg, 'crosshairX', w // 2))
+    cy = int(getattr(cfg, 'crosshairY', h // 2))
+
+    def _c(b: int, g: int, r: int, a: int = 255) -> tuple:
+        return (b, g, r, a) if has_alpha else (b, g, r)
+
+    if bool(getattr(cfg, 'show_detect_range', False)):
+        x1 = max(0, region_left)
+        y1 = max(0, region_top)
+        x2 = min(w - 1, region_left + region_width)
+        y2 = min(h - 1, region_top + region_height)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), _c(255, 140, 0), 1, cv2.LINE_AA)
+
+    if bool(getattr(cfg, 'show_fov', True)):
+        fov = int(getattr(cfg, 'fov_size', 220))
+        half = max(1, fov // 2)
+        x1, y1 = cx - half, cy - half
+        x2, y2 = cx + half, cy + half
+        color = _c(0, 0, 255)
+        if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
+            cv2.circle(frame, (cx, cy), half, color, 2, cv2.LINE_AA)
+        else:
+            corner = max(8, min(20, fov // 6))
+            cv2.line(frame, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
+
+    if bool(getattr(cfg, 'show_boxes', True)):
+        boxes       = list(getattr(cfg, 'latest_boxes',       []) or [])
+        confidences = list(getattr(cfg, 'latest_confidences', []) or [])
+        show_conf   = bool(getattr(cfg, 'show_confidence', True))
+        _theme = {
+            'cyan':   _c(255, 220, 0),
+            'red':    _c(60,  60,  255),
+            'yellow': _c(0,   210, 255),
+            'white':  _c(255, 255, 255),
+            'purple': _c(255, 60,  180),
+        }
+        box_color = _theme.get(str(getattr(cfg, 'box_color_theme', 'default')).lower(), _c(0, 255, 0))
+        speed = float(getattr(cfg, 'chroma_box_speed', 1.0))
+        hue = (time.monotonic() * speed * 60.0) % 360.0
+        r_f, g_f, b_f = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
+        chroma_color = _c(int(b_f * 255), int(g_f * 255), int(r_f * 255), 220)
+        use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
+        fov_half   = float(getattr(cfg, 'fov_size', 220)) / 2.0
+        for i, box in enumerate(boxes):
+            try:
+                x1, y1, x2, y2 = [int(v) for v in box]
+            except Exception:
+                continue
+            if x2 <= 0 or y2 <= 0 or x1 >= w or y1 >= h:
+                continue
+            x1 = max(0, min(w - 1, x1))
+            y1 = max(0, min(h - 1, y1))
+            x2 = max(0, min(w - 1, x2))
+            y2 = max(0, min(h - 1, y2))
+            conf      = float(confidences[i]) if i < len(confidences) else 0.5
+            thickness = max(1, min(3, 1 + round(conf * 2)))
+            clen      = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
+            if use_circle:
+                nx = min(max(float(cx), float(x1)), float(x2))
+                ny = min(max(float(cy), float(y1)), float(y2))
+                in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
+            else:
+                in_fov = (x1 < cx + fov_half and x2 > cx - fov_half and
+                          y1 < cy + fov_half and y2 > cy - fov_half)
+            dc = chroma_color if in_fov else box_color
+            cv2.line(frame, (x1, y1), (x1 + clen, y1), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x1, y1), (x1, y1 + clen), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2 - clen, y1), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2, y1 + clen), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1 + clen, y2), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1, y2 - clen), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2 - clen, y2), dc, thickness, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2, y2 - clen), dc, thickness, cv2.LINE_AA)
+            if show_conf and i < len(confidences):
+                cv2.putText(frame, f"{conf * 100:.0f}%",
+                            (max(0, x1 - 5), max(15, y1 - 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                            _c(0, 255, 255), 1, cv2.LINE_AA)
+
+    if bool(getattr(cfg, 'show_tracer_line', False)):
+        tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
+        fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
+        for box in tracer_boxes:
+            try:
+                x1, y1, x2, y2 = [int(v) for v in box]
+            except Exception:
+                continue
+            bx = (x1 + x2) // 2
+            by = (y1 + y2) // 2
+            if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
+                cv2.line(frame, (cx, cy), (bx, by), _c(255, 255, 255), 2, cv2.LINE_AA)
+
+    decay_box = getattr(cfg, 'display_locked_box', None)
+    if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
+        try:
+            x1, y1, x2, y2 = [int(v) for v in decay_box]
+            x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
+            x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
+            cv2.rectangle(frame, (x1, y1), (x2, y2), _c(0, 140, 255), 1, cv2.LINE_AA)
+        except Exception:
+            pass
+
+    return frame
+
+
 def _render_preview_frame(window_name: str, mode: str, frame_bgr: np.ndarray) -> np.ndarray:
     """Render capture preview according to configured preview mode."""
 
@@ -379,8 +548,13 @@ class NDICapture:
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        # Clear reconnect flag before computing signature so the stored
+        # signature reflects the settled state (no pending reconnect).
+        config.ndi_force_reconnect = False
         self.config_signature = _ndi_signature(config)
         self.source_name = str(getattr(config, 'ndi_source_name', '')).strip()
+        # The GUI exposes a single shared "Capture Preview Window" toggle that
+        # writes uvc_show_window for both UVC and NDI backends.
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
         self.window_name = str(getattr(config, 'ndi_window_name', 'Axiom NDI Preview'))
         # NDI preview prioritizes minimal display latency by default.
@@ -388,6 +562,7 @@ class NDICapture:
         self.preview_scale_mode = ndi_preview_scale_mode or 'low_latency'
         self._finder: Any | None = None
         self._source_assigned = False
+        self._reconnect_logged = False
         self.preview_width = int(getattr(config, 'ndi_width', getattr(config, 'width', 0)) or 0)
         self.preview_height = int(getattr(config, 'ndi_height', getattr(config, 'height', 0)) or 0)
 
@@ -437,9 +612,15 @@ class NDICapture:
                     receiver_kwargs['bandwidth'] = bw_value
                     print(f'[Capture][NDI] Bandwidth set to: {bw_pref}')
             if source is not None:
-                receiver_kwargs['source'] = source
-                self._source_assigned = True
-                print(f"[Capture][NDI] Receiver will start with source '{_extract_ndi_source_name(source)}'.")
+                # NOTE: do NOT pass the source to the Receiver constructor.
+                # Assigning it both in the ctor and again via set_source() below
+                # double-assigns the source and disrupts the initial connection
+                # (observed as a fall-back to MSS on the second launch, when a
+                # source name is already saved in config). The auto-select path
+                # — which connects reliably — only ever calls set_source() once,
+                # so the configured-source path now mirrors it.
+                print(f"[Capture][NDI] Resolved source '{_extract_ndi_source_name(source)}'; "
+                      f"assigning after receiver creation.")
             self._receiver = Receiver(**receiver_kwargs)
             print('[Capture][NDI] Receiver object created successfully.')
 
@@ -467,19 +648,21 @@ class NDICapture:
         except Exception as exc:
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
 
+        print('[Capture][NDI] Waiting for receiver to connect and deliver first video frame (up to 6s)...')
         connected = _wait_for_receiver_connection(
             self._receiver,
             getattr(self._receiver, 'frame_sync', None),
             getattr(self, '_video_frame_sync', None),
             getattr(self._receiver, 'receive', None),
             getattr(self._ReceiveFrameType, 'recv_video', None),
-            attempts=30,
+            attempts=60,
             interval_seconds=0.1,
         )
 
         if not connected:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
         print('[Capture][NDI] Receiver connected and video stream is ready.')
+        self._last_frame_time: float = time.perf_counter()
 
         # Shared refs for the preview thread — grab() writes, thread reads
         self._ndi_frame_lock: threading.Lock = threading.Lock()
@@ -506,24 +689,27 @@ class NDICapture:
                 preview_width=self.preview_width or 1920,
                 preview_height=self.preview_height or 1080,
                 config=self.config,
+                show_cv2_window=False,  # Qt panel is the primary display; cv2 window suppressed
             )
             self._ndi_preview_thread.start()
-            print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
 
-    def _resolve_source(self) -> Any | None:
+    def _resolve_source(self, log: bool = True) -> Any | None:
         if not self.source_name:
             return None
         try:
             if self._finder is None:
                 self._finder = self._Finder()
-                print('[Capture][NDI] Finder instance created.')
+                if log:
+                    print('[Capture][NDI] Finder instance created.')
             finder = self._finder
             if not getattr(finder, "is_open", False):
                 finder.open()
-                print('[Capture][NDI] Finder opened for network source discovery.')
+                if log:
+                    print('[Capture][NDI] Finder opened for network source discovery.')
             source = _find_ndi_source_by_name(finder, self.source_name)
             if source is not None:
-                print(f"[Capture][NDI] Matched configured source '{self.source_name}'.")
+                if log:
+                    print(f"[Capture][NDI] Matched configured source '{self.source_name}'.")
                 return source
             for _ in range(6):
                 try:
@@ -532,12 +718,15 @@ class NDICapture:
                     changed = finder.wait_for_sources(timeout=0.5)
                 if changed:
                     finder.update_sources()
-                    print('[Capture][NDI] Source list changed while searching for configured source.')
+                    if log:
+                        print('[Capture][NDI] Source list changed while searching for configured source.')
                 source = _find_ndi_source_by_name(finder, self.source_name)
                 if source is not None:
-                    print(f"[Capture][NDI] Found configured source after refresh: '{self.source_name}'.")
+                    if log:
+                        print(f"[Capture][NDI] Found configured source after refresh: '{self.source_name}'.")
                     return source
-            print(f"[Capture][NDI] Could not find configured source '{self.source_name}' after retries.")
+            if log:
+                print(f"[Capture][NDI] Could not find configured source '{self.source_name}' after retries.")
             return None
         except Exception:
             return None
@@ -607,40 +796,45 @@ class NDICapture:
         except Exception:
             return None, 0, 0
 
-    @staticmethod
-    def _bgra_from_cyndilib_frame(frame: Any) -> np.ndarray | None:
-        """Legacy wrapper — converts full frame RGBA→BGRA. Use _raw_array_from_cyndilib_frame for crop-first path."""
-        arr, w, h = NDICapture._raw_array_from_cyndilib_frame(frame)
-        if arr is None:
-            return None
-        return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
-
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
+        now = time.perf_counter()
         if not self._receiver.is_connected():
-            now = time.perf_counter()
-            if now - float(getattr(self, '_last_reconnect_attempt', 0.0) or 0.0) > 1.0:
-                self._last_reconnect_attempt = now
-                source = self._resolve_source()
-                if source is not None:
-                    try:
-                        self._receiver.set_source(source)
-                        self._source_assigned = True
-                        print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
-                        _wait_for_receiver_connection(
-                            self._receiver,
-                            getattr(self._receiver, 'frame_sync', None),
-                            getattr(self, '_video_frame_sync', None),
-                            getattr(self._receiver, 'receive', None),
-                            getattr(self._ReceiveFrameType, 'recv_video', None),
-                            attempts=5,
-                            interval_seconds=0.05,
-                        )
-                    except Exception:
-                        pass
-                elif not self.source_name and not self._source_assigned:
-                    self._assign_first_available_source()
-            if not self._receiver.is_connected():
-                return None
+            # is_connected() can return False transiently on healthy streams in some
+            # cyndilib builds. Only reconnect when frames have genuinely stopped flowing.
+            if now - self._last_frame_time > 3.0:
+                if now - float(getattr(self, '_last_reconnect_attempt', 0.0) or 0.0) > 1.0:
+                    self._last_reconnect_attempt = now
+                    # Only log the first attempt of a disconnect episode so a
+                    # persistently-unconnected receiver doesn't spam the console.
+                    log = not self._reconnect_logged
+                    source = self._resolve_source(log=log)
+                    if source is not None:
+                        try:
+                            self._receiver.set_source(source)
+                            self._source_assigned = True
+                            if log:
+                                print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
+                                self._reconnect_logged = True
+                            _wait_for_receiver_connection(
+                                self._receiver,
+                                getattr(self._receiver, 'frame_sync', None),
+                                getattr(self, '_video_frame_sync', None),
+                                getattr(self._receiver, 'receive', None),
+                                getattr(self._ReceiveFrameType, 'recv_video', None),
+                                attempts=5,
+                                interval_seconds=0.05,
+                            )
+                        except Exception:
+                            pass
+                    elif not self.source_name and not self._source_assigned:
+                        self._assign_first_available_source()
+                if not self._receiver.is_connected():
+                    return None
+            # else: is_connected() flickered but frames are recent — fall through and attempt capture
+        elif self._reconnect_logged:
+            # Recovered from a disconnect episode — re-arm logging for next time.
+            print(f"[Capture][NDI] Receiver connected to '{self.source_name}'.")
+            self._reconnect_logged = False
 
         frame_obj: Any | None = None
         if getattr(self, '_video_frame_sync', None) is not None and getattr(self._receiver, 'frame_sync', None) is not None:
@@ -736,7 +930,7 @@ class NDICapture:
                         self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
                         self._bgra_shape = expected_shape
                     cv2.cvtColor(crop_raw, cv2.COLOR_YUV2BGRA_UYVY, self._bgra_buf)
-                    frame = self._bgra_buf
+                    frame = self._bgra_buf.copy()
                 elif recv_fourcc == 'bgra':
                     frame = raw[top:bottom, left:right]
                 else:
@@ -746,145 +940,20 @@ class NDICapture:
                         self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
                         self._bgra_shape = expected_shape
                     cv2.cvtColor(crop_raw, cv2.COLOR_RGBA2BGRA, self._bgra_buf)
-                    frame = self._bgra_buf
+                    frame = self._bgra_buf.copy()
             else:
                 frame = _to_bgra(raw)
 
         if frame.ndim == 3 and frame.shape[2] == 4:
+            self._last_frame_time = now
             return frame
         if frame.ndim == 3 and frame.shape[2] == 3:
+            self._last_frame_time = now
             return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
         return None
 
     def _draw_overlay(self, frame_bgra: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
-        """Draw overlay visuals in NDI preview window using active capture coordinates."""
-
-        cfg = self.config
-        if not bool(getattr(cfg, 'AimToggle', True)):
-            return frame_bgra
-
-        h, w = frame_bgra.shape[:2]
-        region_left = int(region.get('left', 0)) if region else 0
-        region_top = int(region.get('top', 0)) if region else 0
-        region_width = int(region.get('width', w)) if region else w
-        region_height = int(region.get('height', h)) if region else h
-
-        cx = int(getattr(cfg, 'crosshairX', w // 2))
-        cy = int(getattr(cfg, 'crosshairY', h // 2))
-
-        if bool(getattr(cfg, 'show_detect_range', False)):
-            x1 = max(0, region_left)
-            y1 = max(0, region_top)
-            x2 = min(w - 1, region_left + region_width)
-            y2 = min(h - 1, region_top + region_height)
-            cv2.rectangle(frame_bgra, (x1, y1), (x2, y2), (255, 140, 0, 255), 1, cv2.LINE_AA)
-
-        if bool(getattr(cfg, 'show_fov', True)):
-            fov = int(getattr(cfg, 'fov_size', 220))
-            half = max(1, fov // 2)
-            x1, y1 = cx - half, cy - half
-            x2, y2 = cx + half, cy + half
-            color = (0, 0, 255, 255)
-            if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
-                cv2.circle(frame_bgra, (cx, cy), half, color, 2, cv2.LINE_AA)
-            else:
-                corner = max(8, min(20, fov // 6))
-                cv2.line(frame_bgra, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
-
-        if bool(getattr(cfg, 'show_boxes', True)):
-            boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-            confidences = list(getattr(cfg, 'latest_confidences', []) or [])
-            show_conf = bool(getattr(cfg, 'show_confidence', True))
-            # BGRA colors per theme (B, G, R, A)
-            _theme_bgra = {
-                'cyan':   (255, 220, 0, 255),
-                'red':    (60, 60, 255, 255),
-                'yellow': (0, 210, 255, 255),
-                'white':  (255, 255, 255, 255),
-                'purple': (255, 60, 180, 255),
-            }
-            theme_key = str(getattr(cfg, 'box_color_theme', 'default')).lower()
-            box_color_bgra = _theme_bgra.get(theme_key, (0, 255, 0, 255))
-            speed = float(getattr(cfg, 'chroma_box_speed', 1.0))
-            hue = (time.monotonic() * speed * 60.0) % 360.0
-            r, g, b = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
-            chroma_bgra = (int(b * 255), int(g * 255), int(r * 255), 220)
-            use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
-            fov_half = float(getattr(cfg, 'fov_size', 220)) / 2.0
-            for i, box in enumerate(boxes):
-                try:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                except Exception:
-                    continue
-                if x2 <= 0 or y2 <= 0 or x1 >= w or y1 >= h:
-                    continue
-                x1 = max(0, min(w - 1, x1))
-                y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w - 1, x2))
-                y2 = max(0, min(h - 1, y2))
-                conf = float(confidences[i]) if i < len(confidences) else 0.5
-                thickness = max(1, min(3, 1 + round(conf * 2)))
-                corner_len = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
-                bx1, by1, bx2, by2 = float(x1), float(y1), float(x2), float(y2)
-                if use_circle:
-                    nx = min(max(float(cx), bx1), bx2)
-                    ny = min(max(float(cy), by1), by2)
-                    in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
-                else:
-                    in_fov = (bx1 < cx + fov_half and bx2 > cx - fov_half and
-                              by1 < cy + fov_half and by2 > cy - fov_half)
-                draw_color = chroma_bgra if in_fov else box_color_bgra
-                cv2.line(frame_bgra, (x1, y1), (x1 + corner_len, y1), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y1), (x1, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2 - corner_len, y1), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y1), (x2, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1 + corner_len, y2), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x1, y2), (x1, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2 - corner_len, y2), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgra, (x2, y2), (x2, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
-                if show_conf and i < len(confidences):
-                    cv2.putText(
-                        frame_bgra,
-                        f"{conf * 100:.0f}%",
-                        (max(0, x1 - 5), max(15, y1 - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 255, 255, 255),
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-        if bool(getattr(cfg, 'show_tracer_line', False)):
-            tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-            fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
-            for box in tracer_boxes:
-                try:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                except Exception:
-                    continue
-                bx = (x1 + x2) // 2
-                by = (y1 + y2) // 2
-                if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
-                    cv2.line(frame_bgra, (cx, cy), (bx, by), (255, 255, 255, 255), 2, cv2.LINE_AA)
-
-        decay_box = getattr(cfg, 'display_locked_box', None)
-        if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
-            try:
-                x1, y1, x2, y2 = [int(v) for v in decay_box]
-                x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
-                cv2.rectangle(frame_bgra, (x1, y1), (x2, y2), (0, 140, 255, 255), 1, cv2.LINE_AA)
-            except Exception:
-                pass
-
-        return frame_bgra
+        return _draw_detection_overlay(frame_bgra, region, self.config, has_alpha=True)
 
     def close(self) -> None:
         for method_name in ('disconnect', 'close', 'release', 'stop', 'shutdown'):
@@ -949,6 +1018,52 @@ def list_supported_uvc_resolutions(
     return sorted(supported, key=lambda item: (item[0] * item[1], item[0]))
 
 
+def list_supported_uvc_fps(
+    device_index: int,
+    width: int,
+    height: int,
+    capture_method: str = 'dshow',
+) -> list[int]:
+    """Probe common FPS values at the given resolution and return supported ones."""
+    backend_map = {'dshow': cv2.CAP_DSHOW, 'msmf': cv2.CAP_MSMF, 'any': cv2.CAP_ANY}
+    backend = backend_map.get(str(capture_method).lower(), cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(int(device_index), backend)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(int(device_index))
+    if not cap.isOpened():
+        return [30, 60]
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    common = [24, 30, 60, 90, 120, 144, 240]
+    supported: list[int] = []
+    try:
+        for fps in common:
+            cap.set(cv2.CAP_PROP_FPS, fps)
+            actual = cap.get(cv2.CAP_PROP_FPS)
+            if actual > 0 and abs(actual - fps) <= 2:
+                supported.append(fps)
+    finally:
+        cap.release()
+    return supported or [30, 60]
+
+
+def _set_window_topmost(window_name: str, topmost: bool) -> None:
+    """Set an OpenCV window always-on-top via Win32 SetWindowPos."""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.FindWindowW(None, window_name)
+        if hwnd:
+            HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
+            SWP_NOMOVE, SWP_NOSIZE = 0x0002, 0x0001
+            ctypes.windll.user32.SetWindowPos(
+                hwnd,
+                HWND_TOPMOST if topmost else HWND_NOTOPMOST,
+                0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE,
+            )
+    except Exception:
+        pass
+
+
 class _UVCPreviewThread(threading.Thread):
     """Dedicated thread that refreshes the UVC preview window at a fixed rate.
 
@@ -971,6 +1086,7 @@ class _UVCPreviewThread(threading.Thread):
         preview_width: int = 1920,
         preview_height: int = 1080,
         config=None,
+        show_cv2_window: bool = True,
     ) -> None:
         super().__init__(daemon=True, name='UVCPreview')
         self._window_name    = window_name
@@ -984,14 +1100,19 @@ class _UVCPreviewThread(threading.Thread):
         self._preview_width  = preview_width
         self._preview_height = preview_height
         self._config         = config
+        self._show_cv2       = show_cv2_window
 
     def run(self) -> None:
-        # All OpenCV GUI operations for this window must happen on this thread.
-        try:
-            cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
-        except Exception:
-            pass
+        # cv2 GUI operations must stay on this thread.
+        if self._show_cv2:
+            try:
+                cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
+            except Exception:
+                pass
+
+        _crop_active = False
+        _topmost_active: bool | None = None
 
         while not self._stop.is_set():
             t0 = time.perf_counter()
@@ -1001,33 +1122,56 @@ class _UVCPreviewThread(threading.Thread):
                 try:
                     region  = self._region_ref[0]
                     preview = self._draw_overlay(frame.copy(), region)
+                    # Share full overlay-rendered frame with the Qt preview panel
+                    # (before any crop so the panel can apply its own crop).
+                    set_preview_frame(preview)
+                    set_preview_region(region)
 
-                    # Crop to detection region when requested so the user sees
-                    # exactly what the model infers on.
-                    if region is not None and getattr(self._config, 'preview_crop_to_detection', False):
-                        _l = max(0, int(region.get('left', 0)))
-                        _t = max(0, int(region.get('top', 0)))
-                        _w = max(1, int(region.get('width', preview.shape[1])))
-                        _h = max(1, int(region.get('height', preview.shape[0])))
-                        _r = min(preview.shape[1], _l + _w)
-                        _b = min(preview.shape[0], _t + _h)
-                        if _r > _l and _b > _t:
-                            preview = preview[_t:_b, _l:_r]
+                    if self._show_cv2:
+                        # Crop to detection region when requested so the user sees
+                        # exactly what the model infers on.
+                        crop = bool(region is not None and getattr(self._config, 'preview_crop_to_detection', False))
+                        if crop != _crop_active:
+                            _crop_active = crop
+                            try:
+                                if crop and region is not None:
+                                    rw = max(64, int(region.get('width', self._preview_width)))
+                                    rh = max(64, int(region.get('height', self._preview_height)))
+                                    cv2.resizeWindow(self._window_name, rw, rh)
+                                else:
+                                    cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
+                            except Exception:
+                                pass
 
-                    rendered = _render_preview_frame(
-                        self._window_name, self._scale_mode, preview)
-                    cv2.imshow(self._window_name, rendered)
-                    cv2.waitKey(1)
+                        if crop and region is not None:
+                            _l = max(0, int(region.get('left', 0)))
+                            _t = max(0, int(region.get('top', 0)))
+                            _w = max(1, int(region.get('width', preview.shape[1])))
+                            _h = max(1, int(region.get('height', preview.shape[0])))
+                            _r = min(preview.shape[1], _l + _w)
+                            _b = min(preview.shape[0], _t + _h)
+                            if _r > _l and _b > _t:
+                                preview = preview[_t:_b, _l:_r]
+
+                        rendered = _render_preview_frame(
+                            self._window_name, self._scale_mode, preview)
+                        cv2.imshow(self._window_name, rendered)
+                        cv2.waitKey(1)
+                        topmost = bool(getattr(self._config, 'uvc_always_on_top', True))
+                        if topmost != _topmost_active:
+                            _topmost_active = topmost
+                            _set_window_topmost(self._window_name, topmost)
                 except Exception:
                     pass
             remaining = self._interval - (time.perf_counter() - t0)
             if remaining > 0.001:
                 time.sleep(remaining)
 
-        try:
-            cv2.destroyWindow(self._window_name)
-        except Exception:
-            pass
+        if self._show_cv2:
+            try:
+                cv2.destroyWindow(self._window_name)
+            except Exception:
+                pass
 
 
 class UVCCapture:
@@ -1040,7 +1184,7 @@ class UVCCapture:
         height = int(getattr(config, 'uvc_height', 1080))
         fps = int(getattr(config, 'uvc_fps', 60))
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
-        self.window_name = str(getattr(config, 'uvc_window_name', 'Axiom UVC Preview'))
+        self.window_name = _UVC_WINDOW_NAME
         self.config_signature = _uvc_signature(config)
 
         capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
@@ -1131,6 +1275,7 @@ class UVCCapture:
                 preview_width=self.preview_width,
                 preview_height=self.preview_height,
                 config=self.config,
+                show_cv2_window=False,  # Qt panel is the primary display; cv2 window suppressed
             )
             self._preview_thread.start()
 
@@ -1140,6 +1285,8 @@ class UVCCapture:
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
+            else:
+                time.sleep(0.005)
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
@@ -1173,138 +1320,7 @@ class UVCCapture:
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
 
     def _draw_overlay(self, frame_bgr: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
-        """Draw overlay.py-equivalent visuals into UVC preview window."""
-
-        cfg = self.config
-        if not bool(getattr(cfg, 'AimToggle', True)):
-            return frame_bgr
-
-        h, w = frame_bgr.shape[:2]
-        region_left = int(region.get('left', 0)) if region else 0
-        region_top = int(region.get('top', 0)) if region else 0
-        region_width = int(region.get('width', w)) if region else w
-        region_height = int(region.get('height', h)) if region else h
-
-        cx = int(getattr(cfg, 'crosshairX', w // 2))
-        cy = int(getattr(cfg, 'crosshairY', h // 2))
-
-        if bool(getattr(cfg, 'show_detect_range', False)):
-            x1 = max(0, region_left)
-            y1 = max(0, region_top)
-            x2 = min(w - 1, region_left + region_width)
-            y2 = min(h - 1, region_top + region_height)
-            cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (255, 140, 0), 1, cv2.LINE_AA)
-
-        if bool(getattr(cfg, 'show_fov', True)):
-            fov = int(getattr(cfg, 'fov_size', 220))
-            half = max(1, fov // 2)
-            x1, y1 = cx - half, cy - half
-            x2, y2 = cx + half, cy + half
-            color = (0, 0, 255)
-            if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
-                cv2.circle(frame_bgr, (cx, cy), half, color, 2, cv2.LINE_AA)
-            else:
-                corner = max(8, min(20, fov // 6))
-                cv2.line(frame_bgr, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
-
-        if bool(getattr(cfg, 'show_boxes', True)):
-            boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-            confidences = list(getattr(cfg, 'latest_confidences', []) or [])
-            show_conf = bool(getattr(cfg, 'show_confidence', True))
-            # BGR colors per theme (B, G, R)
-            _theme_bgr = {
-                'cyan':   (255, 220, 0),
-                'red':    (60, 60, 255),
-                'yellow': (0, 210, 255),
-                'white':  (255, 255, 255),
-                'purple': (255, 60, 180),
-            }
-            theme_key = str(getattr(cfg, 'box_color_theme', 'default')).lower()
-            box_color_bgr = _theme_bgr.get(theme_key, (0, 255, 0))
-            speed = float(getattr(cfg, 'chroma_box_speed', 1.0))
-            hue = (time.monotonic() * speed * 60.0) % 360.0
-            r, g, b = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
-            chroma_bgr = (int(b * 255), int(g * 255), int(r * 255))
-            use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
-            fov_half = float(getattr(cfg, 'fov_size', 220)) / 2.0
-            for i, box in enumerate(boxes):
-                try:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                except Exception:
-                    continue
-                if x2 <= 0 or y2 <= 0 or x1 >= w or y1 >= h:
-                    continue
-                x1 = max(0, min(w - 1, x1))
-                y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w - 1, x2))
-                y2 = max(0, min(h - 1, y2))
-                conf = float(confidences[i]) if i < len(confidences) else 0.5
-                thickness = max(1, min(3, 1 + round(conf * 2)))
-                corner_len = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
-                bx1, by1, bx2, by2 = float(x1), float(y1), float(x2), float(y2)
-                if use_circle:
-                    nx = min(max(float(cx), bx1), bx2)
-                    ny = min(max(float(cy), by1), by2)
-                    in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
-                else:
-                    in_fov = (bx1 < cx + fov_half and bx2 > cx - fov_half and
-                              by1 < cy + fov_half and by2 > cy - fov_half)
-                draw_color = chroma_bgr if in_fov else box_color_bgr
-                cv2.line(frame_bgr, (x1, y1), (x1 + corner_len, y1), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y1), (x1, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2 - corner_len, y1), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y1), (x2, y1 + corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1 + corner_len, y2), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x1, y2), (x1, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2 - corner_len, y2), draw_color, thickness, cv2.LINE_AA)
-                cv2.line(frame_bgr, (x2, y2), (x2, y2 - corner_len), draw_color, thickness, cv2.LINE_AA)
-                if show_conf and i < len(confidences):
-                    cv2.putText(
-                        frame_bgr,
-                        f"{conf * 100:.0f}%",
-                        (max(0, x1 - 5), max(15, y1 - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 255, 255),
-                        1,
-                        cv2.LINE_AA,
-                    )
-
-        if bool(getattr(cfg, 'show_tracer_line', False)):
-            tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-            fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
-            for box in tracer_boxes:
-                try:
-                    x1, y1, x2, y2 = [int(v) for v in box]
-                except Exception:
-                    continue
-                bx = (x1 + x2) // 2
-                by = (y1 + y2) // 2
-                if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
-                    cv2.line(frame_bgr, (cx, cy), (bx, by), (255, 255, 255), 2, cv2.LINE_AA)
-
-        # Locked-target decay box — drawn when sticky lock is holding position
-        # after detection was lost, so the user sees a visual indicator.
-        decay_box = getattr(cfg, 'display_locked_box', None)
-        if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
-            try:
-                x1, y1, x2, y2 = [int(v) for v in decay_box]
-                x1 = max(0, min(w - 1, x1))
-                y1 = max(0, min(h - 1, y1))
-                x2 = max(0, min(w - 1, x2))
-                y2 = max(0, min(h - 1, y2))
-                cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (0, 140, 255), 1, cv2.LINE_AA)
-            except Exception:
-                pass
-
-        return frame_bgr
+        return _draw_detection_overlay(frame_bgr, region, self.config, has_alpha=False)
 
     def _render_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
         return _render_preview_frame(self.window_name, self.preview_scale_mode, frame_bgr)
@@ -1429,10 +1445,9 @@ def initialize_screen_capture(config: Config) -> Any:
             print('[Capture] NDI backend initialized via cyndilib and is now active.')
             return ndi_capture
         except Exception as exc:
-            _warn_once(
-                'ndi_fallback_mss',
-                f'[Capture][NDI] Initialization failed with "{exc}". Falling back to MSS backend.',
-            )
+            # Always print (not _warn_once): NDI is (re)connected interactively and
+            # the failure reason must stay visible across repeated attempts.
+            print(f'[Capture][NDI] Initialization failed with "{exc}". Falling back to MSS backend.')
     elif screenshot_method != 'mss':
         _warn_once(
             'invalid_screenshot_method',
