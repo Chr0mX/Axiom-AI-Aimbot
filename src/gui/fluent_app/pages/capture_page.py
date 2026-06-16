@@ -9,7 +9,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QMessageBox
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, FluentIcon,
-    ComboBox, PushButton, SettingCard, BodyLabel,
+    ComboBox, PushButton, SettingCard, BodyLabel, SegmentedWidget,
 )
 from ..components.slider_spin_card import SliderSpinCard
 from ..base_page import BasePage
@@ -248,6 +248,20 @@ class CapturePage(BasePage):
             parent=self.previewGroup
         )
 
+        self.previewFpsCapSegment = SegmentedWidget()
+        self.previewFpsCapSegment.addItem(routeKey='uncapped', text="None")
+        self.previewFpsCapSegment.addItem(routeKey='30',       text="30 FPS")
+        self.previewFpsCapSegment.addItem(routeKey='60',       text="60 FPS")
+        self.previewFpsCapSegment.setCurrentItem('uncapped')
+        self.previewFpsCapCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            "Preview FPS Cap",
+            "",
+            self.previewGroup
+        )
+        self.previewFpsCapCard.hBoxLayout.addWidget(self.previewFpsCapSegment, 0, Qt.AlignmentFlag.AlignRight)
+        self.previewFpsCapCard.hBoxLayout.addSpacing(16)
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -279,6 +293,7 @@ class CapturePage(BasePage):
         self.previewGroup.addSettingCard(self.previewCropCard)
         self.previewGroup.addSettingCard(self.uvcPreviewScaleCard)
         self.previewGroup.addSettingCard(self.uvcAlwaysOnTopCard)
+        self.previewGroup.addSettingCard(self.previewFpsCapCard)
         self.addContent(self.previewGroup)
         self.previewGroup.setVisible(False)
 
@@ -302,6 +317,7 @@ class CapturePage(BasePage):
         self.previewCropCard.checkedChanged.connect(self._onPreviewCropChanged)
         self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
         self.uvcAlwaysOnTopCard.checkedChanged.connect(self._onAlwaysOnTopChanged)
+        self.previewFpsCapSegment.currentItemChanged.connect(self._onPreviewFpsCapChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
         self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
@@ -349,6 +365,10 @@ class CapturePage(BasePage):
             self.previewCropCard.setChecked(bool(getattr(self._config, 'preview_crop_to_detection', False)))
             self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
             self.uvcAlwaysOnTopCard.setChecked(bool(getattr(self._config, 'uvc_always_on_top', True)))
+            _cap_key = {0: 'uncapped', 30: '30', 60: '60'}.get(
+                getattr(self._config, 'preview_fps_cap', 0), 'uncapped'
+            )
+            self.previewFpsCapSegment.setCurrentItem(_cap_key)
 
             ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
             if screenshot_method == 'ndi':
@@ -611,6 +631,15 @@ class CapturePage(BasePage):
         if self._config:
             self._config.uvc_always_on_top = bool(checked)
 
+    def _onPreviewFpsCapChanged(self, routeKey: str):
+        cap = {'uncapped': 0, '30': 30, '60': 60}.get(routeKey, 0)
+        if self._config:
+            self._config.preview_fps_cap = cap
+        print(f"[Capture][Preview] FPS cap set to {cap or 'uncapped'}.")
+        win = self.window()
+        if hasattr(win, 'previewPanel'):
+            win.previewPanel.applyFpsCap()
+
     def _onNdiBandwidthChanged(self, text):
         if self._config:
             self._config.ndi_bandwidth = str(text).lower()
@@ -704,3 +733,4 @@ class CapturePage(BasePage):
         self.previewCropCard.contentLabel.setText(t("preview_crop_desc"))
         self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")
+        self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")

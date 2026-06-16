@@ -50,6 +50,7 @@ _FIELD_MAP = {
     'uvc_preview_scale_mode':     'capture.preview.scale_mode',
     'uvc_always_on_top':          'capture.preview.always_on_top',
     'preview_crop_to_detection':  'capture.preview.crop_to_detection',
+    'preview_fps_cap':            'capture.preview.fps_cap',
 
     # --- aim ---
     'fov_size':                   'aim.fov_size',
@@ -233,6 +234,7 @@ class Config:
         self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.uvc_always_on_top: bool = True
         self.preview_crop_to_detection: bool = False
+        self.preview_fps_cap: int = 0
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
         self.ndi_force_reconnect: bool = False

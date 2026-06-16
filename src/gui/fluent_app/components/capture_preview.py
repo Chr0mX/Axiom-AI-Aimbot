@@ -49,8 +49,12 @@ def _apply_crop(frame, config) -> "frame":
 
 
 def _capture_interval_ms(config) -> int:
-    """Return capture interval in ms, derived from config.screenshot_interval."""
-    return max(1, int(getattr(config, 'screenshot_interval', 0.016) * 1000))
+    """Return capture interval in ms, honouring preview_fps_cap (0 = uncapped)."""
+    base = max(1, int(getattr(config, 'screenshot_interval', 0.016) * 1000))
+    cap = getattr(config, 'preview_fps_cap', 0)
+    if cap > 0:
+        return max(base, 1000 // cap)
+    return base
 
 
 class _FpsMixin:
@@ -200,6 +204,12 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
         self._frame_label.clear()
         self._frame_label.setText("No signal")
         self._fps_reset()
+
+    def applyFpsCap(self) -> None:
+        if self._timer.isActive():
+            self._timer.start(_capture_interval_ms(self._config))
+        if self._popout and self._popout.isVisible():
+            self._popout._timer.start(_capture_interval_ms(self._config))
 
     def _refresh(self) -> None:
         from core.screen_capture import get_preview_frame
