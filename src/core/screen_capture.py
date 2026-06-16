@@ -19,6 +19,22 @@ if TYPE_CHECKING:
 _WARNED_MESSAGES: set[str] = set()
 _CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
 
+# ---------------------------------------------------------------------------
+# Module-level preview frame — written by capture worker, read by GUI timer.
+# ---------------------------------------------------------------------------
+_preview_lock = threading.Lock()
+_preview_cell: list = [None]  # [np.ndarray | None]
+
+
+def set_preview_frame(frame: np.ndarray) -> None:
+    with _preview_lock:
+        _preview_cell[0] = frame
+
+
+def get_preview_frame() -> "np.ndarray | None":
+    with _preview_lock:
+        return _preview_cell[0]
+
 
 def _detect_active_capture_method(screen_capture: Any, fallback_method: str = 'mss') -> str:
     """Best-effort detection of the currently active capture backend name."""

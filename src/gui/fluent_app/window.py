@@ -138,7 +138,12 @@ class AxiomWindow(FluentWindow):
 
         self.initNavigation()
         self.initBottomNavigation()
-        
+
+        from .components.capture_preview import CapturePreviewPanel
+        self.previewPanel = CapturePreviewPanel(self)
+        self.widgetLayout.addWidget(self.previewPanel)
+        self.previewPanel.hide()
+
         # 若為深色主題，立即切換圖標為白色版本
         if self._isDarkTheme:
             self.updateIcons()
@@ -331,6 +336,10 @@ class AxiomWindow(FluentWindow):
         if hasattr(self, 'configInterface') and hasattr(self.configInterface, '_applyPanelStyles'):
             self.configInterface._applyPanelStyles()
 
+        self.updateVisualsVisibilityForScreenshotMethod(
+            getattr(config, 'screenshot_method', 'mss')
+        )
+
     def updateVisualsVisibilityForScreenshotMethod(self, screenshot_method: str):
         """UVC 模式下隱藏 visual 頁籤，避免與 UVC 預覽重複顯示。"""
         is_uvc = str(screenshot_method).lower() == 'uvc'
@@ -340,6 +349,15 @@ class AxiomWindow(FluentWindow):
 
         if is_uvc and self.stackedWidget.currentWidget() is self.displayInterface:
             self.switchTo(self.aimInterface)
+
+        is_preview = str(screenshot_method).lower() in ('ndi', 'uvc')
+        if hasattr(self, 'previewPanel'):
+            if is_preview:
+                self.previewPanel.show()
+                self.previewPanel.start()
+            else:
+                self.previewPanel.stop()
+                self.previewPanel.hide()
     
     def setConfigManager(self, manager):
         """設定 ConfigManager 實例"""
