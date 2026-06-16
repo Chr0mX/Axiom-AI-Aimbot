@@ -1,7 +1,9 @@
+import time as _time
+
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QDialog, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QDialog, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 
@@ -51,7 +53,31 @@ def _capture_interval_ms(config) -> int:
     return max(1, int(getattr(config, 'screenshot_interval', 0.016) * 1000))
 
 
-class PreviewPopOutWindow(QDialog):
+class _FpsMixin:
+    """Mixin that tracks rendered-frame rate and updates a QLabel once per second."""
+
+    def _fps_init(self, label: QLabel) -> None:
+        self._fps_label   = label
+        self._fps_count   = 0
+        self._fps_last_ts = _time.perf_counter()
+
+    def _fps_tick(self) -> None:
+        self._fps_count += 1
+        now = _time.perf_counter()
+        elapsed = now - self._fps_last_ts
+        if elapsed >= 1.0:
+            fps = self._fps_count / elapsed
+            self._fps_label.setText(f"{fps:.0f} fps")
+            self._fps_count   = 0
+            self._fps_last_ts = now
+
+    def _fps_reset(self) -> None:
+        self._fps_count   = 0
+        self._fps_last_ts = _time.perf_counter()
+        self._fps_label.setText("-- fps")
+
+
+class PreviewPopOutWindow(_FpsMixin, QDialog):
     """Standalone floating window showing the live capture preview."""
 
     def __init__(self, config, on_close=None, parent=None):
@@ -63,12 +89,20 @@ class PreviewPopOutWindow(QDialog):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+
+        fps_label = QLabel("-- fps")
+        fps_label.setStyleSheet("font-size: 9px; color: #888;")
+        fps_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(fps_label)
 
         self._label = QLabel()
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setStyleSheet("background: #111;")
         self._label.setText("No signal")
         layout.addWidget(self._label, stretch=1)
+
+        self._fps_init(fps_label)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
@@ -88,6 +122,7 @@ class PreviewPopOutWindow(QDialog):
         pixmap = _frame_to_pixmap(frame, pw, ph)
         if pixmap:
             self._label.setPixmap(pixmap)
+            self._fps_tick()
         else:
             self._label.setText("No signal")
 
@@ -98,7 +133,7 @@ class PreviewPopOutWindow(QDialog):
         super().closeEvent(event)
 
 
-class CapturePreviewPanel(QWidget):
+class CapturePreviewPanel(_FpsMixin, QWidget):
     """Right-side live preview for NDI / UVC capture feeds.
 
     Visibility controlled by window.py based on screenshot_method and
@@ -114,11 +149,20 @@ class CapturePreviewPanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 12, 8, 8)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
 
+        # Header row: "Preview" label + FPS counter
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
         header = QLabel("Preview")
         header.setStyleSheet("font-weight: bold; font-size: 11px;")
-        layout.addWidget(header)
+        fps_label = QLabel("-- fps")
+        fps_label.setStyleSheet("font-size: 9px; color: #888;")
+        fps_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        header_row.addWidget(header)
+        header_row.addStretch(1)
+        header_row.addWidget(fps_label)
+        layout.addLayout(header_row)
 
         self._frame_label = QLabel()
         self._frame_label.setMinimumSize(160, 90)
@@ -137,6 +181,8 @@ class CapturePreviewPanel(QWidget):
         self._popout_btn.clicked.connect(self._onPopOut)
         layout.addWidget(self._popout_btn)
 
+        self._fps_init(fps_label)
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
 
@@ -145,6 +191,7 @@ class CapturePreviewPanel(QWidget):
 
     def start(self) -> None:
         if not self._popout:
+            self._fps_reset()
             ms = _capture_interval_ms(self._config)
             self._timer.start(ms)
 
@@ -152,6 +199,7 @@ class CapturePreviewPanel(QWidget):
         self._timer.stop()
         self._frame_label.clear()
         self._frame_label.setText("No signal")
+        self._fps_reset()
 
     def _refresh(self) -> None:
         from core.screen_capture import get_preview_frame
@@ -169,6 +217,7 @@ class CapturePreviewPanel(QWidget):
         pixmap = _frame_to_pixmap(frame, pw, ph)
         if pixmap:
             self._frame_label.setPixmap(pixmap)
+            self._fps_tick()
         else:
             self._frame_label.setText("No signal")
 
@@ -176,6 +225,7 @@ class CapturePreviewPanel(QWidget):
         if self._popout and self._popout.isVisible():
             return
         self._timer.stop()
+        self._fps_reset()
         self._frame_label.setText("Preview in pop-out")
         self._popout = PreviewPopOutWindow(
             config=self._config,
@@ -187,5 +237,6 @@ class CapturePreviewPanel(QWidget):
     def _onPopOutClosed(self) -> None:
         self._popout = None
         self._frame_label.setText("No signal")
+        self._fps_reset()
         ms = _capture_interval_ms(self._config)
         self._timer.start(ms)
