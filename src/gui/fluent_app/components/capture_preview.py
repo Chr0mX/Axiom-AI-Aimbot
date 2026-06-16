@@ -58,7 +58,7 @@ class CapturePreviewPanel(QWidget):
         h, w = frame.shape[:2]
         ch = frame.shape[2]
         if ch == 4:
-            fmt = QImage.Format.Format_BGRA8888
+            fmt = QImage.Format.Format_ARGB32  # ARGB32 = B,G,R,A in memory on x86 — matches BGRA
             bpl = w * 4
         elif ch == 3:
             fmt = QImage.Format.Format_BGR888

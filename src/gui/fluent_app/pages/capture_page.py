@@ -617,7 +617,7 @@ class CapturePage(BasePage):
             return
         source_name = self.ndiSourceCombo.currentData()
         if not isinstance(source_name, str) or not source_name.strip():
-            source_name = str(text).strip()
+            return
         source_name = source_name.strip()
         if not source_name:
             return
