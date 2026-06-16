@@ -89,6 +89,7 @@ _FIELD_MAP = {
     'smart_jitter_strength':      'aim.smart_jitter.strength',
     'smart_jitter_box_threshold_pct': 'aim.smart_jitter.box_threshold_pct',
     'smart_jitter_lmb_gate':      'aim.smart_jitter.lmb_gate',
+    'jitter_pattern_file':        'aim.smart_jitter.pattern_file',
     'aim_deadzone_enabled':       'aim.deadzone.enabled',
     'aim_deadzone_min_px':        'aim.deadzone.min_px',
     'aim_deadzone_close_px':      'aim.deadzone.close_px',
@@ -407,6 +408,7 @@ class Config:
         self.smart_jitter_strength: float = 6.0                # max pixel offset radius applied each frame
         self.smart_jitter_box_threshold_pct: float = 15.0   # box_h / detect_range_size < threshold% → jitter
         self.smart_jitter_lmb_gate: bool = True             # only jitter while aim key is held
+        self.jitter_pattern_file: str = ""                  # path to recorded .json; empty = procedural
 
         # EMA 瞄準點平滑（在 PID 前平滑目標座標）
         self.ema_enabled: bool = False

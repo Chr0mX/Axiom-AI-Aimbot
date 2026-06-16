@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import math
 import random
 import time
@@ -28,6 +29,15 @@ def _box_iou(a: List[float], b: List[float]) -> float:
 
 # Module-level singletons — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
+
+# Jitter pattern iterator cache: reloaded whenever jitter_pattern_file changes.
+_jitter_pattern_cache: dict = {"file": None, "iter": None}
+
+
+def _load_jitter_pattern(path_str: str) -> list:
+    from pathlib import Path
+    from core.jitter_recorder import _load_pattern
+    return _load_pattern(Path(path_str))["frames"]
 _kalman: Optional[KalmanFilter2D] = None
 
 
@@ -348,10 +358,31 @@ def process_aiming(
                 threshold_pct = float(getattr(config, 'smart_jitter_box_threshold_pct', 15.0))
                 if detect_size > 0 and (box_h / detect_size) * 100.0 < threshold_pct:
                     sj = max(0.0, float(getattr(config, 'smart_jitter_strength', 6.0)))
-                    angle = random.uniform(0, math.tau)
-                    r = random.uniform(0, sj)
-                    move_x += int(r * math.cos(angle))
-                    move_y += int(r * math.sin(angle))
+                    pattern_file = getattr(config, 'jitter_pattern_file', '')
+                    if pattern_file:
+                        cache = _jitter_pattern_cache
+                        if cache["file"] != pattern_file:
+                            try:
+                                frames = _load_jitter_pattern(pattern_file)
+                                cache["iter"] = itertools.cycle(frames)
+                                cache["file"] = pattern_file
+                            except Exception:
+                                cache["iter"] = None
+                                cache["file"] = None
+                        if cache["iter"]:
+                            f = next(cache["iter"])
+                            move_x += int(f["dx"])
+                            move_y += int(f["dy"])
+                        else:
+                            angle = random.uniform(0, math.tau)
+                            r = random.uniform(0, sj)
+                            move_x += int(r * math.cos(angle))
+                            move_y += int(r * math.sin(angle))
+                    else:
+                        angle = random.uniform(0, math.tau)
+                        r = random.uniform(0, sj)
+                        move_x += int(r * math.cos(angle))
+                        move_y += int(r * math.sin(angle))
 
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)

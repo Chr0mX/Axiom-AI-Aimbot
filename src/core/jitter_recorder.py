@@ -56,6 +56,22 @@ def _normalize_frames(frames: list) -> list:
     return frames + [{"dx": -net_dx, "dy": -net_dy, "dt_ms": avg_dt}]
 
 
+def list_patterns() -> list:
+    """Return [{name, path, frame_count}, ...] for all saved patterns (GUI helper)."""
+    result = []
+    for p in _list_pattern_files():
+        try:
+            data = _load_pattern(p)
+            result.append({
+                "name": data.get("name", p.stem),
+                "path": str(p),
+                "frame_count": len(data.get("frames", [])),
+            })
+        except Exception:
+            pass
+    return result
+
+
 def _save_pattern(name: str, frames: list) -> Path:
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name) or "pattern"
     path = _PATTERNS_DIR / f"{safe}.json"
