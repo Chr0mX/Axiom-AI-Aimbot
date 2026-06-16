@@ -5,7 +5,7 @@ import os
 import re
 import sys
 import subprocess
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox, QInputDialog
 from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtCore import Qt
 from qfluentwidgets import (
@@ -31,6 +31,8 @@ class AimPage(BasePage):
         self._isLoadingConfig = False
         self._isArduinoConnected = False
         self._isXboxConnected = False
+        self._jitterRecorder = None
+        self._jitterRecording = False
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -360,6 +362,17 @@ class AimPage(BasePage):
             parent=self.antiRecoilGroup
         )
 
+        self.jitterRecordBtn = PushButton("● Record")
+        self.jitterRecordBtn.setFixedWidth(130)
+        self.jitterRecordCard = SettingCard(
+            FluentIcon.MICROPHONE,
+            t("jitter_record_label", "Record Jitter"),
+            t("jitter_record_desc", "Record your mouse shake to create a custom jitter pattern"),
+            self.antiRecoilGroup
+        )
+        self.jitterRecordCard.hBoxLayout.addWidget(self.jitterRecordBtn, 0)
+        self.jitterRecordCard.hBoxLayout.addSpacing(16)
+
         self.jitterPatternCombo = ComboBox()
         self.jitterPatternCombo.setMinimumWidth(180)
         self.jitterPatternCard = SettingCard(
@@ -573,6 +586,7 @@ class AimPage(BasePage):
         self.antiRecoilGroup.addSettingCard(self.smartJitterLmbCard)
         self.antiRecoilGroup.addSettingCard(self.smartJitterLevelCard)
         self.antiRecoilGroup.addSettingCard(self.smartJitterThreshCard)
+        self.antiRecoilGroup.addSettingCard(self.jitterRecordCard)
         self.antiRecoilGroup.addSettingCard(self.jitterPatternCard)
         self.addContent(self.antiRecoilGroup)
 
@@ -640,6 +654,7 @@ class AimPage(BasePage):
         self.smartJitterLmbCard.checkedChanged.connect(self._onSmartJitterLmbChanged)
         self.smartJitterStrengthSpin.valueChanged.connect(self._onSmartJitterStrengthChanged)
         self.smartJitterThreshCard.valueChanged.connect(self._onSmartJitterThreshChanged)
+        self.jitterRecordBtn.clicked.connect(self._onJitterRecordClicked)
         self.jitterPatternCombo.currentIndexChanged.connect(self._onJitterPatternChanged)
 
         # Target Priority
@@ -733,6 +748,7 @@ class AimPage(BasePage):
             _idx = self.jitterPatternCombo.findData(_current_pf)
             self.jitterPatternCombo.setCurrentIndex(max(0, _idx))
             self.jitterPatternCombo.blockSignals(False)
+            self.jitterRecordCard.setEnabled(sj_on)
             self.jitterPatternCard.setEnabled(sj_on)
 
             # Target Priority
@@ -1060,6 +1076,7 @@ class AimPage(BasePage):
         self.smartJitterLmbCard.setEnabled(bool(checked))
         self.smartJitterLevelCard.setEnabled(bool(checked))
         self.smartJitterThreshCard.setEnabled(bool(checked))
+        self.jitterRecordCard.setEnabled(bool(checked))
         self.jitterPatternCard.setEnabled(bool(checked))
 
     def _onSmartJitterLmbChanged(self, checked):
@@ -1073,6 +1090,40 @@ class AimPage(BasePage):
     def _onSmartJitterThreshChanged(self, value):
         if self._config:
             self._config.smart_jitter_box_threshold_pct = float(value)
+
+    def _onJitterRecordClicked(self) -> None:
+        from core.jitter_recorder import _Recorder, _normalize_frames, _save_pattern, list_patterns
+        if not self._jitterRecording:
+            self._jitterRecorder = _Recorder()
+            self._jitterRecorder.start()
+            self._jitterRecording = True
+            self.jitterRecordBtn.setText("■ Stop & Save")
+        else:
+            frames = self._jitterRecorder.stop()
+            self._jitterRecording = False
+            self.jitterRecordBtn.setText("● Record")
+            if not frames:
+                QMessageBox.information(self, "Jitter Recorder", "No movement detected — nothing saved.")
+                return
+            net_dx = sum(f["dx"] for f in frames)
+            net_dy = sum(f["dy"] for f in frames)
+            frames = _normalize_frames(frames)
+            name, ok = QInputDialog.getText(self, "Save Pattern", "Pattern name:", text="jitter")
+            if not ok or not name.strip():
+                return
+            _save_pattern(name.strip(), frames)
+            # refresh combo
+            if self._config is not None:
+                from core.jitter_recorder import list_patterns as _lp
+                self.jitterPatternCombo.blockSignals(True)
+                current = self.jitterPatternCombo.currentData() or ""
+                self.jitterPatternCombo.clear()
+                self.jitterPatternCombo.addItem("(none — procedural)", userData="")
+                for p in _lp():
+                    self.jitterPatternCombo.addItem(p["name"], userData=p["path"])
+                idx = self.jitterPatternCombo.findData(current)
+                self.jitterPatternCombo.setCurrentIndex(max(0, idx))
+                self.jitterPatternCombo.blockSignals(False)
 
     def _onJitterPatternChanged(self, _index: int) -> None:
         if self._isLoadingConfig or not self._config:
@@ -1209,6 +1260,7 @@ class AimPage(BasePage):
         self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Shooting (LMB)"))
         self.smartJitterLevelCard.titleLabel.setText(t("smart_jitter_level_label", "Jitter Strength"))
         self.smartJitterThreshCard.titleLabel.setText(t("smart_jitter_threshold_label", "Box Size Threshold"))
+        self.jitterRecordCard.titleLabel.setText(t("jitter_record_label", "Record Jitter"))
         self.jitterPatternCard.titleLabel.setText(t("jitter_pattern_label", "Recorded Pattern"))
 
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
