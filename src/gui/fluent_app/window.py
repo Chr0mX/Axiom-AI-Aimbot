@@ -159,6 +159,12 @@ class AxiomWindow(FluentWindow):
         self.widgetLayout.addWidget(self.previewPanel)
         self.previewPanel.hide()
 
+        # Stretch: content gets 4x, preview gets 1x; swapped when nav collapses
+        self.widgetLayout.setStretchFactor(self.stackedWidget, 4)
+        self.widgetLayout.setStretchFactor(self.previewPanel, 1)
+
+        self.navigationInterface.displayModeChanged.connect(self._onNavModeChanged)
+
         # 若為深色主題，立即切換圖標為白色版本
         if self._isDarkTheme:
             self.updateIcons()
@@ -385,14 +391,22 @@ class AxiomWindow(FluentWindow):
             self.previewPanel.hide()
 
     def _togglePreviewCollapse(self) -> None:
-        if self.previewPanel.isVisible():
-            self.previewPanel.hide()
+        """Toggle left navigation collapsed/expanded; preview gains the freed space."""
+        self.navigationInterface.toggle()
+
+    def _onNavModeChanged(self, mode) -> None:
+        from qfluentwidgets import NavigationDisplayMode
+        collapsed = mode in (NavigationDisplayMode.MINIMAL, NavigationDisplayMode.COMPACT)
+        if collapsed:
+            self.widgetLayout.setStretchFactor(self.stackedWidget, 2)
+            self.widgetLayout.setStretchFactor(self.previewPanel, 1)
             self._previewArrow.setText("▶")
-            self._previewArrow.setToolTip("Expand preview")
+            self._previewArrow.setToolTip("Expand navigation")
         else:
-            self.previewPanel.show()
+            self.widgetLayout.setStretchFactor(self.stackedWidget, 4)
+            self.widgetLayout.setStretchFactor(self.previewPanel, 1)
             self._previewArrow.setText("◀")
-            self._previewArrow.setToolTip("Collapse preview")
+            self._previewArrow.setToolTip("Collapse navigation")
     
     def setConfigManager(self, manager):
         """設定 ConfigManager 實例"""

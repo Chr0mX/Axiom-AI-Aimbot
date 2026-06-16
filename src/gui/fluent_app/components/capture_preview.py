@@ -1,7 +1,7 @@
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
-    QDialog, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget,
+    QDialog, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 
@@ -46,6 +46,11 @@ def _apply_crop(frame, config) -> "frame":
     return cropped if cropped.size else frame
 
 
+def _capture_interval_ms(config) -> int:
+    """Return capture interval in ms, derived from config.screenshot_interval."""
+    return max(1, int(getattr(config, 'screenshot_interval', 0.016) * 1000))
+
+
 class PreviewPopOutWindow(QDialog):
     """Standalone floating window showing the live capture preview."""
 
@@ -67,7 +72,7 @@ class PreviewPopOutWindow(QDialog):
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
-        self._timer.start(200)
+        self._timer.start(_capture_interval_ms(config))
 
     def _refresh(self):
         from core.screen_capture import get_preview_frame
@@ -98,17 +103,14 @@ class CapturePreviewPanel(QWidget):
 
     Visibility controlled by window.py based on screenshot_method and
     uvc_show_window config. Crop toggled by preview_crop_to_detection config.
+    Responsive width — expands when the left navigation is collapsed.
     """
-
-    _PANEL_W = 240
-    _IMG_W   = 220
-    _IMG_H   = 135   # 16:9 at 220 px wide
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
         self._config = config
         self._popout: "PreviewPopOutWindow | None" = None
-        self.setFixedWidth(self._PANEL_W)
+        self.setMinimumWidth(180)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 12, 8, 8)
@@ -119,15 +121,16 @@ class CapturePreviewPanel(QWidget):
         layout.addWidget(header)
 
         self._frame_label = QLabel()
-        self._frame_label.setFixedSize(self._IMG_W, self._IMG_H)
+        self._frame_label.setMinimumSize(160, 90)
+        self._frame_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self._frame_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._frame_label.setStyleSheet(
             "background: #111; border: 1px solid #333; border-radius: 4px;"
         )
         self._frame_label.setText("No signal")
-        layout.addWidget(self._frame_label)
-
-        layout.addStretch(1)
+        layout.addWidget(self._frame_label, stretch=1)
 
         self._popout_btn = QPushButton("Pop out")
         self._popout_btn.setFixedHeight(28)
@@ -142,7 +145,8 @@ class CapturePreviewPanel(QWidget):
 
     def start(self) -> None:
         if not self._popout:
-            self._timer.start(200)
+            ms = _capture_interval_ms(self._config)
+            self._timer.start(ms)
 
     def stop(self) -> None:
         self._timer.stop()
@@ -160,7 +164,9 @@ class CapturePreviewPanel(QWidget):
                 frame = _apply_crop(frame, self._config)
         except Exception:
             pass
-        pixmap = _frame_to_pixmap(frame, self._IMG_W, self._IMG_H)
+        pw = max(160, self._frame_label.width())
+        ph = max(90,  self._frame_label.height())
+        pixmap = _frame_to_pixmap(frame, pw, ph)
         if pixmap:
             self._frame_label.setPixmap(pixmap)
         else:
@@ -174,11 +180,12 @@ class CapturePreviewPanel(QWidget):
         self._popout = PreviewPopOutWindow(
             config=self._config,
             on_close=self._onPopOutClosed,
-            parent=None,   # top-level so it floats independently
+            parent=None,
         )
         self._popout.show()
 
     def _onPopOutClosed(self) -> None:
         self._popout = None
         self._frame_label.setText("No signal")
-        self._timer.start(200)
+        ms = _capture_interval_ms(self._config)
+        self._timer.start(ms)
