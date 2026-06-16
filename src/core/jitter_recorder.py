@@ -44,6 +44,18 @@ def _load_pattern(path: Path) -> dict:
         return json.load(f)
 
 
+def _normalize_frames(frames: list) -> list:
+    """Append a correction frame so the full loop cycle has zero net displacement."""
+    if not frames:
+        return frames
+    net_dx = sum(f["dx"] for f in frames)
+    net_dy = sum(f["dy"] for f in frames)
+    if net_dx == 0 and net_dy == 0:
+        return frames
+    avg_dt = max(1, int(sum(f["dt_ms"] for f in frames) / len(frames)))
+    return frames + [{"dx": -net_dx, "dy": -net_dy, "dt_ms": avg_dt}]
+
+
 def _save_pattern(name: str, frames: list) -> Path:
     safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name) or "pattern"
     path = _PATTERNS_DIR / f"{safe}.json"
@@ -208,6 +220,11 @@ def _cmd_stop() -> None:
     if not frames:
         print("  Nothing to save (no mouse movement detected).")
         return
+    net_dx = sum(f["dx"] for f in frames)
+    net_dy = sum(f["dy"] for f in frames)
+    frames = _normalize_frames(frames)
+    if net_dx != 0 or net_dy != 0:
+        print(f"  (corrected net drift: dx={net_dx}, dy={net_dy})")
     name = input("  Pattern name: ").strip() or "jitter"
     path = _save_pattern(name, frames)
     print(f"  Saved → {path}")
