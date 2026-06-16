@@ -23,7 +23,8 @@ _CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
 # Module-level preview frame — written by capture worker, read by GUI timer.
 # ---------------------------------------------------------------------------
 _preview_lock = threading.Lock()
-_preview_cell: list = [None]  # [np.ndarray | None]
+_preview_cell: list = [None]   # [np.ndarray | None]
+_preview_region_cell: list = [None]  # [dict | None]
 
 
 def set_preview_frame(frame: np.ndarray) -> None:
@@ -34,6 +35,16 @@ def set_preview_frame(frame: np.ndarray) -> None:
 def get_preview_frame() -> "np.ndarray | None":
     with _preview_lock:
         return _preview_cell[0]
+
+
+def set_preview_region(region: "dict | None") -> None:
+    with _preview_lock:
+        _preview_region_cell[0] = region
+
+
+def get_preview_region() -> "dict | None":
+    with _preview_lock:
+        return _preview_region_cell[0]
 
 
 def _detect_active_capture_method(screen_capture: Any, fallback_method: str = 'mss') -> str:
@@ -1108,6 +1119,10 @@ class _UVCPreviewThread(threading.Thread):
                 try:
                     region  = self._region_ref[0]
                     preview = self._draw_overlay(frame.copy(), region)
+                    # Share full overlay-rendered frame with the Qt preview panel
+                    # (before any crop so the panel can apply its own crop).
+                    set_preview_frame(preview)
+                    set_preview_region(region)
 
                     # Crop to detection region when requested so the user sees
                     # exactly what the model infers on.

@@ -140,7 +140,22 @@ class AxiomWindow(FluentWindow):
         self.initBottomNavigation()
 
         from .components.capture_preview import CapturePreviewPanel
-        self.previewPanel = CapturePreviewPanel(self)
+        from PyQt6.QtWidgets import QToolButton
+
+        self._previewArrow = QToolButton(self)
+        self._previewArrow.setText("◀")
+        self._previewArrow.setFixedWidth(18)
+        self._previewArrow.setFixedHeight(60)
+        self._previewArrow.setToolTip("Collapse preview")
+        self._previewArrow.setStyleSheet(
+            "QToolButton { border: none; color: #888; font-size: 10px; }"
+            "QToolButton:hover { color: #ccc; }"
+        )
+        self._previewArrow.clicked.connect(self._togglePreviewCollapse)
+        self.widgetLayout.addWidget(self._previewArrow)
+        self._previewArrow.hide()
+
+        self.previewPanel = CapturePreviewPanel(None, self)
         self.widgetLayout.addWidget(self.previewPanel)
         self.previewPanel.hide()
 
@@ -336,6 +351,8 @@ class AxiomWindow(FluentWindow):
         if hasattr(self, 'configInterface') and hasattr(self.configInterface, '_applyPanelStyles'):
             self.configInterface._applyPanelStyles()
 
+        if hasattr(self, 'previewPanel'):
+            self.previewPanel.setConfig(config)
         self.updateVisualsVisibilityForScreenshotMethod(
             getattr(config, 'screenshot_method', 'mss')
         )
@@ -350,14 +367,32 @@ class AxiomWindow(FluentWindow):
         if is_uvc and self.stackedWidget.currentWidget() is self.displayInterface:
             self.switchTo(self.aimInterface)
 
-        is_preview = str(screenshot_method).lower() in ('ndi', 'uvc')
-        if hasattr(self, 'previewPanel'):
-            if is_preview:
-                self.previewPanel.show()
-                self.previewPanel.start()
-            else:
-                self.previewPanel.stop()
-                self.previewPanel.hide()
+        self.updatePreviewPanelVisibility()
+
+    def updatePreviewPanelVisibility(self) -> None:
+        """Show/hide preview panel based on screenshot method and uvc_show_window toggle."""
+        if not hasattr(self, 'previewPanel') or self._config is None:
+            return
+        method = str(getattr(self._config, 'screenshot_method', 'mss')).lower()
+        show = bool(getattr(self._config, 'uvc_show_window', True))
+        active = method in ('ndi', 'uvc') and show
+        self._previewArrow.setVisible(active)
+        if active:
+            self.previewPanel.show()
+            self.previewPanel.start()
+        else:
+            self.previewPanel.stop()
+            self.previewPanel.hide()
+
+    def _togglePreviewCollapse(self) -> None:
+        if self.previewPanel.isVisible():
+            self.previewPanel.hide()
+            self._previewArrow.setText("▶")
+            self._previewArrow.setToolTip("Expand preview")
+        else:
+            self.previewPanel.show()
+            self._previewArrow.setText("◀")
+            self._previewArrow.setToolTip("Collapse preview")
     
     def setConfigManager(self, manager):
         """設定 ConfigManager 實例"""

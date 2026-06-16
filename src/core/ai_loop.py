@@ -368,10 +368,6 @@ def ai_logic_loop(
                     capture_state['latest_frame'] = captured_frame
                     capture_state['latest_region'] = target_region
 
-                if getattr(config, 'screenshot_method', '') in ('ndi', 'uvc'):
-                    from core.screen_capture import set_preview_frame
-                    set_preview_frame(captured_frame)
-
                 config.last_screenshot_time = time.time()
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
         finally:

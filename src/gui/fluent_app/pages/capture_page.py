@@ -592,6 +592,9 @@ class CapturePage(BasePage):
         method = str(getattr(self._config, 'screenshot_method', '?')) if self._config else '?'
         print(f"[Capture][Preview] Preview window {'ENABLED' if checked else 'DISABLED'} "
               f"(method={method}); applies on next capture re-init (~0.5s).")
+        win = self.window()
+        if hasattr(win, 'updatePreviewPanelVisibility'):
+            win.updatePreviewPanelVisibility()
 
     def _onPreviewCropChanged(self, checked):
         if self._config:
