@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 
 def _frame_to_pixmap(frame, max_w: int, max_h: int) -> "QPixmap | None":
     """Convert a BGRA/BGR numpy frame to a scaled QPixmap. Returns None on error."""
+    import numpy as np
     if frame is None or frame.ndim < 3:
         return None
     h, w = frame.shape[:2]
@@ -19,7 +20,9 @@ def _frame_to_pixmap(frame, max_w: int, max_h: int) -> "QPixmap | None":
         bpl = w * 3
     else:
         return None
-    img = QImage(frame.data, w, h, bpl, fmt).copy()
+    # tobytes() forces a contiguous copy — PyQt6 needs bytes, not memoryview
+    data = np.ascontiguousarray(frame).tobytes()
+    img = QImage(data, w, h, bpl, fmt)
     return QPixmap.fromImage(img).scaled(
         max_w, max_h,
         Qt.AspectRatioMode.KeepAspectRatio,

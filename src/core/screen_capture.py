@@ -689,9 +689,9 @@ class NDICapture:
                 preview_width=self.preview_width or 1920,
                 preview_height=self.preview_height or 1080,
                 config=self.config,
+                show_cv2_window=False,  # Qt panel is the primary display; cv2 window suppressed
             )
             self._ndi_preview_thread.start()
-            print(f"[Capture][NDI] Preview window enabled: '{self.window_name}'.")
 
     def _resolve_source(self, log: bool = True) -> Any | None:
         if not self.source_name:
@@ -1086,6 +1086,7 @@ class _UVCPreviewThread(threading.Thread):
         preview_width: int = 1920,
         preview_height: int = 1080,
         config=None,
+        show_cv2_window: bool = True,
     ) -> None:
         super().__init__(daemon=True, name='UVCPreview')
         self._window_name    = window_name
@@ -1099,14 +1100,16 @@ class _UVCPreviewThread(threading.Thread):
         self._preview_width  = preview_width
         self._preview_height = preview_height
         self._config         = config
+        self._show_cv2       = show_cv2_window
 
     def run(self) -> None:
-        # All OpenCV GUI operations for this window must happen on this thread.
-        try:
-            cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
-        except Exception:
-            pass
+        # cv2 GUI operations must stay on this thread.
+        if self._show_cv2:
+            try:
+                cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
+            except Exception:
+                pass
 
         _crop_active = False
         _topmost_active: bool | None = None
@@ -1124,49 +1127,51 @@ class _UVCPreviewThread(threading.Thread):
                     set_preview_frame(preview)
                     set_preview_region(region)
 
-                    # Crop to detection region when requested so the user sees
-                    # exactly what the model infers on.
-                    crop = bool(region is not None and getattr(self._config, 'preview_crop_to_detection', False))
-                    if crop != _crop_active:
-                        _crop_active = crop
-                        try:
-                            if crop and region is not None:
-                                rw = max(64, int(region.get('width', self._preview_width)))
-                                rh = max(64, int(region.get('height', self._preview_height)))
-                                cv2.resizeWindow(self._window_name, rw, rh)
-                            else:
-                                cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
-                        except Exception:
-                            pass
+                    if self._show_cv2:
+                        # Crop to detection region when requested so the user sees
+                        # exactly what the model infers on.
+                        crop = bool(region is not None and getattr(self._config, 'preview_crop_to_detection', False))
+                        if crop != _crop_active:
+                            _crop_active = crop
+                            try:
+                                if crop and region is not None:
+                                    rw = max(64, int(region.get('width', self._preview_width)))
+                                    rh = max(64, int(region.get('height', self._preview_height)))
+                                    cv2.resizeWindow(self._window_name, rw, rh)
+                                else:
+                                    cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
+                            except Exception:
+                                pass
 
-                    if crop and region is not None:
-                        _l = max(0, int(region.get('left', 0)))
-                        _t = max(0, int(region.get('top', 0)))
-                        _w = max(1, int(region.get('width', preview.shape[1])))
-                        _h = max(1, int(region.get('height', preview.shape[0])))
-                        _r = min(preview.shape[1], _l + _w)
-                        _b = min(preview.shape[0], _t + _h)
-                        if _r > _l and _b > _t:
-                            preview = preview[_t:_b, _l:_r]
+                        if crop and region is not None:
+                            _l = max(0, int(region.get('left', 0)))
+                            _t = max(0, int(region.get('top', 0)))
+                            _w = max(1, int(region.get('width', preview.shape[1])))
+                            _h = max(1, int(region.get('height', preview.shape[0])))
+                            _r = min(preview.shape[1], _l + _w)
+                            _b = min(preview.shape[0], _t + _h)
+                            if _r > _l and _b > _t:
+                                preview = preview[_t:_b, _l:_r]
 
-                    rendered = _render_preview_frame(
-                        self._window_name, self._scale_mode, preview)
-                    cv2.imshow(self._window_name, rendered)
-                    cv2.waitKey(1)
-                    topmost = bool(getattr(self._config, 'uvc_always_on_top', True))
-                    if topmost != _topmost_active:
-                        _topmost_active = topmost
-                        _set_window_topmost(self._window_name, topmost)
+                        rendered = _render_preview_frame(
+                            self._window_name, self._scale_mode, preview)
+                        cv2.imshow(self._window_name, rendered)
+                        cv2.waitKey(1)
+                        topmost = bool(getattr(self._config, 'uvc_always_on_top', True))
+                        if topmost != _topmost_active:
+                            _topmost_active = topmost
+                            _set_window_topmost(self._window_name, topmost)
                 except Exception:
                     pass
             remaining = self._interval - (time.perf_counter() - t0)
             if remaining > 0.001:
                 time.sleep(remaining)
 
-        try:
-            cv2.destroyWindow(self._window_name)
-        except Exception:
-            pass
+        if self._show_cv2:
+            try:
+                cv2.destroyWindow(self._window_name)
+            except Exception:
+                pass
 
 
 class UVCCapture:
@@ -1270,6 +1275,7 @@ class UVCCapture:
                 preview_width=self.preview_width,
                 preview_height=self.preview_height,
                 config=self.config,
+                show_cv2_window=False,  # Qt panel is the primary display; cv2 window suppressed
             )
             self._preview_thread.start()
 
