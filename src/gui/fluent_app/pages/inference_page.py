@@ -327,8 +327,9 @@ class InferencePage(BasePage):
         if not self._config:
             return
         provider = getattr(self._config, 'current_provider', '')
-        is_trt = provider == 'TensorrtExecutionProvider'
-        is_cuda = provider == 'CUDAExecutionProvider'
+        backend  = str(getattr(self._config, 'inference_backend', '')).lower()
+        is_trt   = provider == 'TensorrtExecutionProvider' or backend == 'tensorrt'
+        is_cuda  = provider == 'CUDAExecutionProvider'     or backend == 'cuda'
         hide = not (is_trt or is_cuda)
         self.cudaIoBindingCard.setVisible(not hide)
         if is_trt and not bool(getattr(self._config, 'cuda_io_binding_enabled', False)):
