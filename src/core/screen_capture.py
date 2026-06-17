@@ -403,14 +403,17 @@ def _draw_detection_overlay(
                 in_fov = (x1 < cx + fov_half and x2 > cx - fov_half and
                           y1 < cy + fov_half and y2 > cy - fov_half)
             dc = chroma_color if in_fov else box_color
-            cv2.line(frame, (x1, y1), (x1 + clen, y1), dc, thickness, cv2.LINE_AA)
-            cv2.line(frame, (x1, y1), (x1, y1 + clen), dc, thickness, cv2.LINE_AA)
-            cv2.line(frame, (x2, y1), (x2 - clen, y1), dc, thickness, cv2.LINE_AA)
-            cv2.line(frame, (x2, y1), (x2, y1 + clen), dc, thickness, cv2.LINE_AA)
-            cv2.line(frame, (x1, y2), (x1 + clen, y2), dc, thickness, cv2.LINE_AA)
-            cv2.line(frame, (x1, y2), (x1, y2 - clen), dc, thickness, cv2.LINE_AA)
-            cv2.line(frame, (x2, y2), (x2 - clen, y2), dc, thickness, cv2.LINE_AA)
-            cv2.line(frame, (x2, y2), (x2, y2 - clen), dc, thickness, cv2.LINE_AA)
+            if getattr(cfg, 'box_full_rect', False):
+                cv2.rectangle(frame, (x1, y1), (x2, y2), dc, thickness, cv2.LINE_AA)
+            else:
+                cv2.line(frame, (x1, y1), (x1 + clen, y1), dc, thickness, cv2.LINE_AA)
+                cv2.line(frame, (x1, y1), (x1, y1 + clen), dc, thickness, cv2.LINE_AA)
+                cv2.line(frame, (x2, y1), (x2 - clen, y1), dc, thickness, cv2.LINE_AA)
+                cv2.line(frame, (x2, y1), (x2, y1 + clen), dc, thickness, cv2.LINE_AA)
+                cv2.line(frame, (x1, y2), (x1 + clen, y2), dc, thickness, cv2.LINE_AA)
+                cv2.line(frame, (x1, y2), (x1, y2 - clen), dc, thickness, cv2.LINE_AA)
+                cv2.line(frame, (x2, y2), (x2 - clen, y2), dc, thickness, cv2.LINE_AA)
+                cv2.line(frame, (x2, y2), (x2, y2 - clen), dc, thickness, cv2.LINE_AA)
             if show_conf and i < len(confidences):
                 cv2.putText(frame, f"{conf * 100:.0f}%",
                             (max(0, x1 - 5), max(15, y1 - 8)),
