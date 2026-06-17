@@ -318,7 +318,10 @@ class PyQtOverlay(QWidget):
                               by1 < oy + fov_half and by2 > oy - fov_half)
 
                 painter.setPen(QPen((chroma_color if in_fov else box_color) if use_chroma else box_color, thickness))
-                self.draw_corner_box(painter, x1, y1, x2, y2)
+                if getattr(self.config, 'box_full_rect', False):
+                    painter.drawRect(x1, y1, x2 - x1, y2 - y1)
+                else:
+                    self.draw_corner_box(painter, x1, y1, x2, y2)
 
                 if show_confidence and i < len(self.confidences):
                     painter.setPen(pen_text)

@@ -144,6 +144,7 @@ _FIELD_MAP = {
     # --- display ---
     'show_fov':                   'display.show_fov',
     'show_boxes':                 'display.show_boxes',
+    'box_full_rect':              'display.box_full_rect',
     'show_detect_range':          'display.show_detect_range',
     'show_confidence':            'display.show_confidence',
     'show_tracer_line':           'display.show_tracer_line',
@@ -364,6 +365,7 @@ class Config:
         # 顯示開關
         self.show_fov: bool = True
         self.show_boxes: bool = True
+        self.box_full_rect: bool = False
         self.show_detect_range: bool = True
         self.show_status_panel: bool = True
         self.status_panel_show_auto_aim: bool = True

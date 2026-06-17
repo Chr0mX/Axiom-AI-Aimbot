@@ -57,6 +57,14 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Full Bounding Box
+        self.boxFullRectCard = SwitchSettingCard(
+            FluentIcon.CHECKBOX,
+            "Full Bounding Box",
+            "Show a full rectangle instead of corner brackets",
+            parent=self.displayGroup
+        )
+
         # Show Confidence
         self.showConfidenceCard = SwitchSettingCard(
             FluentIcon.CERTIFICATE,
@@ -240,6 +248,7 @@ class VisualsPage(BasePage):
         # Display settings
         self.displayGroup.addSettingCard(self.showFovCard)
         self.displayGroup.addSettingCard(self.showBoxesCard)
+        self.displayGroup.addSettingCard(self.boxFullRectCard)
         self.displayGroup.addSettingCard(self.showConfidenceCard)
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
         self.displayGroup.addSettingCard(self.showTracerLineCard)
@@ -274,6 +283,7 @@ class VisualsPage(BasePage):
         # Display settings
         self.showFovCard.checkedChanged.connect(self._onShowFovChanged)
         self.showBoxesCard.checkedChanged.connect(self._onShowBoxesChanged)
+        self.boxFullRectCard.checkedChanged.connect(self._onBoxFullRectChanged)
         self.showConfidenceCard.checkedChanged.connect(self._onShowConfidenceChanged)
         self.showStatusCard.checkedChanged.connect(self._onShowStatusChanged)
         self.showDetectRangeCard.checkedChanged.connect(self._onShowDetectRangeChanged)
@@ -310,6 +320,7 @@ class VisualsPage(BasePage):
         # Display settings
         self.showFovCard.setChecked(self._config.show_fov)
         self.showBoxesCard.setChecked(self._config.show_boxes)
+        self.boxFullRectCard.setChecked(bool(getattr(self._config, 'box_full_rect', False)))
         self.showConfidenceCard.setChecked(self._config.show_confidence)
         self.showStatusCard.setChecked(self._config.show_status_panel)
         self.showDetectRangeCard.setChecked(self._config.show_detect_range)
@@ -350,6 +361,10 @@ class VisualsPage(BasePage):
     def _onShowBoxesChanged(self, checked):
         if self._config:
             self._config.show_boxes = checked
+
+    def _onBoxFullRectChanged(self, checked):
+        if self._config:
+            self._config.box_full_rect = bool(checked)
 
     def _onShowConfidenceChanged(self, checked):
         if self._config:
@@ -474,6 +489,7 @@ class VisualsPage(BasePage):
         # Display settings
         self.showFovCard.titleLabel.setText(t("show_fov"))
         self.showBoxesCard.titleLabel.setText(t("show_boxes"))
+        self.boxFullRectCard.titleLabel.setText("Full Bounding Box")
         self.showConfidenceCard.titleLabel.setText(t("show_confidence"))
         self.showStatusCard.titleLabel.setText(t("show_status_panel"))
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
