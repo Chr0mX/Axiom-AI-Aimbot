@@ -393,9 +393,11 @@ def process_aiming(
                                 cache["iter"] = None
                                 cache["file"] = None
                         if cache["iter"]:
-                            f = next(cache["iter"])
-                            move_x += int(f["dx"])
-                            move_y += int(f["dy"])
+                            _mult = max(1, int(getattr(config, 'jitter_speed_multiplier', 1)))
+                            for _ in range(_mult):
+                                f = next(cache["iter"])
+                                move_x += int(f["dx"])
+                                move_y += int(f["dy"])
                         else:
                             angle = random.uniform(0, math.tau)
                             r = random.uniform(0, sj)

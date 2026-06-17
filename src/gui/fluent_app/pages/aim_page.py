@@ -5,9 +5,12 @@ import os
 import re
 import sys
 import subprocess
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox, QInputDialog
-from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox, QInputDialog,
+    QDialog, QLabel, QPushButton,
+)
+from PyQt6.QtGui import QDesktopServices, QPainter, QPixmap, QColor, QPen
+from PyQt6.QtCore import Qt, QTimer
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon,
@@ -22,6 +25,86 @@ from ..base_page import BasePage
 from ..language_manager import t
 
 
+class _JitterPreviewDialog(QDialog):
+    """Visualises a recorded jitter path before the user names and saves it."""
+
+    def __init__(self, frames, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Jitter Pattern Preview")
+        self.setFixedSize(300, 320)
+        self.result_action = "save"
+
+        # --- build path points (relative, origin = 0,0) ---
+        positions = [(0.0, 0.0)]
+        x, y = 0.0, 0.0
+        for f in frames:
+            x += f.get("dx", 0)
+            y += f.get("dy", 0)
+            positions.append((x, y))
+
+        # --- render into pixmap ---
+        W, H = 240, 240
+        cx, cy = W / 2, H / 2
+        pixmap = QPixmap(W, H)
+        pixmap.fill(QColor(17, 17, 17))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if len(positions) > 1:
+            xs = [p[0] for p in positions]
+            ys = [p[1] for p in positions]
+            span = max(max(xs) - min(xs), max(ys) - min(ys), 1)
+            scale = 100.0 / span
+            pts = [(int(cx + p[0] * scale), int(cy + p[1] * scale)) for p in positions]
+
+            painter.setPen(QPen(QColor(0, 200, 255), 1))
+            for i in range(len(pts) - 1):
+                painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 255, 80))
+            painter.drawEllipse(pts[0][0] - 4, pts[0][1] - 4, 8, 8)
+            painter.setBrush(QColor(255, 60, 60))
+            painter.drawEllipse(pts[-1][0] - 4, pts[-1][1] - 4, 8, 8)
+        else:
+            painter.setPen(QColor(120, 120, 120))
+            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "No movement")
+
+        painter.end()
+
+        canvas = QLabel()
+        canvas.setPixmap(pixmap)
+        canvas.setFixedSize(W, H)
+
+        info = QLabel(f"{len(frames)} frames recorded")
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        info.setStyleSheet("color: #888; font-size: 10px;")
+
+        save_btn = QPushButton("Save")
+        rerecord_btn = QPushButton("Re-record")
+        save_btn.clicked.connect(self._onSave)
+        rerecord_btn.clicked.connect(self._onRerecord)
+
+        btn_row = QHBoxLayout()
+        btn_row.addWidget(rerecord_btn)
+        btn_row.addWidget(save_btn)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        layout.addWidget(canvas, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info)
+        layout.addLayout(btn_row)
+
+    def _onSave(self):
+        self.result_action = "save"
+        self.accept()
+
+    def _onRerecord(self):
+        self.result_action = "rerecord"
+        self.reject()
+
+
 class AimPage(BasePage):
     """Aim Assist Settings Page"""
 
@@ -33,6 +116,9 @@ class AimPage(BasePage):
         self._isXboxConnected = False
         self._jitterRecorder = None
         self._jitterRecording = False
+        self._jitterCountingDown = False
+        self._jitterCountdown = 0
+        self._jitterCountdownTimer = None
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -384,6 +470,19 @@ class AimPage(BasePage):
         self.jitterPatternCard.hBoxLayout.addWidget(self.jitterPatternCombo, 0)
         self.jitterPatternCard.hBoxLayout.addSpacing(16)
 
+        self.jitterSpeedSegment = SegmentedWidget()
+        for _lbl, _key in [("1×", "1"), ("2×", "2"), ("3×", "3"), ("5×", "5"), ("10×", "10")]:
+            self.jitterSpeedSegment.addItem(routeKey=_key, text=_lbl)
+        self.jitterSpeedSegment.setCurrentItem("1")
+        self.jitterSpeedCard = SettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("jitter_speed_label", "Playback Speed"),
+            "",
+            self.antiRecoilGroup
+        )
+        self.jitterSpeedCard.hBoxLayout.addWidget(self.jitterSpeedSegment, 0, Qt.AlignmentFlag.AlignRight)
+        self.jitterSpeedCard.hBoxLayout.addSpacing(16)
+
         # === Target Priority ===
         self.targetPriorityGroup = SettingCardGroup(t("target_priority", "Target Priority"), self.scrollWidget)
 
@@ -588,6 +687,7 @@ class AimPage(BasePage):
         self.antiRecoilGroup.addSettingCard(self.smartJitterThreshCard)
         self.antiRecoilGroup.addSettingCard(self.jitterRecordCard)
         self.antiRecoilGroup.addSettingCard(self.jitterPatternCard)
+        self.antiRecoilGroup.addSettingCard(self.jitterSpeedCard)
         self.addContent(self.antiRecoilGroup)
 
         # Target Priority
@@ -656,6 +756,7 @@ class AimPage(BasePage):
         self.smartJitterThreshCard.valueChanged.connect(self._onSmartJitterThreshChanged)
         self.jitterRecordBtn.clicked.connect(self._onJitterRecordClicked)
         self.jitterPatternCombo.currentIndexChanged.connect(self._onJitterPatternChanged)
+        self.jitterSpeedSegment.currentItemChanged.connect(self._onJitterSpeedChanged)
 
         # Target Priority
         self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
@@ -748,8 +849,12 @@ class AimPage(BasePage):
             _idx = self.jitterPatternCombo.findData(_current_pf)
             self.jitterPatternCombo.setCurrentIndex(max(0, _idx))
             self.jitterPatternCombo.blockSignals(False)
+            _mult = int(getattr(self._config, 'jitter_speed_multiplier', 1))
+            _mult_key = str(_mult) if str(_mult) in ('1', '2', '3', '5', '10') else '1'
+            self.jitterSpeedSegment.setCurrentItem(_mult_key)
             self.jitterRecordCard.setEnabled(sj_on)
             self.jitterPatternCard.setEnabled(sj_on)
+            self.jitterSpeedCard.setEnabled(sj_on)
 
             # Target Priority
             mode_map = {"distance": "Distance", "confidence": "Confidence", "composite": "Composite"}
@@ -1078,6 +1183,7 @@ class AimPage(BasePage):
         self.smartJitterThreshCard.setEnabled(bool(checked))
         self.jitterRecordCard.setEnabled(bool(checked))
         self.jitterPatternCard.setEnabled(bool(checked))
+        self.jitterSpeedCard.setEnabled(bool(checked))
 
     def _onSmartJitterLmbChanged(self, checked):
         if self._config:
@@ -1091,39 +1197,57 @@ class AimPage(BasePage):
         if self._config:
             self._config.smart_jitter_box_threshold_pct = float(value)
 
-    def _onJitterRecordClicked(self) -> None:
-        from core.jitter_recorder import _Recorder, _normalize_frames, _save_pattern, list_patterns
-        if not self._jitterRecording:
+    def _startJitterCountdown(self) -> None:
+        """Begin 3-second countdown before recording starts."""
+        self._jitterCountingDown = True
+        self._jitterCountdown = 3
+        self.jitterRecordBtn.setEnabled(False)
+        self.jitterRecordBtn.setText("3...")
+        self._jitterCountdownTimer = QTimer(self)
+        self._jitterCountdownTimer.timeout.connect(self._onJitterCountdownTick)
+        self._jitterCountdownTimer.start(1000)
+
+    def _onJitterCountdownTick(self) -> None:
+        self._jitterCountdown -= 1
+        if self._jitterCountdown > 0:
+            self.jitterRecordBtn.setText(f"{self._jitterCountdown}...")
+        else:
+            self._jitterCountdownTimer.stop()
+            self._jitterCountingDown = False
+            self.jitterRecordBtn.setEnabled(True)
+            from core.jitter_recorder import _Recorder
             self._jitterRecorder = _Recorder()
             self._jitterRecorder.start()
             self._jitterRecording = True
             self.jitterRecordBtn.setText("■ Stop & Save")
+
+    def _onJitterRecordClicked(self) -> None:
+        if self._jitterCountingDown:
+            return
+        if not self._jitterRecording:
+            self._startJitterCountdown()
         else:
+            from core.jitter_recorder import _normalize_frames, _save_pattern
             frames = self._jitterRecorder.stop()
             self._jitterRecording = False
             self.jitterRecordBtn.setText("● Record")
             if not frames:
                 QMessageBox.information(self, "Jitter Recorder", "No movement detected — nothing saved.")
                 return
-            net_dx = sum(f["dx"] for f in frames)
-            net_dy = sum(f["dy"] for f in frames)
             frames = _normalize_frames(frames)
+
+            # Show preview dialog so user can verify the path before saving
+            dlg = _JitterPreviewDialog(frames, parent=self)
+            dlg.exec()
+            if dlg.result_action == "rerecord":
+                self._startJitterCountdown()
+                return
+
             name, ok = QInputDialog.getText(self, "Save Pattern", "Pattern name:", text="jitter")
             if not ok or not name.strip():
                 return
             _save_pattern(name.strip(), frames)
-            # refresh combo
-            if self._config is not None:
-                from core.jitter_recorder import list_patterns as _lp
-                self.jitterPatternCombo.blockSignals(True)
-                current = self.jitterPatternCombo.currentData() or ""
-                self.jitterPatternCombo.clear()
-                self.jitterPatternCombo.addItem("(none — procedural)", userData="")
-                for p in _lp():
-                    self.jitterPatternCombo.addItem(p["name"], userData=p["path"])
-                idx = self.jitterPatternCombo.findData(current)
-                self.jitterPatternCombo.setCurrentIndex(max(0, idx))
-                self.jitterPatternCombo.blockSignals(False)
+            self._refreshPatternCombo()
 
     def _onJitterPatternChanged(self, _index: int) -> None:
         if self._isLoadingConfig or not self._config:
@@ -1133,6 +1257,22 @@ class AimPage(BasePage):
         from core.ai_aiming import _jitter_pattern_cache
         _jitter_pattern_cache["file"] = None
         _jitter_pattern_cache["iter"] = None
+
+    def _onJitterSpeedChanged(self, routeKey: str) -> None:
+        if self._config:
+            self._config.jitter_speed_multiplier = int(routeKey)
+
+    def _refreshPatternCombo(self) -> None:
+        from core.jitter_recorder import list_patterns as _list_jitter_patterns
+        self.jitterPatternCombo.blockSignals(True)
+        self.jitterPatternCombo.clear()
+        self.jitterPatternCombo.addItem("(none — procedural)", userData="")
+        for _p in _list_jitter_patterns():
+            self.jitterPatternCombo.addItem(_p["name"], userData=_p["path"])
+        _current_pf = getattr(self._config, 'jitter_pattern_file', '') if self._config else ''
+        _idx = self.jitterPatternCombo.findData(_current_pf)
+        self.jitterPatternCombo.setCurrentIndex(max(0, _idx))
+        self.jitterPatternCombo.blockSignals(False)
 
     # === Target Priority Callbacks ===
 
@@ -1262,6 +1402,7 @@ class AimPage(BasePage):
         self.smartJitterThreshCard.titleLabel.setText(t("smart_jitter_threshold_label", "Box Size Threshold"))
         self.jitterRecordCard.titleLabel.setText(t("jitter_record_label", "Record Jitter"))
         self.jitterPatternCard.titleLabel.setText(t("jitter_pattern_label", "Recorded Pattern"))
+        self.jitterSpeedCard.titleLabel.setText(t("jitter_speed_label", "Playback Speed"))
 
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
         self.targetPriorityModeCard.titleLabel.setText(t("target_priority_mode", "Priority Mode"))
