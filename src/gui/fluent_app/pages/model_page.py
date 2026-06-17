@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import sys
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMessageBox, QTextEdit, QVBoxLayout,
 )
