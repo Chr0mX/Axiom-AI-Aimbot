@@ -120,6 +120,9 @@ _FIELD_MAP = {
     'lock_decay_frames':          'tracking.sticky_lock.decay_frames',
     'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
     'sticky_adaptive_iou':        'tracking.sticky_lock.adaptive_iou',
+    'box_ema_enabled':            'tracking.box_ema.enabled',
+    'box_ema_alpha_x':            'tracking.box_ema.alpha_x',
+    'box_ema_alpha_y':            'tracking.box_ema.alpha_y',
     'target_priority_mode':       'tracking.target_priority.mode',
     'target_priority_confidence_weight': 'tracking.target_priority.confidence_weight',
 
@@ -424,9 +427,12 @@ class Config:
 
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
-        self.lock_decay_frames: int = 15       # 鎖定目標消失後維持的幀數
-        self.lock_iou_threshold: float = 0.3   # 視為同一目標的最低 IoU（adaptive 模式下作為基礎值）
-        self.sticky_adaptive_iou: bool = True  # adaptive IoU scaling by box area (Someone_idea)
+        self.lock_decay_frames: int = 15
+        self.lock_iou_threshold: float = 0.3
+        self.sticky_adaptive_iou: bool = True
+        self.box_ema_enabled: bool = False
+        self.box_ema_alpha_x: float = 0.8
+        self.box_ema_alpha_y: float = 0.5
 
         # FOV filter mode
         self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square

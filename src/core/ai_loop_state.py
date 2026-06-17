@@ -29,6 +29,9 @@ class LoopState:
     locked_box: Optional[List[float]] = field(default=None)
     no_detection_frames: int = 0
 
+    # Box EMA — running average of selected box coords [x1, y1, x2, y2].
+    smoothed_box: Optional[List[float]] = field(default=None)
+
     # Y-reduce velocity gate — track target Y position across frames to estimate vy.
     aim_y_last_target_y: float = 0.0
     aim_y_last_target_t: float = 0.0

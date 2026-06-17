@@ -237,6 +237,29 @@ def process_aiming(
             config.display_locked_box = list(selected_box)
             config.display_locked_box_is_decaying = False
 
+        # --- Box EMA — smooth raw box coords to suppress size-jitter wobble ---
+        # Runs after sticky lock (which needs the raw box for IOU matching) but
+        # before aim-point computation so that frame-to-frame box size variance
+        # doesn't propagate into target_x / target_y.
+        if getattr(config, 'box_ema_enabled', False):
+            raw_box = list(selected_box)
+            if state.smoothed_box is None:
+                state.smoothed_box = raw_box[:]
+            else:
+                ax = float(getattr(config, 'box_ema_alpha_x', 0.8))
+                ay = float(getattr(config, 'box_ema_alpha_y', 0.5))
+                sb = state.smoothed_box
+                state.smoothed_box = [
+                    ax * raw_box[0] + (1.0 - ax) * sb[0],
+                    ay * raw_box[1] + (1.0 - ay) * sb[1],
+                    ax * raw_box[2] + (1.0 - ax) * sb[2],
+                    ay * raw_box[3] + (1.0 - ay) * sb[3],
+                ]
+            target_x, target_y = calculate_aim_target(state.smoothed_box, aim_part, head_height_ratio)
+            selected_box = state.smoothed_box
+        else:
+            state.smoothed_box = list(selected_box)
+
         # --- Velocity prediction (optional) ---
         if getattr(config, 'prediction_enabled', False):
             predictor = _get_predictor(config)
@@ -398,8 +421,10 @@ def process_aiming(
             # Decay expired — clear lock and reset
             state.locked_box = None
             state.no_detection_frames = 0
+            state.smoothed_box = None
             config.display_locked_box = None
             config.display_locked_box_is_decaying = False
+        state.smoothed_box = None
         pid_x.reset()
         pid_y.reset()
         state.aim_y_last_target_y = 0.0

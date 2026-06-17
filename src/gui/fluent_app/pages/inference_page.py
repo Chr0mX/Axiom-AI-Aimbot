@@ -6,7 +6,7 @@ from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon, SettingCard,
 )
-from ..components.slider_spin_card import SliderSpinCard, SliderLabelCard
+from ..components.slider_spin_card import SliderSpinCard, SliderLabelCard, SliderDoubleSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
@@ -168,6 +168,36 @@ class InferencePage(BasePage):
             parent=self.inferPerfGroup
         )
 
+        # === Box Smoothing ===
+        self.boxSmoothGroup = SettingCardGroup("Box Smoothing", self.scrollWidget)
+
+        self.boxEmaEnableCard = SwitchSettingCard(
+            FluentIcon.FILTER,
+            "Box Smoothing",
+            "EMA on raw detection box to suppress size-jitter wobble",
+            parent=self.boxSmoothGroup
+        )
+
+        self.boxEmaAlphaXCard = SliderDoubleSpinCard(
+            FluentIcon.MOVE,
+            "X Smoothing",
+            0.05, 1.0,
+            decimals=2,
+            step=0.05,
+            description="1.0 = no smoothing  ·  0.5 = balanced",
+            parent=self.boxSmoothGroup
+        )
+
+        self.boxEmaAlphaYCard = SliderDoubleSpinCard(
+            FluentIcon.DOWN_ARROW,
+            "Y Smoothing",
+            0.05, 1.0,
+            decimals=2,
+            step=0.05,
+            description="1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)",
+            parent=self.boxSmoothGroup
+        )
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -194,6 +224,11 @@ class InferencePage(BasePage):
         self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
         self.addContent(self.inferPerfGroup)
 
+        self.boxSmoothGroup.addSettingCard(self.boxEmaEnableCard)
+        self.boxSmoothGroup.addSettingCard(self.boxEmaAlphaXCard)
+        self.boxSmoothGroup.addSettingCard(self.boxEmaAlphaYCard)
+        self.addContent(self.boxSmoothGroup)
+
         self.scrollLayout.addStretch(1)
 
     # ──────────────────────────────────────────────
@@ -218,6 +253,10 @@ class InferencePage(BasePage):
         self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
         self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
         self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
+
+        self.boxEmaEnableCard.checkedChanged.connect(self._onBoxEmaEnableChanged)
+        self.boxEmaAlphaXCard.valueChanged.connect(self._onBoxEmaAlphaXChanged)
+        self.boxEmaAlphaYCard.valueChanged.connect(self._onBoxEmaAlphaYChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -249,6 +288,10 @@ class InferencePage(BasePage):
             self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
             self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
             self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
+
+            self.boxEmaEnableCard.setChecked(bool(getattr(self._config, 'box_ema_enabled', False)))
+            self.boxEmaAlphaXCard.setValue(float(getattr(self._config, 'box_ema_alpha_x', 0.8)))
+            self.boxEmaAlphaYCard.setValue(float(getattr(self._config, 'box_ema_alpha_y', 0.5)))
 
             # Apply initial screenshot-method effect on fov_follow visibility
             method = getattr(self._config, 'screenshot_method', 'mss')
@@ -367,6 +410,18 @@ class InferencePage(BasePage):
         if self._config:
             self._config.frame_skip_threshold = value / 10.0
 
+    def _onBoxEmaEnableChanged(self, checked):
+        if self._config:
+            self._config.box_ema_enabled = bool(checked)
+
+    def _onBoxEmaAlphaXChanged(self, value):
+        if self._config:
+            self._config.box_ema_alpha_x = float(value)
+
+    def _onBoxEmaAlphaYChanged(self, value):
+        if self._config:
+            self._config.box_ema_alpha_y = float(value)
+
     # ──────────────────────────────────────────────
     # Retranslate
     # ──────────────────────────────────────────────
@@ -396,3 +451,8 @@ class InferencePage(BasePage):
         self.frameSkipCard.titleLabel.setText(t("frame_skip_enabled", "Frame Skip Gate"))
         self.frameSkipCard.contentLabel.setText(t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."))
         self.frameSkipThresholdCard.titleLabel.setText(t("frame_skip_threshold", "Skip Threshold"))
+
+        self.boxSmoothGroup.titleLabel.setText("Box Smoothing")
+        self.boxEmaEnableCard.titleLabel.setText("Box Smoothing")
+        self.boxEmaAlphaXCard.titleLabel.setText("X Smoothing")
+        self.boxEmaAlphaYCard.titleLabel.setText("Y Smoothing")
