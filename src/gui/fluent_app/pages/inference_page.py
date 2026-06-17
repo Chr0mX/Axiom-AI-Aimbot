@@ -189,7 +189,7 @@ class InferencePage(BasePage):
         )
 
         self.boxEmaAlphaYCard = SliderDoubleSpinCard(
-            FluentIcon.DOWN_ARROW,
+            FluentIcon.ALIGNMENT,
             "Y Smoothing",
             0.05, 1.0,
             decimals=2,
