@@ -6,8 +6,11 @@ from __future__ import annotations
 import ctypes
 import dataclasses
 import json
+import logging
 import os
 from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 from .humanization import HumanizationConfig
 
@@ -511,6 +514,14 @@ class Config:
             if val is _MISSING:
                 val = data.get(attr, _MISSING)  # legacy flat fallback
             if val is not _MISSING and hasattr(self, attr):
+                expected = type(getattr(self, attr))
+                if expected in (int, float, bool, str) and not isinstance(val, expected):
+                    try:
+                        val = bool(val) if expected is bool else expected(val)
+                    except (ValueError, TypeError):
+                        logger.warning("Config field '%s': could not coerce %r to %s, using default",
+                                       attr, val, expected.__name__)
+                        continue
                 setattr(self, attr, val)
 
         # Crosshair color: nested [r, g, b], else legacy flat r/g/b.
@@ -550,7 +561,7 @@ def save_state(config_instance: Config, filepath: str = 'state.json') -> bool:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
     except (OSError, TypeError, ValueError) as e:
-        print(f"狀態儲存失敗: {e}")
+        logger.error("State save failed: %s", e)
         return False
 
 
@@ -566,7 +577,7 @@ def load_state(config_instance: Config, filepath: str = 'state.json') -> bool:
                 setattr(config_instance, f_name, data[f_name])
         return True
     except (OSError, json.JSONDecodeError) as e:
-        print(f"狀態載入失敗: {e}")
+        logger.error("State load failed: %s", e)
         return False
 
 
@@ -582,13 +593,13 @@ def save_config(config_instance: Config, filepath: str = 'config.json') -> bool:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(config_instance.to_dict(), f, ensure_ascii=False, indent=2)
         save_state(config_instance, _state_path_for(filepath))
-        print("設定已儲存")
+        logger.info("Config saved")
         return True
     except OSError as e:
-        print(f"設定儲存失敗 (IO錯誤): {e}")
+        logger.error("Config save failed (IO): %s", e)
         return False
     except (TypeError, ValueError) as e:
-        print(f"設定儲存失敗 (序列化錯誤): {e}")
+        logger.error("Config save failed (serialization): %s", e)
         return False
 
 
@@ -649,18 +660,18 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
         # 向後兼容：確保偵測範圍在合理範圍內
         _validate_detect_range_size(config_instance)
         
-        print("設定檔已載入")
+        logger.info("Config loaded")
         return True
         
     except FileNotFoundError:
-        print("未找到設定檔，使用預設值")
+        logger.info("Config file not found, using defaults")
         load_state(config_instance, _state_path_for(filepath))  # state.json may persist independently
         return False
     except json.JSONDecodeError as e:
-        print(f"設定載入失敗 (JSON 格式錯誤): {e}")
+        logger.error("Config load failed (JSON error): %s", e)
         return False
     except OSError as e:
-        print(f"設定載入失敗 (IO錯誤): {e}")
+        logger.error("Config load failed (IO): %s", e)
         return False
 
 
@@ -669,10 +680,10 @@ def _validate_detect_interval(config: Config) -> None:
     detect_interval_ms = config.detect_interval * 1000
     if detect_interval_ms < 1:
         config.detect_interval = 0.001  # 1ms
-        print("[配置修正] 檢測間隔過小，已調整為 1ms")
+        logger.warning("[Config] detect_interval too small, clamped to 1ms")
     elif detect_interval_ms > 100:
         config.detect_interval = 0.1  # 100ms
-        print("[配置修正] 檢測間隔過大，已調整為 100ms")
+        logger.warning("[Config] detect_interval too large, clamped to 100ms")
 
 
 def _validate_idle_detect_interval(config: Config) -> None:
@@ -680,10 +691,10 @@ def _validate_idle_detect_interval(config: Config) -> None:
     idle_ms = getattr(config, 'idle_detect_interval', 0.05) * 1000
     if idle_ms < 5:
         config.idle_detect_interval = 0.005
-        print("[配置修正] 閒置檢測間隔過小，已調整為 5ms")
+        logger.warning("[Config] idle_detect_interval too small, clamped to 5ms")
     elif idle_ms > 500:
         config.idle_detect_interval = 0.5
-        print("[配置修正] 閒置檢測間隔過大，已調整為 500ms")
+        logger.warning("[Config] idle_detect_interval too large, clamped to 500ms")
 
 
 def _validate_screenshot_interval(config: Config) -> None:
@@ -691,10 +702,10 @@ def _validate_screenshot_interval(config: Config) -> None:
     screenshot_interval_ms = getattr(config, 'screenshot_interval', getattr(config, 'detect_interval', 0.008)) * 1000
     if screenshot_interval_ms < 1:
         config.screenshot_interval = 0.001  # 1ms
-        print("[配置修正] 截圖間隔過小，已調整為 1ms")
+        logger.warning("[Config] screenshot_interval too small, clamped to 1ms")
     elif screenshot_interval_ms > 100:
         config.screenshot_interval = 0.1  # 100ms
-        print("[配置修正] 截圖間隔過大，已調整為 100ms")
+        logger.warning("[Config] screenshot_interval too large, clamped to 100ms")
 
 
 def _validate_mouse_method(config: Config) -> None:

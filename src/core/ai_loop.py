@@ -10,9 +10,13 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
+import logging
+
 import numpy as np
 
 from win_utils import is_key_pressed
+
+logger = logging.getLogger(__name__)
 
 from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
@@ -98,7 +102,7 @@ def _try_hot_swap_model(
         abs_model_path = new_model_path
 
     if not (os.path.exists(abs_model_path) and abs_model_path.endswith('.onnx')):
-        print(f"[模型熱切換] 路徑無效或檔案不存在: {abs_model_path}")
+        logger.warning("[Model HotSwap] Invalid path or file not found: %s", abs_model_path)
         config.model_path = current_model_path
         return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
 
@@ -118,14 +122,14 @@ def _try_hot_swap_model(
         _detected_size = _probe_model_input_size(new_model, abs_model_path)
         if _detected_size:
             config.model_input_size = _detected_size
-            print(f"[模型熱切換] 模型輸入尺寸自動偵測: {_detected_size}")
+            logger.info("[Model HotSwap] Auto-detected input size: %d", _detected_size)
         actual_providers = new_model.get_providers()
         if actual_providers:
             config.current_provider = actual_providers[0]
-        print(f"[模型熱切換] 已切換至: {os.path.basename(abs_model_path)} / {config_backend}")
+        logger.info("[Model HotSwap] Switched to: %s / %s", os.path.basename(abs_model_path), config_backend)
         return new_model, new_model_path, input_name, config_backend, config_dml_fallback
     except Exception as e:
-        print(f"[模型熱切換] 載入失敗: {e}，繼續使用原模型")
+        logger.error("[Model HotSwap] Load failed: %s — continuing with current model", e)
         config.model_path = current_model_path
         return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
 
@@ -237,7 +241,7 @@ def ai_logic_loop(
     _init_size = _probe_model_input_size(model, _init_model_path)
     if _init_size:
         config.model_input_size = _init_size
-        print(f"[AI Loop] 初始模型輸入尺寸: {_init_size}")
+        logger.info("[AI Loop] Initial model input size: %d", _init_size)
 
     pid_x = PIDController(config.pid_kp_x, config.pid_ki_x, config.pid_kd_x)
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
@@ -590,7 +594,7 @@ def ai_logic_loop(
                     config.last_detection_time = time.time()
                     config.detection_frame_count = int(getattr(config, 'detection_frame_count', 0)) + 1
                 except (RuntimeError, ValueError) as e:
-                    print(f"ONNX 推理錯誤: {e}")
+                    logger.error("ONNX inference error: %s", e)
                     continue
 
                 # --- Semantic FP filter (new feature from Someone_idea) ---
@@ -661,16 +665,16 @@ def ai_logic_loop(
 
                     now = time.perf_counter()
                     if now - last_stats_print >= float(getattr(config, 'latency_stats_interval', 1.0)):
-                        print(
-                            f"[Latency EMA] total={ema_total:.1f}ms "
-                            f"cap={ema_capture:.1f}ms pre={ema_pre:.1f}ms "
-                            f"inf={ema_inf:.1f}ms post={ema_post:.1f}ms "
-                            f"interval={desired_interval*1000:.0f}ms"
+                        logger.debug(
+                            "[Latency EMA] total=%.1fms cap=%.1fms pre=%.1fms "
+                            "inf=%.1fms post=%.1fms interval=%.0fms",
+                            ema_total, ema_capture, ema_pre,
+                            ema_inf, ema_post, desired_interval * 1000,
                         )
                         last_stats_print = now
 
             except Exception as e:
-                print(f"[AI Loop Error] {e}")
+                logger.error("[AI Loop Error] %s", e)
                 traceback.print_exc()
                 time.sleep(1.0)
     finally:

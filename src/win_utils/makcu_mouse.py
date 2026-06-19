@@ -87,7 +87,6 @@ class MakcuMouse:
                 self._com_port = com_port
                 self._query_info_locked()
                 logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
-                print(f"[MAKCU] Connected to {com_port} @ {_OPERATING_BAUD} baud")
             else:
                 # Step 2: send DE AD baud-change at 115200 then reopen at 4M
                 try:
@@ -99,21 +98,18 @@ class MakcuMouse:
                     s.close()
                 except serial.SerialException as exc:
                     logger.error("[MAKCU] Baud-change frame failed: %s", exc)
-                    print(f"[MAKCU] Connection failed: {exc}")
                     return False
 
                 time.sleep(0.05)
 
                 if not self._try_open_locked(com_port, _OPERATING_BAUD):
                     logger.error("[MAKCU] Could not connect to %s after baud change", com_port)
-                    print(f"[MAKCU] Connection failed on {com_port}")
                     return False
 
                 self._connected = True
                 self._com_port = com_port
                 self._query_info_locked()
                 logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
-                print(f"[MAKCU] Connected to {com_port} @ {_OPERATING_BAUD} baud")
 
         # Start button event stream outside the lock
         self._start_stream()
@@ -285,7 +281,6 @@ class MakcuMouse:
         with self._lock:
             self._close_locked()
         logger.info("[MAKCU] Disconnected")
-        print("[MAKCU] Disconnected")
 
     def is_connected(self) -> bool:
         return self._connected and self._serial is not None and self._serial.is_open

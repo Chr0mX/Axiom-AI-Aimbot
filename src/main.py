@@ -187,13 +187,12 @@ def _register_nvidia_dll_dirs() -> None:
                 registered.append(trt_libs)
 
         if registered:
-            # Use print here – logger may not be initialised yet at import time
-            print(f"[CUDA] Registered {len(registered)} nvidia/TRT DLL dirs from site-packages")
+            logger.info("[CUDA] Registered %d nvidia/TRT DLL dirs from site-packages", len(registered))
         else:
-            print("[CUDA] Warning: no nvidia site-package bin dirs found – "
-                  "install nvidia-cublas-cu12, nvidia-cudnn-cu12, tensorrt-cu12, etc.")
+            logger.warning("[CUDA] No nvidia site-package bin dirs found — "
+                           "install nvidia-cublas-cu12, nvidia-cudnn-cu12, tensorrt-cu12, etc.")
     except Exception as exc:
-        print(f"[CUDA] DLL pre-registration failed: {exc}")
+        logger.error("[CUDA] DLL pre-registration failed: %s", exc)
 
 _register_nvidia_dll_dirs()
 # ─────────────────────────────────────────────────────────────────────────────

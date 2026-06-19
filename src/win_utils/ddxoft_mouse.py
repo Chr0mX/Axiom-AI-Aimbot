@@ -2,9 +2,12 @@
 """ddxoft (Most Stealthy) - Object-Oriented Interface"""
 
 import ctypes
+import logging
 import time
 
 from .mouse_move import send_mouse_move_mouse_event
+
+logger = logging.getLogger(__name__)
 
 
 class DDXoftMouse:
@@ -94,13 +97,13 @@ class DDXoftMouse:
                 return True
             else:
                 self.subsequent_init_failed = True
-                print("[ddxoft] Initialization failed: DD_btn or DD_str returned error code")
-                print("Tip: This might be because Windows Memory Integrity is on, preventing the driver from loading")
+                logger.error("[ddxoft] Initialization failed: DD_btn or DD_str returned error code. "
+                             "Tip: Windows Memory Integrity may be preventing the driver from loading.")
                 return False
             
         except Exception as e:
             self.subsequent_init_failed = True
-            print(f"[ddxoft] 初始化異常: {e}")
+            logger.error("[ddxoft] Initialization exception: %s", e)
             return False
     
     def move_relative(self, dx, dy):
@@ -184,14 +187,12 @@ class DDXoftMouse:
         self.last_status = None
     
     def print_statistics(self):
-        """打印統計信息"""
         stats = self.get_statistics()
-        print(f"[ddxoft] 統計信息:")
-        print(f"  成功次數: {stats['success_count']}")
-        print(f"  失敗次數: {stats['failure_count']}")
-        print(f"  總計次數: {stats['total_count']}")
-        print(f"  成功率: {stats['success_rate']:.1f}%")
-        print(f"  最後狀態: {stats['last_status']}")
+        logger.info(
+            "[ddxoft] Stats — success: %d  failure: %d  total: %d  rate: %.1f%%  last: %s",
+            stats['success_count'], stats['failure_count'], stats['total_count'],
+            stats['success_rate'], stats['last_status'],
+        )
     
     def test_functionality(self):
         """測試 ddxoft 功能並診斷問題"""

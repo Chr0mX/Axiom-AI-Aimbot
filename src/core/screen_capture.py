@@ -4,6 +4,8 @@ import colorsys
 import logging
 import threading
 import time
+
+logger = logging.getLogger(__name__)
 from typing import TYPE_CHECKING, Any
 
 import cv2
@@ -569,11 +571,11 @@ class NDICapture:
         self.preview_width = int(getattr(config, 'ndi_width', getattr(config, 'width', 0)) or 0)
         self.preview_height = int(getattr(config, 'ndi_height', getattr(config, 'height', 0)) or 0)
 
-        print('[Capture][NDI] Initializing cyndilib NDI backend...')
+        logger.info('[Capture][NDI] Initializing cyndilib NDI backend...')
         if self.source_name:
-            print(f"[Capture][NDI] Requested source name from config: '{self.source_name}'.")
+            logger.info("[Capture][NDI] Requested source name from config: '%s'.", self.source_name)
         else:
-            print('[Capture][NDI] No source name configured. First discovered source will be auto-selected.')
+            logger.info('[Capture][NDI] No source name configured. First discovered source will be auto-selected.')
 
         try:
             symbols = _load_cyndilib_symbols()
@@ -597,15 +599,15 @@ class NDICapture:
             if _uyvy_fmt is not None:
                 receiver_kwargs: dict[str, Any] = {'color_format': _uyvy_fmt}
                 self._recv_fourcc: str = 'uyvy'
-                print('[Capture][NDI] Color format: UYVY_RGBA (half bandwidth, zero-copy reshape)')
+                logger.info('[Capture][NDI] Color format: UYVY_RGBA (half bandwidth, zero-copy reshape)')
             elif _bgra_fmt is not None:
                 receiver_kwargs = {'color_format': _bgra_fmt}
                 self._recv_fourcc = 'bgra'
-                print('[Capture][NDI] Color format: BGRX_BGRA (no cvtColor)')
+                logger.info('[Capture][NDI] Color format: BGRX_BGRA (no cvtColor)')
             else:
                 receiver_kwargs = {'color_format': RecvColorFormat.RGBX_RGBA}
                 self._recv_fourcc = 'rgba'
-                print('[Capture][NDI] Color format: RGBX_RGBA (cvtColor fallback)')
+                logger.info('[Capture][NDI] Color format: RGBX_RGBA (cvtColor fallback)')
             # Legacy flag kept so any external callers that check _recv_is_bgra still work
             self._recv_is_bgra: bool = self._recv_fourcc == 'bgra'
             if RecvBandwidth is not None:
@@ -613,7 +615,7 @@ class NDICapture:
                 bw_value = getattr(RecvBandwidth, bw_pref, None) or getattr(RecvBandwidth, 'highest', None)
                 if bw_value is not None:
                     receiver_kwargs['bandwidth'] = bw_value
-                    print(f'[Capture][NDI] Bandwidth set to: {bw_pref}')
+                    logger.info('[Capture][NDI] Bandwidth set to: %s', bw_pref)
             if source is not None:
                 # NOTE: do NOT pass the source to the Receiver constructor.
                 # Assigning it both in the ctor and again via set_source() below
@@ -622,21 +624,21 @@ class NDICapture:
                 # source name is already saved in config). The auto-select path
                 # — which connects reliably — only ever calls set_source() once,
                 # so the configured-source path now mirrors it.
-                print(f"[Capture][NDI] Resolved source '{_extract_ndi_source_name(source)}'; "
-                      f"assigning after receiver creation.")
+                logger.info("[Capture][NDI] Resolved source '%s'; assigning after receiver creation.",
+                            _extract_ndi_source_name(source))
             self._receiver = Receiver(**receiver_kwargs)
-            print('[Capture][NDI] Receiver object created successfully.')
+            logger.info('[Capture][NDI] Receiver object created successfully.')
 
             self._video_frame_sync: Any | None = None
             self._video_frame: Any | None = None
             if VideoFrameSync is not None and getattr(self._receiver, 'frame_sync', None) is not None:
                 self._video_frame_sync = VideoFrameSync()
                 self._receiver.frame_sync.set_video_frame(self._video_frame_sync)
-                print('[Capture][NDI] Using VideoFrameSync capture path (matches gist flow).')
+                logger.info('[Capture][NDI] Using VideoFrameSync capture path (matches gist flow).')
             elif VideoRecvFrame is not None:
                 self._video_frame = VideoRecvFrame()
                 self._receiver.set_video_frame(self._video_frame)
-                print('[Capture][NDI] Using VideoRecvFrame fallback path (legacy cyndilib compatibility).')
+                logger.info('[Capture][NDI] Using VideoRecvFrame fallback path (legacy cyndilib compatibility).')
             else:
                 raise RuntimeError('Unsupported cyndilib version: no usable video frame API found')
 
@@ -651,7 +653,7 @@ class NDICapture:
         except Exception as exc:
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
 
-        print('[Capture][NDI] Waiting for receiver to connect and deliver first video frame (up to 6s)...')
+        logger.info('[Capture][NDI] Waiting for receiver to connect and deliver first video frame (up to 6s)...')
         connected = _wait_for_receiver_connection(
             self._receiver,
             getattr(self._receiver, 'frame_sync', None),
@@ -664,7 +666,7 @@ class NDICapture:
 
         if not connected:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
-        print('[Capture][NDI] Receiver connected and video stream is ready.')
+        logger.info('[Capture][NDI] Receiver connected and video stream is ready.')
         self._last_frame_time: float = time.perf_counter()
 
         # Shared refs for the preview thread — grab() writes, thread reads
@@ -674,9 +676,11 @@ class NDICapture:
         self._ndi_stop: threading.Event = threading.Event()
         # FPS caching — read once from frame metadata, then skip per-frame probe
         self._fps_cached: bool = False
-        # Pre-allocated BGRA output buffer for the crop-path (avoids per-frame malloc)
-        self._bgra_buf: np.ndarray | None = None
-        self._bgra_shape: tuple = ()
+        # Ping-pong pair of BGRA buffers for the crop-path — eliminates per-frame .copy().
+        # Alternating ensures the buffer just returned stays valid while grab() fills the other.
+        self._bgra_bufs: list[np.ndarray | None] = [None, None]
+        self._bgra_shapes: list[tuple] = [(), ()]
+        self._bgra_idx: int = 0
 
         self._ndi_preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
@@ -703,16 +707,16 @@ class NDICapture:
             if self._finder is None:
                 self._finder = self._Finder()
                 if log:
-                    print('[Capture][NDI] Finder instance created.')
+                    logger.info('[Capture][NDI] Finder instance created.')
             finder = self._finder
             if not getattr(finder, "is_open", False):
                 finder.open()
                 if log:
-                    print('[Capture][NDI] Finder opened for network source discovery.')
+                    logger.info('[Capture][NDI] Finder opened for network source discovery.')
             source = _find_ndi_source_by_name(finder, self.source_name)
             if source is not None:
                 if log:
-                    print(f"[Capture][NDI] Matched configured source '{self.source_name}'.")
+                    logger.info("[Capture][NDI] Matched configured source '%s'.", self.source_name)
                 return source
             for _ in range(6):
                 try:
@@ -722,14 +726,14 @@ class NDICapture:
                 if changed:
                     finder.update_sources()
                     if log:
-                        print('[Capture][NDI] Source list changed while searching for configured source.')
+                        logger.info('[Capture][NDI] Source list changed while searching for configured source.')
                 source = _find_ndi_source_by_name(finder, self.source_name)
                 if source is not None:
                     if log:
-                        print(f"[Capture][NDI] Found configured source after refresh: '{self.source_name}'.")
+                        logger.info("[Capture][NDI] Found configured source after refresh: '%s'.", self.source_name)
                     return source
             if log:
-                print(f"[Capture][NDI] Could not find configured source '{self.source_name}' after retries.")
+                logger.warning("[Capture][NDI] Could not find configured source '%s' after retries.", self.source_name)
             return None
         except Exception:
             return None
@@ -740,11 +744,11 @@ class NDICapture:
         try:
             if self._finder is None:
                 self._finder = self._Finder()
-                print('[Capture][NDI] Finder instance created for auto-select mode.')
+                logger.info('[Capture][NDI] Finder instance created for auto-select mode.')
             finder = self._finder
             if not getattr(finder, 'is_open', False):
                 finder.open()
-                print('[Capture][NDI] Finder opened for auto-select mode.')
+                logger.info('[Capture][NDI] Finder opened for auto-select mode.')
 
             for attempt in range(8):
                 names = [name for name in finder.get_source_names() if isinstance(name, str) and name.strip()]
@@ -754,7 +758,7 @@ class NDICapture:
                         selected_source = finder.get_source(selected_name)
                         self._receiver.set_source(selected_source)
                         self._source_assigned = True
-                        print(f"[Capture][NDI] Auto-selected first available source: '{selected_name}'.")
+                        logger.info("[Capture][NDI] Auto-selected first available source: '%s'.", selected_name)
                     return
                 try:
                     changed = finder.wait_for_sources(0.5)
@@ -762,11 +766,11 @@ class NDICapture:
                     changed = finder.wait_for_sources(timeout=0.5)
                 if changed:
                     finder.update_sources()
-                    print(f'[Capture][NDI] Waiting for source discovery (attempt {attempt + 1}/8)...')
+                    logger.info('[Capture][NDI] Waiting for source discovery (attempt %d/8)...', attempt + 1)
 
-            print('[Capture][NDI] No NDI sources discovered for auto-select within timeout window.')
+            logger.warning('[Capture][NDI] No NDI sources discovered for auto-select within timeout window.')
         except Exception as exc:
-            print(f'[Capture][NDI] Auto-select source setup failed: {exc}')
+            logger.error('[Capture][NDI] Auto-select source setup failed: %s', exc)
 
     def _raw_array_from_cyndilib_frame(self, frame: Any) -> tuple[np.ndarray | None, int, int]:
         """Return raw uint8 array + (width, height) with no color conversion.
@@ -816,7 +820,7 @@ class NDICapture:
                             self._receiver.set_source(source)
                             self._source_assigned = True
                             if log:
-                                print(f"[Capture][NDI] Reconnecting receiver using configured source '{self.source_name}'.")
+                                logger.info("[Capture][NDI] Reconnecting receiver using configured source '%s'.", self.source_name)
                                 self._reconnect_logged = True
                             _wait_for_receiver_connection(
                                 self._receiver,
@@ -836,7 +840,7 @@ class NDICapture:
             # else: is_connected() flickered but frames are recent — fall through and attempt capture
         elif self._reconnect_logged:
             # Recovered from a disconnect episode — re-arm logging for next time.
-            print(f"[Capture][NDI] Receiver connected to '{self.source_name}'.")
+            logger.info("[Capture][NDI] Receiver connected to '%s'.", self.source_name)
             self._reconnect_logged = False
 
         frame_obj: Any | None = None
@@ -929,21 +933,25 @@ class NDICapture:
                     right = (right + 1) & ~1
                     crop_raw = raw[top:bottom, left:right, :]
                     expected_shape = (bottom - top, right - left, 4)
-                    if self._bgra_shape != expected_shape:
-                        self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
-                        self._bgra_shape = expected_shape
-                    cv2.cvtColor(crop_raw, cv2.COLOR_YUV2BGRA_UYVY, self._bgra_buf)
-                    frame = self._bgra_buf.copy()
+                    idx = self._bgra_idx
+                    if self._bgra_shapes[idx] != expected_shape:
+                        self._bgra_bufs[idx]   = np.empty(expected_shape, dtype=np.uint8)
+                        self._bgra_shapes[idx] = expected_shape
+                    cv2.cvtColor(crop_raw, cv2.COLOR_YUV2BGRA_UYVY, self._bgra_bufs[idx])
+                    frame = self._bgra_bufs[idx]
+                    self._bgra_idx = 1 - idx
                 elif recv_fourcc == 'bgra':
                     frame = raw[top:bottom, left:right]
                 else:
                     crop_raw = raw[top:bottom, left:right]
                     expected_shape = (bottom - top, right - left, 4)
-                    if self._bgra_shape != expected_shape:
-                        self._bgra_buf   = np.empty(expected_shape, dtype=np.uint8)
-                        self._bgra_shape = expected_shape
-                    cv2.cvtColor(crop_raw, cv2.COLOR_RGBA2BGRA, self._bgra_buf)
-                    frame = self._bgra_buf.copy()
+                    idx = self._bgra_idx
+                    if self._bgra_shapes[idx] != expected_shape:
+                        self._bgra_bufs[idx]   = np.empty(expected_shape, dtype=np.uint8)
+                        self._bgra_shapes[idx] = expected_shape
+                    cv2.cvtColor(crop_raw, cv2.COLOR_RGBA2BGRA, self._bgra_bufs[idx])
+                    frame = self._bgra_bufs[idx]
+                    self._bgra_idx = 1 - idx
             else:
                 frame = _to_bgra(raw)
 
@@ -1360,12 +1368,12 @@ def _get_monitor_refresh_rate() -> int:
 
 
 def _warn_once(key: str, message: str) -> None:
-    """Print warning once per process to avoid log flooding."""
+    """Emit a warning log once per process to avoid log flooding."""
 
     if key in _WARNED_MESSAGES:
         return
     _WARNED_MESSAGES.add(key)
-    print(message)
+    logger.warning(message)
 
 
 def _initialize_dxcam_capture(config: Any | None = None) -> Any | None:
@@ -1429,13 +1437,13 @@ def initialize_screen_capture(config: Config) -> Any:
     if screenshot_method == 'dxcam':
         dxcam_capture = _initialize_dxcam_capture(config)
         if dxcam_capture is not None:
-            print('[Capture] DXcam backend initialized successfully (BGRA output).')
+            logger.info('[Capture] DXcam backend initialized successfully (BGRA output).')
             return dxcam_capture
         _warn_once('dxcam_fallback_mss', '[Capture] DXcam backend unavailable; automatic fallback to MSS is active.')
     elif screenshot_method == 'uvc':
         try:
             uvc_capture = UVCCapture(config)
-            print('[Capture] UVC backend initialized via OpenCV VideoCapture.')
+            logger.info('[Capture] UVC backend initialized via OpenCV VideoCapture.')
             return uvc_capture
         except Exception as exc:
             _warn_once(
@@ -1445,12 +1453,12 @@ def initialize_screen_capture(config: Config) -> Any:
     elif screenshot_method == 'ndi':
         try:
             ndi_capture = NDICapture(config)
-            print('[Capture] NDI backend initialized via cyndilib and is now active.')
+            logger.info('[Capture] NDI backend initialized via cyndilib and is now active.')
             return ndi_capture
         except Exception as exc:
-            # Always print (not _warn_once): NDI is (re)connected interactively and
+            # Always log (not _warn_once): NDI is (re)connected interactively and
             # the failure reason must stay visible across repeated attempts.
-            print(f'[Capture][NDI] Initialization failed with "{exc}". Falling back to MSS backend.')
+            logger.error('[Capture][NDI] Initialization failed with "%s". Falling back to MSS backend.', exc)
     elif screenshot_method != 'mss':
         _warn_once(
             'invalid_screenshot_method',
@@ -1460,7 +1468,7 @@ def initialize_screen_capture(config: Config) -> Any:
     try:
         mss_capture = mss.mss()
     except Exception as exc:
-        print(f'[Capture] MSS initialization failed with "{exc}".')
+        logger.error('[Capture] MSS initialization failed with "%s".', exc)
         raise
 
     # For screen capture backends, report the primary monitor refresh rate as
@@ -1469,7 +1477,7 @@ def initialize_screen_capture(config: Config) -> Any:
     if _refresh > 0:
         config.source_nominal_fps = float(_refresh)
 
-    print('[Capture] MSS backend initialized successfully.')
+    logger.info('[Capture] MSS backend initialized successfully.')
     return mss_capture
 
 
@@ -1500,18 +1508,18 @@ def reinitialize_if_method_changed(
     if desired == current_active:
         if desired == 'uvc' and hasattr(current_capture, 'config_signature'):
             if getattr(current_capture, 'config_signature', None) != _uvc_signature(config):
-                print('[Capture] UVC configuration changed. Reinitializing UVC backend...')
+                logger.info('[Capture] UVC configuration changed. Reinitializing UVC backend...')
             else:
                 return current_capture, current_active
         elif desired == 'ndi' and hasattr(current_capture, 'config_signature'):
             if getattr(current_capture, 'config_signature', None) != _ndi_signature(config):
-                print('[Capture][NDI] NDI configuration changed. Reinitializing NDI backend...')
+                logger.info('[Capture][NDI] NDI configuration changed. Reinitializing NDI backend...')
             else:
                 return current_capture, current_active
         else:
             return current_capture, current_active
 
-    print(f'[Capture] Screenshot method transition detected: {current_active} -> {desired}. Reinitializing backend...')
+    logger.info('[Capture] Screenshot method transition: %s -> %s. Reinitializing backend...', current_active, desired)
 
     # Release the old backend first
     _cleanup_capture(current_capture)

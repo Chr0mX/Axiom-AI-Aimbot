@@ -37,16 +37,16 @@ def _launch_vigem_installer_and_exit() -> None:
     """Launch ViGEmBus installer and exit current program"""
     if os.path.exists(_VIGEM_INSTALLER):
         import subprocess
-        print("[Xbox] ViGEmBus driver not detected, launching installer...")
+        logger.info("[Xbox] ViGEmBus driver not detected, launching installer...")
         try:
             subprocess.Popen([_VIGEM_INSTALLER], shell=False)
         except Exception as launch_err:
-            print(f"[Xbox] Could not launch installer: {launch_err}")
+            logger.error("[Xbox] Could not launch installer: %s", launch_err)
     else:
-        print(f"[Xbox] Could not find ViGEmBus installer: {_VIGEM_INSTALLER}")
-        print("[Xbox] Please manually download and install from https://github.com/nefarius/ViGEmBus/releases")
+        logger.error("[Xbox] Could not find ViGEmBus installer: %s", _VIGEM_INSTALLER)
+        logger.error("[Xbox] Please manually download and install from https://github.com/nefarius/ViGEmBus/releases")
 
-    print("[Xbox] Please restart Axiom after installation. Program will now close...")
+    logger.info("[Xbox] Please restart Axiom after installation. Program will now close...")
     time.sleep(2)
     os._exit(0)
 
@@ -65,11 +65,11 @@ def _import_vgamepad():
         vg = _vg
         return True
     except ImportError:
-        print("[Xbox] vgamepad not installed, please run: pip install vgamepad")
+        logger.error("[Xbox] vgamepad not installed, please run: pip install vgamepad")
         return False
     except Exception as e:
         # ViGEmBus driver not installed (e.g., VIGEM_ERROR_BUS_NOT_FOUND)
-        print(f"[Xbox] vgamepad load failed: {e}")
+        logger.error("[Xbox] vgamepad load failed: %s", e)
         _launch_vigem_installer_and_exit()
         return False
 
@@ -135,21 +135,19 @@ class XboxController:
                 self._init_attempted = True
                 self._error_count = 0
                 logger.info("[Xbox] 虛擬 Xbox 360 控制器已建立")
-                print("[Xbox] 虛擬 Xbox 360 控制器已建立")
                 return True
             except Exception as e:
                 self._last_error = f"建立虛擬手把失敗: {e}"
                 self._connected = False
                 self._gamepad = None
                 self._init_attempted = True
-                logger.error(f"[Xbox] {self._last_error}")
-                print(f"[Xbox] {self._last_error}")
+                logger.error("[Xbox] %s", self._last_error)
 
                 # 若為 ViGEmBus 驅動未安裝，自動啟動安裝程式並結束程序
                 if _is_vigem_error(e):
                     _launch_vigem_installer_and_exit()
 
-                print("[Xbox] 請確認已安裝 ViGEmBus 驅動: https://github.com/nefarius/ViGEmBus/releases")
+                logger.error("[Xbox] Please ensure ViGEmBus driver is installed: https://github.com/nefarius/ViGEmBus/releases")
                 return False
     
     def disconnect(self) -> None:
@@ -165,7 +163,6 @@ class XboxController:
                 self._gamepad = None
             self._connected = False
             logger.info("[Xbox] 虛擬手把已斷開")
-            print("[Xbox] 虛擬手把已斷開")
     
     def ensure_initialized(self) -> bool:
         """確保手把已初始化，如果未初始化則嘗試連線"""

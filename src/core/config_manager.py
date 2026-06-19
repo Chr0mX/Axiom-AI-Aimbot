@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 from datetime import datetime
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .config import Config
@@ -61,7 +64,7 @@ class ConfigManager:
                 json.dump(config_data, f, ensure_ascii=False, indent=2)
             return True
         except OSError as e:
-            print(f"保存參數配置失敗: {e}")
+            logger.error("Failed to save preset '%s': %s", config_name, e)
             return False
     
     def _get_config_data(self, config_instance: Config) -> Dict[str, Any]:
@@ -167,17 +170,14 @@ class ConfigManager:
             
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
-                config_data = json.load(f)
-            
-            # 載入配置到實例
-            config_data = config_data.get('config', {})
-            for key, value in config_data.items():
-                if hasattr(config_instance, key):
-                    setattr(config_instance, key, value)
-            
+                raw = json.load(f)
+
+            # Preset files wrap settings under a 'config' key; support both wrapped and flat.
+            config_data = raw.get('config', raw)
+            config_instance.from_dict(config_data)
             return True
         except (OSError, json.JSONDecodeError) as e:
-            print(f"載入參數配置失敗: {e}")
+            logger.error("Failed to load preset '%s': %s", config_name, e)
             return False
     
     def delete_config(self, config_name: str) -> bool:
@@ -189,7 +189,7 @@ class ConfigManager:
                 os.remove(config_path)
                 return True
             except OSError as e:
-                print(f"刪除參數配置失敗: {e}")
+                logger.error("Failed to delete preset '%s': %s", config_name, e)
                 return False
         return False
     
@@ -213,7 +213,7 @@ class ConfigManager:
                 os.remove(old_path)
                 return True
             except (OSError, json.JSONDecodeError) as e:
-                print(f"重命名參數配置失敗: {e}")
+                logger.error("Failed to rename preset '%s' to '%s': %s", old_name, new_name, e)
                 return False
         return False
     
@@ -226,7 +226,7 @@ class ConfigManager:
                 shutil.copy2(config_path, export_path)
                 return True
             except OSError as e:
-                print(f"匯出參數配置失敗: {e}")
+                logger.error("Failed to export preset '%s': %s", config_name, e)
                 return False
         return False
     
@@ -264,5 +264,5 @@ class ConfigManager:
             
             return config_name
         except (OSError, json.JSONDecodeError) as e:
-            print(f"匯入參數配置失敗: {e}")
+            logger.error("Failed to import preset from '%s': %s", import_path, e)
             return None 
