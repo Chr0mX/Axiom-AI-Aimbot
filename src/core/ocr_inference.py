@@ -156,18 +156,61 @@ def _parse_ocr_result(result) -> list[str]:
     return lines
 
 
+def _build_ocr():
+    """Construct a PaddleOCR instance with OneDNN disabled.
+
+    PaddleOCR 3.x (PaddleX) runs inference through the Paddle Inference
+    predictor, which enables OneDNN in its own config — the global
+    paddle.set_flags / FLAGS_use_mkldnn are ignored by that path, so
+    enable_mkldnn=False must be passed to the constructor. The OneDNN
+    PIR instruction handler crashes on this model
+    (ConvertPirAttribute2RuntimeAttribute / ArrayAttribute<DoubleAttribute>),
+    so disabling it is required for CPU inference to work at all.
+
+    The doc-orientation / unwarping / textline-orientation models are also
+    disabled: they are useless for a single-line weapon-slot ROI and only
+    add startup and per-frame cost.
+
+    Constructor kwargs vary across PaddleOCR versions, so we try the full
+    set first and drop unknown args progressively.
+    """
+    try:
+        from paddleocr import PaddleOCR  # type: ignore[import]
+    except Exception as exc:
+        logger.error("[OCR] PaddleOCR import failed: %s", exc)
+        return None
+
+    kwarg_sets = [
+        # PaddleOCR 3.x (PaddleX) — full control, OneDNN off, extra models off
+        dict(lang="en", device="cpu", enable_mkldnn=False,
+             use_doc_orientation_classify=False, use_doc_unwarping=False,
+             use_textline_orientation=False),
+        # 3.x minimal — OneDNN off only
+        dict(lang="en", device="cpu", enable_mkldnn=False),
+        # 2.7.x legacy API
+        dict(lang="en", use_gpu=False, use_angle_cls=False, show_log=False),
+        # last-resort minimal
+        dict(lang="en"),
+    ]
+    last_exc = None
+    for kwargs in kwarg_sets:
+        try:
+            ocr = PaddleOCR(**kwargs)
+            logger.info("[OCR] PaddleOCR initialized (CPU, mkldnn=%s). ROI=%s",
+                        kwargs.get("enable_mkldnn", "n/a"), _OCR_ROI)
+            return ocr
+        except Exception as exc:
+            last_exc = exc
+            logger.debug("[OCR] init kwargs %s rejected: %s", list(kwargs), exc)
+    logger.error("[OCR] PaddleOCR initialization failed: %s", last_exc)
+    return None
+
+
 def _worker(config: Config, stop_event: threading.Event) -> None:
     from .screen_capture import get_preview_frame
 
-    try:
-        import paddle  # type: ignore[import]
-        paddle.set_flags({"FLAGS_use_mkldnn": False})
-        paddle.set_device("cpu")
-        from paddleocr import PaddleOCR  # type: ignore[import]
-        ocr = PaddleOCR(lang="en", device="cpu")
-        logger.info("[OCR] PaddleOCR initialized (CPU, OneDNN disabled). ROI=%s", _OCR_ROI)
-    except Exception as exc:
-        logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
+    ocr = _build_ocr()
+    if ocr is None:
         return
 
     _logged_raw = False
