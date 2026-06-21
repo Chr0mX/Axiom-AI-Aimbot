@@ -336,6 +336,17 @@ class CapturePage(BasePage):
         # === Inferred Text (OCR) ===
         self.ocrGroup = SettingCardGroup(t("ocr_inferred_text", "Inferred Text"), self.scrollWidget)
 
+        self.ocrScanBtn = PushButton("Scan Full Screen")
+        self.ocrScanBtn.setFixedWidth(140)
+        self.ocrScanCard = SettingCard(
+            FluentIcon.SEARCH,
+            "Full Screen Scan",
+            "Run OCR on the full 1920×1080 frame once to find where text lives",
+            self.ocrGroup
+        )
+        self.ocrScanCard.hBoxLayout.addWidget(self.ocrScanBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.ocrScanCard.hBoxLayout.addSpacing(16)
+
         self.ocrResultLabel = BodyLabel("—")
         self.ocrResultLabel.setWordWrap(True)
         self.ocrResultCard = SettingCard(
@@ -394,6 +405,7 @@ class CapturePage(BasePage):
         self.addContent(self.previewGroup)
         self.previewGroup.setVisible(False)
 
+        self.ocrGroup.addSettingCard(self.ocrScanCard)
         self.ocrGroup.addSettingCard(self.ocrResultCard)
         self.addContent(self.ocrGroup)
 
@@ -424,6 +436,7 @@ class CapturePage(BasePage):
         self.udpBindIpCombo.currentTextChanged.connect(self._onUdpBindIpChanged)
         self.udpPortCard.valueChanged.connect(self._onUdpPortChanged)
         self.udpRefreshBtn.clicked.connect(self._onUdpRefreshClicked)
+        self.ocrScanBtn.clicked.connect(self._onOcrScanClicked)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -830,13 +843,24 @@ class CapturePage(BasePage):
             self._config.udp_force_restart = True
             print('[Capture][UDP] Restart requested — receiver will reinitialize within ~0.5s.')
 
+    def _onOcrScanClicked(self):
+        from core.ocr_inference import trigger_full_scan
+        self.ocrResultLabel.setText("Scanning...")
+        trigger_full_scan()
+
     def _refreshOcrDisplay(self):
         from core.ocr_inference import get_ocr_results
         if not (self._config and getattr(self._config, 'ocr_enabled', False)):
-            self.ocrResultLabel.setText("—")
+            if self.ocrResultLabel.text() not in ("—", "Scanning..."):
+                pass  # keep last scan result visible even when OCR is toggled off
             return
         lines = get_ocr_results()
-        self.ocrResultLabel.setText("\n".join(lines) if lines else "—")
+        if lines:
+            self.ocrResultLabel.setText("\n".join(lines))
+        elif self.ocrResultLabel.text() == "Scanning...":
+            pass  # wait for result to come back
+        else:
+            self.ocrResultLabel.setText("—")
 
     # ──────────────────────────────────────────────
     # Retranslate
@@ -869,4 +893,6 @@ class CapturePage(BasePage):
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")
         self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")
         self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Inferred Text"))
+        self.ocrScanCard.titleLabel.setText("Full Screen Scan")
+        self.ocrScanBtn.setText("Scan Full Screen")
         self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "OCR Result"))

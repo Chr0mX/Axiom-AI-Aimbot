@@ -8,6 +8,10 @@ GUI polls via get_ocr_results().
 Thread lifecycle:
   start(config)  — no-op if worker is already alive
   stop()         — signals the worker and joins within 2 s
+
+One-shot full-screen scan:
+  trigger_full_scan()  — next worker iteration grabs full 1080p instead
+                         of the ROI, useful for finding where text lives
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _OCR_ROI: dict[str, int] = {"left": 1500, "top": 1033, "width": 320, "height": 25}
+_FULL_SCREEN: dict[str, int] = {"left": 0, "top": 0, "width": 1920, "height": 1080}
 _FPS_CAP: int = 10  # maximum frames per second
 
 _results_lock = threading.Lock()
@@ -33,12 +38,18 @@ _ocr_results: list[str] = []
 
 _stop_event: threading.Event | None = None
 _worker_thread: threading.Thread | None = None
+_full_scan_flag = threading.Event()  # set to trigger one full-screen grab
 
 
 def get_ocr_results() -> list[str]:
     """Return current OCR results as a list of 'N , text' strings (thread-safe)."""
     with _results_lock:
         return list(_ocr_results)
+
+
+def trigger_full_scan() -> None:
+    """Request one full-screen OCR grab on the next worker iteration."""
+    _full_scan_flag.set()
 
 
 def start(config: Config) -> None:
@@ -79,16 +90,14 @@ def _parse_ocr_result(result) -> list[str]:
     idx = 1
     for page in result:
         if isinstance(page, dict):
-            # New PaddleOCR 2.9+ / PaddleX: rec_texts is a flat list of strings
             rec_texts = page.get("rec_texts") or page.get("rec_text") or []
             if isinstance(rec_texts, str):
                 rec_texts = [rec_texts]
-            for text in rec_texts:
+            for text in (rec_texts or []):
                 if str(text).strip():
                     lines.append(f"{idx} , {str(text).strip()}")
                     idx += 1
         elif isinstance(page, list):
-            # Old format: list of [box, [text, confidence]]
             for item in page:
                 if isinstance(item, (list, tuple)) and len(item) >= 2:
                     rec = item[1]
@@ -110,29 +119,34 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
         return
 
     frame_interval = 1.0 / _FPS_CAP
-    _logged_raw = False  # log the raw result structure once for debugging
+    _logged_raw = False
 
     with mss.mss() as sct:
         while not stop_event.is_set():
             t0 = time.perf_counter()
 
-            if not getattr(config, "ocr_enabled", False):
+            if not getattr(config, "ocr_enabled", False) and not _full_scan_flag.is_set():
                 stop_event.wait(0.1)
                 continue
 
             try:
-                raw = np.array(sct.grab(_OCR_ROI))  # BGRA uint8
-                img_rgb = raw[:, :, :3][:, :, ::-1]  # BGRA → RGB
+                full_scan = _full_scan_flag.is_set()
+                if full_scan:
+                    _full_scan_flag.clear()
+                    region = _FULL_SCREEN
+                    logger.info("[OCR] Full-screen scan triggered (1920×1080)...")
+                else:
+                    region = _OCR_ROI
+
+                raw = np.array(sct.grab(region))        # BGRA uint8
+                img_rgb = raw[:, :, :3][:, :, ::-1]    # BGRA → RGB
 
                 result = ocr.ocr(img_rgb)
 
-                # Log keys and text fields once so format issues are visible
                 if not _logged_raw:
                     if result and isinstance(result[0], dict):
-                        keys = list(result[0].keys())
-                        rec  = result[0].get("rec_texts") or result[0].get("rec_text")
-                        logger.info("[OCR] Page dict keys: %s", keys)
-                        logger.info("[OCR] rec_texts value: %s", repr(rec))
+                        logger.info("[OCR] Page dict keys: %s", list(result[0].keys()))
+                        logger.info("[OCR] rec_texts value: %s", repr(result[0].get("rec_texts")))
                     else:
                         logger.info("[OCR] First result structure: %s", repr(result)[:500])
                     _logged_raw = True
@@ -143,7 +157,9 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
                     _ocr_results.clear()
                     _ocr_results.extend(lines)
 
-                if lines:
+                if full_scan:
+                    logger.info("[OCR] Full-screen scan found %d text item(s): %s", len(lines), lines)
+                elif lines:
                     logger.debug("[OCR] Detected %d line(s): %s", len(lines), lines)
 
             except Exception as exc:
