@@ -100,7 +100,7 @@ def _parse_ocr_result(result) -> list[str]:
 def _worker(config: Config, stop_event: threading.Event) -> None:
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
-        ocr = PaddleOCR(use_angle_cls=False, lang="en")
+        ocr = PaddleOCR(lang="en")
         logger.info("[OCR] PaddleOCR initialized. ROI=%s", _OCR_ROI)
     except Exception as exc:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
@@ -121,7 +121,7 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
                 raw = np.array(sct.grab(_OCR_ROI))  # BGRA uint8
                 img_rgb = raw[:, :, :3][:, :, ::-1]  # BGRA → RGB
 
-                result = ocr.ocr(img_rgb, cls=False)
+                result = ocr.ocr(img_rgb)
 
                 # Log raw structure once so format issues are visible in logs
                 if not _logged_raw:
