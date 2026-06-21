@@ -142,12 +142,26 @@ def _parse_ocr_result(result) -> list[str]:
 
 
 def _worker(config: Config, stop_event: threading.Event) -> None:
+    import os
+    # Disable OneDNN — unimplemented ops in Paddle 3.x on Windows cause frame errors
+    os.environ.setdefault("FLAGS_use_mkldnn", "0")
+    os.environ.setdefault("PADDLE_DISABLE_ONEDNN", "1")
+
+    # Lower this thread's OS priority so it doesn't steal cycles from main inference
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetThreadPriority(  # type: ignore[attr-defined]
+            ctypes.windll.kernel32.GetCurrentThread(), -1  # THREAD_PRIORITY_BELOW_NORMAL
+        )
+    except Exception:
+        pass
+
     from .screen_capture import get_preview_frame
 
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
         ocr = PaddleOCR(lang="en", device="cpu")
-        logger.info("[OCR] PaddleOCR initialized (EN+digits). ROI=%s", _OCR_ROI)
+        logger.info("[OCR] PaddleOCR initialized (CPU, OneDNN off). ROI=%s", _OCR_ROI)
     except Exception as exc:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
         return
