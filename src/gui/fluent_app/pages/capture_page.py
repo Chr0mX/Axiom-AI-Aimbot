@@ -333,6 +333,25 @@ class CapturePage(BasePage):
         self.previewFpsCapCard.hBoxLayout.addWidget(self.previewFpsCapSegment, 0, Qt.AlignmentFlag.AlignRight)
         self.previewFpsCapCard.hBoxLayout.addSpacing(16)
 
+        # === Inferred Text (OCR) ===
+        self.ocrGroup = SettingCardGroup(t("ocr_inferred_text", "Inferred Text"), self.scrollWidget)
+
+        self.ocrResultLabel = BodyLabel("—")
+        self.ocrResultLabel.setWordWrap(True)
+        self.ocrResultCard = SettingCard(
+            FluentIcon.DOCUMENT,
+            t("ocr_result_title", "OCR Result"),
+            "",
+            self.ocrGroup
+        )
+        self.ocrResultCard.hBoxLayout.addWidget(self.ocrResultLabel, 1, Qt.AlignmentFlag.AlignRight)
+        self.ocrResultCard.hBoxLayout.addSpacing(16)
+
+        self._ocrRefreshTimer = QTimer(self)
+        self._ocrRefreshTimer.setInterval(500)
+        self._ocrRefreshTimer.timeout.connect(self._refreshOcrDisplay)
+        self._ocrRefreshTimer.start()
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -374,6 +393,9 @@ class CapturePage(BasePage):
         self.previewGroup.addSettingCard(self.previewFpsCapCard)
         self.addContent(self.previewGroup)
         self.previewGroup.setVisible(False)
+
+        self.ocrGroup.addSettingCard(self.ocrResultCard)
+        self.addContent(self.ocrGroup)
 
         self.scrollLayout.addStretch(1)
 
@@ -808,6 +830,14 @@ class CapturePage(BasePage):
             self._config.udp_force_restart = True
             print('[Capture][UDP] Restart requested — receiver will reinitialize within ~0.5s.')
 
+    def _refreshOcrDisplay(self):
+        from core.ocr_inference import get_ocr_results
+        if not (self._config and getattr(self._config, 'ocr_enabled', False)):
+            self.ocrResultLabel.setText("—")
+            return
+        lines = get_ocr_results()
+        self.ocrResultLabel.setText("\n".join(lines) if lines else "—")
+
     # ──────────────────────────────────────────────
     # Retranslate
     # ──────────────────────────────────────────────
@@ -838,3 +868,5 @@ class CapturePage(BasePage):
         self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")
         self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")
+        self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Inferred Text"))
+        self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "OCR Result"))

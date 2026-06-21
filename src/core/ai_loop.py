@@ -410,6 +410,9 @@ def ai_logic_loop(
     capture_thread = threading.Thread(target=_capture_worker, name='CaptureWorker', daemon=True)
     capture_thread.start()
 
+    from .ocr_inference import start as _ocr_start, stop as _ocr_stop
+    _ocr_start(config)
+
     try:
         while config.Running:
             try:
@@ -678,6 +681,7 @@ def ai_logic_loop(
                 traceback.print_exc()
                 time.sleep(1.0)
     finally:
+        _ocr_stop()
         _preprocess_stop.set()
         if _preprocess_thread.is_alive():
             _preprocess_thread.join(timeout=1.0)

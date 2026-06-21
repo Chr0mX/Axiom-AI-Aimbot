@@ -134,6 +134,13 @@ class InferencePage(BasePage):
             parent=self.generalGroup
         )
 
+        self.ocrEnableCard = SwitchSettingCard(
+            FluentIcon.DOCUMENT,
+            t("ocr_enable", "Second Inference (OCR)"),
+            t("ocr_enable_desc", "Run PaddleOCR on a fixed screen region at ≤10 FPS to extract text"),
+            parent=self.generalGroup
+        )
+
         # === Inference Performance ===
         self.inferPerfGroup = SettingCardGroup(t("inference_performance", "Inference Performance"), self.scrollWidget)
 
@@ -216,6 +223,7 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
         self.generalGroup.addSettingCard(self.idleDetectIntervalCard)
         self.generalGroup.addSettingCard(self.singleTargetCard)
+        self.generalGroup.addSettingCard(self.ocrEnableCard)
         self.addContent(self.generalGroup)
 
         self.inferPerfGroup.addSettingCard(self.skipLetterboxCard)
@@ -258,6 +266,8 @@ class InferencePage(BasePage):
         self.boxEmaAlphaXCard.valueChanged.connect(self._onBoxEmaAlphaXChanged)
         self.boxEmaAlphaYCard.valueChanged.connect(self._onBoxEmaAlphaYChanged)
 
+        self.ocrEnableCard.checkedChanged.connect(self._onOcrEnableChanged)
+
     # ──────────────────────────────────────────────
     # Config load
     # ──────────────────────────────────────────────
@@ -292,6 +302,8 @@ class InferencePage(BasePage):
             self.boxEmaEnableCard.setChecked(bool(getattr(self._config, 'box_ema_enabled', False)))
             self.boxEmaAlphaXCard.setValue(float(getattr(self._config, 'box_ema_alpha_x', 0.8)))
             self.boxEmaAlphaYCard.setValue(float(getattr(self._config, 'box_ema_alpha_y', 0.5)))
+
+            self.ocrEnableCard.setChecked(bool(getattr(self._config, 'ocr_enabled', False)))
 
             # Apply initial screenshot-method effect on fov_follow visibility
             method = getattr(self._config, 'screenshot_method', 'mss')
@@ -423,6 +435,10 @@ class InferencePage(BasePage):
         if self._config:
             self._config.box_ema_alpha_y = float(value)
 
+    def _onOcrEnableChanged(self, checked: bool):
+        if self._config:
+            self._config.ocr_enabled = bool(checked)
+
     # ──────────────────────────────────────────────
     # Retranslate
     # ──────────────────────────────────────────────
@@ -446,6 +462,8 @@ class InferencePage(BasePage):
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
+        self.ocrEnableCard.titleLabel.setText(t("ocr_enable", "Second Inference (OCR)"))
+        self.ocrEnableCard.contentLabel.setText(t("ocr_enable_desc", "Run PaddleOCR on a fixed screen region at ≤10 FPS to extract text"))
 
         self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
         self.skipLetterboxCard.contentLabel.setText(t("skip_letterbox_desc"))

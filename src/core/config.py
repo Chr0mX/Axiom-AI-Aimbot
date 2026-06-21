@@ -190,6 +190,9 @@ _FIELD_MAP = {
     'acrylic_window_alpha':       'ui.acrylic_window_alpha',
     'acrylic_element_alpha':      'ui.acrylic_element_alpha',
     'show_console':               'ui.show_console',
+
+    # --- ocr ---
+    'ocr_enabled':                'ocr.enabled',
 }
 
 
@@ -492,6 +495,9 @@ class Config:
         # Nominal FPS of the active capture source (UVC/NDI reports this;
         # screen capture uses monitor refresh rate or measured rate)
         self.source_nominal_fps: float = 0.0
+
+        # Secondary OCR inference (PaddleOCR)
+        self.ocr_enabled: bool = False
 
         # Humanization post-processing layer (operates only on final dx/dy output)
         self.humanization: HumanizationConfig = HumanizationConfig()
