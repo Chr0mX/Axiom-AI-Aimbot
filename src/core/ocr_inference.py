@@ -4,14 +4,12 @@ Secondary OCR inference — PaddleOCR text extraction from the active capture fr
 Reads frames from screen_capture.get_preview_frame() so it shares the capture
 pipeline with the main inference and adds zero extra screen-grab overhead.
 
-ROI (absolute pixel coords within the captured frame):
-  Regular OCR: crops to _OCR_ROI when the frame is large enough
-  Full scan:   uses the entire preview frame
+All scans (continuous and manual) always use _OCR_ROI.
 
 Thread lifecycle:
-  start(config)        — no-op if worker is already alive
-  stop()               — signals the worker and joins within 2 s
-  trigger_full_scan()  — next iteration uses the full frame instead of the ROI
+  start(config)     — no-op if worker is already alive
+  stop()            — signals the worker and joins within 2 s
+  trigger_scan()    — force an immediate ROI scan on the next iteration
 """
 
 from __future__ import annotations
@@ -37,20 +35,29 @@ _OCR_ROI: dict[str, int] = {"left": 1515, "top": 1031, "width": 314, "height": 2
 _results_lock = threading.Lock()
 _ocr_results: list[str] = []
 
+_roi_image_lock = threading.Lock()
+_roi_image: np.ndarray | None = None   # last captured ROI crop (BGR/BGRA)
+
 _stop_event: threading.Event | None = None
 _worker_thread: threading.Thread | None = None
-_full_scan_flag = threading.Event()
+_scan_flag = threading.Event()          # set to force an immediate scan
 
 
 def get_ocr_results() -> list[str]:
-    """Return current OCR results as a list of 'N , text' strings (thread-safe)."""
+    """Return current OCR results as a list of formatted strings (thread-safe)."""
     with _results_lock:
         return list(_ocr_results)
 
 
-def trigger_full_scan() -> None:
-    """Request one full-frame OCR pass on the next worker iteration."""
-    _full_scan_flag.set()
+def get_roi_image() -> np.ndarray | None:
+    """Return the last captured ROI crop as a numpy array (thread-safe)."""
+    with _roi_image_lock:
+        return _roi_image if _roi_image is None else _roi_image.copy()
+
+
+def trigger_scan() -> None:
+    """Force an immediate ROI scan on the next worker iteration."""
+    _scan_flag.set()
 
 
 def start(config: Config) -> None:
@@ -84,14 +91,14 @@ def _to_rgb(frame: np.ndarray) -> np.ndarray:
 
 
 def _crop_roi(frame: np.ndarray, log_once: list) -> np.ndarray:
-    """Always crop to _OCR_ROI, clamping to frame bounds if needed."""
+    """Always crop to _OCR_ROI, clamping to frame bounds."""
     h, w = frame.shape[:2]
     l, t = _OCR_ROI["left"], _OCR_ROI["top"]
     rw, rh = _OCR_ROI["width"], _OCR_ROI["height"]
     x1, y1 = min(l, w), min(t, h)
     x2, y2 = min(l + rw, w), min(t + rh, h)
     if not log_once:
-        logger.info("[OCR] Frame %dx%d → ROI crop [%d:%d, %d:%d]", w, h, x1, x2, y1, y2)
+        logger.info("[OCR] Frame %dx%d → ROI crop [x:%d-%d, y:%d-%d]", w, h, x1, x2, y1, y2)
         log_once.append(True)
     return frame[y1:y2, x1:x2]
 
@@ -127,7 +134,6 @@ def _parse_ocr_result(result) -> list[str]:
     Tokens arrive in pairs: [slot, name, slot, name, ...]
     e.g. ['2', 'ALTERNATOR', '3', 'R-301'] →
          ['Weapon 1: 2 , ALTERNATOR', 'Weapon 2: 3 , R-301']
-    Odd leftover tokens are shown on their own line.
     """
     tokens = _extract_texts(result)
     lines: list[str] = []
@@ -156,20 +162,20 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
         return
 
     _logged_raw = False
-    _logged_crop: list = []   # populated on first crop to avoid repeating the log
+    _logged_crop: list = []
 
     while not stop_event.is_set():
         t0 = time.perf_counter()
 
         ocr_enabled = getattr(config, "ocr_enabled", False)
-        full_scan = _full_scan_flag.is_set()
+        forced = _scan_flag.is_set()
 
-        if not ocr_enabled and not full_scan:
+        if not ocr_enabled and not forced:
             stop_event.wait(0.1)
             continue
 
-        if full_scan:
-            _full_scan_flag.clear()
+        if forced:
+            _scan_flag.clear()
 
         frame = get_preview_frame()
         if frame is None:
@@ -177,13 +183,14 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
             continue
 
         try:
-            if full_scan:
-                img_rgb = _to_rgb(frame)
-                logger.info("[OCR] Full-frame scan triggered (%dx%d)...",
-                            frame.shape[1], frame.shape[0])
-            else:
-                img_rgb = _to_rgb(_crop_roi(frame, _logged_crop))
+            roi_crop = _crop_roi(frame, _logged_crop)
 
+            # Store the raw ROI crop for the GUI preview (before RGB conversion)
+            with _roi_image_lock:
+                global _roi_image
+                _roi_image = roi_crop.copy()
+
+            img_rgb = _to_rgb(roi_crop)
             result = ocr.ocr(img_rgb)
 
             if not _logged_raw:
@@ -200,15 +207,14 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
                 _ocr_results.clear()
                 _ocr_results.extend(lines)
 
-            if full_scan:
-                logger.info("[OCR] Full-frame scan found %d item(s): %s", len(lines), lines)
+            if forced:
+                logger.info("[OCR] ROI scan found %d item(s): %s", len(lines), lines)
             elif lines:
                 logger.debug("[OCR] Detected %d line(s): %s", len(lines), lines)
 
         except Exception as exc:
             logger.warning("[OCR] Frame error: %s", exc)
 
-        # Sleep for the remainder of the configured interval
         fps = max(1, min(10, int(getattr(config, "ocr_fps", 2))))
         elapsed = time.perf_counter() - t0
         sleep_time = (1.0 / fps) - elapsed

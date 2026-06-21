@@ -7,7 +7,8 @@ import sys
 import subprocess
 import time
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import QLabel, QMessageBox
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, FluentIcon,
     ComboBox, PushButton, SettingCard, BodyLabel, SegmentedWidget,
@@ -345,12 +346,12 @@ class CapturePage(BasePage):
             parent=self.ocrGroup
         )
 
-        self.ocrScanBtn = PushButton("Scan Full Frame")
+        self.ocrScanBtn = PushButton("Scan ROI")
         self.ocrScanBtn.setFixedWidth(140)
         self.ocrScanCard = SettingCard(
             FluentIcon.SEARCH,
-            "Full Frame Scan",
-            "Run OCR on the full capture frame once to find where text lives",
+            "Scan ROI",
+            "Run OCR on the fixed region once and update the preview below",
             self.ocrGroup
         )
         self.ocrScanCard.hBoxLayout.addWidget(self.ocrScanBtn, 0, Qt.AlignmentFlag.AlignRight)
@@ -366,6 +367,19 @@ class CapturePage(BasePage):
         )
         self.ocrResultCard.hBoxLayout.addWidget(self.ocrResultLabel, 1, Qt.AlignmentFlag.AlignRight)
         self.ocrResultCard.hBoxLayout.addSpacing(16)
+
+        self.ocrRoiCard = SettingCard(
+            FluentIcon.PHOTO,
+            "ROI Preview",
+            "Last scanned region (updated on Scan ROI)",
+            self.ocrGroup
+        )
+        self.ocrRoiLabel = QLabel()
+        self.ocrRoiLabel.setFixedSize(314, 58)
+        self.ocrRoiLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ocrRoiLabel.setStyleSheet("background: #111; border-radius: 3px;")
+        self.ocrRoiCard.hBoxLayout.addWidget(self.ocrRoiLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.ocrRoiCard.hBoxLayout.addSpacing(16)
 
         self._ocrRefreshTimer = QTimer(self)
         self._ocrRefreshTimer.setInterval(500)
@@ -417,6 +431,7 @@ class CapturePage(BasePage):
         self.ocrGroup.addSettingCard(self.ocrFpsCard)
         self.ocrGroup.addSettingCard(self.ocrScanCard)
         self.ocrGroup.addSettingCard(self.ocrResultCard)
+        self.ocrGroup.addSettingCard(self.ocrRoiCard)
         self.addContent(self.ocrGroup)
 
         self.scrollLayout.addStretch(1)
@@ -862,9 +877,28 @@ class CapturePage(BasePage):
         self._config.ocr_fps = max(1, min(10, value))
 
     def _onOcrScanClicked(self):
-        from core.ocr_inference import trigger_full_scan
+        from core.ocr_inference import trigger_scan
         self.ocrResultLabel.setText("Scanning...")
-        trigger_full_scan()
+        trigger_scan()
+        QTimer.singleShot(1500, self._updateRoiPreview)
+
+    def _updateRoiPreview(self):
+        from core.ocr_inference import get_roi_image
+        roi = get_roi_image()
+        if roi is None:
+            return
+        h, w = roi.shape[:2]
+        if roi.ndim != 3 or roi.shape[2] < 3:
+            return
+        roi_rgb = roi[:, :, :3][:, :, ::-1].copy()  # BGR(A) → RGB
+        buf = roi_rgb.tobytes()
+        qimg = QImage(buf, w, h, w * 3, QImage.Format.Format_RGB888)
+        pix = QPixmap.fromImage(qimg)
+        self.ocrRoiLabel.setPixmap(
+            pix.scaled(self.ocrRoiLabel.width(), self.ocrRoiLabel.height(),
+                       Qt.AspectRatioMode.KeepAspectRatio,
+                       Qt.TransformationMode.SmoothTransformation)
+        )
 
     def _refreshOcrDisplay(self):
         from core.ocr_inference import get_ocr_results
@@ -912,6 +946,7 @@ class CapturePage(BasePage):
         self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")
         self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Inferred Text"))
         self.ocrFpsCard.titleLabel.setText("OCR Capture FPS")
-        self.ocrScanCard.titleLabel.setText("Full Frame Scan")
-        self.ocrScanBtn.setText("Scan Full Frame")
+        self.ocrScanCard.titleLabel.setText("Scan ROI")
+        self.ocrScanBtn.setText("Scan ROI")
         self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "OCR Result"))
+        self.ocrRoiCard.titleLabel.setText("ROI Preview")
