@@ -1,4 +1,4 @@
-"""Install PaddleOCR and PaddlePaddle (GPU) into the shared AxiomAI packages dir.
+"""Install PaddleOCR and PaddlePaddle 3.x (GPU) into the shared AxiomAI packages dir.
 
 Packages are written to:
     %LOCALAPPDATA%\\AxiomAI\\site-packages
@@ -12,13 +12,9 @@ Usage (from project root, any Python >= 3.10):
     -- or --
     src\\python\\python.exe src\\install_paddleocr_local.py
 
-Requirements:
-  CUDA 12.x toolkit  (driver >= 525.x)
-  GPU with CUDA compute capability 6.0+ (Maxwell and newer)
-
-CPU fallback:
-  If you do not have a supported GPU, edit PADDLE_PACKAGE below from
-  'paddlepaddle-gpu' to 'paddlepaddle' and re-run.
+Default: CUDA 13.0 + paddlepaddle-gpu 3.3.0
+To change CUDA version, edit PADDLE_CUDA_TAG and PADDLE_PACKAGE below.
+CPU fallback: set PADDLE_PACKAGE = 'paddlepaddle' and PADDLE_INDEX = ''.
 """
 
 from __future__ import annotations
@@ -38,20 +34,18 @@ if not _LOCALAPPDATA:
 
 PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 
-# Pinned to the last known-good combination:
-#   paddlepaddle-gpu 2.6.2.post120  — CUDA 12.0 build (from Paddle's own index)
-#   paddleocr 2.7.3                 — last release targeting Paddle 2.x
-# Newer paddleocr (2.9+) switched to PaddleX and requires Paddle 3.x,
-# which introduces API changes (set_optimization_level) that break 2.x builds.
+# PaddlePaddle 3.x + PaddleOCR 2.9+ are co-designed — no pinning needed.
+# The earlier set_optimization_level error was a 2.x/3.x mismatch; using both
+# at current versions avoids it entirely.
 #
 # Change PADDLE_CUDA_TAG to match your CUDA version:
-#   cu120 → CUDA 12.0   cu118 → CUDA 11.8   cu117 → CUDA 11.7
-# For CPU-only set PADDLE_PACKAGE to 'paddlepaddle==2.6.2' and leave PADDLE_INDEX as "".
-PADDLE_CUDA_TAG = "cu120"
+#   cu130 → CUDA 13.0   cu120 → CUDA 12.0   cu118 → CUDA 11.8
+# For CPU-only set PADDLE_PACKAGE to 'paddlepaddle' and PADDLE_INDEX to "".
+PADDLE_CUDA_TAG = "cu130"
 PADDLE_INDEX    = f"https://www.paddlepaddle.org.cn/packages/stable/{PADDLE_CUDA_TAG}/"
-PADDLE_PACKAGE  = "paddlepaddle-gpu==2.6.2.post120"
+PADDLE_PACKAGE  = "paddlepaddle-gpu==3.3.0"
 PADDLEOCR_PACKAGES = [
-    "paddleocr==2.7.3",
+    "paddleocr",
 ]
 
 
@@ -202,10 +196,7 @@ def main() -> None:
     paddle_ver = _run_check("import paddle; print(paddle.__version__)")
     ocr_ver    = _run_check("import paddleocr; print(paddleocr.__version__)")
     if paddle_ver and ocr_ver:
-        need_reinstall = (
-            "2.6.2" not in paddle_ver
-            or not ocr_ver.startswith("2.7")
-        )
+        need_reinstall = not paddle_ver.startswith("3.")
         if not need_reinstall:
             log("PaddleOCR is already installed at the correct versions.")
             log(f"  paddle version    : {paddle_ver}")
