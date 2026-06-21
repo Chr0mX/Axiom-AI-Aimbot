@@ -34,6 +34,7 @@ class UdpJpegReceiver:
         self.frame_timeout = frame_timeout
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
         self.sock.bind((self.bind_ip, self.bind_port))
 

@@ -794,16 +794,19 @@ class CapturePage(BasePage):
             self.ndiHwInfoLabel.setText("—  (connect source to see info)")
 
     def _onUdpBindIpChanged(self, text):
-        if self._config:
-            self._config.udp_bind_ip = str(text)
+        if self._isLoadingConfig or not self._config:
+            return
+        self._config.udp_bind_ip = str(text)
 
     def _onUdpPortChanged(self, value):
-        if self._config:
-            self._config.udp_bind_port = int(value)
+        if self._isLoadingConfig or not self._config:
+            return
+        self._config.udp_bind_port = int(value)
 
     def _onUdpTimeoutChanged(self, value):
-        if self._config:
-            self._config.udp_frame_timeout = round(int(value) / 10.0, 1)
+        if self._isLoadingConfig or not self._config:
+            return
+        self._config.udp_frame_timeout = round(int(value) / 10.0, 1)
 
     # ──────────────────────────────────────────────
     # Retranslate

@@ -1589,10 +1589,7 @@ def initialize_screen_capture(config: Config) -> Any:
                         getattr(config, 'udp_bind_port', 5600))
             return udp_capture
         except Exception as exc:
-            _warn_once(
-                'udp_fallback_mss',
-                f'[Capture] UDP initialization failed with "{exc}". Falling back to MSS backend.',
-            )
+            logger.error('[Capture][UDP] Initialization failed with "%s". Falling back to MSS backend.', exc)
     elif screenshot_method != 'mss':
         _warn_once(
             'invalid_screenshot_method',
