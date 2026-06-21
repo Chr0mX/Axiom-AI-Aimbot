@@ -38,14 +38,19 @@ if not _LOCALAPPDATA:
 
 PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 
-# Pinned to the last known-good combination on PyPI:
-#   paddlepaddle-gpu 2.6.2.post120  — CUDA 12 build of Paddle 2.6.2
+# Pinned to the last known-good combination:
+#   paddlepaddle-gpu 2.6.2.post120  — CUDA 12.0 build (from Paddle's own index)
 #   paddleocr 2.7.3                 — last release targeting Paddle 2.x
 # Newer paddleocr (2.9+) switched to PaddleX and requires Paddle 3.x,
 # which introduces API changes (set_optimization_level) that break 2.x builds.
-PADDLE_PACKAGE = "paddlepaddle-gpu==2.6.2.post120"  # change .post120 → .post117 for CUDA 11.7, or 'paddlepaddle==2.6.2' for CPU
+#
+# Change PADDLE_CUDA_TAG to match your CUDA version:
+#   cu120 → CUDA 12.0   cu118 → CUDA 11.8   cu117 → CUDA 11.7
+# For CPU-only set PADDLE_PACKAGE to 'paddlepaddle==2.6.2' and leave PADDLE_INDEX as "".
+PADDLE_CUDA_TAG = "cu120"
+PADDLE_INDEX    = f"https://www.paddlepaddle.org.cn/packages/stable/{PADDLE_CUDA_TAG}/"
+PADDLE_PACKAGE  = "paddlepaddle-gpu==2.6.2.post120"
 PADDLEOCR_PACKAGES = [
-    PADDLE_PACKAGE,
     "paddleocr==2.7.3",
 ]
 
@@ -117,18 +122,22 @@ def is_paddle_gpu() -> bool:
 
 # ── Installation ──────────────────────────────────────────────────────────────
 
-def _pip(packages: list, upgrade: bool = True) -> None:
+def _pip(packages: list, upgrade: bool = True, extra_index: str = "") -> None:
     cmd = [
         sys.executable, "-m", "pip", "install",
         "--target", str(PACKAGES_DIR),
     ]
     if upgrade:
         cmd.append("--upgrade")
+    if extra_index:
+        cmd += ["--extra-index-url", extra_index]
     cmd.extend(packages)
     run(cmd)
 
 
 def install_paddleocr() -> None:
+    log(f"Installing PaddlePaddle GPU ({PADDLE_PACKAGE}) from Paddle index ({PADDLE_INDEX})...")
+    _pip([PADDLE_PACKAGE], extra_index=PADDLE_INDEX)
     log(f"Installing: {', '.join(PADDLEOCR_PACKAGES)}")
     _pip(PADDLEOCR_PACKAGES)
 
@@ -160,7 +169,7 @@ def verify_installation() -> None:
         warn("  2. Network error downloading packages")
         warn("  3. Axiom has not been restarted since installation")
         warn("")
-        warn("For CPU-only install, edit PADDLE_PACKAGE in this script to 'paddlepaddle'")
+        warn("  For CPU-only install, set PADDLE_PACKAGE='paddlepaddle==2.6.2' and PADDLE_INDEX='' in this script")
     else:
         log("PaddleOCR installation complete.")
 
@@ -194,7 +203,7 @@ def main() -> None:
     ocr_ver    = _run_check("import paddleocr; print(paddleocr.__version__)")
     if paddle_ver and ocr_ver:
         need_reinstall = (
-            not paddle_ver.startswith("2.6")
+            "2.6.2" not in paddle_ver
             or not ocr_ver.startswith("2.7")
         )
         if not need_reinstall:
