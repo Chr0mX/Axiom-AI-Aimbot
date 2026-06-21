@@ -1,7 +1,8 @@
 # capture_page.py
-"""Capture Page — Screenshot Method, UVC, NDI, Preview settings"""
+"""Capture Page — Screenshot Method, UVC, NDI, UDP, Preview settings"""
 
 import os
+import socket
 import sys
 import subprocess
 import time
@@ -14,6 +15,31 @@ from qfluentwidgets import (
 from ..components.slider_spin_card import SliderSpinCard
 from ..base_page import BasePage
 from ..language_manager import t
+
+
+def _get_local_ips() -> list[str]:
+    """Return non-loopback IPv4 addresses for this machine."""
+    ips: list[str] = []
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None):
+            if info[0] == socket.AF_INET:
+                ip = info[4][0]
+                if ip and not ip.startswith('127.'):
+                    if ip not in ips:
+                        ips.append(ip)
+    except Exception:
+        pass
+    if not ips:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            if ip and not ip.startswith('127.'):
+                ips.append(ip)
+        except Exception:
+            pass
+    return ips
 
 
 class CapturePage(BasePage):
@@ -50,7 +76,7 @@ class CapturePage(BasePage):
         self.captureGroup = SettingCardGroup(t("capture_method_group", "Capture"), self.scrollWidget)
 
         self.screenshotMethodCombo = ComboBox()
-        self.screenshotMethodCombo.addItems(["mss", "dxcam", "uvc", "ndi"])
+        self.screenshotMethodCombo.addItems(["mss", "dxcam", "uvc", "ndi", "udp"])
         self.screenshotMethodCombo.setMinimumWidth(150)
         self.screenshotMethodCard = SettingCard(
             FluentIcon.CAMERA,
@@ -212,6 +238,49 @@ class CapturePage(BasePage):
         self.ndiHwInfoCard.hBoxLayout.addWidget(self.ndiRefreshInfoBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.ndiHwInfoCard.hBoxLayout.addSpacing(16)
 
+        # === UDP Stream ===
+        self.udpGroup = SettingCardGroup("UDP Stream", self.scrollWidget)
+
+        local_ips = _get_local_ips()
+        system_ip_text = ", ".join(local_ips) if local_ips else "—"
+        self.udpSystemIpCard = SettingCard(
+            FluentIcon.WIFI,
+            "System IP Address",
+            f"Stream to: {system_ip_text}",
+            self.udpGroup
+        )
+
+        self.udpBindIpCombo = ComboBox()
+        bind_ip_options = ["0.0.0.0"] + local_ips
+        self.udpBindIpCombo.addItems(bind_ip_options)
+        self.udpBindIpCombo.setMinimumWidth(160)
+        self.udpBindIpCard = SettingCard(
+            FluentIcon.GLOBE,
+            "Bind IP",
+            "Listen on a specific interface, or 0.0.0.0 for all",
+            self.udpGroup
+        )
+        self.udpBindIpCard.hBoxLayout.addWidget(self.udpBindIpCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.udpBindIpCard.hBoxLayout.addSpacing(16)
+
+        self.udpPortCard = SliderSpinCard(
+            FluentIcon.CONNECT,
+            "UDP Port",
+            1, 65535,
+            suffix="",
+            description="",
+            parent=self.udpGroup
+        )
+
+        self.udpTimeoutCard = SliderSpinCard(
+            FluentIcon.SPEED_MEDIUM,
+            "Frame Timeout (s)",
+            1, 100,
+            suffix="×0.1s",
+            description="Drop incomplete frames after this many tenths of a second",
+            parent=self.udpGroup
+        )
+
         # === Preview ===
         self.previewGroup = SettingCardGroup(t("preview_group", "Preview"), self.scrollWidget)
 
@@ -289,6 +358,13 @@ class CapturePage(BasePage):
         self.addContent(self.ndiGroup)
         self.ndiGroup.setVisible(False)
 
+        self.udpGroup.addSettingCard(self.udpSystemIpCard)
+        self.udpGroup.addSettingCard(self.udpBindIpCard)
+        self.udpGroup.addSettingCard(self.udpPortCard)
+        self.udpGroup.addSettingCard(self.udpTimeoutCard)
+        self.addContent(self.udpGroup)
+        self.udpGroup.setVisible(False)
+
         self.previewGroup.addSettingCard(self.uvcPreviewCard)
         self.previewGroup.addSettingCard(self.previewCropCard)
         self.previewGroup.addSettingCard(self.uvcPreviewScaleCard)
@@ -321,6 +397,9 @@ class CapturePage(BasePage):
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
         self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
         self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
+        self.udpBindIpCombo.currentTextChanged.connect(self._onUdpBindIpChanged)
+        self.udpPortCard.valueChanged.connect(self._onUdpPortChanged)
+        self.udpTimeoutCard.valueChanged.connect(self._onUdpTimeoutChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -331,7 +410,7 @@ class CapturePage(BasePage):
             return
         self._isLoadingConfig = True
         try:
-            screenshot_methods = ["mss", "dxcam", "uvc", "ndi"]
+            screenshot_methods = ["mss", "dxcam", "uvc", "ndi", "udp"]
             screenshot_method = getattr(self._config, 'screenshot_method', 'mss')
             if screenshot_method in screenshot_methods:
                 self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
@@ -389,6 +468,14 @@ class CapturePage(BasePage):
             ndi_bw = str(getattr(self._config, 'ndi_bandwidth', 'highest')).capitalize()
             self.ndiBandwidthCombo.setCurrentText(ndi_bw if ndi_bw in ("Highest", "Lowest") else "Highest")
 
+            udp_bind_ip = str(getattr(self._config, 'udp_bind_ip', '0.0.0.0'))
+            idx = self.udpBindIpCombo.findText(udp_bind_ip)
+            if idx >= 0:
+                self.udpBindIpCombo.setCurrentIndex(idx)
+            self.udpPortCard.setValue(int(getattr(self._config, 'udp_bind_port', 5600)))
+            timeout_tenths = max(1, min(100, int(round(float(getattr(self._config, 'udp_frame_timeout', 1.0)) * 10))))
+            self.udpTimeoutCard.setValue(timeout_tenths)
+
             self._updateCaptureControlsVisibility(screenshot_method)
         finally:
             self._isLoadingConfig = False
@@ -400,9 +487,11 @@ class CapturePage(BasePage):
     def _updateCaptureControlsVisibility(self, screenshot_method):
         is_uvc = (screenshot_method == "uvc")
         is_ndi = (screenshot_method == "ndi")
+        is_udp = (screenshot_method == "udp")
         self.uvcGroup.setVisible(is_uvc)
         self.ndiGroup.setVisible(is_ndi)
-        self.previewGroup.setVisible(is_uvc or is_ndi)
+        self.udpGroup.setVisible(is_udp)
+        self.previewGroup.setVisible(is_uvc or is_ndi or is_udp)
         self._notifyInferenceFovFollow(screenshot_method)
 
     def _notifyInferenceFovFollow(self, method):
@@ -703,6 +792,18 @@ class CapturePage(BasePage):
             self.ndiHwInfoLabel.setText(f"{w} × {h} @ {fps_str} fps")
         else:
             self.ndiHwInfoLabel.setText("—  (connect source to see info)")
+
+    def _onUdpBindIpChanged(self, text):
+        if self._config:
+            self._config.udp_bind_ip = str(text)
+
+    def _onUdpPortChanged(self, value):
+        if self._config:
+            self._config.udp_bind_port = int(value)
+
+    def _onUdpTimeoutChanged(self, value):
+        if self._config:
+            self._config.udp_frame_timeout = round(int(value) / 10.0, 1)
 
     # ──────────────────────────────────────────────
     # Retranslate

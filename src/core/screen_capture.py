@@ -59,6 +59,8 @@ def _detect_active_capture_method(screen_capture: Any, fallback_method: str = 'm
         return 'ndi'
     if isinstance(screen_capture, UVCCapture):
         return 'uvc'
+    if isinstance(screen_capture, UdpCapture):
+        return 'udp'
 
     module_name = str(getattr(type(screen_capture), '__module__', '')).lower()
     if module_name.startswith('mss') or '.mss' in module_name:
@@ -161,6 +163,17 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str]:
         int(getattr(config, 'uvc_fps', 0)),
         bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
+        str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
+    )
+
+
+def _udp_signature(config: Config) -> tuple[str, int, int, float, bool, str]:
+    return (
+        str(getattr(config, 'udp_bind_ip', '0.0.0.0')),
+        int(getattr(config, 'udp_bind_port', 5600)),
+        int(getattr(config, 'udp_recv_buffer_size', 65536)),
+        float(getattr(config, 'udp_frame_timeout', 1.0)),
+        bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
     )
 
@@ -1350,6 +1363,115 @@ class UVCCapture:
         # destroyWindow is handled by the preview thread's run() exit path
 
 
+class UdpCapture:
+    """UDP JPEG stream capture backend (OBS udp_stream_filter wire protocol)."""
+
+    def __init__(self, config: Config) -> None:
+        from .udp_receiver import UdpJpegReceiver
+
+        self.config = config
+        bind_ip = str(getattr(config, 'udp_bind_ip', '0.0.0.0'))
+        bind_port = int(getattr(config, 'udp_bind_port', 5600))
+        recv_buffer_size = int(getattr(config, 'udp_recv_buffer_size', 65536))
+        frame_timeout = float(getattr(config, 'udp_frame_timeout', 1.0))
+        self.show_window = bool(getattr(config, 'uvc_show_window', False))
+        self.window_name = _UVC_WINDOW_NAME
+        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
+        self.config_signature = _udp_signature(config)
+
+        self._receiver = UdpJpegReceiver(
+            bind_ip=bind_ip,
+            bind_port=bind_port,
+            recv_buffer_size=recv_buffer_size,
+            frame_timeout=frame_timeout,
+        )
+        self._receiver.start()
+
+        self._latest_frame_lock = threading.Lock()
+        self._latest_frame_ref: list = [None]   # list[np.ndarray | None]  BGR
+        self._region_ref: list = [None]
+        self._stop = threading.Event()
+
+        self._reader_thread = threading.Thread(
+            target=self._reader_worker, name='UDPReader', daemon=True
+        )
+        self._reader_thread.start()
+
+        self.preview_width = 1920
+        self.preview_height = 1080
+        config.source_nominal_fps = 0.0
+
+        self._preview_thread: _UVCPreviewThread | None = None
+        if self.show_window:
+            self._preview_thread = _UVCPreviewThread(
+                window_name=self.window_name,
+                scale_mode=self.preview_scale_mode,
+                frame_lock=self._latest_frame_lock,
+                frame_ref=self._latest_frame_ref,
+                stop_event=self._stop,
+                draw_overlay_fn=self._draw_overlay,
+                region_ref=self._region_ref,
+                target_fps=60,
+                preview_width=self.preview_width,
+                preview_height=self.preview_height,
+                config=self.config,
+                show_cv2_window=False,
+            )
+            self._preview_thread.start()
+
+    def _reader_worker(self) -> None:
+        while not self._stop.is_set():
+            jpeg_bytes = self._receiver.get_latest_frame(block=True, timeout=0.5)
+            if jpeg_bytes is None:
+                continue
+            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+            frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame_bgr is None:
+                continue
+            h, w = frame_bgr.shape[:2]
+            with self._latest_frame_lock:
+                self._latest_frame_ref[0] = frame_bgr
+                if w != self.preview_width or h != self.preview_height:
+                    self.preview_width = w
+                    self.preview_height = h
+                    self.config.source_nominal_fps = float(
+                        getattr(self.config, 'source_nominal_fps', 0.0) or 0.0
+                    )
+
+    def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
+        with self._latest_frame_lock:
+            frame_bgr = self._latest_frame_ref[0]
+        if frame_bgr is None:
+            return None
+
+        self._region_ref[0] = region
+
+        if region is not None:
+            frame_h, frame_w = frame_bgr.shape[:2]
+            left = max(0, int(region.get('left', 0)))
+            top = max(0, int(region.get('top', 0)))
+            width = max(0, int(region.get('width', frame_w)))
+            height = max(0, int(region.get('height', frame_h)))
+            right = min(frame_w, left + width)
+            bottom = min(frame_h, top + height)
+            if right <= left or bottom <= top:
+                return None
+            frame_bgr = frame_bgr[top:bottom, left:right]
+
+        return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
+
+    def _draw_overlay(self, frame_bgr: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
+        return _draw_detection_overlay(frame_bgr, region, self.config, has_alpha=False)
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._preview_thread is not None and self._preview_thread.is_alive():
+            self._preview_thread.join(timeout=1.0)
+        if self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1.0)
+        self._receiver.stop()
+
+
 def _get_monitor_refresh_rate() -> int:
     """Return the primary monitor refresh rate in Hz, or 0 on failure."""
     try:
@@ -1459,6 +1581,18 @@ def initialize_screen_capture(config: Config) -> Any:
             # Always log (not _warn_once): NDI is (re)connected interactively and
             # the failure reason must stay visible across repeated attempts.
             logger.error('[Capture][NDI] Initialization failed with "%s". Falling back to MSS backend.', exc)
+    elif screenshot_method == 'udp':
+        try:
+            udp_capture = UdpCapture(config)
+            logger.info('[Capture] UDP backend initialized and listening on %s:%s.',
+                        getattr(config, 'udp_bind_ip', '0.0.0.0'),
+                        getattr(config, 'udp_bind_port', 5600))
+            return udp_capture
+        except Exception as exc:
+            _warn_once(
+                'udp_fallback_mss',
+                f'[Capture] UDP initialization failed with "{exc}". Falling back to MSS backend.',
+            )
     elif screenshot_method != 'mss':
         _warn_once(
             'invalid_screenshot_method',
@@ -1514,6 +1648,11 @@ def reinitialize_if_method_changed(
         elif desired == 'ndi' and hasattr(current_capture, 'config_signature'):
             if getattr(current_capture, 'config_signature', None) != _ndi_signature(config):
                 logger.info('[Capture][NDI] NDI configuration changed. Reinitializing NDI backend...')
+            else:
+                return current_capture, current_active
+        elif desired == 'udp' and hasattr(current_capture, 'config_signature'):
+            if getattr(current_capture, 'config_signature', None) != _udp_signature(config):
+                logger.info('[Capture][UDP] UDP configuration changed. Reinitializing UDP backend...')
             else:
                 return current_capture, current_active
         else:

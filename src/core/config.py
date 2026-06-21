@@ -49,6 +49,10 @@ _FIELD_MAP = {
     'uvc_capture_method':         'capture.uvc.capture_method',
     'ndi_source_name':            'capture.ndi.source_name',
     'ndi_bandwidth':              'capture.ndi.bandwidth',
+    'udp_bind_ip':                'capture.udp.bind_ip',
+    'udp_bind_port':              'capture.udp.bind_port',
+    'udp_recv_buffer_size':       'capture.udp.recv_buffer_size',
+    'udp_frame_timeout':          'capture.udp.frame_timeout',
     'uvc_show_window':            'capture.preview.enabled',
     'uvc_preview_scale_mode':     'capture.preview.scale_mode',
     'uvc_always_on_top':          'capture.preview.always_on_top',
@@ -248,6 +252,10 @@ class Config:
         self.ndi_force_reconnect: bool = False
         self.ndi_width: int = self.width
         self.ndi_height: int = self.height
+        self.udp_bind_ip: str = "0.0.0.0"
+        self.udp_bind_port: int = 5600
+        self.udp_recv_buffer_size: int = 65536
+        self.udp_frame_timeout: float = 1.0
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
 
@@ -723,7 +731,7 @@ def _validate_mouse_method(config: Config) -> None:
 
 def _validate_screenshot_method(config: Config) -> None:
     """驗證並修正螢幕截圖方式"""
-    valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi')
+    valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi', 'udp')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
     if getattr(config, 'uvc_capture_method', 'dshow') not in ('auto', 'dshow', 'msmf', 'any'):
