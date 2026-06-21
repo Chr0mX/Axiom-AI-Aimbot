@@ -93,17 +93,11 @@ def _crop_roi(frame: np.ndarray) -> np.ndarray:
     return frame   # frame too small for absolute ROI — use whole thing
 
 
-def _parse_ocr_result(result) -> list[str]:
-    """Parse PaddleOCR result into 'N , text' strings.
-
-    New (2.9+/PaddleX): list of page dicts with 'rec_texts' list
-    Old (2.7.x):        list of [[box, [text, conf]], ...]
-    """
-    lines: list[str] = []
+def _extract_texts(result) -> list[str]:
+    """Extract raw text tokens from a PaddleOCR result (new or old API)."""
+    tokens: list[str] = []
     if not result:
-        return lines
-
-    idx = 1
+        return tokens
     for page in result:
         if isinstance(page, dict):
             rec_texts = page.get("rec_texts") or page.get("rec_text") or []
@@ -112,8 +106,7 @@ def _parse_ocr_result(result) -> list[str]:
             for text in (rec_texts or []):
                 clean = _EN_FILTER.sub("", str(text)).strip()
                 if clean:
-                    lines.append(f"{idx} , {clean}")
-                    idx += 1
+                    tokens.append(clean)
         elif isinstance(page, list):
             for item in page:
                 if isinstance(item, (list, tuple)) and len(item) >= 2:
@@ -121,8 +114,30 @@ def _parse_ocr_result(result) -> list[str]:
                     text = rec[0] if isinstance(rec, (list, tuple)) else str(rec)
                     clean = _EN_FILTER.sub("", str(text)).strip()
                     if clean:
-                        lines.append(f"{idx} , {clean}")
-                        idx += 1
+                        tokens.append(clean)
+    return tokens
+
+
+def _parse_ocr_result(result) -> list[str]:
+    """Format OCR tokens as weapon pairs: 'Weapon N: slot , name'.
+
+    Tokens arrive in pairs: [slot, name, slot, name, ...]
+    e.g. ['2', 'ALTERNATOR', '3', 'R-301'] →
+         ['Weapon 1: 2 , ALTERNATOR', 'Weapon 2: 3 , R-301']
+    Odd leftover tokens are shown on their own line.
+    """
+    tokens = _extract_texts(result)
+    lines: list[str] = []
+    i = 0
+    weapon = 1
+    while i < len(tokens):
+        if i + 1 < len(tokens):
+            lines.append(f"Weapon {weapon}: {tokens[i]} , {tokens[i + 1]}")
+            i += 2
+        else:
+            lines.append(f"Weapon {weapon}: {tokens[i]}")
+            i += 1
+        weapon += 1
     return lines
 
 
