@@ -160,9 +160,11 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
     from .screen_capture import get_preview_frame
 
     try:
+        import paddle  # type: ignore[import]
+        paddle.set_device("cpu")
         from paddleocr import PaddleOCR  # type: ignore[import]
         ocr = PaddleOCR(lang="en", device="cpu")
-        logger.info("[OCR] PaddleOCR initialized (CPU). ROI=%s", _OCR_ROI)
+        logger.info("[OCR] PaddleOCR initialized (CPU, paddle.set_device enforced). ROI=%s", _OCR_ROI)
     except Exception as exc:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
         return
