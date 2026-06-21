@@ -134,6 +134,9 @@ def _parse_ocr_result(result) -> list[str]:
     Tokens arrive in pairs: [slot, name, slot, name, ...]
     e.g. ['2', 'ALTERNATOR', '3', 'R-301'] →
          ['Weapon 1: 2 , ALTERNATOR', 'Weapon 2: 3 , R-301']
+
+    PaddleOCR may return the name before the slot number depending on scan
+    direction, so we swap any pair where the second token is purely numeric.
     """
     tokens = _extract_texts(result)
     lines: list[str] = []
@@ -141,7 +144,10 @@ def _parse_ocr_result(result) -> list[str]:
     weapon = 1
     while i < len(tokens):
         if i + 1 < len(tokens):
-            lines.append(f"Weapon {weapon}: {tokens[i]} , {tokens[i + 1]}")
+            a, b = tokens[i], tokens[i + 1]
+            if not a.isdigit() and b.isdigit():
+                a, b = b, a
+            lines.append(f"Weapon {weapon}: {a} , {b}")
             i += 2
         else:
             lines.append(f"Weapon {weapon}: {tokens[i]}")
@@ -155,8 +161,8 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
 
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
-        ocr = PaddleOCR(lang="en", device="gpu")
-        logger.info("[OCR] PaddleOCR initialized (GPU). ROI=%s", _OCR_ROI)
+        ocr = PaddleOCR(lang="en", device="cpu")
+        logger.info("[OCR] PaddleOCR initialized (CPU). ROI=%s", _OCR_ROI)
     except Exception as exc:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
         return
