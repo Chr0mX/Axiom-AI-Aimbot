@@ -36,6 +36,7 @@ class UdpJpegReceiver:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+        self.sock.settimeout(1.0)  # ensures recvfrom wakes up periodically on Windows
         self.sock.bind((self.bind_ip, self.bind_port))
 
         self._partial_frames = {}  # frame_id -> dict(chunks, total_chunks, first_seen)
@@ -54,12 +55,18 @@ class UdpJpegReceiver:
 
     def stop(self):
         self._running = False
+        # Wake any thread blocked in get_latest_frame(block=True) immediately.
+        self._new_frame_event.set()
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         try:
             self.sock.close()
         except OSError:
             pass
         if self._thread:
-            self._thread.join(timeout=1.0)
+            self._thread.join(timeout=2.0)
 
     def get_latest_frame(self, block=False, timeout=None):
         """
@@ -77,8 +84,10 @@ class UdpJpegReceiver:
         while self._running:
             try:
                 packet, _addr = self.sock.recvfrom(self.recv_buffer_size)
+            except TimeoutError:
+                continue  # 1-second poll timeout — check _running and loop
             except OSError:
-                break  # socket closed during stop()
+                break  # socket closed or shut down
 
             if len(packet) < HEADER_SIZE:
                 continue
