@@ -884,6 +884,7 @@ class StatusPanel(QWidget):
         _source_label_map = {
             'uvc':   get_text('status_panel_source_fps_uvc',    'UVC Source FPS'),
             'ndi':   get_text('status_panel_source_fps_ndi',    'NDI Source FPS'),
+            'udp':   get_text('status_panel_source_fps_udp',    'UDP Stream FPS'),
             'dxcam': get_text('status_panel_source_fps_screen', 'Monitor Refresh'),
             'mss':   get_text('status_panel_source_fps_screen', 'Monitor Refresh'),
         }

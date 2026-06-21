@@ -272,14 +272,16 @@ class CapturePage(BasePage):
             parent=self.udpGroup
         )
 
-        self.udpTimeoutCard = SliderSpinCard(
-            FluentIcon.SPEED_MEDIUM,
-            "Frame Timeout (s)",
-            1, 100,
-            suffix="×0.1s",
-            description="Drop incomplete frames after this many tenths of a second",
-            parent=self.udpGroup
+        self.udpRefreshBtn = PushButton(t("refresh"))
+        self.udpRefreshBtn.setFixedWidth(80)
+        self.udpRefreshCard = SettingCard(
+            FluentIcon.SYNC,
+            "Restart Receiver",
+            "Stop and re-bind the UDP socket",
+            self.udpGroup
         )
+        self.udpRefreshCard.hBoxLayout.addWidget(self.udpRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.udpRefreshCard.hBoxLayout.addSpacing(16)
 
         # === Preview ===
         self.previewGroup = SettingCardGroup(t("preview_group", "Preview"), self.scrollWidget)
@@ -361,7 +363,7 @@ class CapturePage(BasePage):
         self.udpGroup.addSettingCard(self.udpSystemIpCard)
         self.udpGroup.addSettingCard(self.udpBindIpCard)
         self.udpGroup.addSettingCard(self.udpPortCard)
-        self.udpGroup.addSettingCard(self.udpTimeoutCard)
+        self.udpGroup.addSettingCard(self.udpRefreshCard)
         self.addContent(self.udpGroup)
         self.udpGroup.setVisible(False)
 
@@ -399,7 +401,7 @@ class CapturePage(BasePage):
         self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
         self.udpBindIpCombo.currentTextChanged.connect(self._onUdpBindIpChanged)
         self.udpPortCard.valueChanged.connect(self._onUdpPortChanged)
-        self.udpTimeoutCard.valueChanged.connect(self._onUdpTimeoutChanged)
+        self.udpRefreshBtn.clicked.connect(self._onUdpRefreshClicked)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -473,8 +475,6 @@ class CapturePage(BasePage):
             if idx >= 0:
                 self.udpBindIpCombo.setCurrentIndex(idx)
             self.udpPortCard.setValue(int(getattr(self._config, 'udp_bind_port', 5600)))
-            timeout_tenths = max(1, min(100, int(round(float(getattr(self._config, 'udp_frame_timeout', 1.0)) * 10))))
-            self.udpTimeoutCard.setValue(timeout_tenths)
 
             self._updateCaptureControlsVisibility(screenshot_method)
         finally:
@@ -803,10 +803,10 @@ class CapturePage(BasePage):
             return
         self._config.udp_bind_port = int(value)
 
-    def _onUdpTimeoutChanged(self, value):
-        if self._isLoadingConfig or not self._config:
-            return
-        self._config.udp_frame_timeout = round(int(value) / 10.0, 1)
+    def _onUdpRefreshClicked(self):
+        if self._config:
+            self._config.udp_force_restart = True
+            print('[Capture][UDP] Restart requested — receiver will reinitialize within ~0.5s.')
 
     # ──────────────────────────────────────────────
     # Retranslate

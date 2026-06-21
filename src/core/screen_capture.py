@@ -167,14 +167,13 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str]:
     )
 
 
-def _udp_signature(config: Config) -> tuple[str, int, int, float, bool, str]:
+def _udp_signature(config: Config) -> tuple[str, int, int, float, bool]:
     return (
         str(getattr(config, 'udp_bind_ip', '0.0.0.0')),
         int(getattr(config, 'udp_bind_port', 5600)),
         int(getattr(config, 'udp_recv_buffer_size', 65536)),
         float(getattr(config, 'udp_frame_timeout', 1.0)),
-        bool(getattr(config, 'uvc_show_window', False)),
-        str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
+        bool(getattr(config, 'udp_force_restart', False)),
     )
 
 
@@ -1374,7 +1373,6 @@ class UdpCapture:
         bind_port = int(getattr(config, 'udp_bind_port', 5600))
         recv_buffer_size = int(getattr(config, 'udp_recv_buffer_size', 65536))
         frame_timeout = float(getattr(config, 'udp_frame_timeout', 1.0))
-        self.show_window = bool(getattr(config, 'uvc_show_window', False))
         self.window_name = _UVC_WINDOW_NAME
         self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
         self.config_signature = _udp_signature(config)
@@ -1386,6 +1384,8 @@ class UdpCapture:
             frame_timeout=frame_timeout,
         )
         self._receiver.start()
+        # Clear restart flag so a queued Refresh doesn't loop forever
+        config.udp_force_restart = False
 
         self._latest_frame_lock = threading.Lock()
         self._latest_frame_ref: list = [None]   # list[np.ndarray | None]  BGR
@@ -1401,25 +1401,28 @@ class UdpCapture:
         self.preview_height = 1080
         config.source_nominal_fps = 0.0
 
-        self._preview_thread: _UVCPreviewThread | None = None
-        if self.show_window:
-            self._preview_thread = _UVCPreviewThread(
-                window_name=self.window_name,
-                scale_mode=self.preview_scale_mode,
-                frame_lock=self._latest_frame_lock,
-                frame_ref=self._latest_frame_ref,
-                stop_event=self._stop,
-                draw_overlay_fn=self._draw_overlay,
-                region_ref=self._region_ref,
-                target_fps=60,
-                preview_width=self.preview_width,
-                preview_height=self.preview_height,
-                config=self.config,
-                show_cv2_window=False,
-            )
-            self._preview_thread.start()
+        # Always start the preview thread so the Qt side panel receives frames
+        # even when the "Capture Preview Window" toggle is off.  show_cv2_window=False
+        # means no OpenCV window is ever opened; the thread only feeds set_preview_frame().
+        self._preview_thread = _UVCPreviewThread(
+            window_name=self.window_name,
+            scale_mode=self.preview_scale_mode,
+            frame_lock=self._latest_frame_lock,
+            frame_ref=self._latest_frame_ref,
+            stop_event=self._stop,
+            draw_overlay_fn=self._draw_overlay,
+            region_ref=self._region_ref,
+            target_fps=60,
+            preview_width=self.preview_width,
+            preview_height=self.preview_height,
+            config=self.config,
+            show_cv2_window=False,
+        )
+        self._preview_thread.start()
 
     def _reader_worker(self) -> None:
+        _fps_count = 0
+        _fps_t0 = time.perf_counter()
         while not self._stop.is_set():
             jpeg_bytes = self._receiver.get_latest_frame(block=True, timeout=0.5)
             if jpeg_bytes is None:
@@ -1434,9 +1437,13 @@ class UdpCapture:
                 if w != self.preview_width or h != self.preview_height:
                     self.preview_width = w
                     self.preview_height = h
-                    self.config.source_nominal_fps = float(
-                        getattr(self.config, 'source_nominal_fps', 0.0) or 0.0
-                    )
+            _fps_count += 1
+            _now = time.perf_counter()
+            _elapsed = _now - _fps_t0
+            if _elapsed >= 1.0:
+                self.config.source_nominal_fps = _fps_count / _elapsed
+                _fps_count = 0
+                _fps_t0 = _now
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         with self._latest_frame_lock:
