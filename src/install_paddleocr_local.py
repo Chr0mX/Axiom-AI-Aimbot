@@ -34,16 +34,16 @@ if not _LOCALAPPDATA:
 
 PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 
-# paddlepaddle 2.6.2 (CPU) + paddleocr 2.7.3 — last pre-PaddleX/PIR release.
-# Paddle 3.x introduced the PIR executor whose OneDNN instruction handler has
-# an unfixed crash (ConvertPirAttribute2RuntimeAttribute /
-# pir::ArrayAttribute<pir::DoubleAttribute>) that occurs even with
-# FLAGS_use_mkldnn=0 and the CPU-only build.
-# paddlepaddle 2.6.2 uses the old stable executor with no PIR / no issue.
+# paddlepaddle 3.3.0 CPU (PyPI) + latest paddleocr.
+# CPU build has no CUDA dependency and is numpy-2.x compatible.
+# OneDNN is disabled at runtime via paddle.set_flags (env vars are ignored
+# by the PIR executor in 3.x).
+# Do NOT use paddlepaddle==2.6.2: it requires numpy<2 and will downgrade
+# numpy in the shared site-packages dir, breaking cv2 which needs numpy 2.x.
 PADDLE_INDEX    = ""
-PADDLE_PACKAGE  = "paddlepaddle==2.6.2"
+PADDLE_PACKAGE  = "paddlepaddle==3.3.0"
 PADDLEOCR_PACKAGES = [
-    "paddleocr==2.7.3",
+    "paddleocr",
 ]
 
 
@@ -193,7 +193,7 @@ def main() -> None:
     ocr_ver    = _run_check("import paddleocr; print(paddleocr.__version__)")
     if paddle_ver and ocr_ver:
         is_gpu_build = _run_check("import paddle; print(paddle.is_compiled_with_cuda())") == "True"
-        is_wrong_ver = not paddle_ver.startswith("2.6")
+        is_wrong_ver = not paddle_ver.startswith("3.")
         need_reinstall = is_wrong_ver or is_gpu_build
         if not need_reinstall:
             log("PaddleOCR is already installed at the correct versions.")
@@ -204,7 +204,7 @@ def main() -> None:
         if is_gpu_build:
             warn(f"Installed paddle {paddle_ver} is the GPU build — switching to CPU.")
         else:
-            warn(f"Installed paddle {paddle_ver} is not 2.6.x — reinstalling.")
+            warn(f"Installed paddle {paddle_ver} is not 3.x — reinstalling.")
         warn("Reinstalling...")
 
     install_paddleocr()
