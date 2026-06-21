@@ -41,7 +41,7 @@ PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 # Change PADDLE_CUDA_TAG to match your CUDA version:
 #   cu130 → CUDA 13.0   cu120 → CUDA 12.0   cu118 → CUDA 11.8
 # For CPU-only set PADDLE_PACKAGE to 'paddlepaddle' and PADDLE_INDEX to "".
-PADDLE_CUDA_TAG = "cu130"
+PADDLE_CUDA_TAG = "cu120"
 PADDLE_INDEX    = f"https://www.paddlepaddle.org.cn/packages/stable/{PADDLE_CUDA_TAG}/"
 PADDLE_PACKAGE  = "paddlepaddle-gpu==3.3.0"
 PADDLEOCR_PACKAGES = [
