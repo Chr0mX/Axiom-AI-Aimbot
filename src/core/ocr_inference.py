@@ -126,9 +126,15 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
 
                 result = ocr.ocr(img_rgb)
 
-                # Log raw structure once so format issues are visible in logs
+                # Log keys and text fields once so format issues are visible
                 if not _logged_raw:
-                    logger.info("[OCR] First result structure: %s", repr(result)[:300])
+                    if result and isinstance(result[0], dict):
+                        keys = list(result[0].keys())
+                        rec  = result[0].get("rec_texts") or result[0].get("rec_text")
+                        logger.info("[OCR] Page dict keys: %s", keys)
+                        logger.info("[OCR] rec_texts value: %s", repr(rec))
+                    else:
+                        logger.info("[OCR] First result structure: %s", repr(result)[:500])
                     _logged_raw = True
 
                 lines = _parse_ocr_result(result)
