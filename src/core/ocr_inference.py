@@ -1,20 +1,39 @@
 """
 Secondary OCR inference — PaddleOCR text extraction from the active capture frame.
 
-Reads frames from screen_capture.get_preview_frame() so it shares the capture
-pipeline with the main inference and adds zero extra screen-grab overhead.
+PROCESS-ISOLATED DESIGN
+-----------------------
+PaddleOCR is CPU-heavy and does a lot of work in *Python* (pre/post-processing),
+so running it in a thread inside the main process stalls the main inference loop
+and the Qt UI every time it fires — the Python GIL lets only one thread run
+bytecode at a time, and PaddleOCR holds it for the whole pass.
+
+To guarantee OCR never hurts main inference or capture, the heavy work runs in a
+separate child *process* (its own GIL, its own core, below-normal OS priority).
+The main process only runs a tiny "feeder" thread that:
+  * reads screen_capture.get_preview_frame() (shared capture, zero extra grab),
+  * crops the fixed _OCR_ROI (~36 KB),
+  * stores the crop for the GUI preview,
+  * ships the crop to the child over a queue (keeps only the newest frame),
+  * drains finished result lines back from the child.
+That feeder work is microseconds per cycle, so the main loop is never blocked.
 
 All scans (continuous and manual) always use _OCR_ROI.
 
-Thread lifecycle:
-  start(config)     — no-op if worker is already alive
-  stop()            — signals the worker and joins within 2 s
-  trigger_scan()    — force an immediate ROI scan on the next iteration
+Public API (unchanged):
+  start(config)     — spawn the OCR process + feeder thread (no-op if running)
+  stop()            — stop both and join within a few seconds
+  trigger_scan()    — force an immediate ROI scan
+  get_ocr_results() — current formatted result lines
+  get_roi_image()   — last ROI crop (for the GUI preview)
 """
 
 from __future__ import annotations
 
 import logging
+import multiprocessing as mp
+import os
+import queue
 import re
 import sys
 import threading
@@ -33,16 +52,26 @@ logger = logging.getLogger(__name__)
 # Absolute pixel coords within the game/capture frame (1080p reference)
 _OCR_ROI: dict[str, int] = {"left": 1515, "top": 1031, "width": 314, "height": 29}
 
+# ── Parent-side shared state ──────────────────────────────────────────────────
 _results_lock = threading.Lock()
 _ocr_results: list[str] = []
 
 _roi_image_lock = threading.Lock()
-_roi_image: np.ndarray | None = None   # last captured ROI crop (BGR/BGRA)
+_roi_image: np.ndarray | None = None        # last captured ROI crop (BGR/BGRA)
 
-_stop_event: threading.Event | None = None
-_worker_thread: threading.Thread | None = None
-_scan_flag = threading.Event()          # set to force an immediate scan
+_scan_flag = threading.Event()              # set to force an immediate scan
 
+_stop_event: threading.Event | None = None  # stops the feeder thread
+_feeder_thread: threading.Thread | None = None
+
+# ── Child-process plumbing ────────────────────────────────────────────────────
+_proc: mp.Process | None = None
+_proc_stop = None                           # mp.Event
+_frame_q = None                             # mp.Queue(maxsize=1)  parent → child
+_result_q = None                            # mp.Queue(maxsize=4)  child → parent
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
 
 def get_ocr_results() -> list[str]:
     """Return current OCR results as a list of formatted strings (thread-safe)."""
@@ -57,32 +86,75 @@ def get_roi_image() -> np.ndarray | None:
 
 
 def trigger_scan() -> None:
-    """Force an immediate ROI scan on the next worker iteration."""
+    """Force an immediate ROI scan on the next feeder iteration."""
     _scan_flag.set()
 
 
 def start(config: Config) -> None:
-    """Start the OCR worker thread. No-op if it is already running."""
-    global _stop_event, _worker_thread
-    if _worker_thread is not None and _worker_thread.is_alive():
+    """Spawn the OCR child process and the feeder thread. No-op if running."""
+    global _proc, _proc_stop, _frame_q, _result_q, _stop_event, _feeder_thread
+    if _feeder_thread is not None and _feeder_thread.is_alive():
         return
+
+    # 'spawn' (not 'fork') so the child starts a clean interpreter and never
+    # duplicates the parent's CUDA / TensorRT / Qt state. main.py guards all
+    # startup under `if __name__ == "__main__"`, so the re-import is safe.
+    try:
+        ctx = mp.get_context("spawn")
+        _frame_q = ctx.Queue(maxsize=1)
+        _result_q = ctx.Queue(maxsize=4)
+        _proc_stop = ctx.Event()
+        _proc = ctx.Process(
+            target=_child_main, args=(_frame_q, _result_q, _proc_stop),
+            name="OCRProcess", daemon=True,
+        )
+        _proc.start()
+    except Exception as exc:
+        logger.error("[OCR] Failed to start OCR process: %s", exc)
+        _proc = None
+        return
+
     _stop_event = threading.Event()
-    _worker_thread = threading.Thread(
-        target=_worker, args=(config, _stop_event), name="OCRWorker", daemon=True
+    _feeder_thread = threading.Thread(
+        target=_feeder, args=(config, _stop_event), name="OCRFeeder", daemon=True,
     )
-    _worker_thread.start()
+    _feeder_thread.start()
 
 
 def stop() -> None:
-    """Signal the OCR worker to stop and wait up to 2 s for it to exit."""
-    global _stop_event, _worker_thread
+    """Stop the feeder thread and OCR process and wait for them to exit."""
+    global _proc, _proc_stop, _frame_q, _result_q, _stop_event, _feeder_thread
     if _stop_event is not None:
         _stop_event.set()
-    if _worker_thread is not None and _worker_thread.is_alive():
-        _worker_thread.join(timeout=2.0)
+    if _proc_stop is not None:
+        try:
+            _proc_stop.set()
+        except Exception:
+            pass
+    # Unblock the child if it is waiting on the frame queue.
+    if _frame_q is not None:
+        try:
+            _frame_q.put_nowait(None)
+        except Exception:
+            pass
+    if _feeder_thread is not None and _feeder_thread.is_alive():
+        _feeder_thread.join(timeout=2.0)
+    if _proc is not None:
+        try:
+            _proc.join(timeout=2.0)
+            if _proc.is_alive():
+                _proc.terminate()
+        except Exception:
+            pass
+    _proc = None
+    _proc_stop = None
+    _frame_q = None
+    _result_q = None
     _stop_event = None
-    _worker_thread = None
+    _feeder_thread = None
 
+
+# ── Shared helpers (used by both parent feeder and child process) ─────────────
 
 def _to_rgb(frame: np.ndarray) -> np.ndarray:
     """Convert BGRA or BGR frame to RGB for PaddleOCR."""
@@ -158,22 +230,22 @@ def _parse_ocr_result(result) -> list[str]:
 
 
 def _build_ocr():
-    """Construct a PaddleOCR instance with OneDNN disabled.
+    """Construct a PaddleOCR instance with OneDNN disabled (child process only).
 
     PaddleOCR 3.x (PaddleX) runs inference through the Paddle Inference
     predictor, which enables OneDNN in its own config — the global
     paddle.set_flags / FLAGS_use_mkldnn are ignored by that path, so
-    enable_mkldnn=False must be passed to the constructor. The OneDNN
-    PIR instruction handler crashes on this model
+    enable_mkldnn=False must be passed to the constructor. The OneDNN PIR
+    instruction handler crashes on this model
     (ConvertPirAttribute2RuntimeAttribute / ArrayAttribute<DoubleAttribute>),
     so disabling it is required for CPU inference to work at all.
 
     The doc-orientation / unwarping / textline-orientation models are also
-    disabled: they are useless for a single-line weapon-slot ROI and only
-    add startup and per-frame cost.
+    disabled: they are useless for a single-line weapon-slot ROI and only add
+    startup and per-frame cost.
 
-    Constructor kwargs vary across PaddleOCR versions, so we try the full
-    set first and drop unknown args progressively.
+    Constructor kwargs vary across PaddleOCR versions, so we try the full set
+    first and drop unknown args progressively.
     """
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
@@ -182,9 +254,7 @@ def _build_ocr():
         return None
 
     kwarg_sets = [
-        # PaddleOCR 3.x (PaddleX) — full control, OneDNN off, extra models off,
-        # cpu_threads=1 so OCR never saturates all cores and starves the main
-        # inference loop / Qt UI (the ROI is only 314x29 px).
+        # PaddleOCR 3.x (PaddleX) — OneDNN off, extra models off, single thread.
         dict(lang="en", device="cpu", enable_mkldnn=False, cpu_threads=1,
              use_doc_orientation_classify=False, use_doc_unwarping=False,
              use_textline_orientation=False),
@@ -210,17 +280,41 @@ def _build_ocr():
     return None
 
 
-def _worker(config: Config, stop_event: threading.Event) -> None:
-    from .screen_capture import get_preview_frame
+# ── Child process entry point ─────────────────────────────────────────────────
 
-    # Run this thread at below-normal priority so the main inference loop and
-    # Qt UI always win CPU scheduling when there is contention.
+def _child_main(frame_q, result_q, proc_stop) -> None:
+    """Run in a separate process: own GIL, own core, below-normal priority.
+
+    Receives ROI crops on frame_q, runs PaddleOCR, returns formatted lines on
+    result_q. Never touches the GPU (CPU PaddlePaddle build).
+    """
+    # Cap math-library thread pools BEFORE paddle's DLLs load. The bundled
+    # libopenblas / libomp otherwise spawn one thread per core.
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+    # Defensive: ensure the shared AppData site-packages dir is importable even
+    # if spawn did not carry it over in sys.path.
+    la = os.environ.get("LOCALAPPDATA", "")
+    if la:
+        pkg = os.path.join(la, "AxiomAI", "site-packages")
+        if os.path.isdir(pkg) and pkg not in sys.path:
+            sys.path.insert(0, pkg)
+
+    # Below-normal priority for the whole OCR process so the OS always schedules
+    # the main app first when cores are contended.
     if sys.platform == "win32":
         try:
             import ctypes
-            ctypes.windll.kernel32.SetThreadPriority(
-                ctypes.windll.kernel32.GetCurrentThread(), -1  # THREAD_PRIORITY_BELOW_NORMAL
-            )
+            BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
+            k32 = ctypes.windll.kernel32
+            k32.SetPriorityClass(k32.GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS)
+        except Exception:
+            pass
+    else:
+        try:
+            os.nice(10)
         except Exception:
             pass
 
@@ -228,62 +322,108 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
     if ocr is None:
         return
 
-    _logged_raw = False
-    _logged_crop: list = []
+    logged_raw = False
+    while not proc_stop.is_set():
+        try:
+            roi = frame_q.get(timeout=0.3)
+        except queue.Empty:
+            continue
+        if roi is None:                      # sentinel → shutdown
+            break
+        try:
+            img_rgb = _to_rgb(roi)
+            result = ocr.ocr(img_rgb)
+
+            if not logged_raw:
+                if result and isinstance(result[0], dict):
+                    print(f"[OCR child] page keys: {list(result[0].keys())}")
+                    print(f"[OCR child] rec_texts: {result[0].get('rec_texts')!r}")
+                else:
+                    print(f"[OCR child] first result: {repr(result)[:300]}")
+                logged_raw = True
+
+            lines = _parse_ocr_result(result)
+            try:
+                result_q.put_nowait(lines)
+            except queue.Full:
+                # drop the oldest, keep the newest
+                try:
+                    result_q.get_nowait()
+                    result_q.put_nowait(lines)
+                except Exception:
+                    pass
+        except Exception as exc:
+            print(f"[OCR child] frame error: {exc}")
+
+
+# ── Parent feeder thread ──────────────────────────────────────────────────────
+
+def _drain(q) -> None:
+    """Empty a queue without blocking."""
+    try:
+        while True:
+            q.get_nowait()
+    except queue.Empty:
+        pass
+
+
+def _collect_results() -> None:
+    """Pull the newest result list from the child and publish it."""
+    latest = None
+    try:
+        while True:
+            latest = _result_q.get_nowait()
+    except queue.Empty:
+        pass
+    except Exception:
+        return
+    if latest is not None:
+        with _results_lock:
+            _ocr_results[:] = latest
+
+
+def _feeder(config: Config, stop_event: threading.Event) -> None:
+    """Lightweight parent thread: crop the ROI and shuttle it to the child.
+
+    Does only trivial work (a numpy slice + a ~36 KB queue put) so it never
+    blocks the main inference loop on the GIL.
+    """
+    from .screen_capture import get_preview_frame
+
+    global _roi_image
+    log_once: list = []
 
     while not stop_event.is_set():
         t0 = time.perf_counter()
 
-        ocr_enabled = getattr(config, "ocr_enabled", False)
+        enabled = getattr(config, "ocr_enabled", False)
         forced = _scan_flag.is_set()
-
-        if not ocr_enabled and not forced:
-            stop_event.wait(0.1)
-            continue
-
         if forced:
             _scan_flag.clear()
 
-        frame = get_preview_frame()
-        if frame is None:
-            stop_event.wait(0.05)
-            continue
+        if enabled or forced:
+            frame = get_preview_frame()
+            if frame is not None:
+                try:
+                    roi = _crop_roi(frame, log_once)
+                    with _roi_image_lock:
+                        _roi_image = roi.copy()
+                    # Keep only the freshest frame in the 1-slot queue.
+                    if _frame_q is not None:
+                        _drain(_frame_q)
+                        try:
+                            _frame_q.put_nowait(roi)
+                        except queue.Full:
+                            pass
+                except Exception as exc:
+                    logger.warning("[OCR] feed error: %s", exc)
 
-        try:
-            roi_crop = _crop_roi(frame, _logged_crop)
-
-            # Store the raw ROI crop for the GUI preview (before RGB conversion)
-            with _roi_image_lock:
-                global _roi_image
-                _roi_image = roi_crop.copy()
-
-            img_rgb = _to_rgb(roi_crop)
-            result = ocr.ocr(img_rgb)
-
-            if not _logged_raw:
-                if result and isinstance(result[0], dict):
-                    logger.info("[OCR] Page dict keys: %s", list(result[0].keys()))
-                    logger.info("[OCR] rec_texts: %s", repr(result[0].get("rec_texts")))
-                else:
-                    logger.info("[OCR] First result structure: %s", repr(result)[:500])
-                _logged_raw = True
-
-            lines = _parse_ocr_result(result)
-
-            with _results_lock:
-                _ocr_results.clear()
-                _ocr_results.extend(lines)
-
-            if forced:
-                logger.info("[OCR] ROI scan found %d item(s): %s", len(lines), lines)
-            elif lines:
-                logger.debug("[OCR] Detected %d line(s): %s", len(lines), lines)
-
-        except Exception as exc:
-            logger.warning("[OCR] Frame error: %s", exc)
+        if _result_q is not None:
+            _collect_results()
 
         fps = max(1, min(10, int(getattr(config, "ocr_fps", 2))))
         elapsed = time.perf_counter() - t0
-        # Always sleep at least 0.5 s so warmup / slow frames never tight-loop.
-        sleep_time = max((1.0 / fps) - elapsed, 0.5)
-        stop_event.wait(sleep_time)
+        # Idle when disabled; otherwise pace to ocr_fps (min 0.05 s so result
+        # collection stays responsive without busy-looping).
+        interval = 0.2 if not (enabled or forced) else max((1.0 / fps) - elapsed, 0.05)
+        stop_event.wait(interval)

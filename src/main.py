@@ -533,4 +533,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # Required for multiprocessing 'spawn' (OCR child process) if this app is
+    # ever frozen with PyInstaller; a harmless no-op when run from source.
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()
