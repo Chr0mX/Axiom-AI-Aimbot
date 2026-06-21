@@ -6,6 +6,16 @@ from __future__ import annotations
 import sys
 import os
 
+# Cap OpenMP / MKL / OpenBLAS thread pools to 1 before any DLL is loaded.
+# PaddleOCR's cpu_threads=1 only limits Paddle's predictor; the underlying
+# libopenblas / libomp the paddle wheel ships ignores that and uses all cores,
+# starving the main inference loop and the Qt UI thread. These env vars are
+# read at DLL load time so they must be set here, before any import.
+# TensorRT / CUDA inference is unaffected — it runs on GPU.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 # Qt must see relevant environment variables before any PyQt module is imported,
 # otherwise scaling strategy will not take effect
 if sys.platform == "win32":

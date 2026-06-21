@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
+import sys
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -212,6 +213,17 @@ def _build_ocr():
 def _worker(config: Config, stop_event: threading.Event) -> None:
     from .screen_capture import get_preview_frame
 
+    # Run this thread at below-normal priority so the main inference loop and
+    # Qt UI always win CPU scheduling when there is contention.
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetThreadPriority(
+                ctypes.windll.kernel32.GetCurrentThread(), -1  # THREAD_PRIORITY_BELOW_NORMAL
+            )
+        except Exception:
+            pass
+
     ocr = _build_ocr()
     if ocr is None:
         return
@@ -272,6 +284,6 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
 
         fps = max(1, min(10, int(getattr(config, "ocr_fps", 2))))
         elapsed = time.perf_counter() - t0
-        sleep_time = (1.0 / fps) - elapsed
-        if sleep_time > 0:
-            stop_event.wait(sleep_time)
+        # Always sleep at least 0.5 s so warmup / slow frames never tight-loop.
+        sleep_time = max((1.0 / fps) - elapsed, 0.5)
+        stop_event.wait(sleep_time)
