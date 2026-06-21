@@ -146,7 +146,7 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
 
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
-        ocr = PaddleOCR(lang="en", use_gpu=False)
+        ocr = PaddleOCR(lang="en", device="cpu")
         logger.info("[OCR] PaddleOCR initialized (EN+digits). ROI=%s", _OCR_ROI)
     except Exception as exc:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
