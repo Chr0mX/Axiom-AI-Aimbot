@@ -181,14 +181,17 @@ def _build_ocr():
         return None
 
     kwarg_sets = [
-        # PaddleOCR 3.x (PaddleX) — full control, OneDNN off, extra models off
-        dict(lang="en", device="cpu", enable_mkldnn=False,
+        # PaddleOCR 3.x (PaddleX) — full control, OneDNN off, extra models off,
+        # cpu_threads=1 so OCR never saturates all cores and starves the main
+        # inference loop / Qt UI (the ROI is only 314x29 px).
+        dict(lang="en", device="cpu", enable_mkldnn=False, cpu_threads=1,
              use_doc_orientation_classify=False, use_doc_unwarping=False,
              use_textline_orientation=False),
-        # 3.x minimal — OneDNN off only
-        dict(lang="en", device="cpu", enable_mkldnn=False),
+        # 3.x minimal — OneDNN off + single thread
+        dict(lang="en", device="cpu", enable_mkldnn=False, cpu_threads=1),
         # 2.7.x legacy API
-        dict(lang="en", use_gpu=False, use_angle_cls=False, show_log=False),
+        dict(lang="en", use_gpu=False, use_angle_cls=False, show_log=False,
+             cpu_threads=1),
         # last-resort minimal
         dict(lang="en"),
     ]
