@@ -1472,11 +1472,13 @@ class UdpCapture:
 
     def close(self) -> None:
         self._stop.set()
+        # Stop the receiver first so its _new_frame_event fires immediately,
+        # waking any _reader_worker thread blocked in get_latest_frame().
+        self._receiver.stop()
         if self._preview_thread is not None and self._preview_thread.is_alive():
             self._preview_thread.join(timeout=1.0)
         if self._reader_thread.is_alive():
             self._reader_thread.join(timeout=1.0)
-        self._receiver.stop()
 
 
 def _get_monitor_refresh_rate() -> int:
