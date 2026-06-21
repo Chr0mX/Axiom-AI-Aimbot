@@ -117,9 +117,12 @@ def is_paddle_gpu() -> bool:
 # ── Installation ──────────────────────────────────────────────────────────────
 
 def _pip(packages: list, upgrade: bool = True, extra_index: str = "") -> None:
+    # PyPI is the primary index for fast dependency resolution.
+    # Paddle's CN CDN is added as an extra index only when needed for the CUDA wheel.
     cmd = [
         sys.executable, "-m", "pip", "install",
         "--target", str(PACKAGES_DIR),
+        "-i", "https://pypi.org/simple",
     ]
     if upgrade:
         cmd.append("--upgrade")
@@ -130,7 +133,9 @@ def _pip(packages: list, upgrade: bool = True, extra_index: str = "") -> None:
 
 
 def install_paddleocr() -> None:
-    log(f"Installing PaddlePaddle GPU ({PADDLE_PACKAGE}) from Paddle index ({PADDLE_INDEX})...")
+    log(f"Installing PaddlePaddle GPU ({PADDLE_PACKAGE})...")
+    log(f"  Primary index : https://pypi.org/simple")
+    log(f"  Extra index   : {PADDLE_INDEX}")
     _pip([PADDLE_PACKAGE], extra_index=PADDLE_INDEX)
     log(f"Installing: {', '.join(PADDLEOCR_PACKAGES)}")
     _pip(PADDLEOCR_PACKAGES)
