@@ -67,7 +67,7 @@ def stop() -> None:
 def _worker(config: Config, stop_event: threading.Event) -> None:
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
-        ocr = PaddleOCR(use_angle_cls=False, lang="en", show_log=False)
+        ocr = PaddleOCR(use_angle_cls=False, lang="en")
     except Exception as exc:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
         return
