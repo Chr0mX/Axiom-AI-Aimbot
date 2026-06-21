@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Absolute pixel coords within the game/capture frame (1080p reference)
-_OCR_ROI: dict[str, int] = {"left": 1500, "top": 1033, "width": 320, "height": 25}
+_OCR_ROI: dict[str, int] = {"left": 1510, "top": 1032, "width": 320, "height": 25}
 
 _results_lock = threading.Lock()
 _ocr_results: list[str] = []
