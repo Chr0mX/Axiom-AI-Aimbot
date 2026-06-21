@@ -842,7 +842,7 @@ class StatusPanel(QWidget):
         self.mouse_click_row.set_value(disp_click, click_color)
 
         # 更新 Screenshot Method
-        screenshot_map = {'mss': 'MSS', 'dxcam': 'DXcam', 'uvc': 'UVC', 'ndi': 'NDI'}
+        screenshot_map = {'mss': 'MSS', 'dxcam': 'DXcam', 'uvc': 'UVC', 'ndi': 'NDI', 'udp': 'UDP'}
         disp_screenshot = screenshot_map.get(current_screenshot_method, str(current_screenshot_method))
         screenshot_color = None
 
@@ -855,7 +855,7 @@ class StatusPanel(QWidget):
                 else:
                     disp_screenshot += " ✗"
                     screenshot_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
-            except ImportError:
+            except Exception:
                 disp_screenshot += " ✗"
                 screenshot_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
         elif current_screenshot_method == 'mss':
@@ -870,9 +870,12 @@ class StatusPanel(QWidget):
                 if cyndilib is not None:
                     disp_screenshot += " ✓"
                     screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
-            except ImportError:
+            except Exception:
                 disp_screenshot += " ✗"
                 screenshot_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
+        elif current_screenshot_method == 'udp':
+            disp_screenshot += " ✓"
+            screenshot_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
 
         self.screenshot_row.label.setText(get_text('screenshot_method'))
         self.screenshot_row.set_value(disp_screenshot, screenshot_color)
