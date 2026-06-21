@@ -38,10 +38,15 @@ if not _LOCALAPPDATA:
 
 PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 
-PADDLE_PACKAGE = "paddlepaddle-gpu"   # change to 'paddlepaddle' for CPU-only
+# Pinned to the last known-good combination on PyPI:
+#   paddlepaddle-gpu 2.6.2.post120  — CUDA 12 build of Paddle 2.6.2
+#   paddleocr 2.7.3                 — last release targeting Paddle 2.x
+# Newer paddleocr (2.9+) switched to PaddleX and requires Paddle 3.x,
+# which introduces API changes (set_optimization_level) that break 2.x builds.
+PADDLE_PACKAGE = "paddlepaddle-gpu==2.6.2.post120"  # change .post120 → .post117 for CUDA 11.7, or 'paddlepaddle==2.6.2' for CPU
 PADDLEOCR_PACKAGES = [
     PADDLE_PACKAGE,
-    "paddleocr",
+    "paddleocr==2.7.3",
 ]
 
 
@@ -185,13 +190,22 @@ def main() -> None:
     log(f"Python          : {sys.executable}")
     log("")
 
-    if is_paddleocr_importable() and is_paddle_importable():
-        log("PaddleOCR is already installed.")
-        log(f"  paddle version    : {_run_check('import paddle; print(paddle.__version__)')}")
-        log(f"  paddleocr version : {_run_check('import paddleocr; print(paddleocr.__version__)')}")
-        log(f"  GPU support       : {_run_check('import paddle; print(paddle.is_compiled_with_cuda())')}")
-        print_next_steps()
-        return
+    paddle_ver = _run_check("import paddle; print(paddle.__version__)")
+    ocr_ver    = _run_check("import paddleocr; print(paddleocr.__version__)")
+    if paddle_ver and ocr_ver:
+        need_reinstall = (
+            not paddle_ver.startswith("2.6")
+            or not ocr_ver.startswith("2.7")
+        )
+        if not need_reinstall:
+            log("PaddleOCR is already installed at the correct versions.")
+            log(f"  paddle version    : {paddle_ver}")
+            log(f"  paddleocr version : {ocr_ver}")
+            log(f"  GPU support       : {_run_check('import paddle; print(paddle.is_compiled_with_cuda())')}")
+            print_next_steps()
+            return
+        warn(f"Installed versions (paddle {paddle_ver}, paddleocr {ocr_ver}) are incompatible.")
+        warn("Reinstalling pinned compatible versions...")
 
     install_paddleocr()
     log("")
