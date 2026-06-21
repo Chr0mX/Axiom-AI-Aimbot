@@ -193,6 +193,7 @@ _FIELD_MAP = {
 
     # --- ocr ---
     'ocr_enabled':                'ocr.enabled',
+    'ocr_fps':                    'ocr.fps',
 }
 
 
@@ -498,6 +499,7 @@ class Config:
 
         # Secondary OCR inference (PaddleOCR)
         self.ocr_enabled: bool = False
+        self.ocr_fps: int = 2  # OCR frames per second (1-10)
 
         # Humanization post-processing layer (operates only on final dx/dy output)
         self.humanization: HumanizationConfig = HumanizationConfig()

@@ -1,17 +1,17 @@
 """
-Secondary OCR inference — PaddleOCR ROI text extraction at ≤10 FPS.
+Secondary OCR inference — PaddleOCR text extraction from the active capture frame.
 
-Captures a fixed 1080p screen region (1500,1033 → 1820,1058), runs
-PaddleOCR, and stores results as "N , text" formatted strings that the
-GUI polls via get_ocr_results().
+Reads frames from screen_capture.get_preview_frame() so it shares the capture
+pipeline with the main inference and adds zero extra screen-grab overhead.
+
+ROI (absolute pixel coords within the captured frame):
+  Regular OCR: crops to _OCR_ROI when the frame is large enough
+  Full scan:   uses the entire preview frame
 
 Thread lifecycle:
-  start(config)  — no-op if worker is already alive
-  stop()         — signals the worker and joins within 2 s
-
-One-shot full-screen scan:
-  trigger_full_scan()  — next worker iteration grabs full 1080p instead
-                         of the ROI, useful for finding where text lives
+  start(config)        — no-op if worker is already alive
+  stop()               — signals the worker and joins within 2 s
+  trigger_full_scan()  — next iteration uses the full frame instead of the ROI
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-import mss
 import numpy as np
 
 if TYPE_CHECKING:
@@ -29,16 +28,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Absolute pixel coords within the game/capture frame (1080p reference)
 _OCR_ROI: dict[str, int] = {"left": 1500, "top": 1033, "width": 320, "height": 25}
-_FULL_SCREEN: dict[str, int] = {"left": 0, "top": 0, "width": 1920, "height": 1080}
-_FPS_CAP: int = 10  # maximum frames per second
 
 _results_lock = threading.Lock()
 _ocr_results: list[str] = []
 
 _stop_event: threading.Event | None = None
 _worker_thread: threading.Thread | None = None
-_full_scan_flag = threading.Event()  # set to trigger one full-screen grab
+_full_scan_flag = threading.Event()
 
 
 def get_ocr_results() -> list[str]:
@@ -48,7 +46,7 @@ def get_ocr_results() -> list[str]:
 
 
 def trigger_full_scan() -> None:
-    """Request one full-screen OCR grab on the next worker iteration."""
+    """Request one full-frame OCR pass on the next worker iteration."""
     _full_scan_flag.set()
 
 
@@ -75,13 +73,28 @@ def stop() -> None:
     _worker_thread = None
 
 
+def _to_rgb(frame: np.ndarray) -> np.ndarray:
+    """Convert BGRA or BGR frame to RGB for PaddleOCR."""
+    if frame.ndim == 3 and frame.shape[2] == 4:
+        return frame[:, :, :3][:, :, ::-1]   # BGRA → RGB
+    return frame[:, :, ::-1]                  # BGR  → RGB
+
+
+def _crop_roi(frame: np.ndarray) -> np.ndarray:
+    """Crop to _OCR_ROI if the frame is large enough, otherwise return the full frame."""
+    h, w = frame.shape[:2]
+    l, t = _OCR_ROI["left"], _OCR_ROI["top"]
+    rw, rh = _OCR_ROI["width"], _OCR_ROI["height"]
+    if w >= l + rw and h >= t + rh:
+        return frame[t:t + rh, l:l + rw]
+    return frame   # frame too small for absolute ROI — use whole thing
+
+
 def _parse_ocr_result(result) -> list[str]:
     """Parse PaddleOCR result into 'N , text' strings.
 
-    Handles both API formats:
-      Old (2.7.x): result[0] = list of [box, [text, conf]]
-      New (2.9+):  result = list of page dicts; text lives in
-                   page['rec_texts'] (list of strings, one per detected box)
+    New (2.9+/PaddleX): list of page dicts with 'rec_texts' list
+    Old (2.7.x):        list of [[box, [text, conf]], ...]
     """
     lines: list[str] = []
     if not result:
@@ -105,11 +118,12 @@ def _parse_ocr_result(result) -> list[str]:
                     if str(text).strip():
                         lines.append(f"{idx} , {str(text).strip()}")
                         idx += 1
-
     return lines
 
 
 def _worker(config: Config, stop_event: threading.Event) -> None:
+    from .screen_capture import get_preview_frame
+
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
         ocr = PaddleOCR(lang="en")
@@ -118,54 +132,61 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
         return
 
-    frame_interval = 1.0 / _FPS_CAP
     _logged_raw = False
 
-    with mss.mss() as sct:
-        while not stop_event.is_set():
-            t0 = time.perf_counter()
+    while not stop_event.is_set():
+        t0 = time.perf_counter()
 
-            if not getattr(config, "ocr_enabled", False) and not _full_scan_flag.is_set():
-                stop_event.wait(0.1)
-                continue
+        ocr_enabled = getattr(config, "ocr_enabled", False)
+        full_scan = _full_scan_flag.is_set()
 
-            try:
-                full_scan = _full_scan_flag.is_set()
-                if full_scan:
-                    _full_scan_flag.clear()
-                    region = _FULL_SCREEN
-                    logger.info("[OCR] Full-screen scan triggered (1920×1080)...")
+        if not ocr_enabled and not full_scan:
+            stop_event.wait(0.1)
+            continue
+
+        if full_scan:
+            _full_scan_flag.clear()
+
+        frame = get_preview_frame()
+        if frame is None:
+            stop_event.wait(0.05)
+            continue
+
+        try:
+            if full_scan:
+                img_rgb = _to_rgb(frame)
+                logger.info("[OCR] Full-frame scan triggered (%dx%d)...",
+                            frame.shape[1], frame.shape[0])
+            else:
+                img_rgb = _to_rgb(_crop_roi(frame))
+
+            result = ocr.ocr(img_rgb)
+
+            if not _logged_raw:
+                if result and isinstance(result[0], dict):
+                    logger.info("[OCR] Page dict keys: %s", list(result[0].keys()))
+                    logger.info("[OCR] rec_texts: %s", repr(result[0].get("rec_texts")))
                 else:
-                    region = _OCR_ROI
+                    logger.info("[OCR] First result structure: %s", repr(result)[:500])
+                _logged_raw = True
 
-                raw = np.array(sct.grab(region))        # BGRA uint8
-                img_rgb = raw[:, :, :3][:, :, ::-1]    # BGRA → RGB
+            lines = _parse_ocr_result(result)
 
-                result = ocr.ocr(img_rgb)
+            with _results_lock:
+                _ocr_results.clear()
+                _ocr_results.extend(lines)
 
-                if not _logged_raw:
-                    if result and isinstance(result[0], dict):
-                        logger.info("[OCR] Page dict keys: %s", list(result[0].keys()))
-                        logger.info("[OCR] rec_texts value: %s", repr(result[0].get("rec_texts")))
-                    else:
-                        logger.info("[OCR] First result structure: %s", repr(result)[:500])
-                    _logged_raw = True
+            if full_scan:
+                logger.info("[OCR] Full-frame scan found %d item(s): %s", len(lines), lines)
+            elif lines:
+                logger.debug("[OCR] Detected %d line(s): %s", len(lines), lines)
 
-                lines = _parse_ocr_result(result)
+        except Exception as exc:
+            logger.warning("[OCR] Frame error: %s", exc)
 
-                with _results_lock:
-                    _ocr_results.clear()
-                    _ocr_results.extend(lines)
-
-                if full_scan:
-                    logger.info("[OCR] Full-screen scan found %d text item(s): %s", len(lines), lines)
-                elif lines:
-                    logger.debug("[OCR] Detected %d line(s): %s", len(lines), lines)
-
-            except Exception as exc:
-                logger.warning("[OCR] Frame error: %s", exc)
-
-            elapsed = time.perf_counter() - t0
-            sleep_time = frame_interval - elapsed
-            if sleep_time > 0:
-                stop_event.wait(sleep_time)
+        # Sleep for the remainder of the configured interval
+        fps = max(1, min(10, int(getattr(config, "ocr_fps", 2))))
+        elapsed = time.perf_counter() - t0
+        sleep_time = (1.0 / fps) - elapsed
+        if sleep_time > 0:
+            stop_event.wait(sleep_time)

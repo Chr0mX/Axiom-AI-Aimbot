@@ -336,12 +336,21 @@ class CapturePage(BasePage):
         # === Inferred Text (OCR) ===
         self.ocrGroup = SettingCardGroup(t("ocr_inferred_text", "Inferred Text"), self.scrollWidget)
 
-        self.ocrScanBtn = PushButton("Scan Full Screen")
+        self.ocrFpsCard = SliderSpinCard(
+            FluentIcon.SPEED_HIGH,
+            "OCR Capture FPS",
+            1, 10,
+            suffix=" FPS",
+            description="How often OCR runs — lower values reduce CPU load",
+            parent=self.ocrGroup
+        )
+
+        self.ocrScanBtn = PushButton("Scan Full Frame")
         self.ocrScanBtn.setFixedWidth(140)
         self.ocrScanCard = SettingCard(
             FluentIcon.SEARCH,
-            "Full Screen Scan",
-            "Run OCR on the full 1920×1080 frame once to find where text lives",
+            "Full Frame Scan",
+            "Run OCR on the full capture frame once to find where text lives",
             self.ocrGroup
         )
         self.ocrScanCard.hBoxLayout.addWidget(self.ocrScanBtn, 0, Qt.AlignmentFlag.AlignRight)
@@ -405,6 +414,7 @@ class CapturePage(BasePage):
         self.addContent(self.previewGroup)
         self.previewGroup.setVisible(False)
 
+        self.ocrGroup.addSettingCard(self.ocrFpsCard)
         self.ocrGroup.addSettingCard(self.ocrScanCard)
         self.ocrGroup.addSettingCard(self.ocrResultCard)
         self.addContent(self.ocrGroup)
@@ -436,6 +446,7 @@ class CapturePage(BasePage):
         self.udpBindIpCombo.currentTextChanged.connect(self._onUdpBindIpChanged)
         self.udpPortCard.valueChanged.connect(self._onUdpPortChanged)
         self.udpRefreshBtn.clicked.connect(self._onUdpRefreshClicked)
+        self.ocrFpsCard.valueChanged.connect(self._onOcrFpsChanged)
         self.ocrScanBtn.clicked.connect(self._onOcrScanClicked)
 
     # ──────────────────────────────────────────────
@@ -510,6 +521,8 @@ class CapturePage(BasePage):
             if idx >= 0:
                 self.udpBindIpCombo.setCurrentIndex(idx)
             self.udpPortCard.setValue(int(getattr(self._config, 'udp_bind_port', 5600)))
+
+            self.ocrFpsCard.setValue(int(getattr(self._config, 'ocr_fps', 2)))
 
             self._updateCaptureControlsVisibility(screenshot_method)
         finally:
@@ -843,6 +856,11 @@ class CapturePage(BasePage):
             self._config.udp_force_restart = True
             print('[Capture][UDP] Restart requested — receiver will reinitialize within ~0.5s.')
 
+    def _onOcrFpsChanged(self, value: int):
+        if self._isLoadingConfig or not self._config:
+            return
+        self._config.ocr_fps = max(1, min(10, value))
+
     def _onOcrScanClicked(self):
         from core.ocr_inference import trigger_full_scan
         self.ocrResultLabel.setText("Scanning...")
@@ -893,6 +911,7 @@ class CapturePage(BasePage):
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")
         self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")
         self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Inferred Text"))
-        self.ocrScanCard.titleLabel.setText("Full Screen Scan")
-        self.ocrScanBtn.setText("Scan Full Screen")
+        self.ocrFpsCard.titleLabel.setText("OCR Capture FPS")
+        self.ocrScanCard.titleLabel.setText("Full Frame Scan")
+        self.ocrScanBtn.setText("Scan Full Frame")
         self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "OCR Result"))
