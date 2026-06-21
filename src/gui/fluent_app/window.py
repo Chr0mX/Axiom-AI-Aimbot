@@ -381,7 +381,7 @@ class AxiomWindow(FluentWindow):
             return
         method = str(getattr(self._config, 'screenshot_method', 'mss')).lower()
         show = bool(getattr(self._config, 'uvc_show_window', True))
-        active = method in ('ndi', 'uvc') and show
+        active = method in ('ndi', 'uvc', 'udp') and show
         self._previewArrow.setVisible(active)
         if active:
             self.previewPanel.show()
