@@ -17,11 +17,14 @@ Thread lifecycle:
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+_EN_FILTER = re.compile(r"[^A-Za-z0-9 .,:;/\-_%()\[\]']")
 
 if TYPE_CHECKING:
     from .config import Config
@@ -107,16 +110,18 @@ def _parse_ocr_result(result) -> list[str]:
             if isinstance(rec_texts, str):
                 rec_texts = [rec_texts]
             for text in (rec_texts or []):
-                if str(text).strip():
-                    lines.append(f"{idx} , {str(text).strip()}")
+                clean = _EN_FILTER.sub("", str(text)).strip()
+                if clean:
+                    lines.append(f"{idx} , {clean}")
                     idx += 1
         elif isinstance(page, list):
             for item in page:
                 if isinstance(item, (list, tuple)) and len(item) >= 2:
                     rec = item[1]
                     text = rec[0] if isinstance(rec, (list, tuple)) else str(rec)
-                    if str(text).strip():
-                        lines.append(f"{idx} , {str(text).strip()}")
+                    clean = _EN_FILTER.sub("", str(text)).strip()
+                    if clean:
+                        lines.append(f"{idx} , {clean}")
                         idx += 1
     return lines
 
@@ -126,8 +131,8 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
 
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
-        ocr = PaddleOCR(lang="en")
-        logger.info("[OCR] PaddleOCR initialized. ROI=%s", _OCR_ROI)
+        ocr = PaddleOCR(lang="en", rec_char_type="EN")
+        logger.info("[OCR] PaddleOCR initialized (EN+digits). ROI=%s", _OCR_ROI)
     except Exception as exc:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
         return
