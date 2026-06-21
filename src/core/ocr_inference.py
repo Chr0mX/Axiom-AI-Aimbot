@@ -69,30 +69,33 @@ def _parse_ocr_result(result) -> list[str]:
 
     Handles both API formats:
       Old (2.7.x): result[0] = list of [box, [text, conf]]
-      New (2.9+):  result[0] = list of dicts with 'rec_text' / 'text' keys,
-                   or result is a flat list of such dicts.
+      New (2.9+):  result = list of page dicts; text lives in
+                   page['rec_texts'] (list of strings, one per detected box)
     """
     lines: list[str] = []
     if not result:
         return lines
 
-    # Flatten: new API sometimes returns list-of-dicts at top level, old wraps in result[0]
-    items = result[0] if (isinstance(result, list) and result and isinstance(result[0], list)) else result
-
-    for idx, item in enumerate(items, start=1):
-        text = ""
-        if isinstance(item, dict):
-            # New PaddleOCR 2.9+ / PaddleX format
-            text = item.get("rec_text") or item.get("text") or ""
-        elif isinstance(item, (list, tuple)) and len(item) >= 2:
-            # Old format: [box, [text, confidence]]
-            rec = item[1]
-            if isinstance(rec, (list, tuple)):
-                text = rec[0] if rec else ""
-            elif isinstance(rec, str):
-                text = rec
-        if text.strip():
-            lines.append(f"{idx} , {text.strip()}")
+    idx = 1
+    for page in result:
+        if isinstance(page, dict):
+            # New PaddleOCR 2.9+ / PaddleX: rec_texts is a flat list of strings
+            rec_texts = page.get("rec_texts") or page.get("rec_text") or []
+            if isinstance(rec_texts, str):
+                rec_texts = [rec_texts]
+            for text in rec_texts:
+                if str(text).strip():
+                    lines.append(f"{idx} , {str(text).strip()}")
+                    idx += 1
+        elif isinstance(page, list):
+            # Old format: list of [box, [text, confidence]]
+            for item in page:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    rec = item[1]
+                    text = rec[0] if isinstance(rec, (list, tuple)) else str(rec)
+                    if str(text).strip():
+                        lines.append(f"{idx} , {str(text).strip()}")
+                        idx += 1
 
     return lines
 
