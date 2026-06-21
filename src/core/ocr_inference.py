@@ -64,15 +64,50 @@ def stop() -> None:
     _worker_thread = None
 
 
+def _parse_ocr_result(result) -> list[str]:
+    """Parse PaddleOCR result into 'N , text' strings.
+
+    Handles both API formats:
+      Old (2.7.x): result[0] = list of [box, [text, conf]]
+      New (2.9+):  result[0] = list of dicts with 'rec_text' / 'text' keys,
+                   or result is a flat list of such dicts.
+    """
+    lines: list[str] = []
+    if not result:
+        return lines
+
+    # Flatten: new API sometimes returns list-of-dicts at top level, old wraps in result[0]
+    items = result[0] if (isinstance(result, list) and result and isinstance(result[0], list)) else result
+
+    for idx, item in enumerate(items, start=1):
+        text = ""
+        if isinstance(item, dict):
+            # New PaddleOCR 2.9+ / PaddleX format
+            text = item.get("rec_text") or item.get("text") or ""
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            # Old format: [box, [text, confidence]]
+            rec = item[1]
+            if isinstance(rec, (list, tuple)):
+                text = rec[0] if rec else ""
+            elif isinstance(rec, str):
+                text = rec
+        if text.strip():
+            lines.append(f"{idx} , {text.strip()}")
+
+    return lines
+
+
 def _worker(config: Config, stop_event: threading.Event) -> None:
     try:
         from paddleocr import PaddleOCR  # type: ignore[import]
         ocr = PaddleOCR(use_angle_cls=False, lang="en")
+        logger.info("[OCR] PaddleOCR initialized. ROI=%s", _OCR_ROI)
     except Exception as exc:
         logger.error("[OCR] PaddleOCR initialization failed: %s", exc)
         return
 
     frame_interval = 1.0 / _FPS_CAP
+    _logged_raw = False  # log the raw result structure once for debugging
 
     with mss.mss() as sct:
         while not stop_event.is_set():
@@ -84,22 +119,26 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
 
             try:
                 raw = np.array(sct.grab(_OCR_ROI))  # BGRA uint8
-                img_rgb = raw[:, :, :3][:, :, ::-1]  # BGRA → RGB (PaddleOCR expects RGB)
+                img_rgb = raw[:, :, :3][:, :, ::-1]  # BGRA → RGB
+
                 result = ocr.ocr(img_rgb, cls=False)
 
-                lines: list[str] = []
-                if result and result[0]:
-                    for idx, line in enumerate(result[0], start=1):
-                        text: str = line[1][0] if line[1] else ""
-                        if text.strip():
-                            lines.append(f"{idx} , {text.strip()}")
+                # Log raw structure once so format issues are visible in logs
+                if not _logged_raw:
+                    logger.info("[OCR] First result structure: %s", repr(result)[:300])
+                    _logged_raw = True
+
+                lines = _parse_ocr_result(result)
 
                 with _results_lock:
                     _ocr_results.clear()
                     _ocr_results.extend(lines)
 
+                if lines:
+                    logger.debug("[OCR] Detected %d line(s): %s", len(lines), lines)
+
             except Exception as exc:
-                logger.debug("[OCR] Frame error: %s", exc)
+                logger.warning("[OCR] Frame error: %s", exc)
 
             elapsed = time.perf_counter() - t0
             sleep_time = frame_interval - elapsed
