@@ -34,15 +34,16 @@ if not _LOCALAPPDATA:
 
 PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 
-# CPU-only PaddlePaddle — no CUDA/OneDNN stack, no GPU FPS impact.
-# paddlepaddle-gpu 3.3.0 has an unfixed OneDNN bug
-# (ConvertPirAttribute2RuntimeAttribute / pir::ArrayAttribute<pir::DoubleAttribute>)
-# that crashes CPU inference even when FLAGS_use_mkldnn=0. The CPU build avoids
-# this entirely and is sufficient for OCR on a 314×29 px ROI at ≤10 FPS.
+# paddlepaddle 2.6.2 (CPU) + paddleocr 2.7.3 — last pre-PaddleX/PIR release.
+# Paddle 3.x introduced the PIR executor whose OneDNN instruction handler has
+# an unfixed crash (ConvertPirAttribute2RuntimeAttribute /
+# pir::ArrayAttribute<pir::DoubleAttribute>) that occurs even with
+# FLAGS_use_mkldnn=0 and the CPU-only build.
+# paddlepaddle 2.6.2 uses the old stable executor with no PIR / no issue.
 PADDLE_INDEX    = ""
-PADDLE_PACKAGE  = "paddlepaddle==3.3.0"
+PADDLE_PACKAGE  = "paddlepaddle==2.6.2"
 PADDLEOCR_PACKAGES = [
-    "paddleocr",
+    "paddleocr==2.7.3",
 ]
 
 
@@ -192,7 +193,8 @@ def main() -> None:
     ocr_ver    = _run_check("import paddleocr; print(paddleocr.__version__)")
     if paddle_ver and ocr_ver:
         is_gpu_build = _run_check("import paddle; print(paddle.is_compiled_with_cuda())") == "True"
-        need_reinstall = not paddle_ver.startswith("3.") or is_gpu_build
+        is_wrong_ver = not paddle_ver.startswith("2.6")
+        need_reinstall = is_wrong_ver or is_gpu_build
         if not need_reinstall:
             log("PaddleOCR is already installed at the correct versions.")
             log(f"  paddle version    : {paddle_ver}")
@@ -200,9 +202,9 @@ def main() -> None:
             print_next_steps()
             return
         if is_gpu_build:
-            warn(f"Installed paddle {paddle_ver} is the GPU build — reinstalling CPU build to fix OneDNN crash.")
+            warn(f"Installed paddle {paddle_ver} is the GPU build — switching to CPU.")
         else:
-            warn(f"Installed versions (paddle {paddle_ver}, paddleocr {ocr_ver}) are incompatible.")
+            warn(f"Installed paddle {paddle_ver} is not 2.6.x — reinstalling.")
         warn("Reinstalling...")
 
     install_paddleocr()

@@ -6,12 +6,6 @@ from __future__ import annotations
 import sys
 import os
 
-# Disable PaddlePaddle OneDNN/MKL-DNN before any Paddle DLL is loaded.
-# FLAGS_use_mkldnn=0 must be in the process environment at DLL load time;
-# setting it inside the OCR worker thread is too late on Windows.
-os.environ.setdefault("FLAGS_use_mkldnn", "0")
-os.environ.setdefault("PADDLE_DISABLE_ONEDNN", "1")
-
 # Qt must see relevant environment variables before any PyQt module is imported,
 # otherwise scaling strategy will not take effect
 if sys.platform == "win32":
