@@ -83,14 +83,20 @@ def _to_rgb(frame: np.ndarray) -> np.ndarray:
     return frame[:, :, ::-1]                  # BGR  → RGB
 
 
-def _crop_roi(frame: np.ndarray) -> np.ndarray:
+def _crop_roi(frame: np.ndarray, log_once: list) -> np.ndarray:
     """Crop to _OCR_ROI if the frame is large enough, otherwise return the full frame."""
     h, w = frame.shape[:2]
     l, t = _OCR_ROI["left"], _OCR_ROI["top"]
     rw, rh = _OCR_ROI["width"], _OCR_ROI["height"]
+    if not log_once:
+        if w >= l + rw and h >= t + rh:
+            logger.info("[OCR] Frame %dx%d → cropping ROI left=%d top=%d w=%d h=%d", w, h, l, t, rw, rh)
+        else:
+            logger.info("[OCR] Frame %dx%d is smaller than ROI bounds (%dx%d) — using full frame", w, h, l + rw, t + rh)
+        log_once.append(True)
     if w >= l + rw and h >= t + rh:
         return frame[t:t + rh, l:l + rw]
-    return frame   # frame too small for absolute ROI — use whole thing
+    return frame
 
 
 def _extract_texts(result) -> list[str]:
@@ -153,6 +159,7 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
         return
 
     _logged_raw = False
+    _logged_crop: list = []   # populated on first crop to avoid repeating the log
 
     while not stop_event.is_set():
         t0 = time.perf_counter()
@@ -178,7 +185,7 @@ def _worker(config: Config, stop_event: threading.Event) -> None:
                 logger.info("[OCR] Full-frame scan triggered (%dx%d)...",
                             frame.shape[1], frame.shape[0])
             else:
-                img_rgb = _to_rgb(_crop_roi(frame))
+                img_rgb = _to_rgb(_crop_roi(frame, _logged_crop))
 
             result = ocr.ocr(img_rgb)
 
