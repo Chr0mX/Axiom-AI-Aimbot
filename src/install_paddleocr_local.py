@@ -34,16 +34,13 @@ if not _LOCALAPPDATA:
 
 PACKAGES_DIR = Path(_LOCALAPPDATA) / "AxiomAI" / "site-packages"
 
-# PaddlePaddle 3.x + PaddleOCR 2.9+ are co-designed — no pinning needed.
-# The earlier set_optimization_level error was a 2.x/3.x mismatch; using both
-# at current versions avoids it entirely.
-#
-# Change PADDLE_CUDA_TAG to match your CUDA version:
-#   cu118 → CUDA 11.8   cu126 → CUDA 12.6   cu129 → CUDA 12.9   cu130 → CUDA 13.0
-# For CPU-only set PADDLE_PACKAGE to 'paddlepaddle==3.3.0' and PADDLE_INDEX to "".
-PADDLE_CUDA_TAG = "cu126"
-PADDLE_INDEX    = f"https://www.paddlepaddle.org.cn/packages/stable/{PADDLE_CUDA_TAG}/"
-PADDLE_PACKAGE  = "paddlepaddle-gpu==3.3.0"
+# CPU-only PaddlePaddle — no CUDA/OneDNN stack, no GPU FPS impact.
+# paddlepaddle-gpu 3.3.0 has an unfixed OneDNN bug
+# (ConvertPirAttribute2RuntimeAttribute / pir::ArrayAttribute<pir::DoubleAttribute>)
+# that crashes CPU inference even when FLAGS_use_mkldnn=0. The CPU build avoids
+# this entirely and is sufficient for OCR on a 314×29 px ROI at ≤10 FPS.
+PADDLE_INDEX    = ""
+PADDLE_PACKAGE  = "paddlepaddle==3.3.0"
 PADDLEOCR_PACKAGES = [
     "paddleocr",
 ]
@@ -133,10 +130,9 @@ def _pip(packages: list, upgrade: bool = True, extra_index: str = "") -> None:
 
 
 def install_paddleocr() -> None:
-    log(f"Installing PaddlePaddle GPU ({PADDLE_PACKAGE})...")
-    log(f"  Primary index : https://pypi.org/simple")
-    log(f"  Extra index   : {PADDLE_INDEX}")
-    _pip([PADDLE_PACKAGE], extra_index=PADDLE_INDEX)
+    log(f"Installing PaddlePaddle CPU ({PADDLE_PACKAGE})...")
+    log(f"  Index : https://pypi.org/simple")
+    _pip([PADDLE_PACKAGE])
     log(f"Installing: {', '.join(PADDLEOCR_PACKAGES)}")
     _pip(PADDLEOCR_PACKAGES)
 
@@ -146,8 +142,7 @@ def install_paddleocr() -> None:
 def verify_installation() -> None:
     log("Verifying installation...")
     checks = [
-        ("paddle importable",    is_paddle_importable, True),
-        ("paddle GPU support",   is_paddle_gpu,        False),
+        ("paddle importable",    is_paddle_importable,    True),
         ("paddleocr importable", is_paddleocr_importable, True),
     ]
     all_ok = True
@@ -155,20 +150,15 @@ def verify_installation() -> None:
         ok = fn()
         if ok:
             log(f"  [OK]      {name}")
-        elif required:
+        else:
             log(f"  [MISSING] {name}")
             all_ok = False
-        else:
-            log(f"  [WARN]    {name} — GPU not available, OCR will run on CPU")
 
     if not all_ok:
         warn("")
         warn("One or more required components are missing. Common causes:")
-        warn("  1. CUDA 12.x toolkit not installed (driver >= 525.x required for GPU)")
-        warn("  2. Network error downloading packages")
-        warn("  3. Axiom has not been restarted since installation")
-        warn("")
-        warn("  For CPU-only install, set PADDLE_PACKAGE='paddlepaddle==2.6.2' and PADDLE_INDEX='' in this script")
+        warn("  1. Network error downloading packages")
+        warn("  2. Axiom has not been restarted since installation")
     else:
         log("PaddleOCR installation complete.")
 
@@ -201,16 +191,19 @@ def main() -> None:
     paddle_ver = _run_check("import paddle; print(paddle.__version__)")
     ocr_ver    = _run_check("import paddleocr; print(paddleocr.__version__)")
     if paddle_ver and ocr_ver:
-        need_reinstall = not paddle_ver.startswith("3.")
+        is_gpu_build = _run_check("import paddle; print(paddle.is_compiled_with_cuda())") == "True"
+        need_reinstall = not paddle_ver.startswith("3.") or is_gpu_build
         if not need_reinstall:
             log("PaddleOCR is already installed at the correct versions.")
             log(f"  paddle version    : {paddle_ver}")
             log(f"  paddleocr version : {ocr_ver}")
-            log(f"  GPU support       : {_run_check('import paddle; print(paddle.is_compiled_with_cuda())')}")
             print_next_steps()
             return
-        warn(f"Installed versions (paddle {paddle_ver}, paddleocr {ocr_ver}) are incompatible.")
-        warn("Reinstalling pinned compatible versions...")
+        if is_gpu_build:
+            warn(f"Installed paddle {paddle_ver} is the GPU build — reinstalling CPU build to fix OneDNN crash.")
+        else:
+            warn(f"Installed versions (paddle {paddle_ver}, paddleocr {ocr_ver}) are incompatible.")
+        warn("Reinstalling...")
 
     install_paddleocr()
     log("")

@@ -7,7 +7,7 @@ if %errorlevel% NEQ 0 (
 	exit /b
 )
 
-echo [Axiom] Installing PaddleOCR (GPU) packages...
+echo [Axiom] Installing PaddleOCR (CPU) packages...
 echo [Axiom] Packages will be written to: %LOCALAPPDATA%\AxiomAI\site-packages
 echo.
 
