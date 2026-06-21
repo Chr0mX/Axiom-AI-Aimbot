@@ -84,19 +84,16 @@ def _to_rgb(frame: np.ndarray) -> np.ndarray:
 
 
 def _crop_roi(frame: np.ndarray, log_once: list) -> np.ndarray:
-    """Crop to _OCR_ROI if the frame is large enough, otherwise return the full frame."""
+    """Always crop to _OCR_ROI, clamping to frame bounds if needed."""
     h, w = frame.shape[:2]
     l, t = _OCR_ROI["left"], _OCR_ROI["top"]
     rw, rh = _OCR_ROI["width"], _OCR_ROI["height"]
+    x1, y1 = min(l, w), min(t, h)
+    x2, y2 = min(l + rw, w), min(t + rh, h)
     if not log_once:
-        if w >= l + rw and h >= t + rh:
-            logger.info("[OCR] Frame %dx%d → cropping ROI left=%d top=%d w=%d h=%d", w, h, l, t, rw, rh)
-        else:
-            logger.info("[OCR] Frame %dx%d is smaller than ROI bounds (%dx%d) — using full frame", w, h, l + rw, t + rh)
+        logger.info("[OCR] Frame %dx%d → ROI crop [%d:%d, %d:%d]", w, h, x1, x2, y1, y2)
         log_once.append(True)
-    if w >= l + rw and h >= t + rh:
-        return frame[t:t + rh, l:l + rw]
-    return frame
+    return frame[y1:y2, x1:x2]
 
 
 def _extract_texts(result) -> list[str]:
