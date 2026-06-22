@@ -274,7 +274,13 @@ def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
         if top_score > 0.001 and class_names:
             best_cid = int(class_ids[np.argmax(scores)])
             best_name = class_names[best_cid] if best_cid < len(class_names) else str(best_cid)
-            return [f"[below threshold] best: {best_name} {top_score:.1%}  (threshold={threshold:.0%})"], []
+            # Return best candidate as an orange "hint" box (negative score signals below-threshold)
+            best_orig = int(np.argmax(scores))
+            cx, cy, bw, bh = data[best_orig, :4]
+            x1, y1 = float(cx - bw / 2), float(cy - bh / 2)
+            x2, y2 = float(cx + bw / 2), float(cy + bh / 2)
+            hint_box = [(x1, y1, x2, y2, best_cid, -top_score)]  # negative score = below threshold
+            return [f"[below threshold] best: {best_name} {top_score:.1%}  (threshold={threshold:.0%})"], hint_box
         return [], []
 
     passing_idx = np.where(mask)[0]

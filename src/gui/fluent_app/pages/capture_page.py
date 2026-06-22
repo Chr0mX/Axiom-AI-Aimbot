@@ -913,6 +913,8 @@ class CapturePage(BasePage):
             trigger_hud_scan()
         QTimer.singleShot(1500, self._updateRoiPreview)
 
+    _box_logged: bool = False
+
     @staticmethod
     def _draw_hud_boxes(roi_rgb: "np.ndarray", boxes: list) -> "np.ndarray":
         if not boxes:
@@ -930,11 +932,17 @@ class CapturePage(BasePage):
                 py1 = int((y1m - pad_y) / scale)
                 px2 = int((x2m - pad_x) / scale)
                 py2 = int((y2m - pad_y) / scale)
-                cv2.rectangle(roi_rgb, (px1, py1), (px2, py2), (0, 255, 80), 1)
-                cv2.putText(roi_rgb, f"{score:.0%}", (px1, max(py1 - 2, 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 80), 1)
-        except Exception:
-            pass
+                below = score < 0
+                color = (255, 140, 0) if below else (0, 255, 80)  # orange hint / green confirmed
+                label = f"~{abs(score):.0%}" if below else f"{score:.0%}"
+                print(f"[HUD box] model({inp_w}×{inp_h}) scale={scale:.3f} pad=({pad_x:.1f},{pad_y:.1f}) "
+                      f"model_coords=({x1m:.0f},{y1m:.0f},{x2m:.0f},{y2m:.0f}) "
+                      f"roi_px=({px1},{py1},{px2},{py2}) {'HINT' if below else 'DETECT'}")
+                cv2.rectangle(roi_rgb, (px1, py1), (px2, py2), color, 1)
+                cv2.putText(roi_rgb, label, (max(px1, 0), max(py1 - 2, 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+        except Exception as exc:
+            print(f"[HUD box] draw error: {exc}")
         return roi_rgb
 
     def _updateRoiPreview(self):
