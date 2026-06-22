@@ -411,7 +411,9 @@ def ai_logic_loop(
     capture_thread.start()
 
     from .ocr_inference import start as _ocr_start, stop as _ocr_stop
+    from .hud_inference import start as _hud_start, stop as _hud_stop
     _ocr_start(config)
+    _hud_start(config)
 
     try:
         while config.Running:
@@ -681,6 +683,7 @@ def ai_logic_loop(
                 traceback.print_exc()
                 time.sleep(1.0)
     finally:
+        _hud_stop()
         _ocr_stop()
         _preprocess_stop.set()
         if _preprocess_thread.is_alive():

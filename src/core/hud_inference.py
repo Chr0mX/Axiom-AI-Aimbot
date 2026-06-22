@@ -1,0 +1,391 @@
+"""
+Secondary HUD inference — YOLO11n ONNX weapon/attachment detector.
+
+PROCESS-ISOLATED DESIGN
+-----------------------
+Mirrors ocr_inference.py: the ONNX Runtime session and all pre/post-processing
+run in a separate child process so the main inference loop and Qt UI are never
+blocked by this work.
+
+ROI: x1=1499, y1=949, x2=1873, y2=1029  (374 x 80 px, 1080p reference)
+Model input: 320 x 320 NCHW float32, letterboxed with grey fill (114).
+Output: YOLO11n format [1, 4+num_classes, num_anchors] — transposed and decoded here.
+
+Public API (identical shape to ocr_inference.py):
+  start(config)           — spawn child process + feeder thread (no-op if running)
+  stop()                  — stop both and join
+  trigger_hud_scan()      — force an immediate scan
+  get_hud_results()       — current detection lines, e.g. ["R301: 92%"]
+  get_hud_roi_image()     — last ROI crop (for GUI preview)
+"""
+
+from __future__ import annotations
+
+import logging
+import multiprocessing as mp
+import os
+import queue
+import sys
+import threading
+import time
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from .config import Config
+
+logger = logging.getLogger(__name__)
+
+_HUD_ROI: dict[str, int] = {"left": 1499, "top": 949, "width": 374, "height": 80}
+_MODEL_INPUT_SIZE = 320
+
+# ── Parent-side shared state ──────────────────────────────────────────────────
+_results_lock = threading.Lock()
+_hud_results: list[str] = []
+
+_roi_image_lock = threading.Lock()
+_roi_image: np.ndarray | None = None
+
+_scan_flag = threading.Event()
+
+_stop_event: threading.Event | None = None
+_feeder_thread: threading.Thread | None = None
+
+# ── Child-process plumbing ────────────────────────────────────────────────────
+_proc: mp.Process | None = None
+_proc_stop = None
+_frame_q = None     # mp.Queue(maxsize=1)  parent → child: (roi_bgra, model_path, hud_confidence)
+_result_q = None    # mp.Queue(maxsize=4)  child → parent: list[str]
+
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+def get_hud_results() -> list[str]:
+    with _results_lock:
+        return list(_hud_results)
+
+
+def get_hud_roi_image() -> np.ndarray | None:
+    with _roi_image_lock:
+        return _roi_image if _roi_image is None else _roi_image.copy()
+
+
+def trigger_hud_scan() -> None:
+    _scan_flag.set()
+
+
+def start(config: "Config") -> None:
+    """Spawn the HUD child process and feeder thread. No-op if already running."""
+    global _proc, _proc_stop, _frame_q, _result_q, _stop_event, _feeder_thread
+    if _feeder_thread is not None and _feeder_thread.is_alive():
+        return
+
+    try:
+        ctx = mp.get_context("spawn")
+        _frame_q = ctx.Queue(maxsize=1)
+        _result_q = ctx.Queue(maxsize=4)
+        _proc_stop = ctx.Event()
+        _proc = ctx.Process(
+            target=_child_main, args=(_frame_q, _result_q, _proc_stop),
+            name="HUDProcess", daemon=True,
+        )
+        _proc.start()
+    except Exception as exc:
+        logger.error("[HUD] Failed to start HUD process: %s", exc)
+        _proc = None
+        return
+
+    _stop_event = threading.Event()
+    _feeder_thread = threading.Thread(
+        target=_feeder, args=(config, _stop_event), name="HUDFeeder", daemon=True,
+    )
+    _feeder_thread.start()
+
+
+def stop() -> None:
+    """Stop feeder thread and HUD child process."""
+    global _proc, _proc_stop, _frame_q, _result_q, _stop_event, _feeder_thread
+    if _stop_event is not None:
+        _stop_event.set()
+    if _proc_stop is not None:
+        try:
+            _proc_stop.set()
+        except Exception:
+            pass
+    if _frame_q is not None:
+        try:
+            _frame_q.put_nowait(None)
+        except Exception:
+            pass
+    if _feeder_thread is not None and _feeder_thread.is_alive():
+        _feeder_thread.join(timeout=2.0)
+    if _proc is not None:
+        try:
+            _proc.join(timeout=2.0)
+            if _proc.is_alive():
+                _proc.terminate()
+        except Exception:
+            pass
+    _proc = None
+    _proc_stop = None
+    _frame_q = None
+    _result_q = None
+    _stop_event = None
+    _feeder_thread = None
+
+
+# ── Shared helpers ────────────────────────────────────────────────────────────
+
+def _crop_roi(frame: np.ndarray, log_once: list) -> np.ndarray:
+    h, w = frame.shape[:2]
+    l, t = _HUD_ROI["left"], _HUD_ROI["top"]
+    rw, rh = _HUD_ROI["width"], _HUD_ROI["height"]
+    x1, y1 = min(l, w), min(t, h)
+    x2, y2 = min(l + rw, w), min(t + rh, h)
+    if not log_once:
+        logger.info("[HUD] Frame %dx%d → ROI [x:%d-%d, y:%d-%d]", w, h, x1, x2, y1, y2)
+        log_once.append(True)
+    return frame[y1:y2, x1:x2]
+
+
+def _drain(q) -> None:
+    try:
+        while True:
+            q.get_nowait()
+    except queue.Empty:
+        pass
+
+
+def _collect_results() -> None:
+    latest = None
+    try:
+        while True:
+            latest = _result_q.get_nowait()
+    except queue.Empty:
+        pass
+    except Exception:
+        return
+    if latest is not None:
+        with _results_lock:
+            _hud_results[:] = latest
+
+
+# ── Child process ─────────────────────────────────────────────────────────────
+
+def _letterbox(img_bgr: np.ndarray, size: int) -> np.ndarray:
+    """Letterbox img_bgr to a square (size x size) with grey fill (114)."""
+    import cv2
+    h, w = img_bgr.shape[:2]
+    scale = min(size / w, size / h)
+    new_w, new_h = int(w * scale), int(h * scale)
+    resized = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    canvas = np.full((size, size, 3), 114, dtype=np.uint8)
+    pad_x = (size - new_w) // 2
+    pad_y = (size - new_h) // 2
+    canvas[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
+    return canvas
+
+
+def _preprocess(roi: np.ndarray) -> np.ndarray:
+    """Return NCHW float32 blob [1, 3, 320, 320] from a BGR(A) ROI crop."""
+    import cv2
+    if roi.ndim == 3 and roi.shape[2] == 4:
+        roi = cv2.cvtColor(roi, cv2.COLOR_BGRA2BGR)
+    square = _letterbox(roi, _MODEL_INPUT_SIZE)
+    rgb = square[:, :, ::-1].astype(np.float32) / 255.0
+    return rgb.transpose(2, 0, 1)[np.newaxis]   # [1, 3, H, W]
+
+
+def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
+                 class_names: list[str] | None) -> list[str]:
+    """Decode YOLO11n output and return top detection strings.
+
+    output shape: [1, 4+num_classes, num_anchors]
+    """
+    data = output[0]  # [4+C, A]
+    data = data.T     # [A, 4+C]
+
+    conf = data[:, 4:4 + num_classes]       # [A, C]
+    class_ids = conf.argmax(axis=1)         # [A]
+    scores = conf[np.arange(len(conf)), class_ids]  # [A]
+
+    mask = scores >= threshold
+    if not mask.any():
+        return []
+
+    scores = scores[mask]
+    class_ids = class_ids[mask]
+
+    order = np.argsort(scores)[::-1][:5]
+    lines: list[str] = []
+    for idx in order:
+        cid = int(class_ids[idx])
+        score = float(scores[idx])
+        name = class_names[cid] if (class_names and cid < len(class_names)) else str(cid)
+        lines.append(f"{name}: {int(score * 100)}%")
+    return lines
+
+
+def _child_main(frame_q, result_q, proc_stop) -> None:
+    """Run in a separate process: own GIL, below-normal priority."""
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
+    la = os.environ.get("LOCALAPPDATA", "")
+    if la:
+        pkg = os.path.join(la, "AxiomAI", "site-packages")
+        if os.path.isdir(pkg) and pkg not in sys.path:
+            sys.path.insert(0, pkg)
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            BELOW_NORMAL = 0x00004000
+            k32 = ctypes.windll.kernel32
+            k32.SetPriorityClass(k32.GetCurrentProcess(), BELOW_NORMAL)
+        except Exception:
+            pass
+    else:
+        try:
+            os.nice(10)
+        except Exception:
+            pass
+
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        print("[HUD child] onnxruntime not available — exiting")
+        return
+
+    session = None
+    current_model_path: str = ""
+    class_names: list[str] | None = None
+    num_classes: int = 0
+    input_name: str = ""
+
+    while not proc_stop.is_set():
+        try:
+            item = frame_q.get(timeout=0.3)
+        except queue.Empty:
+            continue
+        if item is None:
+            break
+
+        roi, model_path, confidence = item
+
+        # (Re)load session if model changed
+        if model_path != current_model_path:
+            session = None
+            current_model_path = model_path
+            class_names = None
+            if model_path and os.path.isfile(model_path):
+                try:
+                    opts = ort.SessionOptions()
+                    opts.intra_op_num_threads = 1
+                    opts.inter_op_num_threads = 1
+                    session = ort.InferenceSession(
+                        model_path,
+                        sess_options=opts,
+                        providers=["CPUExecutionProvider"],
+                    )
+                    out_shape = session.get_outputs()[0].shape
+                    # out_shape: [1, 4+C, A]  → num_classes = out_shape[1] - 4
+                    if len(out_shape) >= 2 and isinstance(out_shape[1], int):
+                        num_classes = out_shape[1] - 4
+                    input_name = session.get_inputs()[0].name
+
+                    # Try to read class names from metadata
+                    meta = session.get_modelmeta().custom_metadata_map
+                    if "names" in meta:
+                        import ast
+                        try:
+                            raw = ast.literal_eval(meta["names"])
+                            if isinstance(raw, dict):
+                                class_names = [raw[i] for i in range(len(raw))]
+                            elif isinstance(raw, list):
+                                class_names = raw
+                        except Exception:
+                            pass
+
+                    if num_classes <= 0 and class_names:
+                        num_classes = len(class_names)
+
+                    print(f"[HUD child] Model loaded: {os.path.basename(model_path)}"
+                          f"  classes={num_classes}  input={input_name}")
+                except Exception as exc:
+                    print(f"[HUD child] Model load error: {exc}")
+                    session = None
+
+        if session is None:
+            continue
+
+        try:
+            blob = _preprocess(roi)
+            outputs = session.run(None, {input_name: blob})
+            output = outputs[0]
+
+            if num_classes <= 0:
+                num_classes = output.shape[1] - 4
+
+            lines = _postprocess(output, num_classes, confidence, class_names)
+            try:
+                result_q.put_nowait(lines)
+            except queue.Full:
+                try:
+                    result_q.get_nowait()
+                    result_q.put_nowait(lines)
+                except Exception:
+                    pass
+        except Exception as exc:
+            print(f"[HUD child] frame error: {exc}")
+
+
+# ── Parent feeder thread ──────────────────────────────────────────────────────
+
+def _feeder(config: "Config", stop_event: threading.Event) -> None:
+    from .screen_capture import get_preview_frame
+
+    global _roi_image
+    log_once: list = []
+
+    # Resolve project root for model paths (relative to project root)
+    _src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _project_root = os.path.dirname(_src)
+
+    while not stop_event.is_set():
+        t0 = time.perf_counter()
+
+        enabled = getattr(config, "second_inference_mode", "off") == "v2_onnx"
+        hud_model_rel = getattr(config, "hud_model_path", "")
+        forced = _scan_flag.is_set()
+        if forced:
+            _scan_flag.clear()
+
+        if (enabled or forced) and hud_model_rel:
+            model_path = (hud_model_rel if os.path.isabs(hud_model_rel)
+                          else os.path.join(_project_root, hud_model_rel))
+            confidence = float(getattr(config, "hud_confidence", 0.25))
+            frame = get_preview_frame()
+            if frame is not None:
+                try:
+                    roi = _crop_roi(frame, log_once)
+                    with _roi_image_lock:
+                        _roi_image = roi.copy()
+                    if _frame_q is not None:
+                        _drain(_frame_q)
+                        try:
+                            _frame_q.put_nowait((roi, model_path, confidence))
+                        except queue.Full:
+                            pass
+                except Exception as exc:
+                    logger.warning("[HUD] feed error: %s", exc)
+
+        if _result_q is not None:
+            _collect_results()
+
+        fps = max(1, min(10, int(getattr(config, "second_inference_fps", 2))))
+        elapsed = time.perf_counter() - t0
+        interval = 0.2 if not (enabled or forced) else max((1.0 / fps) - elapsed, 0.05)
+        stop_event.wait(interval)

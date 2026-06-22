@@ -224,6 +224,20 @@ class ModelPage(BasePage):
 
         self.modelNotesCard = _ModelNotesCard(self.scrollWidget)
 
+        # === HUD Model (V2 ONNX) ===
+        self.hudModelGroup = SettingCardGroup("HUD Model (V2 ONNX)", self.scrollWidget)
+
+        self.hudModelCombo = ComboBox()
+        self.hudModelCombo.setMinimumWidth(200)
+        self.hudModelCard = SettingCard(
+            FluentIcon.ROBOT,
+            "HUD Model",
+            "YOLO11n .onnx model from Model_Hud/ for V2 weapon detection",
+            self.hudModelGroup,
+        )
+        self.hudModelCard.hBoxLayout.addWidget(self.hudModelCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.hudModelCard.hBoxLayout.addSpacing(16)
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -235,6 +249,10 @@ class ModelPage(BasePage):
         self.modelGroup.addSettingCard(self.openModelFolderCard)
         self.addContent(self.modelGroup)
         self.scrollLayout.addWidget(self.modelNotesCard)
+
+        self.hudModelGroup.addSettingCard(self.hudModelCard)
+        self.addContent(self.hudModelGroup)
+
         self.scrollLayout.addStretch(1)
 
     # ──────────────────────────────────────────────
@@ -245,6 +263,7 @@ class ModelPage(BasePage):
         self.modelCombo.currentTextChanged.connect(self._onModelChanged)
         self.inferenceBackendCombo.currentTextChanged.connect(self._onInferenceBackendChanged)
         self.openModelFolderBtn.clicked.connect(self._openModelFolder)
+        self.hudModelCombo.currentTextChanged.connect(self._onHudModelChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -294,6 +313,23 @@ class ModelPage(BasePage):
             self._updateInferenceBackendSubtitle()
         finally:
             self._isLoadingConfig = False
+
+        # Load HUD model combo
+        self.hudModelCombo.blockSignals(True)
+        self._refreshHudModelList()
+        hud_name = os.path.basename(getattr(self._config, 'hud_model_path', '') or "")
+        hud_idx = -1
+        for i in range(self.hudModelCombo.count()):
+            if self.hudModelCombo.itemText(i).lower() == hud_name.lower():
+                hud_idx = i
+                break
+        if hud_idx >= 0:
+            self.hudModelCombo.setCurrentIndex(hud_idx)
+        elif self.hudModelCombo.count() > 0:
+            self.hudModelCombo.setCurrentIndex(0)
+            if self._config:
+                self._config.hud_model_path = os.path.join("Model_Hud", self.hudModelCombo.itemText(0))
+        self.hudModelCombo.blockSignals(False)
 
         # Kick off model inspection and load notes after config load
         self._updateModelInfo(self._config.model_path)
@@ -363,6 +399,16 @@ class ModelPage(BasePage):
             models = glob.glob(os.path.join(model_dir, "*.onnx"))
             for m in models:
                 self.modelCombo.addItem(os.path.basename(m))
+
+    def _refreshHudModelList(self):
+        self.hudModelCombo.clear()
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        project_root = os.path.dirname(src_dir)
+        model_dir = os.path.join(project_root, "Model_Hud")
+        if os.path.exists(model_dir):
+            models = glob.glob(os.path.join(model_dir, "*.onnx"))
+            for m in sorted(models):
+                self.hudModelCombo.addItem(os.path.basename(m))
 
     def _openModelFolder(self):
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -482,6 +528,10 @@ class ModelPage(BasePage):
             self._updateModelInfo(self._config.model_path)
             self.modelNotesCard.setModel(os.path.basename(text))
 
+    def _onHudModelChanged(self, text):
+        if self._config and text:
+            self._config.hud_model_path = os.path.join("Model_Hud", text)
+
     def _onInferenceBackendChanged(self, text):
         if not self._config:
             return
@@ -522,3 +572,5 @@ class ModelPage(BasePage):
         self._updateInferenceBackendSubtitle()
         self.openModelFolderCard.titleLabel.setText(t("open_model_folder"))
         self.openModelFolderBtn.setText(t("open_model_folder"))
+        self.hudModelGroup.titleLabel.setText("HUD Model (V2 ONNX)")
+        self.hudModelCard.titleLabel.setText("HUD Model")

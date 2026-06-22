@@ -4,7 +4,7 @@
 from PyQt6.QtCore import Qt
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
-    FluentIcon, SettingCard,
+    FluentIcon, SettingCard, SegmentedWidget,
 )
 from ..components.slider_spin_card import SliderSpinCard, SliderLabelCard, SliderDoubleSpinCard
 
@@ -134,11 +134,27 @@ class InferencePage(BasePage):
             parent=self.generalGroup
         )
 
-        self.ocrEnableCard = SwitchSettingCard(
+        self.secondInferSegment = SegmentedWidget()
+        self.secondInferSegment.addItem("off",     "Off")
+        self.secondInferSegment.addItem("v1_ocr",  "V1 OCR")
+        self.secondInferSegment.addItem("v2_onnx", "V2 ONNX")
+        self.secondInferCard = SettingCard(
             FluentIcon.DOCUMENT,
-            t("ocr_enable", "Second Inference (OCR)"),
-            t("ocr_enable_desc", "Run PaddleOCR on a fixed screen region at ≤10 FPS to extract text"),
-            parent=self.generalGroup
+            "2nd Inference",
+            "Off / V1 OCR (PaddleOCR) / V2 ONNX (HUD weapon detector)",
+            self.generalGroup,
+        )
+        self.secondInferCard.hBoxLayout.addWidget(self.secondInferSegment, 0, Qt.AlignmentFlag.AlignRight)
+        self.secondInferCard.hBoxLayout.addSpacing(16)
+
+        self.hudConfidenceCard = SliderDoubleSpinCard(
+            FluentIcon.FILTER,
+            "V2 Confidence Threshold",
+            0.01, 1.0,
+            decimals=2,
+            step=0.05,
+            description="Minimum confidence for V2 ONNX detections",
+            parent=self.generalGroup,
         )
 
         # === Inference Performance ===
@@ -223,7 +239,8 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
         self.generalGroup.addSettingCard(self.idleDetectIntervalCard)
         self.generalGroup.addSettingCard(self.singleTargetCard)
-        self.generalGroup.addSettingCard(self.ocrEnableCard)
+        self.generalGroup.addSettingCard(self.secondInferCard)
+        self.generalGroup.addSettingCard(self.hudConfidenceCard)
         self.addContent(self.generalGroup)
 
         self.inferPerfGroup.addSettingCard(self.skipLetterboxCard)
@@ -266,7 +283,8 @@ class InferencePage(BasePage):
         self.boxEmaAlphaXCard.valueChanged.connect(self._onBoxEmaAlphaXChanged)
         self.boxEmaAlphaYCard.valueChanged.connect(self._onBoxEmaAlphaYChanged)
 
-        self.ocrEnableCard.checkedChanged.connect(self._onOcrEnableChanged)
+        self.secondInferSegment.currentItemChanged.connect(self._onSecondInferChanged)
+        self.hudConfidenceCard.valueChanged.connect(self._onHudConfidenceChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -303,7 +321,9 @@ class InferencePage(BasePage):
             self.boxEmaAlphaXCard.setValue(float(getattr(self._config, 'box_ema_alpha_x', 0.8)))
             self.boxEmaAlphaYCard.setValue(float(getattr(self._config, 'box_ema_alpha_y', 0.5)))
 
-            self.ocrEnableCard.setChecked(bool(getattr(self._config, 'ocr_enabled', False)))
+            mode = getattr(self._config, 'second_inference_mode', 'off')
+            self.secondInferSegment.setCurrentItem(mode if mode in ("off", "v1_ocr", "v2_onnx") else "off")
+            self.hudConfidenceCard.setValue(float(getattr(self._config, 'hud_confidence', 0.25)))
 
             # Apply initial screenshot-method effect on fov_follow visibility
             method = getattr(self._config, 'screenshot_method', 'mss')
@@ -435,9 +455,13 @@ class InferencePage(BasePage):
         if self._config:
             self._config.box_ema_alpha_y = float(value)
 
-    def _onOcrEnableChanged(self, checked: bool):
+    def _onSecondInferChanged(self, key: str):
         if self._config:
-            self._config.ocr_enabled = bool(checked)
+            self._config.second_inference_mode = key
+
+    def _onHudConfidenceChanged(self, value: float):
+        if self._config:
+            self._config.hud_confidence = float(value)
 
     # ──────────────────────────────────────────────
     # Retranslate
@@ -462,8 +486,9 @@ class InferencePage(BasePage):
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
-        self.ocrEnableCard.titleLabel.setText(t("ocr_enable", "Second Inference (OCR)"))
-        self.ocrEnableCard.contentLabel.setText(t("ocr_enable_desc", "Run PaddleOCR on a fixed screen region at ≤10 FPS to extract text"))
+        self.secondInferCard.titleLabel.setText("2nd Inference")
+        self.secondInferCard.contentLabel.setText("Off / V1 OCR (PaddleOCR) / V2 ONNX (HUD weapon detector)")
+        self.hudConfidenceCard.titleLabel.setText("V2 Confidence Threshold")
 
         self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
         self.skipLetterboxCard.contentLabel.setText(t("skip_letterbox_desc"))

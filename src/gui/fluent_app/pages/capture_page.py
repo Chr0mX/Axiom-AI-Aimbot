@@ -334,8 +334,8 @@ class CapturePage(BasePage):
         self.previewFpsCapCard.hBoxLayout.addWidget(self.previewFpsCapSegment, 0, Qt.AlignmentFlag.AlignRight)
         self.previewFpsCapCard.hBoxLayout.addSpacing(16)
 
-        # === Inferred Text (OCR) ===
-        self.ocrGroup = SettingCardGroup(t("ocr_inferred_text", "Inferred Text"), self.scrollWidget)
+        # === Active Weapon (2nd Inference) ===
+        self.ocrGroup = SettingCardGroup(t("ocr_inferred_text", "Active Weapon"), self.scrollWidget)
 
         self.ocrFpsCard = SliderSpinCard(
             FluentIcon.SPEED_HIGH,
@@ -361,7 +361,7 @@ class CapturePage(BasePage):
         self.ocrResultLabel.setWordWrap(True)
         self.ocrResultCard = SettingCard(
             FluentIcon.DOCUMENT,
-            t("ocr_result_title", "OCR Result"),
+            t("ocr_result_title", "Detected"),
             "",
             self.ocrGroup
         )
@@ -537,7 +537,7 @@ class CapturePage(BasePage):
                 self.udpBindIpCombo.setCurrentIndex(idx)
             self.udpPortCard.setValue(int(getattr(self._config, 'udp_bind_port', 5600)))
 
-            self.ocrFpsCard.setValue(int(getattr(self._config, 'ocr_fps', 2)))
+            self.ocrFpsCard.setValue(int(getattr(self._config, 'second_inference_fps', 2)))
 
             self._updateCaptureControlsVisibility(screenshot_method)
         finally:
@@ -874,22 +874,37 @@ class CapturePage(BasePage):
     def _onOcrFpsChanged(self, value: int):
         if self._isLoadingConfig or not self._config:
             return
-        self._config.ocr_fps = max(1, min(10, value))
+        self._config.second_inference_fps = max(1, min(10, value))
 
     def _onOcrScanClicked(self):
-        from core.ocr_inference import trigger_scan
         self.ocrResultLabel.setText("Scanning...")
-        trigger_scan()
+        mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
+        if mode == 'v1_ocr':
+            from core.ocr_inference import trigger_scan
+            trigger_scan()
+        elif mode == 'v2_onnx':
+            from core.hud_inference import trigger_hud_scan
+            trigger_hud_scan()
         QTimer.singleShot(1500, self._updateRoiPreview)
 
     def _updateRoiPreview(self):
-        from core.ocr_inference import get_roi_image
-        roi = get_roi_image()
+        mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
+        if mode == 'v1_ocr':
+            from core.ocr_inference import get_roi_image
+            roi = get_roi_image()
+            roi_w, roi_h = 314, 58
+        elif mode == 'v2_onnx':
+            from core.hud_inference import get_hud_roi_image
+            roi = get_hud_roi_image()
+            roi_w, roi_h = 374, 80
+        else:
+            return
         if roi is None:
             return
         h, w = roi.shape[:2]
         if roi.ndim != 3 or roi.shape[2] < 3:
             return
+        self.ocrRoiLabel.setFixedSize(roi_w, roi_h)
         roi_rgb = roi[:, :, :3][:, :, ::-1].copy()  # BGR(A) → RGB
         buf = roi_rgb.tobytes()
         qimg = QImage(buf, w, h, w * 3, QImage.Format.Format_RGB888)
@@ -901,12 +916,17 @@ class CapturePage(BasePage):
         )
 
     def _refreshOcrDisplay(self):
-        from core.ocr_inference import get_ocr_results
-        if not (self._config and getattr(self._config, 'ocr_enabled', False)):
+        mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
+        if mode == 'v1_ocr':
+            from core.ocr_inference import get_ocr_results
+            lines = get_ocr_results()
+        elif mode == 'v2_onnx':
+            from core.hud_inference import get_hud_results
+            lines = get_hud_results()
+        else:
             if self.ocrResultLabel.text() not in ("—", "Scanning..."):
-                pass  # keep last scan result visible even when OCR is toggled off
+                pass
             return
-        lines = get_ocr_results()
         if lines:
             self.ocrResultLabel.setText("\n".join(lines))
         elif self.ocrResultLabel.text() == "Scanning...":
@@ -944,9 +964,9 @@ class CapturePage(BasePage):
         self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")
         self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")
-        self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Inferred Text"))
-        self.ocrFpsCard.titleLabel.setText("OCR Capture FPS")
+        self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Active Weapon"))
+        self.ocrFpsCard.titleLabel.setText("2nd Inference FPS")
         self.ocrScanCard.titleLabel.setText("Scan ROI")
         self.ocrScanBtn.setText("Scan ROI")
-        self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "OCR Result"))
+        self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "Detected"))
         self.ocrRoiCard.titleLabel.setText("ROI Preview")

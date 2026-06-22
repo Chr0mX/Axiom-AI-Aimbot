@@ -191,9 +191,11 @@ _FIELD_MAP = {
     'acrylic_element_alpha':      'ui.acrylic_element_alpha',
     'show_console':               'ui.show_console',
 
-    # --- ocr ---
-    'ocr_enabled':                'ocr.enabled',
-    'ocr_fps':                    'ocr.fps',
+    # --- ocr / 2nd inference ---
+    'second_inference_mode':      'ocr.mode',
+    'second_inference_fps':       'ocr.fps',
+    'hud_model_path':             'ocr.hud_model_path',
+    'hud_confidence':             'ocr.hud_confidence',
 }
 
 
@@ -497,9 +499,11 @@ class Config:
         # screen capture uses monitor refresh rate or measured rate)
         self.source_nominal_fps: float = 0.0
 
-        # Secondary OCR inference (PaddleOCR)
-        self.ocr_enabled: bool = False
-        self.ocr_fps: int = 2  # OCR frames per second (1-10)
+        # Secondary inference (V1 = PaddleOCR, V2 = ONNX HUD detector)
+        self.second_inference_mode: str = "off"   # "off" | "v1_ocr" | "v2_onnx"
+        self.second_inference_fps: int = 2        # scan rate (1-10 FPS)
+        self.hud_model_path: str = ""             # relative path to V2 .onnx inside Model_Hud/
+        self.hud_confidence: float = 0.25         # V2 minimum detection confidence
 
         # Humanization post-processing layer (operates only on final dx/dy output)
         self.humanization: HumanizationConfig = HumanizationConfig()

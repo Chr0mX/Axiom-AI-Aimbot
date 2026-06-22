@@ -396,7 +396,7 @@ def _feeder(config: Config, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         t0 = time.perf_counter()
 
-        enabled = getattr(config, "ocr_enabled", False)
+        enabled = getattr(config, "second_inference_mode", "off") == "v1_ocr"
         forced = _scan_flag.is_set()
         if forced:
             _scan_flag.clear()
@@ -421,7 +421,7 @@ def _feeder(config: Config, stop_event: threading.Event) -> None:
         if _result_q is not None:
             _collect_results()
 
-        fps = max(1, min(10, int(getattr(config, "ocr_fps", 2))))
+        fps = max(1, min(10, int(getattr(config, "second_inference_fps", 2))))
         elapsed = time.perf_counter() - t0
         # Idle when disabled; otherwise pace to ocr_fps (min 0.05 s so result
         # collection stays responsive without busy-looping).
