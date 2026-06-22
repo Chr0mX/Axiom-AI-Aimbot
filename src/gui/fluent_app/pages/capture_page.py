@@ -919,10 +919,12 @@ class CapturePage(BasePage):
             return roi_rgb
         try:
             import cv2
+            from core.hud_inference import get_hud_model_size
+            inp_w, inp_h = get_hud_model_size()
             roi_h, roi_w = roi_rgb.shape[:2]
-            scale = min(320 / roi_w, 320 / roi_h)
-            pad_x = (320 - roi_w * scale) / 2
-            pad_y = (320 - roi_h * scale) / 2
+            scale = min(inp_w / roi_w, inp_h / roi_h)
+            pad_x = (inp_w - roi_w * scale) / 2
+            pad_y = (inp_h - roi_h * scale) / 2
             for (x1m, y1m, x2m, y2m, _cid, score) in boxes:
                 px1 = int((x1m - pad_x) / scale)
                 py1 = int((y1m - pad_y) / scale)

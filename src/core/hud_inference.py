@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _HUD_ROI_DEFAULT_STR = "1490,953,1870,1041"
-_MODEL_INPUT_SIZE = 320
 
 
 def _parse_roi(coords: str) -> dict[str, int] | None:
@@ -59,6 +58,9 @@ _hud_results: list[str] = []
 
 _boxes_lock = threading.Lock()
 _hud_boxes: list[tuple] = []
+
+_model_wh_lock = threading.Lock()
+_model_input_wh: tuple[int, int] = (320, 320)
 
 _roi_image_lock = threading.Lock()
 _roi_image: np.ndarray | None = None
@@ -83,9 +85,15 @@ def get_hud_results() -> list[str]:
 
 
 def get_hud_boxes() -> list[tuple]:
-    """Return latest bounding boxes as (x1, y1, x2, y2, class_id, score) in model space (0-320)."""
+    """Return latest bounding boxes as (x1, y1, x2, y2, class_id, score) in model-input space."""
     with _boxes_lock:
         return list(_hud_boxes)
+
+
+def get_hud_model_size() -> tuple[int, int]:
+    """Return (inp_w, inp_h) of the currently loaded model."""
+    with _model_wh_lock:
+        return _model_input_wh
 
 
 def get_hud_roi_image() -> np.ndarray | None:
@@ -190,7 +198,11 @@ def _collect_results() -> None:
     except Exception:
         return
     if latest is not None:
-        if isinstance(latest, tuple):
+        if isinstance(latest, tuple) and len(latest) == 4:
+            lines, boxes, inp_w, inp_h = latest
+            with _model_wh_lock:
+                _model_input_wh = (inp_w, inp_h)
+        elif isinstance(latest, tuple) and len(latest) == 2:
             lines, boxes = latest
         else:
             lines, boxes = latest, []
@@ -202,28 +214,28 @@ def _collect_results() -> None:
 
 # ── Child process ─────────────────────────────────────────────────────────────
 
-def _letterbox(img_bgr: np.ndarray, size: int) -> np.ndarray:
-    """Letterbox img_bgr to a square (size x size) with grey fill (114)."""
+def _letterbox(img_bgr: np.ndarray, inp_w: int, inp_h: int) -> np.ndarray:
+    """Letterbox img_bgr into an (inp_h × inp_w) canvas with grey fill (114)."""
     import cv2
     h, w = img_bgr.shape[:2]
-    scale = min(size / w, size / h)
+    scale = min(inp_w / w, inp_h / h)
     new_w, new_h = int(w * scale), int(h * scale)
     resized = cv2.resize(img_bgr, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-    canvas = np.full((size, size, 3), 114, dtype=np.uint8)
-    pad_x = (size - new_w) // 2
-    pad_y = (size - new_h) // 2
+    canvas = np.full((inp_h, inp_w, 3), 114, dtype=np.uint8)
+    pad_x = (inp_w - new_w) // 2
+    pad_y = (inp_h - new_h) // 2
     canvas[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
     return canvas
 
 
-def _preprocess(roi: np.ndarray) -> np.ndarray:
-    """Return NCHW float32 blob [1, 3, 320, 320] from a BGR(A) ROI crop."""
+def _preprocess(roi: np.ndarray, inp_w: int, inp_h: int) -> np.ndarray:
+    """Return NCHW float32 blob [1, 3, inp_h, inp_w] from a BGR(A) ROI crop."""
     import cv2
     if roi.ndim == 3 and roi.shape[2] == 4:
         roi = cv2.cvtColor(roi, cv2.COLOR_BGRA2BGR)
-    square = _letterbox(roi, _MODEL_INPUT_SIZE)
-    rgb = square[:, :, ::-1].astype(np.float32) / 255.0
-    return rgb.transpose(2, 0, 1)[np.newaxis]   # [1, 3, H, W]
+    lb = _letterbox(roi, inp_w, inp_h)
+    rgb = lb[:, :, ::-1].astype(np.float32) / 255.0
+    return rgb.transpose(2, 0, 1)[np.newaxis]   # [1, 3, inp_h, inp_w]
 
 
 def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
@@ -339,6 +351,8 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
     class_names: list[str] | None = None
     num_classes: int = 0
     input_name: str = ""
+    inp_w: int = 320
+    inp_h: int = 320
     _last_roi_shape: tuple = ()
 
     while not proc_stop.is_set():
@@ -367,11 +381,19 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
                         sess_options=opts,
                         providers=["CPUExecutionProvider"],
                     )
+                    inp_meta = session.get_inputs()[0]
+                    input_name = inp_meta.name
+                    # Read actual model input dims from NCHW shape [1, 3, H, W]
+                    try:
+                        inp_h = int(inp_meta.shape[2])
+                        inp_w = int(inp_meta.shape[3])
+                    except Exception:
+                        inp_h, inp_w = 320, 320
+
                     out_shape = session.get_outputs()[0].shape
                     if len(out_shape) >= 3:
                         d1, d2 = int(out_shape[1]), int(out_shape[2])
                         num_classes = min(d1, d2) - 4  # smaller dim = 4+C
-                    input_name = session.get_inputs()[0].name
 
                     meta = session.get_modelmeta().custom_metadata_map
                     if "names" in meta:
@@ -389,7 +411,7 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
                         num_classes = len(class_names)
 
                     print(f"[HUD child] Loaded: {os.path.basename(model_path)}"
-                          f"  classes={num_classes}  input={input_name}")
+                          f"  classes={num_classes}  input={inp_w}×{inp_h}")
                 except Exception as exc:
                     err = f"[HUD Error] Model load failed: {exc}"
                     print(err)
@@ -413,7 +435,7 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
             if roi.shape != _last_roi_shape:
                 _last_roi_shape = roi.shape
                 print(f"[HUD child] ROI shape={roi.shape} mean={float(roi.mean()):.1f} min={int(roi.min())} max={int(roi.max())}")
-            blob = _preprocess(roi)
+            blob = _preprocess(roi, inp_w, inp_h)
             outputs = session.run(None, {input_name: blob})
             output = outputs[0]
 
@@ -422,11 +444,11 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
 
             lines, boxes = _postprocess(output, num_classes, confidence, class_names)
             try:
-                result_q.put_nowait((lines, boxes))
+                result_q.put_nowait((lines, boxes, inp_w, inp_h))
             except queue.Full:
                 try:
                     result_q.get_nowait()
-                    result_q.put_nowait((lines, boxes))
+                    result_q.put_nowait((lines, boxes, inp_w, inp_h))
                 except Exception:
                     pass
         except Exception as exc:
