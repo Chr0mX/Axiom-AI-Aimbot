@@ -228,10 +228,26 @@ def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
     scores = conf[np.arange(len(conf)), class_ids]
 
     top_score = float(scores.max()) if len(scores) > 0 else 0.0
-    print(f"[HUD child] max_score={top_score:.3f} threshold={threshold} anchors={len(scores)}")
+
+    # Log top-3 classes so we can see what the model is actually seeing
+    if len(scores) > 0 and class_names:
+        top_idx = np.argsort(scores)[::-1][:3]
+        top_str = "  ".join(
+            f"{class_names[int(class_ids[i])] if int(class_ids[i]) < len(class_names) else class_ids[i]}="
+            f"{float(scores[i]):.3f}"
+            for i in top_idx
+        )
+        print(f"[HUD child] threshold={threshold}  top3: {top_str}")
+    else:
+        print(f"[HUD child] max_score={top_score:.3f} threshold={threshold} anchors={len(scores)}")
 
     mask = scores >= threshold
     if not mask.any():
+        # Return a diagnostic line so the UI shows something useful
+        if top_score > 0.001 and class_names:
+            best_cid = int(class_ids[np.argmax(scores)])
+            best_name = class_names[best_cid] if best_cid < len(class_names) else str(best_cid)
+            return [f"[below threshold] best: {best_name} {top_score:.1%}  (threshold={threshold:.0%})"]
         return []
 
     scores = scores[mask]
@@ -301,6 +317,7 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
     class_names: list[str] | None = None
     num_classes: int = 0
     input_name: str = ""
+    _last_roi_shape: tuple = ()
 
     while not proc_stop.is_set():
         try:
@@ -371,6 +388,9 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
             continue
 
         try:
+            if roi.shape != _last_roi_shape:
+                _last_roi_shape = roi.shape
+                print(f"[HUD child] ROI shape={roi.shape} mean={float(roi.mean()):.1f} min={int(roi.min())} max={int(roi.max())}")
             blob = _preprocess(roi)
             outputs = session.run(None, {input_name: blob})
             output = outputs[0]
