@@ -541,12 +541,24 @@ class CapturePage(BasePage):
             self.ocrFpsCard.setValue(int(getattr(self._config, 'second_inference_fps', 2)))
 
             self._updateCaptureControlsVisibility(screenshot_method)
+            self._syncRoiLabelSize()
         finally:
             self._isLoadingConfig = False
 
     # ──────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────
+
+    def _syncRoiLabelSize(self):
+        mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
+        if mode == 'v2_onnx':
+            from core.hud_inference import _parse_roi, _HUD_ROI_DEFAULT_STR
+            coords = getattr(self._config, 'hud_roi_coords', _HUD_ROI_DEFAULT_STR) or _HUD_ROI_DEFAULT_STR
+            r = _parse_roi(coords) or _parse_roi(_HUD_ROI_DEFAULT_STR)
+            if r:
+                self.ocrRoiLabel.setFixedSize(r["width"], r["height"])
+        else:
+            self.ocrRoiLabel.setFixedSize(314, 58)
 
     def _updateCaptureControlsVisibility(self, screenshot_method):
         is_uvc = (screenshot_method == "uvc")

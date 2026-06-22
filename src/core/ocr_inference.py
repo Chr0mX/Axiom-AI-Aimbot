@@ -318,10 +318,7 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
         except Exception:
             pass
 
-    ocr = _build_ocr()
-    if ocr is None:
-        return
-
+    ocr = None
     logged_raw = False
     while not proc_stop.is_set():
         try:
@@ -330,6 +327,10 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
             continue
         if roi is None:                      # sentinel → shutdown
             break
+        if ocr is None:
+            ocr = _build_ocr()
+            if ocr is None:
+                continue
         try:
             img_rgb = _to_rgb(roi)
             result = ocr.ocr(img_rgb)

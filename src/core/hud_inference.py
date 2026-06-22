@@ -215,14 +215,20 @@ def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
                  class_names: list[str] | None) -> list[str]:
     """Decode YOLO11n output and return top detection strings.
 
-    output shape: [1, 4+num_classes, num_anchors]
+    Handles both [1, 4+C, A] and [1, A, 4+C] output formats.
     """
-    data = output[0]  # [4+C, A]
-    data = data.T     # [A, 4+C]
+    data = output[0]
+    # Auto-detect: if rows < cols it's [4+C, A] → transpose to [A, 4+C]
+    if data.shape[0] < data.shape[1]:
+        data = data.T
+    # data is now [A, 4+C]
 
     conf = data[:, 4:4 + num_classes]
     class_ids = conf.argmax(axis=1)
     scores = conf[np.arange(len(conf)), class_ids]
+
+    top_score = float(scores.max()) if len(scores) > 0 else 0.0
+    print(f"[HUD child] max_score={top_score:.3f} threshold={threshold} anchors={len(scores)}")
 
     mask = scores >= threshold
     if not mask.any():
@@ -323,8 +329,9 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
                         providers=["CPUExecutionProvider"],
                     )
                     out_shape = session.get_outputs()[0].shape
-                    if len(out_shape) >= 2 and isinstance(out_shape[1], int):
-                        num_classes = out_shape[1] - 4
+                    if len(out_shape) >= 3:
+                        d1, d2 = int(out_shape[1]), int(out_shape[2])
+                        num_classes = min(d1, d2) - 4  # smaller dim = 4+C
                     input_name = session.get_inputs()[0].name
 
                     meta = session.get_modelmeta().custom_metadata_map

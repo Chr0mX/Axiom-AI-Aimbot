@@ -505,7 +505,7 @@ class Config:
         self.second_inference_mode: str = "off"          # "off" | "v1_ocr" | "v2_onnx"
         self.second_inference_fps: int = 2               # scan rate (1-10 FPS)
         self.hud_model_path: str = ""                    # relative path to V2 .onnx inside Model_Hud/
-        self.hud_confidence: float = 0.25                # V2 minimum detection confidence
+        self.hud_confidence: float = 0.10                # V2 minimum detection confidence
         self.hud_game: str = "Apex Legends"              # selected game profile key from game.json
         self.hud_roi_coords: str = "1490,953,1870,1041"  # HUD ROI as "x1,y1,x2,y2" (from game.json)
 
