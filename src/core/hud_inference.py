@@ -57,6 +57,9 @@ def _parse_roi(coords: str) -> dict[str, int] | None:
 _results_lock = threading.Lock()
 _hud_results: list[str] = []
 
+_boxes_lock = threading.Lock()
+_hud_boxes: list[tuple] = []
+
 _roi_image_lock = threading.Lock()
 _roi_image: np.ndarray | None = None
 
@@ -69,7 +72,7 @@ _feeder_thread: threading.Thread | None = None
 _proc: mp.Process | None = None
 _proc_stop = None
 _frame_q = None     # mp.Queue(maxsize=1)  parent → child: (roi_bgra, model_path, confidence)
-_result_q = None    # mp.Queue(maxsize=4)  child → parent: list[str]
+_result_q = None    # mp.Queue(maxsize=4)  child → parent: (list[str], list[tuple])
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -77,6 +80,12 @@ _result_q = None    # mp.Queue(maxsize=4)  child → parent: list[str]
 def get_hud_results() -> list[str]:
     with _results_lock:
         return list(_hud_results)
+
+
+def get_hud_boxes() -> list[tuple]:
+    """Return latest bounding boxes as (x1, y1, x2, y2, class_id, score) in model space (0-320)."""
+    with _boxes_lock:
+        return list(_hud_boxes)
 
 
 def get_hud_roi_image() -> np.ndarray | None:
@@ -181,8 +190,14 @@ def _collect_results() -> None:
     except Exception:
         return
     if latest is not None:
+        if isinstance(latest, tuple):
+            lines, boxes = latest
+        else:
+            lines, boxes = latest, []
         with _results_lock:
-            _hud_results[:] = latest
+            _hud_results[:] = lines
+        with _boxes_lock:
+            _hud_boxes[:] = boxes
 
 
 # ── Child process ─────────────────────────────────────────────────────────────
@@ -212,9 +227,10 @@ def _preprocess(roi: np.ndarray) -> np.ndarray:
 
 
 def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
-                 class_names: list[str] | None) -> list[str]:
-    """Decode YOLO11n output and return top detection strings.
+                 class_names: list[str] | None) -> tuple[list[str], list[tuple]]:
+    """Decode YOLO11n output; return (lines, boxes).
 
+    boxes: list of (x1, y1, x2, y2, class_id, score) in model-input space (0–320).
     Handles both [1, 4+C, A] and [1, A, 4+C] output formats.
     """
     data = output[0]
@@ -243,24 +259,30 @@ def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
 
     mask = scores >= threshold
     if not mask.any():
-        # Return a diagnostic line so the UI shows something useful
         if top_score > 0.001 and class_names:
             best_cid = int(class_ids[np.argmax(scores)])
             best_name = class_names[best_cid] if best_cid < len(class_names) else str(best_cid)
-            return [f"[below threshold] best: {best_name} {top_score:.1%}  (threshold={threshold:.0%})"]
-        return []
+            return [f"[below threshold] best: {best_name} {top_score:.1%}  (threshold={threshold:.0%})"], []
+        return [], []
 
-    scores = scores[mask]
-    class_ids = class_ids[mask]
+    passing_idx = np.where(mask)[0]
+    scores_f = scores[mask]
+    class_ids_f = class_ids[mask]
 
-    order = np.argsort(scores)[::-1][:5]
+    order = np.argsort(scores_f)[::-1][:5]
     lines: list[str] = []
-    for idx in order:
-        cid = int(class_ids[idx])
-        score = float(scores[idx])
+    boxes_out: list[tuple] = []
+    for i in order:
+        orig = passing_idx[i]
+        cid = int(class_ids_f[i])
+        score = float(scores_f[i])
+        cx, cy, bw, bh = data[orig, :4]
+        x1, y1 = float(cx - bw / 2), float(cy - bh / 2)
+        x2, y2 = float(cx + bw / 2), float(cy + bh / 2)
         name = class_names[cid] if (class_names and cid < len(class_names)) else str(cid)
         lines.append(f"{name}: {int(score * 100)}%")
-    return lines
+        boxes_out.append((x1, y1, x2, y2, cid, score))
+    return lines, boxes_out
 
 
 def _child_main(frame_q, result_q, proc_stop) -> None:
@@ -398,13 +420,13 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
             if num_classes <= 0:
                 num_classes = output.shape[1] - 4
 
-            lines = _postprocess(output, num_classes, confidence, class_names)
+            lines, boxes = _postprocess(output, num_classes, confidence, class_names)
             try:
-                result_q.put_nowait(lines)
+                result_q.put_nowait((lines, boxes))
             except queue.Full:
                 try:
                     result_q.get_nowait()
-                    result_q.put_nowait(lines)
+                    result_q.put_nowait((lines, boxes))
                 except Exception:
                     pass
         except Exception as exc:

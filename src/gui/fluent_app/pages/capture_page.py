@@ -8,10 +8,11 @@ import subprocess
 import time
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import QLabel, QMessageBox
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, FluentIcon,
     ComboBox, PushButton, SettingCard, BodyLabel, SegmentedWidget,
+    CaptionLabel, SwitchButton,
 )
 from ..components.slider_spin_card import SliderSpinCard
 from ..base_page import BasePage
@@ -369,18 +370,28 @@ class CapturePage(BasePage):
         self.ocrResultCard.hBoxLayout.addWidget(self.ocrResultLabel, 1, Qt.AlignmentFlag.AlignRight)
         self.ocrResultCard.hBoxLayout.addSpacing(16)
 
-        self.ocrRoiCard = SettingCard(
-            FluentIcon.PHOTO,
-            "ROI Preview",
-            "Last scanned region (updated on Scan ROI)",
-            self.ocrGroup
-        )
+        self.ocrRoiFrame = QFrame(self.ocrGroup)
+        self.ocrRoiFrame.setObjectName("ocrRoiFrame")
+        self.ocrRoiFrame.setStyleSheet("#ocrRoiFrame { background: transparent; }")
+        _roi_vbox = QVBoxLayout(self.ocrRoiFrame)
+        _roi_vbox.setContentsMargins(16, 8, 16, 8)
+        _roi_vbox.setSpacing(6)
+
+        _roi_hdr = QHBoxLayout()
+        _roi_hdr.addWidget(CaptionLabel("ROI Preview"))
+        _roi_hdr.addStretch(1)
+        self.ocrLiveToggle = SwitchButton(self.ocrRoiFrame)
+        self.ocrLiveToggle.setText("Live")
+        self.ocrLiveToggle.setChecked(False)
+        _roi_hdr.addWidget(self.ocrLiveToggle)
+        _roi_vbox.addLayout(_roi_hdr)
+
         self.ocrRoiLabel = QLabel()
-        self.ocrRoiLabel.setFixedSize(314, 58)
+        self.ocrRoiLabel.setFixedHeight(58)
+        self.ocrRoiLabel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.ocrRoiLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.ocrRoiLabel.setStyleSheet("background: #111; border-radius: 3px;")
-        self.ocrRoiCard.hBoxLayout.addWidget(self.ocrRoiLabel, 0, Qt.AlignmentFlag.AlignRight)
-        self.ocrRoiCard.hBoxLayout.addSpacing(16)
+        _roi_vbox.addWidget(self.ocrRoiLabel)
 
         self._ocrRefreshTimer = QTimer(self)
         self._ocrRefreshTimer.setInterval(500)
@@ -432,7 +443,7 @@ class CapturePage(BasePage):
         self.ocrGroup.addSettingCard(self.ocrFpsCard)
         self.ocrGroup.addSettingCard(self.ocrScanCard)
         self.ocrGroup.addSettingCard(self.ocrResultCard)
-        self.ocrGroup.addSettingCard(self.ocrRoiCard)
+        self.ocrGroup.addSettingCard(self.ocrRoiFrame)
         self.addContent(self.ocrGroup)
 
         self.scrollLayout.addStretch(1)
@@ -555,10 +566,9 @@ class CapturePage(BasePage):
             from core.hud_inference import _parse_roi, _HUD_ROI_DEFAULT_STR
             coords = getattr(self._config, 'hud_roi_coords', _HUD_ROI_DEFAULT_STR) or _HUD_ROI_DEFAULT_STR
             r = _parse_roi(coords) or _parse_roi(_HUD_ROI_DEFAULT_STR)
-            if r:
-                self.ocrRoiLabel.setFixedSize(r["width"], r["height"])
+            self.ocrRoiLabel.setFixedHeight(r["height"] if r else 88)
         else:
-            self.ocrRoiLabel.setFixedSize(314, 58)
+            self.ocrRoiLabel.setFixedHeight(58)
 
     def _updateCaptureControlsVisibility(self, screenshot_method):
         is_uvc = (screenshot_method == "uvc")
@@ -901,27 +911,51 @@ class CapturePage(BasePage):
             trigger_hud_scan()
         QTimer.singleShot(1500, self._updateRoiPreview)
 
+    @staticmethod
+    def _draw_hud_boxes(roi_rgb: "np.ndarray", boxes: list) -> "np.ndarray":
+        if not boxes:
+            return roi_rgb
+        try:
+            import cv2
+            roi_h, roi_w = roi_rgb.shape[:2]
+            scale = min(320 / roi_w, 320 / roi_h)
+            pad_x = (320 - roi_w * scale) / 2
+            pad_y = (320 - roi_h * scale) / 2
+            for (x1m, y1m, x2m, y2m, _cid, score) in boxes:
+                px1 = int((x1m - pad_x) / scale)
+                py1 = int((y1m - pad_y) / scale)
+                px2 = int((x2m - pad_x) / scale)
+                py2 = int((y2m - pad_y) / scale)
+                cv2.rectangle(roi_rgb, (px1, py1), (px2, py2), (0, 255, 80), 1)
+                cv2.putText(roi_rgb, f"{score:.0%}", (px1, max(py1 - 2, 8)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 80), 1)
+        except Exception:
+            pass
+        return roi_rgb
+
     def _updateRoiPreview(self):
         mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
         if mode == 'v1_ocr':
             from core.ocr_inference import get_roi_image
             roi = get_roi_image()
-            roi_w, roi_h = 314, 58
+            boxes = []
         elif mode == 'v2_onnx':
-            from core.hud_inference import get_hud_roi_image, _parse_roi, _HUD_ROI_DEFAULT_STR
+            from core.hud_inference import get_hud_roi_image, get_hud_boxes, _parse_roi, _HUD_ROI_DEFAULT_STR
             roi = get_hud_roi_image()
+            boxes = get_hud_boxes()
             coords_str = getattr(self._config, 'hud_roi_coords', _HUD_ROI_DEFAULT_STR) or _HUD_ROI_DEFAULT_STR
             _r = _parse_roi(coords_str) or _parse_roi(_HUD_ROI_DEFAULT_STR)
-            roi_w, roi_h = (_r["width"], _r["height"]) if _r else (374, 80)
+            self.ocrRoiLabel.setFixedHeight((_r["height"] if _r else 88))
         else:
             return
         if roi is None:
             return
-        h, w = roi.shape[:2]
         if roi.ndim != 3 or roi.shape[2] < 3:
             return
-        self.ocrRoiLabel.setFixedSize(roi_w, roi_h)
+        h, w = roi.shape[:2]
         roi_rgb = roi[:, :, :3][:, :, ::-1].copy()  # BGR(A) → RGB
+        if boxes:
+            roi_rgb = self._draw_hud_boxes(roi_rgb, boxes)
         buf = roi_rgb.tobytes()
         qimg = QImage(buf, w, h, w * 3, QImage.Format.Format_RGB888)
         pix = QPixmap.fromImage(qimg)
@@ -951,6 +985,9 @@ class CapturePage(BasePage):
                 self.ocrResultLabel.setText("No result — check console for errors")
         else:
             self.ocrResultLabel.setText("—")
+
+        if getattr(self, 'ocrLiveToggle', None) and self.ocrLiveToggle.isChecked():
+            self._updateRoiPreview()
 
     # ──────────────────────────────────────────────
     # Retranslate
