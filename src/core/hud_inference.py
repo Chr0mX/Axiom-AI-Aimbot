@@ -189,6 +189,7 @@ def _drain(q) -> None:
 
 
 def _collect_results() -> None:
+    global _model_input_wh
     latest = None
     try:
         while True:
