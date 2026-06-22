@@ -7,7 +7,8 @@ Mirrors ocr_inference.py: the ONNX Runtime session and all pre/post-processing
 run in a separate child process so the main inference loop and Qt UI are never
 blocked by this work.
 
-ROI: x1=1499, y1=949, x2=1873, y2=1029  (374 x 80 px, 1080p reference)
+ROI: read from config.hud_roi_coords ("x1,y1,x2,y2"), defaulting to
+     "1490,953,1870,1041" (Apex Legends HUD strip, 1080p reference).
 Model input: 320 x 320 NCHW float32, letterboxed with grey fill (114).
 Output: YOLO11n format [1, 4+num_classes, num_anchors] — transposed and decoded here.
 
@@ -37,8 +38,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_HUD_ROI: dict[str, int] = {"left": 1499, "top": 949, "width": 374, "height": 80}
+_HUD_ROI_DEFAULT_STR = "1490,953,1870,1041"
 _MODEL_INPUT_SIZE = 320
+
+
+def _parse_roi(coords: str) -> dict[str, int] | None:
+    """Parse 'x1,y1,x2,y2' into a crop dict. Returns None on invalid input."""
+    try:
+        x1, y1, x2, y2 = map(int, coords.strip().split(','))
+        if x2 > x1 and y2 > y1:
+            return {"left": x1, "top": y1, "width": x2 - x1, "height": y2 - y1}
+    except Exception:
+        pass
+    return None
+
 
 # ── Parent-side shared state ──────────────────────────────────────────────────
 _results_lock = threading.Lock()
@@ -55,7 +68,7 @@ _feeder_thread: threading.Thread | None = None
 # ── Child-process plumbing ────────────────────────────────────────────────────
 _proc: mp.Process | None = None
 _proc_stop = None
-_frame_q = None     # mp.Queue(maxsize=1)  parent → child: (roi_bgra, model_path, hud_confidence)
+_frame_q = None     # mp.Queue(maxsize=1)  parent → child: (roi_bgra, model_path, confidence)
 _result_q = None    # mp.Queue(maxsize=4)  child → parent: list[str]
 
 
@@ -137,10 +150,11 @@ def stop() -> None:
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _crop_roi(frame: np.ndarray, log_once: list) -> np.ndarray:
+def _crop_roi(frame: np.ndarray, roi: dict[str, int], log_once: list) -> np.ndarray:
+    """Crop frame to the given roi dict, clamping to frame bounds."""
     h, w = frame.shape[:2]
-    l, t = _HUD_ROI["left"], _HUD_ROI["top"]
-    rw, rh = _HUD_ROI["width"], _HUD_ROI["height"]
+    l, t = roi["left"], roi["top"]
+    rw, rh = roi["width"], roi["height"]
     x1, y1 = min(l, w), min(t, h)
     x2, y2 = min(l + rw, w), min(t + rh, h)
     if not log_once:
@@ -206,9 +220,9 @@ def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
     data = output[0]  # [4+C, A]
     data = data.T     # [A, 4+C]
 
-    conf = data[:, 4:4 + num_classes]       # [A, C]
-    class_ids = conf.argmax(axis=1)         # [A]
-    scores = conf[np.arange(len(conf)), class_ids]  # [A]
+    conf = data[:, 4:4 + num_classes]
+    class_ids = conf.argmax(axis=1)
+    scores = conf[np.arange(len(conf)), class_ids]
 
     mask = scores >= threshold
     if not mask.any():
@@ -233,11 +247,23 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 
+    # Inject AppData site-packages (for PaddleOCR/user-installed packages)
     la = os.environ.get("LOCALAPPDATA", "")
     if la:
         pkg = os.path.join(la, "AxiomAI", "site-packages")
         if os.path.isdir(pkg) and pkg not in sys.path:
             sys.path.insert(0, pkg)
+
+    # Inject src/ and src/python/dependencies/ so cv2, numpy, onnxruntime are
+    # importable in the spawned child (mirrors main.py path setup).
+    _here = os.path.dirname(os.path.abspath(__file__))   # .../src/core/
+    _src  = os.path.dirname(_here)                        # .../src/
+    for _extra in (
+        os.path.join(_src, "python", "dependencies"),
+        _src,
+    ):
+        if os.path.isdir(_extra) and _extra not in sys.path:
+            sys.path.insert(0, _extra)
 
     if sys.platform == "win32":
         try:
@@ -255,8 +281,13 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
 
     try:
         import onnxruntime as ort
-    except ImportError:
-        print("[HUD child] onnxruntime not available — exiting")
+    except ImportError as exc:
+        msg = f"[HUD Error] onnxruntime not importable: {exc}"
+        print(msg)
+        try:
+            result_q.put_nowait([msg])
+        except Exception:
+            pass
         return
 
     session = None
@@ -275,11 +306,12 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
 
         roi, model_path, confidence = item
 
-        # (Re)load session if model changed
+        # (Re)load session when model changes
         if model_path != current_model_path:
             session = None
             current_model_path = model_path
             class_names = None
+            num_classes = 0
             if model_path and os.path.isfile(model_path):
                 try:
                     opts = ort.SessionOptions()
@@ -291,12 +323,10 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
                         providers=["CPUExecutionProvider"],
                     )
                     out_shape = session.get_outputs()[0].shape
-                    # out_shape: [1, 4+C, A]  → num_classes = out_shape[1] - 4
                     if len(out_shape) >= 2 and isinstance(out_shape[1], int):
                         num_classes = out_shape[1] - 4
                     input_name = session.get_inputs()[0].name
 
-                    # Try to read class names from metadata
                     meta = session.get_modelmeta().custom_metadata_map
                     if "names" in meta:
                         import ast
@@ -312,11 +342,23 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
                     if num_classes <= 0 and class_names:
                         num_classes = len(class_names)
 
-                    print(f"[HUD child] Model loaded: {os.path.basename(model_path)}"
+                    print(f"[HUD child] Loaded: {os.path.basename(model_path)}"
                           f"  classes={num_classes}  input={input_name}")
                 except Exception as exc:
-                    print(f"[HUD child] Model load error: {exc}")
+                    err = f"[HUD Error] Model load failed: {exc}"
+                    print(err)
+                    try:
+                        result_q.put_nowait([err])
+                    except Exception:
+                        pass
                     session = None
+            else:
+                err = f"[HUD Error] Model not found: {model_path!r}"
+                print(err)
+                try:
+                    result_q.put_nowait([err])
+                except Exception:
+                    pass
 
         if session is None:
             continue
@@ -339,7 +381,12 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
                 except Exception:
                     pass
         except Exception as exc:
-            print(f"[HUD child] frame error: {exc}")
+            err = f"[HUD Error] Inference: {exc}"
+            print(err)
+            try:
+                result_q.put_nowait([err])
+            except Exception:
+                pass
 
 
 # ── Parent feeder thread ──────────────────────────────────────────────────────
@@ -350,7 +397,6 @@ def _feeder(config: "Config", stop_event: threading.Event) -> None:
     global _roi_image
     log_once: list = []
 
-    # Resolve project root for model paths (relative to project root)
     _src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _project_root = os.path.dirname(_src)
 
@@ -364,13 +410,15 @@ def _feeder(config: "Config", stop_event: threading.Event) -> None:
             _scan_flag.clear()
 
         if (enabled or forced) and hud_model_rel:
+            coords_str = getattr(config, "hud_roi_coords", _HUD_ROI_DEFAULT_STR) or _HUD_ROI_DEFAULT_STR
+            roi_dict = _parse_roi(coords_str) or _parse_roi(_HUD_ROI_DEFAULT_STR)
             model_path = (hud_model_rel if os.path.isabs(hud_model_rel)
                           else os.path.join(_project_root, hud_model_rel))
             confidence = float(getattr(config, "hud_confidence", 0.25))
             frame = get_preview_frame()
-            if frame is not None:
+            if frame is not None and roi_dict is not None:
                 try:
-                    roi = _crop_roi(frame, log_once)
+                    roi = _crop_roi(frame, roi_dict, log_once)
                     with _roi_image_lock:
                         _roi_image = roi.copy()
                     if _frame_q is not None:

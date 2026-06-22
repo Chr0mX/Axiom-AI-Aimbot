@@ -227,6 +227,17 @@ class ModelPage(BasePage):
         # === HUD Model (V2 ONNX) ===
         self.hudModelGroup = SettingCardGroup("HUD Model (V2 ONNX)", self.scrollWidget)
 
+        self.hudGameCombo = ComboBox()
+        self.hudGameCombo.setMinimumWidth(200)
+        self.hudGameCard = SettingCard(
+            FluentIcon.GAME,
+            "Game Profile",
+            "HUD region coords loaded from game.json",
+            self.hudModelGroup,
+        )
+        self.hudGameCard.hBoxLayout.addWidget(self.hudGameCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.hudGameCard.hBoxLayout.addSpacing(16)
+
         self.hudModelCombo = ComboBox()
         self.hudModelCombo.setMinimumWidth(200)
         self.hudModelCard = SettingCard(
@@ -250,6 +261,7 @@ class ModelPage(BasePage):
         self.addContent(self.modelGroup)
         self.scrollLayout.addWidget(self.modelNotesCard)
 
+        self.hudModelGroup.addSettingCard(self.hudGameCard)
         self.hudModelGroup.addSettingCard(self.hudModelCard)
         self.addContent(self.hudModelGroup)
 
@@ -263,6 +275,7 @@ class ModelPage(BasePage):
         self.modelCombo.currentTextChanged.connect(self._onModelChanged)
         self.inferenceBackendCombo.currentTextChanged.connect(self._onInferenceBackendChanged)
         self.openModelFolderBtn.clicked.connect(self._openModelFolder)
+        self.hudGameCombo.currentTextChanged.connect(self._onHudGameChanged)
         self.hudModelCombo.currentTextChanged.connect(self._onHudModelChanged)
 
     # ──────────────────────────────────────────────
@@ -313,6 +326,28 @@ class ModelPage(BasePage):
             self._updateInferenceBackendSubtitle()
         finally:
             self._isLoadingConfig = False
+
+        # Load game profile combo (game.json)
+        self.hudGameCombo.blockSignals(True)
+        game_data = self._loadGameJson()
+        self.hudGameCombo.clear()
+        for game_name in game_data:
+            self.hudGameCombo.addItem(game_name)
+        saved_game = getattr(self._config, 'hud_game', 'Apex Legends')
+        game_idx = -1
+        for i in range(self.hudGameCombo.count()):
+            if self.hudGameCombo.itemText(i) == saved_game:
+                game_idx = i
+                break
+        if game_idx >= 0:
+            self.hudGameCombo.setCurrentIndex(game_idx)
+        elif self.hudGameCombo.count() > 0:
+            self.hudGameCombo.setCurrentIndex(0)
+            first_game = self.hudGameCombo.itemText(0)
+            if self._config:
+                self._config.hud_game = first_game
+                self._config.hud_roi_coords = game_data.get(first_game, "")
+        self.hudGameCombo.blockSignals(False)
 
         # Load HUD model combo
         self.hudModelCombo.blockSignals(True)
@@ -409,6 +444,18 @@ class ModelPage(BasePage):
             models = glob.glob(os.path.join(model_dir, "*.onnx"))
             for m in sorted(models):
                 self.hudModelCombo.addItem(os.path.basename(m))
+
+    def _loadGameJson(self) -> dict:
+        """Read game.json from project root. Returns {} on missing/invalid file."""
+        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        project_root = os.path.dirname(src_dir)
+        game_json_path = os.path.join(project_root, "game.json")
+        try:
+            with open(game_json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return {k: v for k, v in data.items() if isinstance(k, str)}
+        except Exception:
+            return {}
 
     def _openModelFolder(self):
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -528,6 +575,15 @@ class ModelPage(BasePage):
             self._updateModelInfo(self._config.model_path)
             self.modelNotesCard.setModel(os.path.basename(text))
 
+    def _onHudGameChanged(self, text):
+        if not self._config or not text or self._isLoadingConfig:
+            return
+        self._config.hud_game = text
+        game_data = self._loadGameJson()
+        coords = game_data.get(text, "")
+        self._config.hud_roi_coords = coords
+        self.hudGameCard.contentLabel.setText(coords or "No coords configured")
+
     def _onHudModelChanged(self, text):
         if self._config and text:
             self._config.hud_model_path = os.path.join("Model_Hud", text)
@@ -573,4 +629,5 @@ class ModelPage(BasePage):
         self.openModelFolderCard.titleLabel.setText(t("open_model_folder"))
         self.openModelFolderBtn.setText(t("open_model_folder"))
         self.hudModelGroup.titleLabel.setText("HUD Model (V2 ONNX)")
+        self.hudGameCard.titleLabel.setText("Game Profile")
         self.hudModelCard.titleLabel.setText("HUD Model")

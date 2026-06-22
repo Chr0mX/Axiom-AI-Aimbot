@@ -51,6 +51,7 @@ class CapturePage(BasePage):
         self._config = None
         self._isLoadingConfig = False
         self._last_probe_time: float = 0.0
+        self._scan_started: float = 0.0
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -878,6 +879,7 @@ class CapturePage(BasePage):
 
     def _onOcrScanClicked(self):
         self.ocrResultLabel.setText("Scanning...")
+        self._scan_started = time.monotonic()
         mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
         if mode == 'v1_ocr':
             from core.ocr_inference import trigger_scan
@@ -894,9 +896,11 @@ class CapturePage(BasePage):
             roi = get_roi_image()
             roi_w, roi_h = 314, 58
         elif mode == 'v2_onnx':
-            from core.hud_inference import get_hud_roi_image
+            from core.hud_inference import get_hud_roi_image, _parse_roi, _HUD_ROI_DEFAULT_STR
             roi = get_hud_roi_image()
-            roi_w, roi_h = 374, 80
+            coords_str = getattr(self._config, 'hud_roi_coords', _HUD_ROI_DEFAULT_STR) or _HUD_ROI_DEFAULT_STR
+            _r = _parse_roi(coords_str) or _parse_roi(_HUD_ROI_DEFAULT_STR)
+            roi_w, roi_h = (_r["width"], _r["height"]) if _r else (374, 80)
         else:
             return
         if roi is None:
@@ -930,7 +934,9 @@ class CapturePage(BasePage):
         if lines:
             self.ocrResultLabel.setText("\n".join(lines))
         elif self.ocrResultLabel.text() == "Scanning...":
-            pass  # wait for result to come back
+            elapsed = time.monotonic() - getattr(self, '_scan_started', 0)
+            if elapsed > 5:
+                self.ocrResultLabel.setText("No result — check console for errors")
         else:
             self.ocrResultLabel.setText("—")
 
