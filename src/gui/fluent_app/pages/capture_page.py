@@ -370,9 +370,11 @@ class CapturePage(BasePage):
         self.ocrResultCard.hBoxLayout.addWidget(self.ocrResultLabel, 1, Qt.AlignmentFlag.AlignRight)
         self.ocrResultCard.hBoxLayout.addSpacing(16)
 
-        self.ocrRoiFrame = QFrame(self.ocrGroup)
+        self.ocrRoiFrame = QFrame(self)
         self.ocrRoiFrame.setObjectName("ocrRoiFrame")
-        self.ocrRoiFrame.setStyleSheet("#ocrRoiFrame { background: transparent; }")
+        self.ocrRoiFrame.setStyleSheet(
+            "#ocrRoiFrame { background: rgba(255,255,255,0.04); border-radius: 8px; }"
+        )
         _roi_vbox = QVBoxLayout(self.ocrRoiFrame)
         _roi_vbox.setContentsMargins(16, 8, 16, 8)
         _roi_vbox.setSpacing(6)
@@ -443,8 +445,8 @@ class CapturePage(BasePage):
         self.ocrGroup.addSettingCard(self.ocrFpsCard)
         self.ocrGroup.addSettingCard(self.ocrScanCard)
         self.ocrGroup.addSettingCard(self.ocrResultCard)
-        self.ocrGroup.addSettingCard(self.ocrRoiFrame)
         self.addContent(self.ocrGroup)
+        self.addContent(self.ocrRoiFrame)
 
         self.scrollLayout.addStretch(1)
 
