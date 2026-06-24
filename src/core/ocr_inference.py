@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 # Absolute pixel coords within the game/capture frame (1080p reference)
 _OCR_ROI: dict[str, int] = {"left": 1515, "top": 1031, "width": 314, "height": 29}
+_IDLE_TEARDOWN_S = 5.0  # seconds before releasing an idle child process
 
 # ── Parent-side shared state ──────────────────────────────────────────────────
 _results_lock = threading.Lock()
@@ -90,15 +91,11 @@ def trigger_scan() -> None:
     _scan_flag.set()
 
 
-def start(config: Config) -> None:
-    """Spawn the OCR child process and the feeder thread. No-op if running."""
-    global _proc, _proc_stop, _frame_q, _result_q, _stop_event, _feeder_thread
-    if _feeder_thread is not None and _feeder_thread.is_alive():
+def _ensure_proc() -> None:
+    """Spawn the OCR child process if not already alive. Called from the feeder."""
+    global _proc, _proc_stop, _frame_q, _result_q
+    if _proc is not None and _proc.is_alive():
         return
-
-    # 'spawn' (not 'fork') so the child starts a clean interpreter and never
-    # duplicates the parent's CUDA / TensorRT / Qt state. main.py guards all
-    # startup under `if __name__ == "__main__"`, so the re-import is safe.
     try:
         ctx = mp.get_context("spawn")
         _frame_q = ctx.Queue(maxsize=1)
@@ -109,9 +106,43 @@ def start(config: Config) -> None:
             name="OCRProcess", daemon=True,
         )
         _proc.start()
+        logger.info("[OCR] child process started (pid=%s)", _proc.pid)
     except Exception as exc:
         logger.error("[OCR] Failed to start OCR process: %s", exc)
         _proc = None
+
+
+def _kill_proc() -> None:
+    """Tear down the OCR child process, leaving the feeder thread running."""
+    global _proc, _proc_stop, _frame_q, _result_q
+    if _proc_stop is not None:
+        try:
+            _proc_stop.set()
+        except Exception:
+            pass
+    if _frame_q is not None:
+        try:
+            _frame_q.put_nowait(None)  # sentinel
+        except Exception:
+            pass
+    if _proc is not None:
+        try:
+            _proc.join(timeout=1.0)
+            if _proc.is_alive():
+                _proc.terminate()
+        except Exception:
+            pass
+        logger.info("[OCR] child process released")
+    _proc = None
+    _proc_stop = None
+    _frame_q = None
+    _result_q = None
+
+
+def start(config: Config) -> None:
+    """Start the OCR feeder thread. Child process is spawned lazily on first use. No-op if running."""
+    global _stop_event, _feeder_thread
+    if _feeder_thread is not None and _feeder_thread.is_alive():
         return
 
     _stop_event = threading.Event()
@@ -122,34 +153,13 @@ def start(config: Config) -> None:
 
 
 def stop() -> None:
-    """Stop the feeder thread and OCR process and wait for them to exit."""
-    global _proc, _proc_stop, _frame_q, _result_q, _stop_event, _feeder_thread
+    """Stop the feeder thread and OCR child process."""
+    global _stop_event, _feeder_thread
     if _stop_event is not None:
         _stop_event.set()
-    if _proc_stop is not None:
-        try:
-            _proc_stop.set()
-        except Exception:
-            pass
-    # Unblock the child if it is waiting on the frame queue.
-    if _frame_q is not None:
-        try:
-            _frame_q.put_nowait(None)
-        except Exception:
-            pass
+    _kill_proc()
     if _feeder_thread is not None and _feeder_thread.is_alive():
         _feeder_thread.join(timeout=2.0)
-    if _proc is not None:
-        try:
-            _proc.join(timeout=2.0)
-            if _proc.is_alive():
-                _proc.terminate()
-        except Exception:
-            pass
-    _proc = None
-    _proc_stop = None
-    _frame_q = None
-    _result_q = None
     _stop_event = None
     _feeder_thread = None
 
@@ -393,6 +403,7 @@ def _feeder(config: Config, stop_event: threading.Event) -> None:
 
     global _roi_image
     log_once: list = []
+    _idle_since: float | None = None
 
     while not stop_event.is_set():
         t0 = time.perf_counter()
@@ -402,7 +413,24 @@ def _feeder(config: Config, stop_event: threading.Event) -> None:
         if forced:
             _scan_flag.clear()
 
-        if enabled or forced:
+        active = enabled or forced
+
+        if active:
+            # Detect and log child crashes before respawning
+            if _proc is not None and not _proc.is_alive():
+                logger.warning("[OCR] child process died (exit=%s); respawning", _proc.exitcode)
+                _kill_proc()
+            _ensure_proc()
+            _idle_since = None
+        elif _proc is not None:
+            # Release idle child after timeout
+            if _idle_since is None:
+                _idle_since = t0
+            elif (t0 - _idle_since) > _IDLE_TEARDOWN_S:
+                _kill_proc()
+                _idle_since = None
+
+        if active:
             frame = get_preview_frame()
             if frame is not None:
                 try:
@@ -424,7 +452,5 @@ def _feeder(config: Config, stop_event: threading.Event) -> None:
 
         fps = max(1, min(10, int(getattr(config, "second_inference_fps", 2))))
         elapsed = time.perf_counter() - t0
-        # Idle when disabled; otherwise pace to ocr_fps (min 0.05 s so result
-        # collection stays responsive without busy-looping).
-        interval = 0.2 if not (enabled or forced) else max((1.0 / fps) - elapsed, 0.05)
+        interval = 0.2 if not active else max((1.0 / fps) - elapsed, 0.05)
         stop_event.wait(interval)

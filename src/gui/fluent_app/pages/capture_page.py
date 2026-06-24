@@ -914,6 +914,7 @@ class CapturePage(BasePage):
         QTimer.singleShot(1500, self._updateRoiPreview)
 
     _box_logged: bool = False
+    _last_roi_render_sig: tuple | None = None
 
     @staticmethod
     def _draw_hud_boxes(roi_rgb: "np.ndarray", boxes: list) -> "np.ndarray":
@@ -964,6 +965,13 @@ class CapturePage(BasePage):
             return
         if roi.ndim != 3 or roi.shape[2] < 3:
             return
+
+        # Skip redraw when ROI and boxes haven't changed
+        sig = (id(roi), len(boxes), tuple(round(b[5], 3) for b in boxes))
+        if sig == self._last_roi_render_sig:
+            return
+        self._last_roi_render_sig = sig
+
         h, w = roi.shape[:2]
         roi_rgb = roi[:, :, :3][:, :, ::-1].copy()  # BGR(A) → RGB
         if boxes:
