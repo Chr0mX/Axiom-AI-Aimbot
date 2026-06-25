@@ -91,6 +91,7 @@ _FIELD_MAP = {
     'kalman_measurement_noise':   'aim.kalman.measurement_noise',
     'ema_enabled':                'aim.ema.enabled',
     'ema_alpha':                  'aim.ema.alpha',
+    'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
     'jitter_enabled':             'aim.jitter.enabled',
     'jitter_strength':            'aim.jitter.strength',
     'smart_jitter_enabled':       'aim.smart_jitter.enabled',
@@ -442,6 +443,9 @@ class Config:
         # EMA 瞄準點平滑（在 PID 前平滑目標座標）
         self.ema_enabled: bool = False
         self.ema_alpha: float = 0.7  # 1.0=原始，0.3=強平滑
+
+        # Camera motion compensation — subtract per-frame global scene shift before PID
+        self.cam_motion_comp_enabled: bool = False
 
         # 速度預測瞄準（基於歷史位置估算目標未來位置）
         self.prediction_enabled: bool = False

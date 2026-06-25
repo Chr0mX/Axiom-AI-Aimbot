@@ -616,6 +616,13 @@ class AimPage(BasePage):
             parent=self.trackingGroup
         )
 
+        self.camMotionCompCard = SwitchSettingCard(
+            FluentIcon.GLOBE,
+            t("cam_motion_comp_enabled", "Camera Motion Compensation"),
+            t("cam_motion_comp_desc", "Subtract per-frame global scene shift (phase correlation) from aim error to cancel camera shake."),
+            parent=self.trackingGroup
+        )
+
     def _initLayout(self):
         """Layout all controls"""
         # General
@@ -708,6 +715,7 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.kalmanEnableCard)
         self.trackingGroup.addSettingCard(self.kalmanProcessNoiseCard)
         self.trackingGroup.addSettingCard(self.kalmanMeasNoiseCard)
+        self.trackingGroup.addSettingCard(self.camMotionCompCard)
         self.addContent(self.trackingGroup)
 
         self.scrollLayout.addStretch(1)
@@ -775,6 +783,7 @@ class AimPage(BasePage):
         self.kalmanEnableCard.checkedChanged.connect(self._onKalmanEnableChanged)
         self.kalmanProcessNoiseCard.valueChanged.connect(self._onKalmanProcessNoiseChanged)
         self.kalmanMeasNoiseCard.valueChanged.connect(self._onKalmanMeasNoiseChanged)
+        self.camMotionCompCard.checkedChanged.connect(self._onCamMotionCompChanged)
 
     def _loadFromConfig(self):
         """Load values from Config"""
@@ -885,6 +894,8 @@ class AimPage(BasePage):
                 self.emaEnableCard.setChecked(False)
                 if self._config:
                     self._config.ema_enabled = False
+
+            self.camMotionCompCard.setChecked(bool(getattr(self._config, 'cam_motion_comp_enabled', False)))
         finally:
             self._isLoadingConfig = False
 
@@ -1349,6 +1360,10 @@ class AimPage(BasePage):
     def _onKalmanMeasNoiseChanged(self, value):
         if self._config:
             self._config.kalman_measurement_noise = value / 100.0
+
+    def _onCamMotionCompChanged(self, checked):
+        if self._config:
+            self._config.cam_motion_comp_enabled = bool(checked)
 
     def retranslateUi(self):
         """Refresh translations"""

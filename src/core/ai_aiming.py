@@ -297,6 +297,11 @@ def process_aiming(
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
 
+        # --- Camera motion compensation — cancel shake-induced scene shift ---
+        if getattr(config, 'cam_motion_comp_enabled', False):
+            errorX -= state.cam_shift_x
+            errorY -= state.cam_shift_y
+
         # --- Adaptive deadzone (new feature from Someone_idea) ---
         if getattr(config, 'aim_deadzone_enabled', False):
             errorX, errorY = _apply_adaptive_deadzone(errorX, errorY, selected_box[3] - selected_box[1], config)
