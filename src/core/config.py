@@ -92,6 +92,7 @@ _FIELD_MAP = {
     'ema_enabled':                'aim.ema.enabled',
     'ema_alpha':                  'aim.ema.alpha',
     'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
+    'cam_motion_comp_size':       'aim.cam_motion_comp.size',
     'jitter_enabled':             'aim.jitter.enabled',
     'jitter_strength':            'aim.jitter.strength',
     'smart_jitter_enabled':       'aim.smart_jitter.enabled',
@@ -446,6 +447,7 @@ class Config:
 
         # Camera motion compensation — subtract per-frame global scene shift before PID
         self.cam_motion_comp_enabled: bool = False
+        self.cam_motion_comp_size: int = 128   # downsample resolution for phase correlation (128 or 256)
 
         # 速度預測瞄準（基於歷史位置估算目標未來位置）
         self.prediction_enabled: bool = False

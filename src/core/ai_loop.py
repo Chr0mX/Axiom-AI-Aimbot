@@ -397,12 +397,13 @@ def ai_logic_loop(
                 last_frame_id = frame_id
 
                 if getattr(config, 'cam_motion_comp_enabled', False):
-                    small = cv2.resize(frame[:, :, :3], (128, 128), interpolation=cv2.INTER_LINEAR)
+                    cmc_size = int(getattr(config, 'cam_motion_comp_size', 128))
+                    small = cv2.resize(frame[:, :, :3], (cmc_size, cmc_size), interpolation=cv2.INTER_LINEAR)
                     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
-                    if _cmc_prev[0] is not None:
+                    if _cmc_prev[0] is not None and _cmc_prev[0].shape == gray.shape:
                         shift, _ = cv2.phaseCorrelate(_cmc_prev[0], gray)
-                        sx = frame.shape[1] / 128.0
-                        sy = frame.shape[0] / 128.0
+                        sx = frame.shape[1] / float(cmc_size)
+                        sy = frame.shape[0] / float(cmc_size)
                         state.cam_shift_x = max(-30.0, min(30.0, float(shift[0]) * sx))
                         state.cam_shift_y = max(-30.0, min(30.0, float(shift[1]) * sy))
                     _cmc_prev[0] = gray

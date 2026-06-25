@@ -623,6 +623,19 @@ class AimPage(BasePage):
             parent=self.trackingGroup
         )
 
+        self.camMotionCompSizeSegment = SegmentedWidget()
+        for _lbl, _key in [("128", "128"), ("256", "256")]:
+            self.camMotionCompSizeSegment.addItem(routeKey=_key, text=_lbl)
+        self.camMotionCompSizeSegment.setCurrentItem("128")
+        self.camMotionCompSizeCard = SettingCard(
+            FluentIcon.ZOOM_IN,
+            t("cam_motion_comp_size", "Compensation Resolution"),
+            t("cam_motion_comp_size_desc", "128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)"),
+            self.trackingGroup
+        )
+        self.camMotionCompSizeCard.hBoxLayout.addWidget(self.camMotionCompSizeSegment, 0, Qt.AlignmentFlag.AlignRight)
+        self.camMotionCompSizeCard.hBoxLayout.addSpacing(16)
+
     def _initLayout(self):
         """Layout all controls"""
         # General
@@ -716,6 +729,7 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.kalmanProcessNoiseCard)
         self.trackingGroup.addSettingCard(self.kalmanMeasNoiseCard)
         self.trackingGroup.addSettingCard(self.camMotionCompCard)
+        self.trackingGroup.addSettingCard(self.camMotionCompSizeCard)
         self.addContent(self.trackingGroup)
 
         self.scrollLayout.addStretch(1)
@@ -784,6 +798,7 @@ class AimPage(BasePage):
         self.kalmanProcessNoiseCard.valueChanged.connect(self._onKalmanProcessNoiseChanged)
         self.kalmanMeasNoiseCard.valueChanged.connect(self._onKalmanMeasNoiseChanged)
         self.camMotionCompCard.checkedChanged.connect(self._onCamMotionCompChanged)
+        self.camMotionCompSizeSegment.currentItemChanged.connect(self._onCamMotionCompSizeChanged)
 
     def _loadFromConfig(self):
         """Load values from Config"""
@@ -895,7 +910,13 @@ class AimPage(BasePage):
                 if self._config:
                     self._config.ema_enabled = False
 
-            self.camMotionCompCard.setChecked(bool(getattr(self._config, 'cam_motion_comp_enabled', False)))
+            cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
+            self.camMotionCompCard.setChecked(cmc_on)
+            cmc_size = str(getattr(self._config, 'cam_motion_comp_size', 128))
+            if cmc_size not in ("128", "256"):
+                cmc_size = "128"
+            self.camMotionCompSizeSegment.setCurrentItem(cmc_size)
+            self.camMotionCompSizeCard.setEnabled(cmc_on)
         finally:
             self._isLoadingConfig = False
 
@@ -1364,6 +1385,11 @@ class AimPage(BasePage):
     def _onCamMotionCompChanged(self, checked):
         if self._config:
             self._config.cam_motion_comp_enabled = bool(checked)
+        self.camMotionCompSizeCard.setEnabled(bool(checked))
+
+    def _onCamMotionCompSizeChanged(self, key):
+        if self._config:
+            self._config.cam_motion_comp_size = int(key)
 
     def retranslateUi(self):
         """Refresh translations"""
