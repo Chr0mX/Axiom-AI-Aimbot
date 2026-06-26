@@ -68,20 +68,58 @@ def _get_predictor(config: Config) -> VelocityPredictor:
     return _predictor
 
 
-def calculate_aim_target(box: List[float], aim_part: str, head_height_ratio: float) -> Tuple[float, float]:
+def calculate_aim_target(
+    box: List[float],
+    aim_part: str,
+    head_height_ratio: float,
+    config=None,
+) -> Tuple[float, float]:
     """Calculate aim-point coordinates from a detection box."""
 
     abs_x1, abs_y1, abs_x2, abs_y2 = box
     box_w, box_h = abs_x2 - abs_x1, abs_y2 - abs_y1
     box_center_x = abs_x1 + box_w * 0.5
 
+    # --- Distance-adaptive ratio ---
+    # Scales head_height_ratio inversely with box height so the aim point stays
+    # on the head at all ranges. Large box (close) → ratio shrinks; small box
+    # (far) → ratio grows. Clamped to [0.4×, 2.5×] of the nominal value.
+    ratio = head_height_ratio
+    if config is not None and getattr(config, 'aim_adaptive_ratio_enabled', False) and box_h > 0:
+        ref_h = float(getattr(config, 'aim_adaptive_ratio_ref_h', 80.0))
+        scale = ref_h / max(box_h, 1.0)
+        ratio = max(head_height_ratio * 0.4, min(head_height_ratio * 2.5, head_height_ratio * scale))
+
+    # --- Posture-aware targeting ---
+    # When box_w / box_h exceeds the threshold the player is likely crouching,
+    # sliding, or prone. Fall back to center-mass to avoid overshooting above them.
+    if config is not None and getattr(config, 'aim_posture_aware_enabled', False) and box_h > 0:
+        threshold = float(getattr(config, 'aim_crouch_aspect_threshold', 1.2))
+        if box_w / box_h >= threshold:
+            return box_center_x, abs_y1 + box_h * 0.5
+
     if aim_part == 'head':
         target_x = box_center_x
-        target_y = abs_y1 + box_h * head_height_ratio * 0.5
+        target_y = abs_y1 + box_h * ratio * 0.5
     else:
         target_x = box_center_x
-        head_h = box_h * head_height_ratio
+        head_h = box_h * ratio
         target_y = (abs_y1 + head_h + abs_y2) * 0.5
+
+    # TODO: X-axis offset (aim_x_offset_frac) — nudge target_x by ± fraction of box_w
+    #       to correct for systematic model bounding-box bias. Config: aim_x_offset_frac.
+
+    # TODO: Fine Y nudge (aim_y_offset_frac) — additive fraction of box_h applied after
+    #       the ratio formula for per-game calibration without re-deriving head_height_ratio.
+    #       Config: aim_y_offset_frac (positive = lower in box).
+
+    # TODO: Per-class routing — when model outputs separate head/body class IDs, bypass
+    #       the ratio formula: aim at box center for head class, body formula for body class.
+    #       Requires passing class_id and config._detect_class_names here.
+
+    # TODO: Confidence-weighted fallback — blend aim point toward center-mass when detection
+    #       confidence is below a threshold (partially occluded target). Config:
+    #       aim_low_conf_threshold, aim_low_conf_blend (0–1).
 
     return target_x, target_y
 
@@ -194,7 +232,7 @@ def process_aiming(
     valid_targets = []
     confidences = getattr(config, '_current_confidences', [])
     for i, box in enumerate(boxes):
-        target_x, target_y = calculate_aim_target(box, aim_part, head_height_ratio)
+        target_x, target_y = calculate_aim_target(box, aim_part, head_height_ratio, config)
         moveX = target_x - crosshair_x
         moveY = target_y - crosshair_y
         distance_sq = moveX * moveX + moveY * moveY
@@ -255,7 +293,7 @@ def process_aiming(
                     ax * raw_box[2] + (1.0 - ax) * sb[2],
                     ay * raw_box[3] + (1.0 - ay) * sb[3],
                 ]
-            target_x, target_y = calculate_aim_target(state.smoothed_box, aim_part, head_height_ratio)
+            target_x, target_y = calculate_aim_target(state.smoothed_box, aim_part, head_height_ratio, config)
             selected_box = state.smoothed_box
         else:
             state.smoothed_box = list(selected_box)

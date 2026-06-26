@@ -112,6 +112,10 @@ _FIELD_MAP = {
     'head_width_ratio':           'aim.target_area.head_width_ratio',
     'head_height_ratio':          'aim.target_area.head_height_ratio',
     'body_width_ratio':           'aim.target_area.body_width_ratio',
+    'aim_adaptive_ratio_enabled': 'aim.target_area.adaptive_ratio.enabled',
+    'aim_adaptive_ratio_ref_h':   'aim.target_area.adaptive_ratio.ref_h',
+    'aim_posture_aware_enabled':  'aim.target_area.posture_aware.enabled',
+    'aim_crouch_aspect_threshold':'aim.target_area.posture_aware.crouch_aspect',
 
     # --- autofire ---
     'auto_fire_key':              'autofire.key',
@@ -308,6 +312,16 @@ class Config:
         self.head_width_ratio: float = 0.38    # 頭部寬度占檢測框寬度的比例
         self.head_height_ratio: float = 0.26   # 頭部高度占檢測框高度的比例
         self.body_width_ratio: float = 0.87    # 身體寬度占檢測框寬度的比例
+
+        # Distance-adaptive head ratio — scales head_height_ratio inversely with box height
+        # so the aim point stays on the head at all engagement ranges.
+        self.aim_adaptive_ratio_enabled: bool = False
+        self.aim_adaptive_ratio_ref_h: float = 80.0  # box height (px) where ratio is nominal
+
+        # Posture-aware targeting — detects crouch/slide/prone via box aspect ratio and
+        # falls back to center-mass so the aim doesn't overshoot into empty space.
+        self.aim_posture_aware_enabled: bool = False
+        self.aim_crouch_aspect_threshold: float = 1.2  # box_w/box_h above which = crouching
         
         # PID 控制器參數 (分離 X 和 Y 軸)
         self.pid_kp_x: float = 0.26      # 水平 P: 比例 - 主要影響反應速度

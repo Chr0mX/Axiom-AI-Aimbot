@@ -125,6 +125,40 @@ class TriggerPage(BasePage):
             parent=self.areaGroup
         )
 
+        self.adaptiveRatioCard = SwitchSettingCard(
+            FluentIcon.ZOOM_FIT_WIDTH,
+            t("aim_adaptive_ratio_enabled", "Distance-Adaptive Ratio"),
+            t("aim_adaptive_ratio_desc", "Scale head ratio inversely with box size — keeps head aim accurate from close to long range."),
+            parent=self.areaGroup
+        )
+
+        self.adaptiveRatioRefHCard = SliderLabelCard(
+            FluentIcon.ZOOM_IN,
+            t("aim_adaptive_ratio_ref_h", "Reference Box Height"),
+            20, 200,
+            format_func=lambda v: f"{v} px",
+            description=t("aim_adaptive_ratio_ref_h_desc", "Box height (px) where head ratio is nominal. Match to your typical close-range target."),
+            slider_width=180,
+            parent=self.areaGroup
+        )
+
+        self.postureAwareCard = SwitchSettingCard(
+            FluentIcon.PEOPLE,
+            t("aim_posture_aware_enabled", "Posture-Aware Targeting"),
+            t("aim_posture_aware_desc", "Fall back to center-mass when box is wider than tall (crouch / slide / prone)."),
+            parent=self.areaGroup
+        )
+
+        self.crouchAspectCard = SliderLabelCard(
+            FluentIcon.CONSTRACT,
+            t("aim_crouch_aspect_threshold", "Crouch Aspect Threshold"),
+            80, 200,
+            format_func=lambda v: f"{v / 100:.1f}×",
+            description=t("aim_crouch_aspect_desc", "box_w / box_h above which player is treated as crouching. Default 1.2×."),
+            slider_width=180,
+            parent=self.areaGroup
+        )
+
     def _initLayout(self):
         """排版所有控制項"""
         # 自動射擊設定
@@ -138,6 +172,10 @@ class TriggerPage(BasePage):
         self.areaGroup.addSettingCard(self.headWidthCard)
         self.areaGroup.addSettingCard(self.headHeightCard)
         self.areaGroup.addSettingCard(self.bodyWidthCard)
+        self.areaGroup.addSettingCard(self.adaptiveRatioCard)
+        self.areaGroup.addSettingCard(self.adaptiveRatioRefHCard)
+        self.areaGroup.addSettingCard(self.postureAwareCard)
+        self.areaGroup.addSettingCard(self.crouchAspectCard)
         self.addContent(self.areaGroup)
 
         self.scrollLayout.addStretch(1)
@@ -155,6 +193,10 @@ class TriggerPage(BasePage):
         self.headWidthCard.valueChanged.connect(self._onHeadWidthChanged)
         self.headHeightCard.valueChanged.connect(self._onHeadHeightChanged)
         self.bodyWidthCard.valueChanged.connect(self._onBodyWidthChanged)
+        self.adaptiveRatioCard.checkedChanged.connect(self._onAdaptiveRatioChanged)
+        self.adaptiveRatioRefHCard.valueChanged.connect(self._onAdaptiveRatioRefHChanged)
+        self.postureAwareCard.checkedChanged.connect(self._onPostureAwareChanged)
+        self.crouchAspectCard.valueChanged.connect(self._onCrouchAspectChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -183,6 +225,15 @@ class TriggerPage(BasePage):
         self.headWidthCard.setValue(int(self._config.head_width_ratio * 100))
         self.headHeightCard.setValue(int(self._config.head_height_ratio * 100))
         self.bodyWidthCard.setValue(int(self._config.body_width_ratio * 100))
+
+        adaptive_on = bool(getattr(self._config, 'aim_adaptive_ratio_enabled', False))
+        self.adaptiveRatioCard.setChecked(adaptive_on)
+        self.adaptiveRatioRefHCard.setValue(int(getattr(self._config, 'aim_adaptive_ratio_ref_h', 80.0)))
+        self.adaptiveRatioRefHCard.setEnabled(adaptive_on)
+        posture_on = bool(getattr(self._config, 'aim_posture_aware_enabled', False))
+        self.postureAwareCard.setChecked(posture_on)
+        self.crouchAspectCard.setValue(int(getattr(self._config, 'aim_crouch_aspect_threshold', 1.2) * 100))
+        self.crouchAspectCard.setEnabled(posture_on)
 
     # === 回調函數 ===
     def _onFireTargetChanged(self, index):
@@ -228,6 +279,24 @@ class TriggerPage(BasePage):
     def _onBodyWidthChanged(self, value):
         if self._config:
             self._config.body_width_ratio = value / 100.0
+
+    def _onAdaptiveRatioChanged(self, checked):
+        if self._config:
+            self._config.aim_adaptive_ratio_enabled = bool(checked)
+        self.adaptiveRatioRefHCard.setEnabled(bool(checked))
+
+    def _onAdaptiveRatioRefHChanged(self, value):
+        if self._config:
+            self._config.aim_adaptive_ratio_ref_h = float(value)
+
+    def _onPostureAwareChanged(self, checked):
+        if self._config:
+            self._config.aim_posture_aware_enabled = bool(checked)
+        self.crouchAspectCard.setEnabled(bool(checked))
+
+    def _onCrouchAspectChanged(self, value):
+        if self._config:
+            self._config.aim_crouch_aspect_threshold = value / 100.0
 
     def retranslateUi(self):
         """刷新翻譯"""
