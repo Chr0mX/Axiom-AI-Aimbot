@@ -326,10 +326,10 @@ class Config:
         # PID 控制器參數 (分離 X 和 Y 軸)
         self.pid_kp_x: float = 0.26      # 水平 P: 比例 - 主要影響反應速度
         self.pid_ki_x: float = 0.0       # 水平 I: 積分 - 修正靜態誤差
-        self.pid_kd_x: float = 0.0       # 水平 D: 微分 - 抑制抖動與過衝
+        self.pid_kd_x: float = 0.12      # 水平 D: 微分 - 抑制抖動與過衝
         self.pid_kp_y: float = 0.26      # 垂直 P: 比例
         self.pid_ki_y: float = 0.0       # 垂直 I: 積分
-        self.pid_kd_y: float = 0.0       # 垂直 D: 微分
+        self.pid_kd_y: float = 0.08      # 垂直 D: 微分
 
         # Y軸壓槍速度逐漸歸零
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能
@@ -474,9 +474,9 @@ class Config:
         self.lock_decay_frames: int = 15
         self.lock_iou_threshold: float = 0.3
         self.sticky_adaptive_iou: bool = True
-        self.box_ema_enabled: bool = False
-        self.box_ema_alpha_x: float = 0.8
-        self.box_ema_alpha_y: float = 0.5
+        self.box_ema_enabled: bool = True
+        self.box_ema_alpha_x: float = 0.55
+        self.box_ema_alpha_y: float = 0.45
 
         # FOV filter mode
         self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square
