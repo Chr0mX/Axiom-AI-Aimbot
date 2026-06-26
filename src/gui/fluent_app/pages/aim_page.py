@@ -511,6 +511,33 @@ class AimPage(BasePage):
         # === Target Tracking ===
         self.trackingGroup = SettingCardGroup(t("target_tracking", "Target Tracking"), self.scrollWidget)
 
+        self.boxEmaEnableCard = SwitchSettingCard(
+            FluentIcon.FILTER,
+            t("box_ema_enabled", "Box EMA"),
+            t("box_ema_desc", "Smooth raw detection box coordinates before aim calculation. Reduces jitter at high Kp."),
+            parent=self.trackingGroup
+        )
+
+        self.boxEmaAlphaXCard = SliderLabelCard(
+            FluentIcon.LEFT_ARROW,
+            t("box_ema_alpha_x", "Box EMA Alpha X"),
+            10, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("box_ema_alpha_x_desc", "X-axis smoothing. Lower = heavier smooth, less jitter. Higher = more responsive."),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        self.boxEmaAlphaYCard = SliderLabelCard(
+            FluentIcon.UP,
+            t("box_ema_alpha_y", "Box EMA Alpha Y"),
+            10, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("box_ema_alpha_y_desc", "Y-axis smoothing. Lower = heavier smooth."),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
         self.emaEnableCard = SwitchSettingCard(
             FluentIcon.SPEED_MEDIUM,
             t("ema_enabled", "EMA Smoothing"),
@@ -716,6 +743,9 @@ class AimPage(BasePage):
         self.addContent(self.targetPriorityGroup)
 
         # Target Tracking
+        self.trackingGroup.addSettingCard(self.boxEmaEnableCard)
+        self.trackingGroup.addSettingCard(self.boxEmaAlphaXCard)
+        self.trackingGroup.addSettingCard(self.boxEmaAlphaYCard)
         self.trackingGroup.addSettingCard(self.emaEnableCard)
         self.trackingGroup.addSettingCard(self.emaAlphaCard)
         self.trackingGroup.addSettingCard(self.predictionEnableCard)
@@ -785,6 +815,9 @@ class AimPage(BasePage):
         self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
 
         # Target Tracking
+        self.boxEmaEnableCard.checkedChanged.connect(self._onBoxEmaEnableChanged)
+        self.boxEmaAlphaXCard.valueChanged.connect(self._onBoxEmaAlphaXChanged)
+        self.boxEmaAlphaYCard.valueChanged.connect(self._onBoxEmaAlphaYChanged)
         self.emaEnableCard.checkedChanged.connect(self._onEmaEnableChanged)
         self.emaAlphaCard.valueChanged.connect(self._onEmaAlphaChanged)
         self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
@@ -887,6 +920,12 @@ class AimPage(BasePage):
             self.targetPriorityWeightCard.setValue(int(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100))
 
             # Target Tracking
+            box_ema_on = bool(getattr(self._config, 'box_ema_enabled', True))
+            self.boxEmaEnableCard.setChecked(box_ema_on)
+            self.boxEmaAlphaXCard.setValue(int(getattr(self._config, 'box_ema_alpha_x', 0.55) * 100))
+            self.boxEmaAlphaYCard.setValue(int(getattr(self._config, 'box_ema_alpha_y', 0.45) * 100))
+            self.boxEmaAlphaXCard.setEnabled(box_ema_on)
+            self.boxEmaAlphaYCard.setEnabled(box_ema_on)
             self.emaEnableCard.setChecked(bool(getattr(self._config, 'ema_enabled', False)))
             self.emaAlphaCard.setValue(int(getattr(self._config, 'ema_alpha', 0.7) * 100))
             self.predictionEnableCard.setChecked(bool(getattr(self._config, 'prediction_enabled', False)))
@@ -1317,6 +1356,20 @@ class AimPage(BasePage):
             self._config.target_priority_confidence_weight = value / 100.0
 
     # === Target Tracking Callbacks ===
+
+    def _onBoxEmaEnableChanged(self, checked):
+        if self._config:
+            self._config.box_ema_enabled = bool(checked)
+        self.boxEmaAlphaXCard.setEnabled(bool(checked))
+        self.boxEmaAlphaYCard.setEnabled(bool(checked))
+
+    def _onBoxEmaAlphaXChanged(self, value):
+        if self._config:
+            self._config.box_ema_alpha_x = value / 100.0
+
+    def _onBoxEmaAlphaYChanged(self, value):
+        if self._config:
+            self._config.box_ema_alpha_y = value / 100.0
 
     def _onEmaEnableChanged(self, checked):
         if self._config:
