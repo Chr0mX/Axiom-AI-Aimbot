@@ -40,3 +40,8 @@ class LoopState:
     # _preprocess_worker; written there, read in process_aiming to cancel shake-induced error.
     cam_shift_x: float = 0.0
     cam_shift_y: float = 0.0
+
+    # Sub-pixel carry for MAKCU — accumulates the fractional remainder that integer
+    # rounding discards each frame so micro-corrections are never silently lost.
+    makcu_carry_x: float = 0.0
+    makcu_carry_y: float = 0.0
