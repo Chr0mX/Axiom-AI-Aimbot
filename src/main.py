@@ -496,6 +496,15 @@ def main():
     main_overlay = PyQtOverlay(overlay_boxes_queue, overlay_confidences_queue, config)
     main_overlay.show()
 
+    # Web ESP overlay — stream detection state to a browser Canvas renderer (LAN)
+    if getattr(config, 'web_esp_enabled', False):
+        try:
+            from core import esp_server
+            esp_server.start(config)
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).error("[WebESP] failed to start: %s", exc)
+
     # 建立並顯示新的狀態面板（根據配置決定是否顯示）
     status_panel = StatusPanel(config)
     if config.show_status_panel:

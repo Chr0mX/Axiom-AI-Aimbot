@@ -175,6 +175,10 @@ _FIELD_MAP = {
     'show_crosshair':             'display.crosshair.show',
     'crosshair_style':            'display.crosshair.style',
     'crosshair_size':             'display.crosshair.size',
+    'web_esp_enabled':            'web_esp.enabled',
+    'web_esp_http_port':          'web_esp.http_port',
+    'web_esp_ws_port':            'web_esp.ws_port',
+    'web_esp_fps':                'web_esp.fps',
 
     # --- hardware ---
     'mouse_move_method':          'hardware.mouse_move_method',
@@ -480,6 +484,12 @@ class Config:
 
         # FOV filter mode
         self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square
+
+        # Web ESP overlay — stream detection state to a browser Canvas renderer over LAN
+        self.web_esp_enabled: bool = False
+        self.web_esp_http_port: int = 8080   # static page server
+        self.web_esp_ws_port: int = 8765     # state broadcast websocket
+        self.web_esp_fps: int = 60           # broadcast tick rate (latest-state wins)
 
         # Aim shaping (ported from Someone_idea)
         self.aim_deadzone_enabled: bool = False
