@@ -12,6 +12,9 @@ from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
+# Bundled built-in presets shipped with the app (seeded into the user config dir).
+_BUILTIN_PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'presets')
+
 if TYPE_CHECKING:
     from .config import Config
 
@@ -34,6 +37,27 @@ class ConfigManager:
         """確保參數配置目錄存在"""
         if not os.path.exists(self.configs_dir):
             os.makedirs(self.configs_dir)
+        self._seed_builtin_presets()
+
+    def _seed_builtin_presets(self) -> None:
+        """Copy any bundled built-in presets into the user config dir.
+
+        Only seeds a preset whose target file does not already exist, so user
+        edits are never clobbered. A deleted built-in re-appears on next launch.
+        """
+        if not os.path.isdir(_BUILTIN_PRESETS_DIR):
+            return
+        for fn in os.listdir(_BUILTIN_PRESETS_DIR):
+            if not fn.endswith('.json'):
+                continue
+            dst = os.path.join(self.configs_dir, fn)
+            if os.path.exists(dst):
+                continue
+            try:
+                shutil.copy2(os.path.join(_BUILTIN_PRESETS_DIR, fn), dst)
+                logger.info("Seeded built-in preset: %s", fn[:-5])
+            except OSError as e:
+                logger.warning("Failed to seed built-in preset '%s': %s", fn, e)
             
     def get_config_list(self) -> List[str]:
         """獲取所有參數配置列表"""

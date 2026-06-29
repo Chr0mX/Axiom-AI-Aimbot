@@ -1,0 +1,67 @@
+{
+  "name": "Apex MAKCU UDP Precision",
+  "created_time": "2026-06-29T00:00:00",
+  "description": "Precision center-mass tracking for Apex Legends on a 2-PC setup: game video received over UDP, hardware mouse output via MAKCU. Aim sits dead-center on target (deadzone/lateral-brake/Y-reduce off, universal sub-pixel carry), with prediction + sticky lock for moving targets. Performance-tuned: time-critical thread priority, queue depth 1, tight detect interval, skip-letterbox, CUDA IO binding. NOTE: set your MAKCU COM port on the Aim/Hardware page and the UDP port to match your sender. With UDP the PyQt overlay hides — use the Web ESP overlay (Visuals page) in a browser to view detections.",
+  "config": {
+    "aim_part": "center",
+    "single_target_mode": true,
+    "target_priority_mode": "distance",
+    "keep_detecting": true,
+    "always_aim": false,
+
+    "aim_deadzone_enabled": false,
+    "aim_lateral_brake_enabled": false,
+    "aim_y_reduce_enabled": false,
+
+    "pid_kp_x": 0.40,
+    "pid_ki_x": 0.0,
+    "pid_kd_x": 0.12,
+    "pid_kp_y": 0.40,
+    "pid_ki_y": 0.0,
+    "pid_kd_y": 0.08,
+
+    "box_ema_enabled": true,
+    "box_ema_alpha_x": 0.75,
+    "box_ema_alpha_y": 0.70,
+
+    "prediction_enabled": true,
+    "prediction_horizon_ms": 10.0,
+    "prediction_max_velocity": 1200.0,
+    "prediction_history_len": 3,
+
+    "sticky_lock_enabled": true,
+    "lock_decay_frames": 15,
+    "lock_iou_threshold": 0.3,
+
+    "mouse_move_method": "makcu",
+    "mouse_click_method": "makcu",
+    "makcu_baud_rate": 4000000,
+    "makcu_aim_button": "rmb",
+    "makcu_aim_mode": "hold",
+    "makcu_disengage_delay": 0.0,
+
+    "screenshot_method": "udp",
+    "udp_bind_ip": "0.0.0.0",
+    "udp_bind_port": 5600,
+    "udp_recv_buffer_size": 131072,
+    "udp_frame_timeout": 1.0,
+    "uvc_show_window": false,
+
+    "inference_backend": "auto",
+    "cuda_io_binding_enabled": true,
+    "skip_letterbox": true,
+    "performance_mode": true,
+    "thread_priority": "time_critical",
+    "max_queue_size": 1,
+    "detect_interval": 0.006,
+    "screenshot_interval": 0.006,
+    "idle_detect_enabled": false,
+
+    "fov_size": 220,
+    "detect_range_size": 320,
+    "min_confidence": 0.50,
+
+    "jitter_enabled": false,
+    "smart_jitter_enabled": false
+  }
+}
