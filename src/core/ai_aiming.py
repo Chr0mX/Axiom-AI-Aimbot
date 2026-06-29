@@ -98,7 +98,11 @@ def calculate_aim_target(
         if box_w / box_h >= threshold:
             return box_center_x, abs_y1 + box_h * 0.5
 
-    if aim_part == 'head':
+    if aim_part == 'center':
+        # Geometric center-mass of the bounding box.
+        target_x = box_center_x
+        target_y = (abs_y1 + abs_y2) * 0.5
+    elif aim_part == 'head':
         target_x = box_center_x
         target_y = abs_y1 + box_h * ratio * 0.5
     else:
@@ -396,18 +400,17 @@ def process_aiming(
                 return
             dx, dy = _result
 
-        # Sub-pixel carry for MAKCU: accumulate the fractional remainder that
-        # would otherwise be discarded by integer rounding so that micro-corrections
-        # (e.g. PID output of 0.4 px) are carried forward and applied on a later frame.
-        if mouse_method == 'makcu':
-            raw_x = dx + state.makcu_carry_x
-            raw_y = dy + state.makcu_carry_y
-            move_x = int(raw_x)
-            move_y = int(raw_y)
-            state.makcu_carry_x = raw_x - move_x
-            state.makcu_carry_y = raw_y - move_y
-        else:
-            move_x, move_y = int(round(dx)), int(round(dy))
+        # Sub-pixel carry (all backends): accumulate the fractional remainder that
+        # integer truncation would otherwise discard, so micro-corrections (e.g. a
+        # PID output of 0.4 px) are carried forward and applied on a later frame.
+        # This lets the crosshair converge exactly onto the aim point instead of
+        # dithering ±0.5 px from per-frame rounding.
+        raw_x = dx + state.aim_carry_x
+        raw_y = dy + state.aim_carry_y
+        move_x = int(raw_x)
+        move_y = int(raw_y)
+        state.aim_carry_x = raw_x - move_x
+        state.aim_carry_y = raw_y - move_y
 
         # --- Per-frame pixel cap (new feature from Someone_idea) ---
         if getattr(config, 'max_move_per_frame_px', 0) > 0:
@@ -481,8 +484,8 @@ def process_aiming(
             config.display_locked_box = None
             config.display_locked_box_is_decaying = False
         state.smoothed_box = None
-        state.makcu_carry_x = 0.0
-        state.makcu_carry_y = 0.0
+        state.aim_carry_x = 0.0
+        state.aim_carry_y = 0.0
         pid_x.reset()
         pid_y.reset()
         state.aim_y_last_target_y = 0.0

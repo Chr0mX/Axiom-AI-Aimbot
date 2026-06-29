@@ -217,7 +217,9 @@ class PyQtOverlay(QWidget):
             x1, y1, x2, y2 = map(int, box)
             box_h = y2 - y1
             bx = (x1 + x2) // 2
-            if aim_part == 'head':
+            if aim_part == 'center':
+                by = (y1 + y2) // 2
+            elif aim_part == 'head':
                 by = int(y1 + box_h * head_h_ratio * 0.5)
             else:
                 by = int((y1 + box_h * head_h_ratio + y2) * 0.5)
@@ -331,7 +333,9 @@ class PyQtOverlay(QWidget):
                 box_w = x2 - x1
                 box_h = y2 - y1
                 tx = int(x1 + box_w * 0.5)
-                if aim_part == 'head':
+                if aim_part == 'center':
+                    ty = int((y1 + y2) * 0.5)
+                elif aim_part == 'head':
                     ty = int(y1 + box_h * head_h_ratio * 0.5)
                 else:
                     ty = int((y1 + box_h * head_h_ratio + y2) * 0.5)

@@ -41,7 +41,8 @@ class LoopState:
     cam_shift_x: float = 0.0
     cam_shift_y: float = 0.0
 
-    # Sub-pixel carry for MAKCU — accumulates the fractional remainder that integer
-    # rounding discards each frame so micro-corrections are never silently lost.
-    makcu_carry_x: float = 0.0
-    makcu_carry_y: float = 0.0
+    # Sub-pixel carry — accumulates the fractional remainder that integer truncation
+    # discards each frame so micro-corrections are never silently lost and the
+    # crosshair converges exactly onto the aim point. Applies to all mouse backends.
+    aim_carry_x: float = 0.0
+    aim_carry_y: float = 0.0

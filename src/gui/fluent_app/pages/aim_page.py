@@ -135,7 +135,7 @@ class AimPage(BasePage):
         self.generalGroup = SettingCardGroup(t("general_params"), self.scrollWidget)
 
         self.aimPartCombo = ComboBox()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("both")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("both"), t("center", "Center")])
         self.aimPartCombo.setMinimumWidth(120)
         self.aimPartCard = SettingCard(
             FluentIcon.PEOPLE,
@@ -840,7 +840,7 @@ class AimPage(BasePage):
         self._isLoadingConfig = True
         try:
             # General
-            aim_parts = ["head", "body", "both"]
+            aim_parts = ["head", "body", "both", "center"]
             if self._config.aim_part in aim_parts:
                 self.aimPartCombo.setCurrentIndex(aim_parts.index(self._config.aim_part))
 
@@ -1022,8 +1022,9 @@ class AimPage(BasePage):
 
     def _onAimPartChanged(self, index):
         if self._config:
-            parts = ["head", "body", "both"]
-            self._config.aim_part = parts[index]
+            parts = ["head", "body", "both", "center"]
+            if 0 <= index < len(parts):
+                self._config.aim_part = parts[index]
 
     def _onMouseMoveChanged(self, text):
         if self._config:
@@ -1511,5 +1512,5 @@ class AimPage(BasePage):
 
         current_aim = self.aimPartCombo.currentIndex()
         self.aimPartCombo.clear()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("both")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("both"), t("center", "Center")])
         self.aimPartCombo.setCurrentIndex(current_aim)
