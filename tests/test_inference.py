@@ -38,12 +38,18 @@ class TestPIDController:
         output = pid.update(10.0)
         assert output == 0.5 * 10.0  # kp <= 0.5 時不調整
 
-    def test_proportional_high_kp(self):
-        """高 Kp 值使用非線性調整曲線"""
+    def test_proportional_high_kp_is_linear(self):
+        """Kp response is a clamped identity — no non-linear gain explosion above 0.5."""
         pid = self._make_pid(kp=1.0, ki=0.0, kd=0.0)
         output = pid.update(10.0)
-        # kp=1.0 -> adjusted_kp = 0.5 + (1.0 - 0.5) * 3.0 = 2.0
-        assert output == 2.0 * 10.0
+        # kp=1.0 -> effective 1.0 (was 2.0 under the old triple-gain curve)
+        assert output == 1.0 * 10.0
+        # And a mid-upper value is linear too: kp=0.75 -> 0.75 (was 1.25)
+        pid2 = self._make_pid(kp=0.75, ki=0.0, kd=0.0)
+        assert pid2.update(10.0) == 0.75 * 10.0
+        # Out-of-range is clamped to [0, 1]
+        pid3 = self._make_pid(kp=1.5, ki=0.0, kd=0.0)
+        assert pid3.update(10.0) == 1.0 * 10.0
 
     def test_integral_accumulation(self):
         """積分項累積測試"""
@@ -94,10 +100,16 @@ class TestPIDController:
         assert adjusted == 0.5
 
     def test_adjusted_kp_at_075(self):
-        """kp = 0.75 -> 0.5 + 0.25*3 = 1.25"""
+        """kp = 0.75 -> 0.75 (linear identity; no triple-gain above 0.5)"""
         pid = self._make_pid()
         adjusted = pid._calculate_adjusted_kp(0.75)
-        assert abs(adjusted - 1.25) < 0.001
+        assert abs(adjusted - 0.75) < 0.001
+
+    def test_adjusted_kp_clamped(self):
+        """Out-of-range kp is clamped to [0, 1]."""
+        pid = self._make_pid()
+        assert pid._calculate_adjusted_kp(1.5) == 1.0
+        assert pid._calculate_adjusted_kp(-0.2) == 0.0
 
     def test_adjusted_kp_below_050(self):
         """kp < 0.5 維持原值"""

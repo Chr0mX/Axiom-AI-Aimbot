@@ -307,11 +307,13 @@ class AimPage(BasePage):
 
         self.pidStackedWidget = QStackedWidget()
 
+        # Kp slider travel 0–100 maps to config 0.0–0.5 (the proven-stable band) — see
+        # _onPidChanged / _loadFromConfig. The /200 display keeps the label honest.
         self.pidPxCard = SliderLabelCard(
             FluentIcon.SPEED_HIGH,
             t("reaction_speed_p"),
             0, 100,
-            format_func=lambda v: f"{v/100:.2f}",
+            format_func=lambda v: f"{v/200:.2f}",
             parent=self.pidGroup
         )
 
@@ -335,7 +337,7 @@ class AimPage(BasePage):
             FluentIcon.SPEED_HIGH,
             t("reaction_speed_p"),
             0, 100,
-            format_func=lambda v: f"{v/100:.2f}",
+            format_func=lambda v: f"{v/200:.2f}",
             parent=self.pidGroup
         )
 
@@ -871,11 +873,12 @@ class AimPage(BasePage):
             self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
             self._updateXboxConnectionStatus()
 
-            # PID
-            self.pidPxCard.setValue(int(self._config.pid_kp_x * 100))
+            # PID — Kp sliders are scaled x200 (slider 0–100 → config 0.0–0.5), clamped
+            # to the slider max so a saved value keeps its exact effective gain.
+            self.pidPxCard.setValue(min(100, int(self._config.pid_kp_x * 200)))
             self.pidIxCard.setValue(int(self._config.pid_ki_x * 100))
             self.pidDxCard.setValue(int(self._config.pid_kd_x * 100))
-            self.pidPyCard.setValue(int(self._config.pid_kp_y * 100))
+            self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * 200)))
             self.pidIyCard.setValue(int(self._config.pid_ki_y * 100))
             self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
             self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
@@ -1243,7 +1246,10 @@ class AimPage(BasePage):
             if is_bool:
                 setattr(self._config, attr, value)
             else:
-                setattr(self._config, attr, value / 100.0)
+                # Kp sliders are scaled so full travel (0–100) spans config 0.0–0.5,
+                # keeping the whole strength slider inside the stable band. Ki/Kd use /100.
+                divisor = 200.0 if attr in ('pid_kp_x', 'pid_kp_y') else 100.0
+                setattr(self._config, attr, value / divisor)
 
     # === Smart Jitter Callbacks ===
 
