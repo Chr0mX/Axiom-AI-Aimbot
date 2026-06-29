@@ -126,7 +126,7 @@ class TriggerPage(BasePage):
         )
 
         self.adaptiveRatioCard = SwitchSettingCard(
-            FluentIcon.ZOOM_FIT_WIDTH,
+            FluentIcon.FIT_PAGE,
             t("aim_adaptive_ratio_enabled", "Distance-Adaptive Ratio"),
             t("aim_adaptive_ratio_desc", "Scale head ratio inversely with box size — keeps head aim accurate from close to long range."),
             parent=self.areaGroup
