@@ -112,8 +112,8 @@
     } else if (st.aim_part === "custom") {
       ty = y1 + h * ((st.aim_custom_y_pct ?? 30) / 100);
     } else {
-      // center / smart
-      ty = (y1 + y2) * 0.5;
+      // center / smart — also uses custom Y offset
+      ty = y1 + h * ((st.aim_custom_y_pct ?? 50) / 100);
     }
     const r = Math.max(3, Math.min(6, w / 8));
     ctx.strokeStyle = "rgba(255,80,80,0.86)";

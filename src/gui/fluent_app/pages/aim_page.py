@@ -93,10 +93,8 @@ class _AimPointPreview(QWidget):
             ay = by + head_px // 2
         elif self._aim_part == "body":
             ay = by + head_px + (bh - head_px) // 2
-        elif self._aim_part == "custom":
+        elif self._aim_part in ("custom", "center"):
             ay = by + int(bh * self._custom_y)
-        else:  # smart / center
-            ay = by + head_px + (bh - head_px) // 2
 
         # red X crosshair
         r = 6
@@ -119,7 +117,8 @@ class _AimPointPreview(QWidget):
         p.setFont(fnt)
         p.setPen(QColor(160, 160, 160, 130))
         label = {"head": "Head aim", "body": "Body aim",
-                 "custom": f"Custom ({int(self._custom_y*100)}%)"}.get(self._aim_part, "Smart (center-mass)")
+                 "custom": f"Custom ({int(self._custom_y*100)}%)",
+                 "center": f"Smart @ {int(self._custom_y*100)}%"}.get(self._aim_part, self._aim_part)
         p.drawText(6, H - 5, label)
 
         p.end()
@@ -1306,8 +1305,9 @@ class AimPage(BasePage):
     def _updateTargetAreaVisibility(self, aim_part):
         is_smart = aim_part == "center"
         is_custom = aim_part == "custom"
+        uses_custom_y = is_smart or is_custom
         if is_smart:
-            suffix = ""
+            suffix = t("aim_smart_mode_note", " — Smart + Custom Y")
         elif is_custom:
             suffix = t("aim_custom_mode_note", " — Custom Y mode")
         else:
@@ -1317,7 +1317,7 @@ class AimPage(BasePage):
                      self.adaptiveRatioCard, self.adaptiveRatioRefHCard,
                      self.postureAwareCard, self.crouchAspectCard]:
             card.setEnabled(is_smart)
-        self.customYCard.setEnabled(is_custom)
+        self.customYCard.setEnabled(uses_custom_y)
         head_h = self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20
         head_w = self.headWidthCard.value() if hasattr(self.headWidthCard, 'value') else 38
         body_w = self.bodyWidthCard.value() if hasattr(self.bodyWidthCard, 'value') else 87

@@ -103,9 +103,10 @@ def calculate_aim_target(
         pct = float(getattr(config, 'aim_custom_y_pct', 30.0)) / 100.0
         target_y = abs_y1 + box_h * pct
     elif aim_part == 'center':
-        # Geometric center-mass of the bounding box.
+        # Smart (center-mass): intelligent target selection + custom Y offset within box.
         target_x = box_center_x
-        target_y = (abs_y1 + abs_y2) * 0.5
+        pct = float(getattr(config, 'aim_custom_y_pct', 50.0)) / 100.0
+        target_y = abs_y1 + box_h * pct
     elif aim_part == 'head':
         target_x = box_center_x
         target_y = abs_y1 + box_h * ratio * 0.5
