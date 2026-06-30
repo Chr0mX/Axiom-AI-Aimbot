@@ -129,7 +129,7 @@
   function render() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    if (state && state.active !== false) {
+    if (state) {
       const st = state.settings;
       const { sx, sy } = scaler(state);
       const X = (v) => v * sx, Y = (v) => v * sy;
