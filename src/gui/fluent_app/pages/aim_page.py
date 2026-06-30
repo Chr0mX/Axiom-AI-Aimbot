@@ -25,6 +25,86 @@ from ..base_page import BasePage
 from ..language_manager import t
 
 
+class _AimPointPreview(QWidget):
+    """Live canvas: simulated ESP box with head/body zones and aim-point X mark."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(200)
+        self._aim_part = "center"
+        self._head_h = 0.20   # fraction 0–1
+
+    def setParams(self, aim_part: str, head_h_pct: float):
+        self._aim_part = aim_part
+        self._head_h = max(0.05, min(0.95, head_h_pct / 100.0))
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+
+        # background
+        p.fillRect(0, 0, W, H, QColor(15, 15, 20))
+
+        # bounding box geometry (tall, centred)
+        bw = max(40, int(W * 0.28))
+        bh = int(H * 0.82)
+        bx = (W - bw) // 2
+        by = (H - bh) // 2
+        head_px = int(bh * self._head_h)
+
+        # zone fills
+        p.fillRect(bx, by,             bw, head_px,          QColor(80,  120, 220, 50))
+        p.fillRect(bx, by + head_px,   bw, bh - head_px,     QColor(200, 120,  40, 40))
+
+        # corner-box (ESP style)
+        cl = max(5, min(bw, bh) // 6)
+        p.setPen(QPen(QColor(0, 220, 140), 2))
+        for sx, sy, dx, dy in ((bx, by, 1, 1), (bx+bw, by, -1, 1),
+                                (bx, by+bh, 1, -1), (bx+bw, by+bh, -1, -1)):
+            p.drawLine(sx, sy + dy*cl, sx, sy)
+            p.drawLine(sx, sy, sx + dx*cl, sy)
+
+        # head / body divider
+        p.setPen(QPen(QColor(140, 140, 200, 80), 1, Qt.PenStyle.DashLine))
+        p.drawLine(bx, by + head_px, bx + bw, by + head_px)
+
+        # aim-point position
+        ax = bx + bw // 2
+        if self._aim_part == "head":
+            ay = by + head_px // 2
+        elif self._aim_part == "body":
+            ay = by + head_px + (bh - head_px) // 2
+        else:  # smart / center
+            ay = by + head_px + (bh - head_px) // 2
+
+        # red X crosshair
+        r = 6
+        p.setPen(QPen(QColor(255, 50, 50), 2))
+        p.drawLine(ax - r, ay - r, ax + r, ay + r)
+        p.drawLine(ax + r, ay - r, ax - r, ay + r)
+
+        # zone labels to the right of the box
+        fnt = p.font()
+        fnt.setPointSize(8)
+        p.setFont(fnt)
+        lx = bx + bw + 8
+        p.setPen(QColor(100, 150, 230, 200))
+        p.drawText(lx, by + head_px // 2 + 4, "Head")
+        p.setPen(QColor(220, 140, 60, 200))
+        p.drawText(lx, by + head_px + (bh - head_px) // 2 + 4, "Body")
+
+        # mode label bottom-left
+        fnt.setPointSize(7)
+        p.setFont(fnt)
+        p.setPen(QColor(160, 160, 160, 130))
+        label = {"head": "Head aim", "body": "Body aim"}.get(self._aim_part, "Smart (center-mass)")
+        p.drawText(6, H - 5, label)
+
+        p.end()
+
+
 def _render_frames_pixmap(frames, W=240, H=240):
     """Render a jitter frames list as a path on a W×H QPixmap."""
     positions = [(0.0, 0.0)]
@@ -724,6 +804,7 @@ class AimPage(BasePage):
 
         # === Target Area (shared by aim-point calculation and auto-fire hit zone) ===
         self.targetAreaGroup = SettingCardGroup(t("target_area_settings"), self.scrollWidget)
+        self.aimPreview = _AimPointPreview(self.targetAreaGroup)
 
         self.headWidthCard = SliderLabelCard(
             FluentIcon.CONSTRACT,
@@ -891,6 +972,7 @@ class AimPage(BasePage):
         self.addContent(self.trackingGroup)
 
         # Target Area (shared aim-point geometry + auto-fire hit zone)
+        self.targetAreaGroup.addSettingCard(self.aimPreview)
         self.targetAreaGroup.addSettingCard(self.headWidthCard)
         self.targetAreaGroup.addSettingCard(self.headHeightCard)
         self.targetAreaGroup.addSettingCard(self.bodyWidthCard)
@@ -1196,6 +1278,8 @@ class AimPage(BasePage):
                      self.adaptiveRatioCard, self.adaptiveRatioRefHCard,
                      self.postureAwareCard, self.crouchAspectCard]:
             card.setEnabled(is_smart)
+        head_h = self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20
+        self.aimPreview.setParams(aim_part, head_h)
 
     def _onMouseMoveChanged(self, text):
         if self._config:
@@ -1644,6 +1728,9 @@ class AimPage(BasePage):
     def _onHeadHeightChanged(self, value):
         if self._config:
             self._config.head_height_ratio = value / 100.0
+        parts = ["head", "body", "center"]
+        idx = self.aimPartCombo.currentIndex()
+        self.aimPreview.setParams(parts[idx] if 0 <= idx < len(parts) else "center", value)
 
     def _onBodyWidthChanged(self, value):
         if self._config:
