@@ -50,6 +50,8 @@ _broadcast_thread: Optional[threading.Thread] = None
 _clients: Set[socket.socket] = set()
 _clients_lock = threading.Lock()
 
+_actual_ws_port: int = 0
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -72,7 +74,7 @@ def connect_url() -> str:
     if not _config:
         return ""
     port = int(getattr(_config, "web_esp_http_port", 8080))
-    ws_port = int(getattr(_config, "web_esp_ws_port", 8765))
+    ws_port = _actual_ws_port or int(getattr(_config, "web_esp_ws_port", 8765))
     return f"http://{_lan_ip()}:{port}/?ws={ws_port}"
 
 
@@ -220,16 +222,27 @@ def _ws_handshake(conn: socket.socket) -> bool:
 
 
 def _accept_loop(port: int):
-    global _ws_listener
-    try:
-        _ws_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _ws_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        _ws_listener.bind(("0.0.0.0", port))
-        _ws_listener.listen(8)
-        _ws_listener.settimeout(0.5)
-    except Exception as exc:
-        logger.error("[WebESP] WS listener failed: %s", exc)
-        return
+    global _ws_listener, _actual_ws_port
+    for attempt in range(10):
+        try:
+            _ws_listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            _ws_listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            _ws_listener.bind(("0.0.0.0", port + attempt))
+            _ws_listener.listen(8)
+            _ws_listener.settimeout(0.5)
+            _actual_ws_port = port + attempt
+            if attempt:
+                logger.warning("[WebESP] WS port %d in use, using %d instead", port, _actual_ws_port)
+            break
+        except Exception as exc:
+            try:
+                _ws_listener.close()
+            except Exception:
+                pass
+            _ws_listener = None
+            if attempt == 9:
+                logger.error("[WebESP] WS listener failed after 10 attempts: %s", exc)
+                return
     while not _stop.is_set():
         try:
             conn, _addr = _ws_listener.accept()
@@ -288,7 +301,7 @@ def _broadcast_loop():
 
 def start(config) -> bool:
     """Start the Web ESP server (idempotent). Returns True if running afterwards."""
-    global _config, _token, _http_thread, _ws_accept_thread, _broadcast_thread
+    global _config, _actual_ws_port, _http_thread, _ws_accept_thread, _broadcast_thread
     if is_running():
         return True
     _config = config
@@ -310,7 +323,8 @@ def start(config) -> bool:
 
 def stop():
     """Stop the server and close all client connections."""
-    global _http_server, _ws_listener
+    global _http_server, _ws_listener, _actual_ws_port
+    _actual_ws_port = 0
     _stop.set()
     if _http_server is not None:
         try:
