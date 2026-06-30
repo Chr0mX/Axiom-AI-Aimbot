@@ -67,33 +67,52 @@ def _render_frames_pixmap(frames, W=240, H=240):
 class _JitterLiveWindow(QDialog):
     """Floating live preview of the jitter path being recorded."""
 
-    def __init__(self, recorder, parent=None):
+    def __init__(self, stop_callback, parent=None):
         super().__init__(parent, Qt.WindowType.Tool)
-        self.setWindowTitle("Recording…")
-        self.setFixedSize(280, 300)
-        self._recorder = recorder
+        self.setWindowTitle("Jitter Recorder")
+        self.setFixedSize(280, 340)
+        self._recorder = None
+        self._stop_callback = stop_callback
 
         self._canvas = QLabel()
         self._canvas.setFixedSize(240, 240)
-        self._info = QLabel("Recording… 0 frames")
+        self._canvas.setPixmap(_render_frames_pixmap([]))
+
+        self._info = QLabel("Starting…")
         self._info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._info.setStyleSheet("color: #888; font-size: 10px;")
+
+        self._stop_btn = QPushButton("■ Stop & Save")
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._onStopClicked)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
         layout.addWidget(self._canvas, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._info)
+        layout.addWidget(self._stop_btn)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
+
+    def setCountdown(self, n):
+        self._info.setText(f"Starting in {n}…")
+
+    def setRecorder(self, recorder):
+        self._recorder = recorder
+        self._stop_btn.setEnabled(True)
+        self._info.setText("Recording… 0 frames")
         self._timer.start(150)
-        self._refresh()
 
     def _refresh(self):
         frames = list(self._recorder._frames)
         self._canvas.setPixmap(_render_frames_pixmap(frames))
         self._info.setText(f"Recording… {len(frames)} frames")
+
+    def _onStopClicked(self):
+        self._timer.stop()
+        self._stop_callback()
 
     def closeEvent(self, event):
         self._timer.stop()
@@ -1420,6 +1439,9 @@ class AimPage(BasePage):
         self._jitterCountdown = 3
         self.jitterRecordBtn.setEnabled(False)
         self.jitterRecordBtn.setText("3...")
+        self._jitterLiveWin = _JitterLiveWindow(stop_callback=self._onJitterRecordClicked, parent=self)
+        self._jitterLiveWin.setCountdown(3)
+        self._jitterLiveWin.show()
         self._jitterCountdownTimer = QTimer(self)
         self._jitterCountdownTimer.timeout.connect(self._onJitterCountdownTick)
         self._jitterCountdownTimer.start(1000)
@@ -1428,6 +1450,8 @@ class AimPage(BasePage):
         self._jitterCountdown -= 1
         if self._jitterCountdown > 0:
             self.jitterRecordBtn.setText(f"{self._jitterCountdown}...")
+            if getattr(self, '_jitterLiveWin', None):
+                self._jitterLiveWin.setCountdown(self._jitterCountdown)
         else:
             self._jitterCountdownTimer.stop()
             self._jitterCountingDown = False
@@ -1437,11 +1461,19 @@ class AimPage(BasePage):
             self._jitterRecorder.start()
             self._jitterRecording = True
             self.jitterRecordBtn.setText("■ Stop & Save")
-            self._jitterLiveWin = _JitterLiveWindow(self._jitterRecorder, parent=self)
-            self._jitterLiveWin.show()
+            if getattr(self, '_jitterLiveWin', None):
+                self._jitterLiveWin.setRecorder(self._jitterRecorder)
 
     def _onJitterRecordClicked(self) -> None:
         if self._jitterCountingDown:
+            # Cancel countdown and close window if user presses the main button during countdown
+            self._jitterCountdownTimer.stop()
+            self._jitterCountingDown = False
+            self.jitterRecordBtn.setEnabled(True)
+            self.jitterRecordBtn.setText("● Record")
+            if getattr(self, '_jitterLiveWin', None):
+                self._jitterLiveWin.close()
+                self._jitterLiveWin = None
             return
         if not self._jitterRecording:
             self._startJitterCountdown()
