@@ -191,7 +191,7 @@ class AimPage(BasePage):
         self.generalGroup = SettingCardGroup(t("general_params"), self.scrollWidget)
 
         self.aimPartCombo = ComboBox()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("both"), t("center", "Center")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)")])
         self.aimPartCombo.setMinimumWidth(120)
         self.aimPartCard = SettingCard(
             FluentIcon.PEOPLE,
@@ -987,9 +987,10 @@ class AimPage(BasePage):
         self._isLoadingConfig = True
         try:
             # General
-            aim_parts = ["head", "body", "both", "center"]
-            if self._config.aim_part in aim_parts:
-                self.aimPartCombo.setCurrentIndex(aim_parts.index(self._config.aim_part))
+            aim_parts = ["head", "body", "center"]
+            part = self._config.aim_part if self._config.aim_part in aim_parts else "center"
+            self.aimPartCombo.setCurrentIndex(aim_parts.index(part))
+            self._updateTargetAreaVisibility(part)
 
             mouse_methods = ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]
             if self._config.mouse_move_method in mouse_methods:
@@ -1182,10 +1183,19 @@ class AimPage(BasePage):
     # ── General Callbacks ────────────────────────
 
     def _onAimPartChanged(self, index):
-        if self._config:
-            parts = ["head", "body", "both", "center"]
-            if 0 <= index < len(parts):
-                self._config.aim_part = parts[index]
+        parts = ["head", "body", "center"]
+        if self._config and 0 <= index < len(parts):
+            self._config.aim_part = parts[index]
+        self._updateTargetAreaVisibility(parts[index] if 0 <= index < len(parts) else "head")
+
+    def _updateTargetAreaVisibility(self, aim_part):
+        is_smart = aim_part == "center"
+        title = t("target_area_settings") + ("" if is_smart else t("aim_smart_mode_only", " — Smart mode only"))
+        self.targetAreaGroup.titleLabel.setText(title)
+        for card in [self.headWidthCard, self.headHeightCard, self.bodyWidthCard,
+                     self.adaptiveRatioCard, self.adaptiveRatioRefHCard,
+                     self.postureAwareCard, self.crouchAspectCard]:
+            card.setEnabled(is_smart)
 
     def _onMouseMoveChanged(self, text):
         if self._config:
@@ -1723,7 +1733,9 @@ class AimPage(BasePage):
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
 
-        self.targetAreaGroup.titleLabel.setText(t("target_area_settings"))
+        parts = ["head", "body", "center"]
+        idx = self.aimPartCombo.currentIndex()
+        self._updateTargetAreaVisibility(parts[idx] if 0 <= idx < len(parts) else "head")
         self.headWidthCard.titleLabel.setText(t("head_width_ratio"))
         self.headHeightCard.titleLabel.setText(t("head_height_ratio"))
         self.headHeightCard.contentLabel.setText(t("body_height_note"))
@@ -1731,5 +1743,5 @@ class AimPage(BasePage):
 
         current_aim = self.aimPartCombo.currentIndex()
         self.aimPartCombo.clear()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("both"), t("center", "Center")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)")])
         self.aimPartCombo.setCurrentIndex(current_aim)
