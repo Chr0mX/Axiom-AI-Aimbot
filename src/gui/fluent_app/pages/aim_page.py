@@ -91,7 +91,7 @@ class _JitterLiveWindow(QDialog):
         self._refresh()
 
     def _refresh(self):
-        frames = list(self._recorder.frames)
+        frames = list(self._recorder._frames)
         self._canvas.setPixmap(_render_frames_pixmap(frames))
         self._info.setText(f"Recording… {len(frames)} frames")
 
