@@ -130,6 +130,7 @@ def _build_snapshot() -> dict:
             "chroma_box_speed": float(getattr(c, "chroma_box_speed", 1.0)),
             "aim_part": str(getattr(c, "aim_part", "head")),
             "head_height_ratio": float(getattr(c, "head_height_ratio", 0.26)),
+            "aim_custom_y_pct": float(getattr(c, "aim_custom_y_pct", 30.0)),
             "min_confidence": float(getattr(c, "min_confidence", 0.5)),
         },
         "boxes": _boxes(getattr(c, "latest_boxes", [])),

@@ -104,12 +104,20 @@
   function aimPoint(x1, y1, x2, y2, st) {
     const w = x2 - x1, h = y2 - y1;
     const tx = x1 + w * 0.5;
-    const ty = st.aim_part === "head"
-      ? y1 + h * st.head_height_ratio * 0.5
-      : (y1 + h * st.head_height_ratio + y2) * 0.5;
+    let ty;
+    if (st.aim_part === "head") {
+      ty = y1 + h * st.head_height_ratio * 0.5;
+    } else if (st.aim_part === "body") {
+      ty = (y1 + h * st.head_height_ratio + y2) * 0.5;
+    } else if (st.aim_part === "custom") {
+      ty = y1 + h * ((st.aim_custom_y_pct ?? 30) / 100);
+    } else {
+      // center / smart
+      ty = (y1 + y2) * 0.5;
+    }
     const r = Math.max(3, Math.min(6, w / 8));
     ctx.strokeStyle = "rgba(255,80,80,0.86)";
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(tx - r, ty - r); ctx.lineTo(tx + r, ty + r);
     ctx.moveTo(tx + r, ty - r); ctx.lineTo(tx - r, ty + r);
@@ -164,7 +172,7 @@
           const b = boxes[i];
           const x1 = X(b[0]), y1 = Y(b[1]), x2 = X(b[2]), y2 = Y(b[3]);
           const conf = i < confs.length ? confs[i] : 0.5;
-          const thickness = Math.max(1, Math.min(3, 1 + Math.round(conf * 2)));
+          const thickness = Math.max(2, Math.min(4, 2 + Math.round(conf * 2)));
 
           // in-FOV test in screen space
           const ox = state.center.x, oy = state.center.y;
