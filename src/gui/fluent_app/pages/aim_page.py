@@ -25,6 +25,81 @@ from ..base_page import BasePage
 from ..language_manager import t
 
 
+def _render_frames_pixmap(frames, W=240, H=240):
+    """Render a jitter frames list as a path on a W×H QPixmap."""
+    positions = [(0.0, 0.0)]
+    x, y = 0.0, 0.0
+    for f in frames:
+        x += f.get("dx", 0)
+        y += f.get("dy", 0)
+        positions.append((x, y))
+
+    cx, cy = W / 2, H / 2
+    pixmap = QPixmap(W, H)
+    pixmap.fill(QColor(17, 17, 17))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    if len(positions) > 1:
+        xs = [p[0] for p in positions]
+        ys = [p[1] for p in positions]
+        span = max(max(xs) - min(xs), max(ys) - min(ys), 1)
+        scale = 100.0 / span
+        pts = [(int(cx + p[0] * scale), int(cy + p[1] * scale)) for p in positions]
+
+        painter.setPen(QPen(QColor(0, 200, 255), 1))
+        for i in range(len(pts) - 1):
+            painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 255, 80))
+        painter.drawEllipse(pts[0][0] - 4, pts[0][1] - 4, 8, 8)
+        painter.setBrush(QColor(255, 60, 60))
+        painter.drawEllipse(pts[-1][0] - 4, pts[-1][1] - 4, 8, 8)
+    else:
+        painter.setPen(QColor(120, 120, 120))
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "No movement")
+
+    painter.end()
+    return pixmap
+
+
+class _JitterLiveWindow(QDialog):
+    """Floating live preview of the jitter path being recorded."""
+
+    def __init__(self, recorder, parent=None):
+        super().__init__(parent, Qt.WindowType.Tool)
+        self.setWindowTitle("Recording…")
+        self.setFixedSize(280, 300)
+        self._recorder = recorder
+
+        self._canvas = QLabel()
+        self._canvas.setFixedSize(240, 240)
+        self._info = QLabel("Recording… 0 frames")
+        self._info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._info.setStyleSheet("color: #888; font-size: 10px;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        layout.addWidget(self._canvas, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._info)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start(150)
+        self._refresh()
+
+    def _refresh(self):
+        frames = list(self._recorder.frames)
+        self._canvas.setPixmap(_render_frames_pixmap(frames))
+        self._info.setText(f"Recording… {len(frames)} frames")
+
+    def closeEvent(self, event):
+        self._timer.stop()
+        super().closeEvent(event)
+
+
 class _JitterPreviewDialog(QDialog):
     """Visualises a recorded jitter path before the user names and saves it."""
 
@@ -34,47 +109,9 @@ class _JitterPreviewDialog(QDialog):
         self.setFixedSize(300, 320)
         self.result_action = "save"
 
-        # --- build path points (relative, origin = 0,0) ---
-        positions = [(0.0, 0.0)]
-        x, y = 0.0, 0.0
-        for f in frames:
-            x += f.get("dx", 0)
-            y += f.get("dy", 0)
-            positions.append((x, y))
-
-        # --- render into pixmap ---
-        W, H = 240, 240
-        cx, cy = W / 2, H / 2
-        pixmap = QPixmap(W, H)
-        pixmap.fill(QColor(17, 17, 17))
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        if len(positions) > 1:
-            xs = [p[0] for p in positions]
-            ys = [p[1] for p in positions]
-            span = max(max(xs) - min(xs), max(ys) - min(ys), 1)
-            scale = 100.0 / span
-            pts = [(int(cx + p[0] * scale), int(cy + p[1] * scale)) for p in positions]
-
-            painter.setPen(QPen(QColor(0, 200, 255), 1))
-            for i in range(len(pts) - 1):
-                painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
-
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 255, 80))
-            painter.drawEllipse(pts[0][0] - 4, pts[0][1] - 4, 8, 8)
-            painter.setBrush(QColor(255, 60, 60))
-            painter.drawEllipse(pts[-1][0] - 4, pts[-1][1] - 4, 8, 8)
-        else:
-            painter.setPen(QColor(120, 120, 120))
-            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "No movement")
-
-        painter.end()
-
         canvas = QLabel()
-        canvas.setPixmap(pixmap)
-        canvas.setFixedSize(W, H)
+        canvas.setPixmap(_render_frames_pixmap(frames))
+        canvas.setFixedSize(240, 240)
 
         info = QLabel(f"{len(frames)} frames recorded")
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1400,6 +1437,8 @@ class AimPage(BasePage):
             self._jitterRecorder.start()
             self._jitterRecording = True
             self.jitterRecordBtn.setText("■ Stop & Save")
+            self._jitterLiveWin = _JitterLiveWindow(self._jitterRecorder, parent=self)
+            self._jitterLiveWin.show()
 
     def _onJitterRecordClicked(self) -> None:
         if self._jitterCountingDown:
@@ -1411,6 +1450,9 @@ class AimPage(BasePage):
             frames = self._jitterRecorder.stop()
             self._jitterRecording = False
             self.jitterRecordBtn.setText("● Record")
+            if getattr(self, '_jitterLiveWin', None):
+                self._jitterLiveWin.close()
+                self._jitterLiveWin = None
             if not frames:
                 QMessageBox.information(self, "Jitter Recorder", "No movement detected — nothing saved.")
                 return
