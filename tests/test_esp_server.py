@@ -3,7 +3,7 @@
 Covers:
 1. The state snapshot serializes to valid JSON from a Config-like object.
 2. The WebSocket text-frame encoder produces a correct RFC 6455 header.
-3. The WS handshake rejects a missing/wrong token and accepts a valid one.
+3. The WS handshake completes without authentication.
 """
 
 import json
@@ -100,29 +100,9 @@ def _do_handshake(request_bytes):
         b.close()
 
 
-def test_handshake_rejects_missing_token():
-    esp_server._token = "secret"
+def test_handshake_accepts_connection():
     req = (
-        b"GET /?token= HTTP/1.1\r\n"
-        b"Upgrade: websocket\r\n"
-        b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
-    )
-    assert _do_handshake(req) is False
-
-
-def test_handshake_rejects_wrong_token():
-    esp_server._token = "secret"
-    req = (
-        b"GET /?token=nope HTTP/1.1\r\n"
-        b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
-    )
-    assert _do_handshake(req) is False
-
-
-def test_handshake_accepts_valid_token():
-    esp_server._token = "secret"
-    req = (
-        b"GET /?token=secret HTTP/1.1\r\n"
+        b"GET / HTTP/1.1\r\n"
         b"Upgrade: websocket\r\n"
         b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
     )

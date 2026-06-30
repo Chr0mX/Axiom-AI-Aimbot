@@ -7,7 +7,6 @@
   "use strict";
 
   const params = new URLSearchParams(location.search);
-  const TOKEN = params.get("token") || "";
   const WS_PORT = params.get("ws") || "8765";
 
   const canvas = document.getElementById("esp");
@@ -50,7 +49,7 @@
   // ── WebSocket ──────────────────────────────────────────────────
   let ws = null;
   function connect() {
-    const url = `ws://${location.hostname}:${WS_PORT}/?token=${encodeURIComponent(TOKEN)}`;
+    const url = `ws://${location.hostname}:${WS_PORT}/`;
     ws = new WebSocket(url);
     ws.onopen = () => setStatus(true);
     ws.onclose = () => { setStatus(false); setTimeout(connect, 1000); };

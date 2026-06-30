@@ -11,8 +11,7 @@ Architecture (all daemon threads, read-only against Config):
   - A fixed-tick broadcaster (~web_esp_fps Hz, latest-state wins) serializes a
     snapshot of Config and pushes it to all connected clients.
 
-Access is LAN-wide (binds 0.0.0.0) and guarded by a per-session token appended to
-the URL; the WS handshake rejects a missing/wrong token.
+Access is LAN-wide (binds 0.0.0.0); no authentication required.
 """
 from __future__ import annotations
 
@@ -21,13 +20,12 @@ import hashlib
 import json
 import logging
 import os
-import secrets
 import socket
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import List, Optional, Set
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +38,6 @@ _WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 # ---------------------------------------------------------------------------
 
 _config = None
-_token: str = ""
 _stop = threading.Event()
 
 _http_server: Optional[ThreadingHTTPServer] = None
@@ -71,12 +68,12 @@ def _lan_ip() -> str:
 
 
 def connect_url() -> str:
-    """Full URL (token + ws port) a browser should open to view the overlay."""
+    """URL a browser should open to view the overlay."""
     if not _config:
         return ""
     port = int(getattr(_config, "web_esp_http_port", 8080))
     ws_port = int(getattr(_config, "web_esp_ws_port", 8765))
-    return f"http://{_lan_ip()}:{port}/?token={_token}&ws={ws_port}"
+    return f"http://{_lan_ip()}:{port}/?ws={ws_port}"
 
 
 def is_running() -> bool:
@@ -153,14 +150,8 @@ class _Handler(SimpleHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        parsed = urlparse(self.path)
-        path = parsed.path
-        # Token is enforced on the page entry; static assets (js/css) carry no data.
+        path = urlparse(self.path).path
         if path in ("/", "/index.html"):
-            token = parse_qs(parsed.query).get("token", [""])[0]
-            if token != _token:
-                self.send_error(403, "Forbidden")
-                return
             self.path = "/index.html"
         return super().do_GET()
 
@@ -194,7 +185,7 @@ def _ws_encode_text(payload: str) -> bytes:
 
 
 def _ws_handshake(conn: socket.socket) -> bool:
-    """Read the client upgrade request, validate token, send 101. Returns success."""
+    """Read the client upgrade request and send 101. Returns success."""
     conn.settimeout(5.0)
     request = b""
     while b"\r\n\r\n" not in request:
@@ -206,19 +197,6 @@ def _ws_handshake(conn: socket.socket) -> bool:
             return False
     text = request.decode("latin-1", errors="ignore")
     lines = text.split("\r\n")
-    request_line = lines[0] if lines else ""
-    # Token check from the request target query string
-    try:
-        target = request_line.split(" ")[1]
-        token = parse_qs(urlparse(target).query).get("token", [""])[0]
-    except Exception:
-        token = ""
-    if token != _token:
-        try:
-            conn.sendall(b"HTTP/1.1 403 Forbidden\r\n\r\n")
-        except Exception:
-            pass
-        return False
     key = ""
     for line in lines[1:]:
         if line.lower().startswith("sec-websocket-key:"):
@@ -314,7 +292,6 @@ def start(config) -> bool:
     if is_running():
         return True
     _config = config
-    _token = secrets.token_urlsafe(16)
     _stop.clear()
 
     http_port = int(getattr(config, "web_esp_http_port", 8080))
