@@ -52,6 +52,12 @@ _clients_lock = threading.Lock()
 
 _actual_ws_port: int = 0
 
+_capture_fps: float = 0.0
+_inference_fps: float = 0.0
+_prev_capture_count: int = 0
+_prev_inference_count: int = 0
+_fps_last_t: float = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -138,6 +144,11 @@ def _build_snapshot() -> dict:
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
         "active": bool(getattr(c, "AimToggle", False)),
+        "model": os.path.basename(getattr(c, "model_path", "") or ""),
+        "screenshot_method": str(getattr(c, "screenshot_method", "dxcam")),
+        "source_fps": float(getattr(c, "source_nominal_fps", 0.0)),
+        "capture_fps": round(_capture_fps, 1),
+        "inference_fps": round(_inference_fps, 1),
     }
 
 
@@ -153,8 +164,15 @@ class _Handler(SimpleHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path in ("/", "/index.html"):
+            if "ws=" not in (parsed.query or ""):
+                port = _actual_ws_port or int(getattr(_config, "web_esp_ws_port", 8765))
+                self.send_response(302)
+                self.send_header("Location", f"/?ws={port}")
+                self.end_headers()
+                return
             self.path = "/index.html"
         return super().do_GET()
 
@@ -295,6 +313,23 @@ def _broadcast_loop():
         elapsed = time.monotonic() - start
         _stop.wait(max(0.0, interval - elapsed))
 
+        # FPS computation (~1 Hz, mirrors StatusPanel logic)
+        global _capture_fps, _inference_fps, _prev_capture_count, _prev_inference_count, _fps_last_t
+        now_t = time.monotonic()
+        if _fps_last_t == 0.0:
+            _fps_last_t = now_t
+            _prev_capture_count = int(getattr(_config, "screenshot_frame_count", 0))
+            _prev_inference_count = int(getattr(_config, "detection_frame_count", 0))
+        elif now_t - _fps_last_t >= 1.0:
+            cap_c = int(getattr(_config, "screenshot_frame_count", 0))
+            inf_c = int(getattr(_config, "detection_frame_count", 0))
+            dt = now_t - _fps_last_t
+            _capture_fps = max(0.0, (cap_c - _prev_capture_count) / dt)
+            _inference_fps = max(0.0, (inf_c - _prev_inference_count) / dt)
+            _prev_capture_count = cap_c
+            _prev_inference_count = inf_c
+            _fps_last_t = now_t
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -325,7 +360,11 @@ def start(config) -> bool:
 def stop():
     """Stop the server and close all client connections."""
     global _http_server, _ws_listener, _actual_ws_port
+    global _capture_fps, _inference_fps, _prev_capture_count, _prev_inference_count, _fps_last_t
     _actual_ws_port = 0
+    _capture_fps = _inference_fps = 0.0
+    _prev_capture_count = _prev_inference_count = 0
+    _fps_last_t = 0.0
     _stop.set()
     if _http_server is not None:
         try:

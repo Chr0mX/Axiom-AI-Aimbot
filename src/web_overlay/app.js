@@ -249,10 +249,29 @@
 
   function drawHud(s, count) {
     ctx.font = "11px Consolas, monospace";
-    ctx.fillStyle = "rgba(0,224,160,0.85)";
-    const lines = [`targets: ${count}`, `net: ${packetHz}hz`, `draw: ${drawFps}fps`];
-    let y = canvas.height - 8 - (lines.length - 1) * 14;
-    for (const ln of lines) { ctx.fillText(ln, 8, y); y += 14; }
+    const aim = s.active;
+    const model = (s.model || "").replace(/\.onnx$/i, "") || "none";
+    const capMethod = (s.screenshot_method || "dxcam").toUpperCase();
+    const srcFps = (s.source_fps > 0) ? `${Math.round(s.source_fps)}Hz` : "—";
+    const capFps = s.capture_fps != null ? `${s.capture_fps.toFixed(1)}fps` : "";
+    const infFps = s.inference_fps != null ? `${s.inference_fps.toFixed(1)}fps` : "";
+
+    const lines = [
+      { text: aim ? "● AIM ON" : "○ AIM OFF",
+        color: aim ? "rgba(0,255,100,0.92)" : "rgba(255,60,60,0.9)" },
+      { text: `model  ${model}`,         color: "rgba(210,210,210,0.82)" },
+      { text: `cap    ${capMethod}  ${srcFps}  ${capFps}`, color: "rgba(170,170,190,0.75)" },
+      { text: `inf    ${infFps}`,        color: "rgba(170,170,190,0.75)" },
+      { text: `targets ${count}`,        color: "rgba(0,224,160,0.88)" },
+      { text: `net ${packetHz}hz  draw ${drawFps}fps`, color: "rgba(110,110,130,0.7)" },
+    ];
+
+    let y = 16;
+    for (const ln of lines) {
+      ctx.fillStyle = ln.color;
+      ctx.fillText(ln.text, 8, y);
+      y += 14;
+    }
   }
 
   function hsv2rgb(h, s, v) {
