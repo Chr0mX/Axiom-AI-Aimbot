@@ -298,6 +298,7 @@ class AimPage(BasePage):
 
         # === PID Parameters ===
         self.pidGroup = SettingCardGroup(t("aim_speed_pid"), self.scrollWidget)
+        self.yReduceGroup = SettingCardGroup("Y-Axis Recoil Suppression", self.scrollWidget)
 
         self.pidAxisPivot = SegmentedWidget()
         self.pidAxisPivot.addItem(routeKey='x', text=t("horizontal_x"))
@@ -361,7 +362,7 @@ class AimPage(BasePage):
             FluentIcon.CARE_UP_SOLID,
             t("aim_y_reduce_enable"),
             "",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceDelayCard = SliderLabelCard(
@@ -369,7 +370,7 @@ class AimPage(BasePage):
             t("aim_y_reduce_delay"),
             0, 500,
             format_func=lambda v: f"{v/100:.2f} s",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceFloorCard = SliderLabelCard(
@@ -378,7 +379,7 @@ class AimPage(BasePage):
             0, 100,
             format_func=lambda v: f"{v/100:.2f}",
             description="Min Y multiplier after ramp — 0.00 = full cut, 1.00 = no suppression",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceRampCard = SliderLabelCard(
@@ -387,7 +388,7 @@ class AimPage(BasePage):
             0, 200,
             format_func=lambda v: f"{v/100:.2f} s",
             description="Time to fade 1.0 → floor after delay (0 = instant cut)",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceSettleCard = SliderLabelCard(
@@ -396,7 +397,7 @@ class AimPage(BasePage):
             0, 50,
             format_func=lambda v: "Off" if v == 0 else f"{v} px",
             description="Skip suppression while vertical error > this — waits until aim is settled (0 = off)",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceVelCard = SliderLabelCard(
@@ -405,7 +406,7 @@ class AimPage(BasePage):
             0, 500,
             format_func=lambda v: "Off" if v == 0 else f"{v} px/s",
             description="Restore full Y tracking if target moves vertically faster than this (0 = off)",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         # === Anti-Detection (Smart Jitter only) ===
@@ -715,12 +716,7 @@ class AimPage(BasePage):
         yPageLayout.addWidget(self.pidPyCard)
         yPageLayout.addWidget(self.pidIyCard)
         yPageLayout.addWidget(self.pidDyCard)
-        yPageLayout.addWidget(self.pidYReduceEnableCard)
-        yPageLayout.addWidget(self.pidYReduceDelayCard)
-        yPageLayout.addWidget(self.pidYReduceFloorCard)
-        yPageLayout.addWidget(self.pidYReduceRampCard)
-        yPageLayout.addWidget(self.pidYReduceSettleCard)
-        yPageLayout.addWidget(self.pidYReduceVelCard)
+        yPageLayout.addStretch(1)
 
         self.pidStackedWidget.addWidget(self.pidXPage)
         self.pidStackedWidget.addWidget(self.pidYPage)
@@ -728,6 +724,15 @@ class AimPage(BasePage):
         self.pidGroup.vBoxLayout.addWidget(pivotWidget)
         self.pidGroup.vBoxLayout.addWidget(self.pidStackedWidget)
         self.addContent(self.pidGroup)
+
+        # Y-Axis Recoil Suppression (separate group so X tab has no height gap)
+        self.yReduceGroup.addSettingCard(self.pidYReduceEnableCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceDelayCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceFloorCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceRampCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceSettleCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceVelCard)
+        self.addContent(self.yReduceGroup)
 
         # Anti-Recoil (Smart Jitter)
         self.antiRecoilGroup.addSettingCard(self.smartJitterEnableCard)
@@ -1489,6 +1494,7 @@ class AimPage(BasePage):
         self.pidPyCard.titleLabel.setText(t("reaction_speed_p"))
         self.pidIyCard.titleLabel.setText(t("error_correction_i"))
         self.pidDyCard.titleLabel.setText(t("stability_suppression_d"))
+        self.yReduceGroup.titleLabel.setText("Y-Axis Recoil Suppression")
         self.pidYReduceEnableCard.titleLabel.setText(t("aim_y_reduce_enable"))
         self.pidYReduceDelayCard.titleLabel.setText(t("aim_y_reduce_delay"))
         self.pidYReduceFloorCard.titleLabel.setText("Y Floor")

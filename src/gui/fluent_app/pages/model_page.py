@@ -224,8 +224,8 @@ class ModelPage(BasePage):
 
         self.modelNotesCard = _ModelNotesCard(self.scrollWidget)
 
-        # === HUD Model (V2 ONNX) ===
-        self.hudModelGroup = SettingCardGroup("HUD Model (V2 ONNX)", self.scrollWidget)
+        # === Model HUD Settings ===
+        self.hudModelGroup = SettingCardGroup("Model HUD Settings", self.scrollWidget)
 
         self.hudGameCombo = ComboBox()
         self.hudGameCombo.setMinimumWidth(200)
@@ -628,6 +628,6 @@ class ModelPage(BasePage):
         self._updateInferenceBackendSubtitle()
         self.openModelFolderCard.titleLabel.setText(t("open_model_folder"))
         self.openModelFolderBtn.setText(t("open_model_folder"))
-        self.hudModelGroup.titleLabel.setText("HUD Model (V2 ONNX)")
+        self.hudModelGroup.titleLabel.setText("Model HUD Settings")
         self.hudGameCard.titleLabel.setText("Game Profile")
         self.hudModelCard.titleLabel.setText("HUD Model")

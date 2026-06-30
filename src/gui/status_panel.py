@@ -555,10 +555,10 @@ class StatusPanel(QWidget):
         self.screenshot_row = StatusRow(get_text('screenshot_method'))
 
         # 8. 狀態行 - 截圖 FPS (measured capture rate)
-        self.screenshot_fps_row = StatusRow(get_text('status_panel_screenshot_fps', 'Screenshot FPS'))
+        self.screenshot_fps_row = StatusRow(get_text('status_panel_screenshot_fps', 'Capture FPS'))
 
         # 9. 狀態行 - 偵測 FPS
-        self.detection_fps_row = StatusRow(get_text('status_panel_detection_fps', 'Detection FPS'))
+        self.detection_fps_row = StatusRow(get_text('status_panel_detection_fps', 'Inference FPS'))
 
         # 10. 狀態行 - Source FPS (nominal rate reported by the source device)
         self.source_fps_row = StatusRow(get_text('status_panel_source_fps', 'Source FPS'))

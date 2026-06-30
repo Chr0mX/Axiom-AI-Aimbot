@@ -142,8 +142,8 @@ class VisualsPage(BasePage):
         self.spMouseMoveCheck = CheckBox(self._shortText("mouse_move_method"), self.statusPanelElementsWidget)
         self.spMouseClickCheck = CheckBox(self._shortText("mouse_click_method"), self.statusPanelElementsWidget)
         self.spScreenshotMethodCheck = CheckBox(self._shortText("screenshot_method"), self.statusPanelElementsWidget)
-        self.spScreenshotFpsCheck = CheckBox(t("status_panel_screenshot_fps", "Screenshot FPS"), self.statusPanelElementsWidget)
-        self.spDetectionFpsCheck = CheckBox(t("status_panel_detection_fps", "Detection FPS"), self.statusPanelElementsWidget)
+        self.spScreenshotFpsCheck = CheckBox(t("status_panel_screenshot_fps", "Capture FPS"), self.statusPanelElementsWidget)
+        self.spDetectionFpsCheck = CheckBox(t("status_panel_detection_fps", "Inference FPS"), self.statusPanelElementsWidget)
 
         self._statusPanelChecks = [
             self.spAutoAimCheck,
@@ -659,8 +659,8 @@ class VisualsPage(BasePage):
         self.spMouseMoveCheck.setText(self._shortText("mouse_move_method"))
         self.spMouseClickCheck.setText(self._shortText("mouse_click_method"))
         self.spScreenshotMethodCheck.setText(self._shortText("screenshot_method"))
-        self.spScreenshotFpsCheck.setText(t("status_panel_screenshot_fps", "Screenshot FPS"))
-        self.spDetectionFpsCheck.setText(t("status_panel_detection_fps", "Detection FPS"))
+        self.spScreenshotFpsCheck.setText(t("status_panel_screenshot_fps", "Capture FPS"))
+        self.spDetectionFpsCheck.setText(t("status_panel_detection_fps", "Inference FPS"))
 
         # Crosshair settings
         self.crosshairGroup.titleLabel.setText(t("crosshair_settings", "Crosshair"))
