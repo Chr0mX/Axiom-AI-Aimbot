@@ -98,7 +98,11 @@ def calculate_aim_target(
         if box_w / box_h >= threshold:
             return box_center_x, abs_y1 + box_h * 0.5
 
-    if aim_part == 'center':
+    if aim_part == 'custom':
+        target_x = box_center_x
+        pct = float(getattr(config, 'aim_custom_y_pct', 30.0)) / 100.0
+        target_y = abs_y1 + box_h * pct
+    elif aim_part == 'center':
         # Geometric center-mass of the bounding box.
         target_x = box_center_x
         target_y = (abs_y1 + abs_y2) * 0.5

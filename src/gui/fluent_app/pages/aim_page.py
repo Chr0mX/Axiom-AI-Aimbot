@@ -33,10 +33,21 @@ class _AimPointPreview(QWidget):
         self.setFixedHeight(200)
         self._aim_part = "center"
         self._head_h = 0.20   # fraction 0–1
+        self._head_w = 0.38   # fraction 0–1
+        self._body_w = 0.87   # fraction 0–1
+        self._custom_y = 0.30  # fraction 0–1
 
-    def setParams(self, aim_part: str, head_h_pct: float):
+    def setParams(self, aim_part: str, head_h_pct: float,
+                  head_w_pct: float = None, body_w_pct: float = None,
+                  custom_y_pct: float = None):
         self._aim_part = aim_part
         self._head_h = max(0.05, min(0.95, head_h_pct / 100.0))
+        if head_w_pct is not None:
+            self._head_w = max(0.05, min(1.0, head_w_pct / 100.0))
+        if body_w_pct is not None:
+            self._body_w = max(0.05, min(1.0, body_w_pct / 100.0))
+        if custom_y_pct is not None:
+            self._custom_y = max(0.0, min(1.0, custom_y_pct / 100.0))
         self.update()
 
     def paintEvent(self, event):
@@ -47,18 +58,24 @@ class _AimPointPreview(QWidget):
         # background
         p.fillRect(0, 0, W, H, QColor(15, 15, 20))
 
-        # bounding box geometry (tall, centred)
+        # full bounding box geometry (tall, centred)
         bw = max(40, int(W * 0.28))
         bh = int(H * 0.82)
         bx = (W - bw) // 2
         by = (H - bh) // 2
         head_px = int(bh * self._head_h)
 
-        # zone fills
-        p.fillRect(bx, by,             bw, head_px,          QColor(80,  120, 220, 50))
-        p.fillRect(bx, by + head_px,   bw, bh - head_px,     QColor(200, 120,  40, 40))
+        # narrowed zone widths
+        hw = max(4, int(bw * self._head_w))
+        ow = max(4, int(bw * self._body_w))
+        hx = bx + (bw - hw) // 2   # head zone x
+        ox = bx + (bw - ow) // 2   # body zone x
 
-        # corner-box (ESP style)
+        # zone fills (show actual width)
+        p.fillRect(hx, by,           hw, head_px,      QColor(80,  120, 220, 55))
+        p.fillRect(ox, by + head_px, ow, bh - head_px, QColor(200, 120,  40, 45))
+
+        # full corner-box (ESP style)
         cl = max(5, min(bw, bh) // 6)
         p.setPen(QPen(QColor(0, 220, 140), 2))
         for sx, sy, dx, dy in ((bx, by, 1, 1), (bx+bw, by, -1, 1),
@@ -76,6 +93,8 @@ class _AimPointPreview(QWidget):
             ay = by + head_px // 2
         elif self._aim_part == "body":
             ay = by + head_px + (bh - head_px) // 2
+        elif self._aim_part == "custom":
+            ay = by + int(bh * self._custom_y)
         else:  # smart / center
             ay = by + head_px + (bh - head_px) // 2
 
@@ -99,7 +118,8 @@ class _AimPointPreview(QWidget):
         fnt.setPointSize(7)
         p.setFont(fnt)
         p.setPen(QColor(160, 160, 160, 130))
-        label = {"head": "Head aim", "body": "Body aim"}.get(self._aim_part, "Smart (center-mass)")
+        label = {"head": "Head aim", "body": "Body aim",
+                 "custom": f"Custom ({int(self._custom_y*100)}%)"}.get(self._aim_part, "Smart (center-mass)")
         p.drawText(6, H - 5, label)
 
         p.end()
@@ -271,7 +291,7 @@ class AimPage(BasePage):
         self.generalGroup = SettingCardGroup(t("general_params"), self.scrollWidget)
 
         self.aimPartCombo = ComboBox()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)"), t("custom", "Custom")])
         self.aimPartCombo.setMinimumWidth(120)
         self.aimPartCard = SettingCard(
             FluentIcon.PEOPLE,
@@ -806,6 +826,16 @@ class AimPage(BasePage):
         self.targetAreaGroup = SettingCardGroup(t("target_area_settings"), self.scrollWidget)
         self.aimPreview = _AimPointPreview(self.targetAreaGroup)
 
+        self.customYCard = SliderLabelCard(
+            FluentIcon.MOVE,
+            t("aim_custom_y_pct", "Custom Aim Y Position (%)"),
+            0, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("aim_custom_y_desc", "0% = top of box, 100% = bottom. ~20% = head, ~60% = body."),
+            slider_width=200,
+            parent=self.targetAreaGroup
+        )
+
         self.headWidthCard = SliderLabelCard(
             FluentIcon.CONSTRACT,
             t("head_width_ratio"),
@@ -973,6 +1003,7 @@ class AimPage(BasePage):
 
         # Target Area (shared aim-point geometry + auto-fire hit zone)
         self.targetAreaGroup.addSettingCard(self.aimPreview)
+        self.targetAreaGroup.addSettingCard(self.customYCard)
         self.targetAreaGroup.addSettingCard(self.headWidthCard)
         self.targetAreaGroup.addSettingCard(self.headHeightCard)
         self.targetAreaGroup.addSettingCard(self.bodyWidthCard)
@@ -1057,6 +1088,7 @@ class AimPage(BasePage):
         self.headWidthCard.valueChanged.connect(self._onHeadWidthChanged)
         self.headHeightCard.valueChanged.connect(self._onHeadHeightChanged)
         self.bodyWidthCard.valueChanged.connect(self._onBodyWidthChanged)
+        self.customYCard.valueChanged.connect(self._onCustomYChanged)
         self.adaptiveRatioCard.checkedChanged.connect(self._onAdaptiveRatioChanged)
         self.adaptiveRatioRefHCard.valueChanged.connect(self._onAdaptiveRatioRefHChanged)
         self.postureAwareCard.checkedChanged.connect(self._onPostureAwareChanged)
@@ -1069,7 +1101,7 @@ class AimPage(BasePage):
         self._isLoadingConfig = True
         try:
             # General
-            aim_parts = ["head", "body", "center"]
+            aim_parts = ["head", "body", "center", "custom"]
             part = self._config.aim_part if self._config.aim_part in aim_parts else "center"
             self.aimPartCombo.setCurrentIndex(aim_parts.index(part))
             self._updateTargetAreaVisibility(part)
@@ -1189,6 +1221,7 @@ class AimPage(BasePage):
             self.camMotionCompSizeCard.setEnabled(cmc_on)
 
             # Target Area
+            self.customYCard.setValue(int(getattr(self._config, 'aim_custom_y_pct', 30.0)))
             self.headWidthCard.setValue(int(self._config.head_width_ratio * 100))
             self.headHeightCard.setValue(int(self._config.head_height_ratio * 100))
             self.bodyWidthCard.setValue(int(self._config.body_width_ratio * 100))
@@ -1265,21 +1298,31 @@ class AimPage(BasePage):
     # ── General Callbacks ────────────────────────
 
     def _onAimPartChanged(self, index):
-        parts = ["head", "body", "center"]
+        parts = ["head", "body", "center", "custom"]
         if self._config and 0 <= index < len(parts):
             self._config.aim_part = parts[index]
         self._updateTargetAreaVisibility(parts[index] if 0 <= index < len(parts) else "head")
 
     def _updateTargetAreaVisibility(self, aim_part):
         is_smart = aim_part == "center"
-        title = t("target_area_settings") + ("" if is_smart else t("aim_smart_mode_only", " — Smart mode only"))
-        self.targetAreaGroup.titleLabel.setText(title)
+        is_custom = aim_part == "custom"
+        if is_smart:
+            suffix = ""
+        elif is_custom:
+            suffix = t("aim_custom_mode_note", " — Custom Y mode")
+        else:
+            suffix = t("aim_smart_mode_only", " — Smart mode only")
+        self.targetAreaGroup.titleLabel.setText(t("target_area_settings") + suffix)
         for card in [self.headWidthCard, self.headHeightCard, self.bodyWidthCard,
                      self.adaptiveRatioCard, self.adaptiveRatioRefHCard,
                      self.postureAwareCard, self.crouchAspectCard]:
             card.setEnabled(is_smart)
+        self.customYCard.setEnabled(is_custom)
         head_h = self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20
-        self.aimPreview.setParams(aim_part, head_h)
+        head_w = self.headWidthCard.value() if hasattr(self.headWidthCard, 'value') else 38
+        body_w = self.bodyWidthCard.value() if hasattr(self.bodyWidthCard, 'value') else 87
+        custom_y = self.customYCard.value() if hasattr(self.customYCard, 'value') else 30
+        self.aimPreview.setParams(aim_part, head_h, head_w, body_w, custom_y)
 
     def _onMouseMoveChanged(self, text):
         if self._config:
@@ -1724,17 +1767,34 @@ class AimPage(BasePage):
     def _onHeadWidthChanged(self, value):
         if self._config:
             self._config.head_width_ratio = value / 100.0
+        self._refreshPreview()
 
     def _onHeadHeightChanged(self, value):
         if self._config:
             self._config.head_height_ratio = value / 100.0
-        parts = ["head", "body", "center"]
-        idx = self.aimPartCombo.currentIndex()
-        self.aimPreview.setParams(parts[idx] if 0 <= idx < len(parts) else "center", value)
+        self._refreshPreview()
 
     def _onBodyWidthChanged(self, value):
         if self._config:
             self._config.body_width_ratio = value / 100.0
+        self._refreshPreview()
+
+    def _onCustomYChanged(self, value):
+        if self._config:
+            self._config.aim_custom_y_pct = float(value)
+        self._refreshPreview()
+
+    def _refreshPreview(self):
+        parts = ["head", "body", "center", "custom"]
+        idx = self.aimPartCombo.currentIndex()
+        aim_part = parts[idx] if 0 <= idx < len(parts) else "center"
+        self.aimPreview.setParams(
+            aim_part,
+            self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20,
+            self.headWidthCard.value()  if hasattr(self.headWidthCard,  'value') else 38,
+            self.bodyWidthCard.value()  if hasattr(self.bodyWidthCard,  'value') else 87,
+            self.customYCard.value()    if hasattr(self.customYCard,    'value') else 30,
+        )
 
     def _onAdaptiveRatioChanged(self, checked):
         if self._config:
@@ -1830,5 +1890,5 @@ class AimPage(BasePage):
 
         current_aim = self.aimPartCombo.currentIndex()
         self.aimPartCombo.clear()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)"), t("custom", "Custom")])
         self.aimPartCombo.setCurrentIndex(current_aim)

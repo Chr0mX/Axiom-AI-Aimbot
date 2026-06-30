@@ -116,6 +116,7 @@ _FIELD_MAP = {
     'aim_adaptive_ratio_ref_h':   'aim.target_area.adaptive_ratio.ref_h',
     'aim_posture_aware_enabled':  'aim.target_area.posture_aware.enabled',
     'aim_crouch_aspect_threshold':'aim.target_area.posture_aware.crouch_aspect',
+    'aim_custom_y_pct':           'aim.target_area.custom_y_pct',
 
     # --- autofire ---
     'auto_fire_key':              'autofire.key',
@@ -326,6 +327,7 @@ class Config:
         # falls back to center-mass so the aim doesn't overshoot into empty space.
         self.aim_posture_aware_enabled: bool = False
         self.aim_crouch_aspect_threshold: float = 1.2  # box_w/box_h above which = crouching
+        self.aim_custom_y_pct: float = 30.0  # Custom aim Y as % of box height (0=top, 100=bottom)
         
         # PID 控制器參數 (分離 X 和 Y 軸)
         self.pid_kp_x: float = 0.26      # 水平 P: 比例 - 主要影響反應速度
