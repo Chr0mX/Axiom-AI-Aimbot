@@ -58,7 +58,8 @@
       try {
         state = JSON.parse(ev.data);
         const now = performance.now();
-        if (lastPacketT) packetHz = Math.round(1000 / (now - lastPacketT));
+        const dt = now - lastPacketT;
+        if (lastPacketT && dt > 0) packetHz = Math.round(1000 / dt);
         lastPacketT = now;
       } catch (e) { /* ignore malformed */ }
     };
@@ -66,7 +67,7 @@
 
   function setStatus(ok) {
     statusEl.className = ok ? "connected" : "disconnected";
-    statusEl.textContent = ok ? "" : "reconnecting…";
+    statusEl.textContent = ok ? "● ESP" : "reconnecting…";
   }
 
   // ── Drawing primitives (parity with overlay.py paintEvent) ─────
