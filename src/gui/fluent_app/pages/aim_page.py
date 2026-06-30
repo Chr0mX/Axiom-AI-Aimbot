@@ -666,6 +666,71 @@ class AimPage(BasePage):
         self.camMotionCompSizeCard.hBoxLayout.addWidget(self.camMotionCompSizeSegment, 0, Qt.AlignmentFlag.AlignRight)
         self.camMotionCompSizeCard.hBoxLayout.addSpacing(16)
 
+        # === Target Area (shared by aim-point calculation and auto-fire hit zone) ===
+        self.targetAreaGroup = SettingCardGroup(t("target_area_settings"), self.scrollWidget)
+
+        self.headWidthCard = SliderLabelCard(
+            FluentIcon.CONSTRACT,
+            t("head_width_ratio"),
+            10, 100,
+            format_func=lambda v: f"{v}%",
+            slider_width=200,
+            parent=self.targetAreaGroup
+        )
+
+        self.headHeightCard = SliderLabelCard(
+            FluentIcon.FIT_PAGE,
+            t("head_height_ratio"),
+            10, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("body_height_note"),
+            slider_width=200,
+            parent=self.targetAreaGroup
+        )
+
+        self.bodyWidthCard = SliderLabelCard(
+            FluentIcon.CONSTRACT,
+            t("body_width_ratio"),
+            10, 100,
+            format_func=lambda v: f"{v}%",
+            slider_width=200,
+            parent=self.targetAreaGroup
+        )
+
+        self.adaptiveRatioCard = SwitchSettingCard(
+            FluentIcon.FIT_PAGE,
+            t("aim_adaptive_ratio_enabled", "Distance-Adaptive Ratio"),
+            t("aim_adaptive_ratio_desc", "Scale head ratio inversely with box size — keeps head aim accurate from close to long range."),
+            parent=self.targetAreaGroup
+        )
+
+        self.adaptiveRatioRefHCard = SliderLabelCard(
+            FluentIcon.ZOOM_IN,
+            t("aim_adaptive_ratio_ref_h", "Reference Box Height"),
+            20, 200,
+            format_func=lambda v: f"{v} px",
+            description=t("aim_adaptive_ratio_ref_h_desc", "Box height (px) where head ratio is nominal. Match to your typical close-range target."),
+            slider_width=180,
+            parent=self.targetAreaGroup
+        )
+
+        self.postureAwareCard = SwitchSettingCard(
+            FluentIcon.PEOPLE,
+            t("aim_posture_aware_enabled", "Posture-Aware Targeting"),
+            t("aim_posture_aware_desc", "Fall back to center-mass when box is wider than tall (crouch / slide / prone)."),
+            parent=self.targetAreaGroup
+        )
+
+        self.crouchAspectCard = SliderLabelCard(
+            FluentIcon.CONSTRACT,
+            t("aim_crouch_aspect_threshold", "Crouch Aspect Threshold"),
+            80, 200,
+            format_func=lambda v: f"{v / 100:.1f}×",
+            description=t("aim_crouch_aspect_desc", "box_w / box_h above which player is treated as crouching. Default 1.2×."),
+            slider_width=180,
+            parent=self.targetAreaGroup
+        )
+
     def _initLayout(self):
         """Layout all controls"""
         # General
@@ -769,6 +834,16 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.camMotionCompSizeCard)
         self.addContent(self.trackingGroup)
 
+        # Target Area (shared aim-point geometry + auto-fire hit zone)
+        self.targetAreaGroup.addSettingCard(self.headWidthCard)
+        self.targetAreaGroup.addSettingCard(self.headHeightCard)
+        self.targetAreaGroup.addSettingCard(self.bodyWidthCard)
+        self.targetAreaGroup.addSettingCard(self.adaptiveRatioCard)
+        self.targetAreaGroup.addSettingCard(self.adaptiveRatioRefHCard)
+        self.targetAreaGroup.addSettingCard(self.postureAwareCard)
+        self.targetAreaGroup.addSettingCard(self.crouchAspectCard)
+        self.addContent(self.targetAreaGroup)
+
         self.scrollLayout.addStretch(1)
 
     def _connectSignals(self):
@@ -839,6 +914,15 @@ class AimPage(BasePage):
         self.kalmanMeasNoiseCard.valueChanged.connect(self._onKalmanMeasNoiseChanged)
         self.camMotionCompCard.checkedChanged.connect(self._onCamMotionCompChanged)
         self.camMotionCompSizeSegment.currentItemChanged.connect(self._onCamMotionCompSizeChanged)
+
+        # Target Area
+        self.headWidthCard.valueChanged.connect(self._onHeadWidthChanged)
+        self.headHeightCard.valueChanged.connect(self._onHeadHeightChanged)
+        self.bodyWidthCard.valueChanged.connect(self._onBodyWidthChanged)
+        self.adaptiveRatioCard.checkedChanged.connect(self._onAdaptiveRatioChanged)
+        self.adaptiveRatioRefHCard.valueChanged.connect(self._onAdaptiveRatioRefHChanged)
+        self.postureAwareCard.checkedChanged.connect(self._onPostureAwareChanged)
+        self.crouchAspectCard.valueChanged.connect(self._onCrouchAspectChanged)
 
     def _loadFromConfig(self):
         """Load values from Config"""
@@ -964,6 +1048,19 @@ class AimPage(BasePage):
                 cmc_size = "128"
             self.camMotionCompSizeSegment.setCurrentItem(cmc_size)
             self.camMotionCompSizeCard.setEnabled(cmc_on)
+
+            # Target Area
+            self.headWidthCard.setValue(int(self._config.head_width_ratio * 100))
+            self.headHeightCard.setValue(int(self._config.head_height_ratio * 100))
+            self.bodyWidthCard.setValue(int(self._config.body_width_ratio * 100))
+            adaptive_on = bool(getattr(self._config, 'aim_adaptive_ratio_enabled', False))
+            self.adaptiveRatioCard.setChecked(adaptive_on)
+            self.adaptiveRatioRefHCard.setValue(int(getattr(self._config, 'aim_adaptive_ratio_ref_h', 80.0)))
+            self.adaptiveRatioRefHCard.setEnabled(adaptive_on)
+            posture_on = bool(getattr(self._config, 'aim_posture_aware_enabled', False))
+            self.postureAwareCard.setChecked(posture_on)
+            self.crouchAspectCard.setValue(int(getattr(self._config, 'aim_crouch_aspect_threshold', 1.2) * 100))
+            self.crouchAspectCard.setEnabled(posture_on)
         finally:
             self._isLoadingConfig = False
 
@@ -1456,6 +1553,36 @@ class AimPage(BasePage):
         if self._config:
             self._config.cam_motion_comp_size = int(key)
 
+    def _onHeadWidthChanged(self, value):
+        if self._config:
+            self._config.head_width_ratio = value / 100.0
+
+    def _onHeadHeightChanged(self, value):
+        if self._config:
+            self._config.head_height_ratio = value / 100.0
+
+    def _onBodyWidthChanged(self, value):
+        if self._config:
+            self._config.body_width_ratio = value / 100.0
+
+    def _onAdaptiveRatioChanged(self, checked):
+        if self._config:
+            self._config.aim_adaptive_ratio_enabled = bool(checked)
+        self.adaptiveRatioRefHCard.setEnabled(bool(checked))
+
+    def _onAdaptiveRatioRefHChanged(self, value):
+        if self._config:
+            self._config.aim_adaptive_ratio_ref_h = float(value)
+
+    def _onPostureAwareChanged(self, checked):
+        if self._config:
+            self._config.aim_posture_aware_enabled = bool(checked)
+        self.crouchAspectCard.setEnabled(bool(checked))
+
+    def _onCrouchAspectChanged(self, value):
+        if self._config:
+            self._config.aim_crouch_aspect_threshold = value / 100.0
+
     def retranslateUi(self):
         """Refresh translations"""
         super().retranslateUi()
@@ -1521,6 +1648,12 @@ class AimPage(BasePage):
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
+
+        self.targetAreaGroup.titleLabel.setText(t("target_area_settings"))
+        self.headWidthCard.titleLabel.setText(t("head_width_ratio"))
+        self.headHeightCard.titleLabel.setText(t("head_height_ratio"))
+        self.headHeightCard.contentLabel.setText(t("body_height_note"))
+        self.bodyWidthCard.titleLabel.setText(t("body_width_ratio"))
 
         current_aim = self.aimPartCombo.currentIndex()
         self.aimPartCombo.clear()
