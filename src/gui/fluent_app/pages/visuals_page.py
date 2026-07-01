@@ -287,21 +287,15 @@ class VisualsPage(BasePage):
         )
         self._webEspConnectWidget = QWidget()
         _cv = QVBoxLayout(self._webEspConnectWidget)
-        _cv.setContentsMargins(0, 0, 0, 0)
-        _cv.setSpacing(6)
-        self.webEspUrlLabel = BodyLabel("—")
-        self.webEspUrlLabel.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.webEspUrlLabel.setWordWrap(True)
+        _cv.setContentsMargins(0, 4, 0, 4)
+        _cv.setSpacing(8)
         self.webEspQrLabel = QLabel()
         self.webEspQrLabel.setFixedSize(160, 160)
         self.webEspQrLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        _btnRow = QHBoxLayout()
         self.webEspOpenBtn = PushButton(t("web_esp_open", "Open in browser"))
-        _btnRow.addWidget(self.webEspOpenBtn)
-        _btnRow.addStretch(1)
-        _cv.addWidget(self.webEspUrlLabel)
+        self.webEspOpenBtn.setMinimumWidth(140)
         _cv.addWidget(self.webEspQrLabel)
-        _cv.addLayout(_btnRow)
+        _cv.addWidget(self.webEspOpenBtn)
         self.webEspConnectCard.hBoxLayout.addStretch(1)
         self.webEspConnectCard.hBoxLayout.addWidget(self._webEspConnectWidget)
         self.webEspConnectCard.hBoxLayout.addSpacing(16)
@@ -590,12 +584,10 @@ class VisualsPage(BasePage):
             url = ""
 
         if not url:
-            self.webEspUrlLabel.setText(t("web_esp_url_off", "Enable to get a connect URL"))
             self.webEspQrLabel.clear()
             self.webEspOpenBtn.setEnabled(False)
             return
 
-        self.webEspUrlLabel.setText(url)
         self.webEspOpenBtn.setEnabled(True)
         # QR code via segno if available; otherwise URL text alone is enough.
         try:

@@ -18,6 +18,17 @@
   // Render-side FPS + packet-rate tracking for the HUD.
   let lastPacketT = 0, packetHz = 0;
   let frames = 0, fpsT = performance.now(), drawFps = 0;
+  // 2PC latency (browser → HTTP server round-trip)
+  let latencyMs = null;
+  async function measureLatency() {
+    try {
+      const t0 = performance.now();
+      await fetch("/ping", { cache: "no-store" });
+      latencyMs = Math.round(performance.now() - t0);
+    } catch { latencyMs = null; }
+  }
+  measureLatency();
+  setInterval(measureLatency, 2000);
 
   // ── HUD settings (persisted to localStorage) ──────────────────
   const CFG_DEFAULTS = {
@@ -338,14 +349,21 @@
     const capFps = s.capture_fps   != null ? `${s.capture_fps.toFixed(1)}fps`   : "";
     const infFps = s.inference_fps != null ? `${s.inference_fps.toFixed(1)}fps` : "";
 
+    const firing = s.aim_firing;
+    const aimStatus = firing ? "● AIMING" : (aim ? "○ IDLE" : "○ OFF");
+    const aimStatusColor = firing ? "rgba(255,200,0,0.95)" : (aim ? "rgba(160,200,160,0.8)" : "rgba(150,150,160,0.7)");
+    const latStr = latencyMs != null ? `${latencyMs}ms` : "—";
+
     const lines = [
       { text: aim ? "● AIM ON" : "○ AIM OFF",
         color: aim ? "rgba(0,255,100,0.92)" : "rgba(255,60,60,0.9)" },
-      { text: `model  ${model}`,                              color: "rgba(210,210,210,0.82)" },
-      { text: `cap    ${capMethod}  ${srcFps}  ${capFps}`,   color: "rgba(170,170,190,0.75)" },
-      { text: `inf    ${infFps}`,                             color: "rgba(170,170,190,0.75)" },
-      { text: `targets ${count}`,                             color: "rgba(0,224,160,0.88)"  },
-      { text: `net ${packetHz}hz  draw ${drawFps}fps`,        color: "rgba(110,110,130,0.7)" },
+      { text: `aim status  ${aimStatus}`,  color: aimStatusColor },
+      { text: `model  ${model}`,           color: "rgba(210,210,210,0.82)" },
+      { text: `cap    ${capMethod}  ${srcFps}  ${capFps}`, color: "rgba(170,170,190,0.75)" },
+      { text: `inf    ${infFps}`,          color: "rgba(170,170,190,0.75)" },
+      { text: `targets ${count}`,          color: "rgba(0,224,160,0.88)"  },
+      { text: `2pc latency  ${latStr}`,    color: "rgba(180,170,210,0.78)" },
+      { text: `net ${packetHz}hz  draw ${drawFps}fps`, color: "rgba(110,110,130,0.7)" },
     ];
 
     // Measure widest line for background rect

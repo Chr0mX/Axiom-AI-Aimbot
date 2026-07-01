@@ -144,6 +144,7 @@ def _build_snapshot() -> dict:
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
         "active": bool(getattr(c, "AimToggle", False)),
+        "aim_firing": bool(getattr(c, "makcu_aim_active", False)),
         "model": os.path.basename(getattr(c, "model_path", "") or ""),
         "screenshot_method": str(getattr(c, "screenshot_method", "dxcam")),
         "source_fps": float(getattr(c, "source_nominal_fps", 0.0)),
@@ -166,6 +167,12 @@ class _Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path == "/ping":
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            return
         if path in ("/", "/index.html"):
             if "ws=" not in (parsed.query or ""):
                 port = _actual_ws_port or int(getattr(_config, "web_esp_ws_port", 8765))
