@@ -901,7 +901,19 @@ class StatusPanel(QWidget):
         self.source_fps_row.label.setText(source_fps_label)
         if nominal_fps > 0:
             unit = "fps" if source_method == 'udp' else "Hz"
-            self.source_fps_row.set_value(f"{nominal_fps:.0f} {unit}")
+            fps_text = f"{nominal_fps:.0f} {unit}"
+            fps_color = None
+            if source_method == 'udp':
+                # Surface real packet loss directly in the status panel instead of
+                # only in the log — makes the verdict visible at a glance without
+                # digging through logs or running a separate benchmark.
+                dropped_fps = float(getattr(self.config, 'udp_dropped_fps', 0.0))
+                if dropped_fps >= 1.0:
+                    fps_text += f"  ⚠ {dropped_fps:.0f} dropped/s"
+                    fps_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
+                else:
+                    fps_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
+            self.source_fps_row.set_value(fps_text, fps_color)
         else:
             self.source_fps_row.set_value("—")
 
