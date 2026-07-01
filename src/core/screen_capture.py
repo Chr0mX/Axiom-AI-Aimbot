@@ -1421,22 +1421,34 @@ class UdpCapture:
         self._preview_thread.start()
 
     def _reader_worker(self) -> None:
+        # Non-blocking poll via frame_id deduplication.
+        # time.sleep(0) is a GIL-releasing yield — no Windows 15 ms scheduler
+        # penalty — so the loop reacts to new frames within one reschedule tick
+        # rather than waiting up to 15 ms per event.wait() call.
         _fps_count = 0
         _fps_t0 = time.perf_counter()
+        _seen_id = None
+
         while not self._stop.is_set():
-            jpeg_bytes = self._receiver.get_latest_frame(block=True, timeout=0.5)
-            if jpeg_bytes is None:
+            jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id()
+
+            if jpeg_bytes is None or frame_id == _seen_id:
+                time.sleep(0)  # yield without incurring scheduler-quantum sleep
                 continue
+
+            _seen_id = frame_id
             arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
             frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if frame_bgr is None:
                 continue
+
             h, w = frame_bgr.shape[:2]
             with self._latest_frame_lock:
                 self._latest_frame_ref[0] = frame_bgr
                 if w != self.preview_width or h != self.preview_height:
                     self.preview_width = w
                     self.preview_height = h
+
             _fps_count += 1
             _now = time.perf_counter()
             _elapsed = _now - _fps_t0

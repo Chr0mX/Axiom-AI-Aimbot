@@ -80,6 +80,11 @@ class UdpJpegReceiver:
         with self._lock:
             return self._latest_frame
 
+    def get_latest_frame_with_id(self):
+        """Non-blocking: return (jpeg_bytes, frame_id) atomically. Both None if no frame yet."""
+        with self._lock:
+            return self._latest_frame, self._latest_frame_id
+
     def _recv_loop(self):
         while self._running:
             try:
