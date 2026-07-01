@@ -50,9 +50,9 @@ screenshot>` for the most accurate reading against your actual content.
 from __future__ import annotations
 
 import argparse
-import socket
-import struct
+import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -62,7 +62,7 @@ _SRC = _HERE.parent                       # src/
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from core.udp_receiver import HEADER_FORMAT, HEADER_SIZE, UdpJpegReceiver  # noqa: E402
+from core.udp_receiver import UdpJpegReceiver  # noqa: E402
 
 
 def _make_test_jpeg(width: int, height: int, quality: int, image_path: "str | None" = None) -> bytes:
@@ -119,58 +119,86 @@ def decode_bench(width: int, height: int, quality: int, duration: float,
           f"(single-threaded, this CPU)")
 
 
+def _contender_worker(stop_evt: threading.Event) -> None:
+    """Mimics real ai_loop capture/preprocess/inference threads: cv2/numpy
+    calls that release the GIL during their C implementation (unlike a
+    pure-Python busy loop, which would badly overstate contention)."""
+    import cv2
+    import numpy as np
+
+    frame = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
+    while not stop_evt.is_set():
+        small = cv2.resize(frame, (320, 320), interpolation=cv2.INTER_LINEAR)
+        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        gray.astype(np.float32).mean()
+
+
 def loopback_bench(width: int, height: int, quality: int, fps: float, duration: float, port: int,
-                    image_path: "str | None" = None) -> None:
-    jpeg_bytes = _make_test_jpeg(width, height, quality, image_path)
-    chunk_payload = 1400 - HEADER_SIZE  # matches typical MTU-safe chunk size
-    total_size = len(jpeg_bytes)
-    n_chunks = max(1, (total_size + chunk_payload - 1) // chunk_payload)
-    # Precompute payload slices once — only the frame_id in each header changes
-    # per frame, so the hot send loop shouldn't redo this slicing/packing work.
-    payloads = [jpeg_bytes[i * chunk_payload:(i + 1) * chunk_payload] for i in range(n_chunks)]
-    print(f"[loopback-bench] {width}x{height} q={quality} -> {total_size} bytes/frame, "
-          f"{n_chunks} chunks/frame")
-    print(f"[loopback-bench] target {fps:.1f} fps for {duration:.1f}s over 127.0.0.1:{port}")
+                    image_path: "str | None" = None, contenders: int = 0) -> None:
+    # The sender runs as a SEPARATE OS PROCESS (_bench_udp_sender.py), not a
+    # thread in this interpreter -- it must not share a GIL with the receiver
+    # or the contender threads below, matching real deployment where OBS is
+    # an independent process from Axiom's Python receiver. Running it as an
+    # in-process thread here would let contention starve the sender too,
+    # confounding the very effect this bench is trying to isolate.
+    sender_script = str(Path(__file__).resolve().parent / "_bench_udp_sender.py")
+
+    print(f"[loopback-bench] target {fps:.1f} fps for {duration:.1f}s over 127.0.0.1:{port}"
+          + (f", with {contenders} simulated capture/inference threads competing for CPU"
+             if contenders else ""))
 
     receiver = UdpJpegReceiver(bind_ip="127.0.0.1", bind_port=port)
     receiver.start()
 
-    sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    addr = ("127.0.0.1", port)
+    stop_evt = threading.Event()
+    contender_threads = [threading.Thread(target=_contender_worker, args=(stop_evt,), daemon=True)
+                          for _ in range(contenders)]
+    for t in contender_threads:
+        t.start()
 
-    interval = 1.0 / fps
-    frame_id = 0
-    t0 = time.perf_counter()
-    next_send = t0
-    while time.perf_counter() - t0 < duration:
-        now = time.perf_counter()
-        if now < next_send:
-            time.sleep(max(0.0, next_send - now))
-        for idx, payload in enumerate(payloads):
-            header = struct.pack(HEADER_FORMAT, frame_id, total_size, idx, n_chunks, len(payload))
-            sender.sendto(header + payload, addr)
-        frame_id += 1
-        next_send += interval
+    proc = subprocess.run(
+        [sys.executable, sender_script, str(port), str(fps), str(duration),
+         str(width), str(height), str(quality), image_path or ""],
+        capture_output=True, text=True, timeout=duration + 10,
+    )
 
-    # let the receiver drain in-flight packets
-    time.sleep(0.5)
-    elapsed = time.perf_counter() - t0
-    sent_fps = frame_id / elapsed
-    print(f"[loopback-bench] sent {frame_id} frames in {elapsed:.2f}s -> {sent_fps:.1f} fps requested")
+    time.sleep(0.5)  # let the receiver drain in-flight packets
+    stop_evt.set()
+    for t in contender_threads:
+        t.join(timeout=2.0)
+
+    if proc.returncode != 0:
+        print(f"[loopback-bench] sender process failed:\n{proc.stderr}")
+        receiver.stop()
+        return
+
+    print(f"[loopback-bench] {proc.stdout.strip()}")
+    sent_fps = fps
+    for tok in proc.stdout.split():
+        if tok.startswith("sent_fps="):
+            sent_fps = float(tok.split("=", 1)[1])
     print(f"[loopback-bench] receiver assembled-frame rate (recv_fps): {receiver.recv_fps:.1f} fps")
     print(f"[loopback-bench] receiver dropped-frame rate (dropped_fps): {receiver.dropped_fps:.1f} fps")
 
     receiver.stop()
-    sender.close()
 
-    if receiver.recv_fps >= sent_fps * 0.95 and receiver.dropped_fps < 1.0:
-        print("[loopback-bench] RESULT: local socket/assembly path keeps up fine — "
+    keep_up_ratio = receiver.recv_fps / sent_fps if sent_fps > 0 else 0.0
+    if receiver.dropped_fps < 1.0 and keep_up_ratio >= 0.98:
+        print("[loopback-bench] RESULT: local socket/assembly path keeps up fully — "
               "if your live UDP Stream FPS is still low, the bottleneck is real "
               "network loss, not this machine's Python/OS UDP stack.")
+    elif keep_up_ratio >= 0.90:
+        print(f"[loopback-bench] RESULT: mostly keeping up ({keep_up_ratio*100:.0f}% of target, "
+              f"{receiver.dropped_fps:.1f} dropped_fps) — minor contention effects, not a hard "
+              "bottleneck. If live fps is well below this, look at real network loss instead.")
     else:
-        print("[loopback-bench] RESULT: even on loopback (no real network), the "
-              "receiver could not keep up with the target rate — this machine's "
-              "CPU/OS UDP handling is the bottleneck, not network loss.")
+        print(f"[loopback-bench] RESULT: falling significantly behind ({keep_up_ratio*100:.0f}% of "
+              f"target, {receiver.dropped_fps:.1f} dropped_fps) — this machine's CPU/OS UDP "
+              "handling under this load level is a real bottleneck. "
+              + ("Try --contenders 0 to isolate whether it's the simulated capture/"
+                 "inference load causing this." if contenders else
+                 "Try --contenders 3 to check if this gets WORSE under load similar "
+                 "to real capture+inference threads running."))
 
 
 def main() -> None:
@@ -195,13 +223,20 @@ def main() -> None:
     p_loop.add_argument("--duration", type=float, default=5.0)
     p_loop.add_argument("--port", type=int, default=5601)
     p_loop.add_argument("--image", type=str, default=None)
+    p_loop.add_argument("--contenders", type=int, default=0,
+                         help="Number of simulated capture/preprocess/inference-style "
+                              "threads (real cv2/numpy work, not busy-loops) to run "
+                              "concurrently, to reproduce CPU contention like the real "
+                              "app under load. Try --contenders 3 to match ai_loop's "
+                              "capture+preprocess+inference threads.")
 
     args = parser.parse_args()
 
     if args.mode == "decode-bench":
         decode_bench(args.width, args.height, args.quality, args.duration, args.image)
     elif args.mode == "loopback-bench":
-        loopback_bench(args.width, args.height, args.quality, args.fps, args.duration, args.port, args.image)
+        loopback_bench(args.width, args.height, args.quality, args.fps, args.duration, args.port,
+                        args.image, args.contenders)
 
 
 if __name__ == "__main__":
