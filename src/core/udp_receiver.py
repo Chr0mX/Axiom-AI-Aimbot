@@ -128,6 +128,14 @@ class UdpJpegReceiver:
         _rfps_count = 0
         _rfps_t0 = time.time()
         _last_evict = time.time()
+        # Even the throttled eviction check still called time.time() on every
+        # single packet just to compare against the interval — at ~35k
+        # packets/sec (e.g. 1080p JPEGs split into hundreds of chunks/frame)
+        # that syscall alone is measurable CPU. Only actually check wall-clock
+        # time every _EVICT_CHECK_EVERY packets; the 250ms throttle doesn't
+        # need sub-millisecond precision.
+        _EVICT_CHECK_EVERY = 32
+        _packets_since_evict_check = 0
         while self._running:
             try:
                 packet, _addr = self.sock.recvfrom(self.recv_buffer_size)
@@ -139,8 +147,10 @@ class UdpJpegReceiver:
             if len(packet) < HEADER_SIZE:
                 continue
 
-            frame_id, total_size, chunk_index, total_chunks, chunk_size = struct.unpack(
-                HEADER_FORMAT, packet[:HEADER_SIZE]
+            # unpack_from reads directly from `packet` without first slicing out
+            # a copy of the header bytes (struct.unpack needed that slice).
+            frame_id, total_size, chunk_index, total_chunks, chunk_size = struct.unpack_from(
+                HEADER_FORMAT, packet
             )
             payload = packet[HEADER_SIZE:HEADER_SIZE + chunk_size]
 
@@ -175,10 +185,13 @@ class UdpJpegReceiver:
                     _rfps_count = 0
                     _rfps_t0 = _now
 
-            now_t = time.time()
-            if now_t - _last_evict >= _EVICT_INTERVAL:
-                _last_evict = now_t
-                self._evict_stale_frames(now_t)
+            _packets_since_evict_check += 1
+            if _packets_since_evict_check >= _EVICT_CHECK_EVERY:
+                _packets_since_evict_check = 0
+                now_t = time.time()
+                if now_t - _last_evict >= _EVICT_INTERVAL:
+                    _last_evict = now_t
+                    self._evict_stale_frames(now_t)
 
     def _evict_stale_frames(self, now=None):
         now = now if now is not None else time.time()
