@@ -37,6 +37,15 @@ Compare the two numbers against your live `UDP Stream FPS` (recv_fps) and
   - Both benches hit target fine, but decode-bench is close to your
     observed source_nominal_fps                                        -> JPEG
     decode is the bottleneck, not the network.
+
+IMPORTANT: by default `--image` is unset and this generates a smooth
+gradient + light noise as test content, NOT random noise. Pure random
+noise is the worst possible case for JPEG (near-incompressible, forces
+maximum-length Huffman codes) and decodes several times slower than real
+game/desktop footage — using it overstates the real decode cost badly
+(e.g. ~50fps for noise vs ~100-200+fps for realistic content at the same
+1920x1080 resolution on the same CPU). Pass `--image <path to a real
+screenshot>` for the most accurate reading against your actual content.
 """
 from __future__ import annotations
 
@@ -56,22 +65,43 @@ if str(_SRC) not in sys.path:
 from core.udp_receiver import HEADER_FORMAT, HEADER_SIZE, UdpJpegReceiver  # noqa: E402
 
 
-def _make_test_jpeg(width: int, height: int, quality: int) -> bytes:
+def _make_test_jpeg(width: int, height: int, quality: int, image_path: "str | None" = None) -> bytes:
+    """Build a test JPEG. Pure random noise is the WORST case for JPEG (near-
+    incompressible, forces maximum-length Huffman codes) and decodes several
+    times slower than real footage — using it alone badly overstates the real
+    decode-time bottleneck. Default here is smooth gradient + light noise,
+    much closer to real game/desktop content. Pass --image for a real
+    screenshot from your actual game for the most accurate measurement."""
     import cv2
     import numpy as np
 
-    img = np.random.randint(0, 255, (height, width, 3), dtype=np.uint8)
+    if image_path:
+        img = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        if img is None:
+            raise RuntimeError(f"failed to load image: {image_path}")
+        img = cv2.resize(img, (width, height), interpolation=cv2.INTER_LINEAR)
+    else:
+        base = np.zeros((height, width, 3), dtype=np.uint8)
+        base[:, :, 0] = np.linspace(0, 255, width, dtype=np.uint8)[None, :]
+        base[:, :, 1] = np.linspace(0, 255, height, dtype=np.uint8)[:, None]
+        base[:, :, 2] = 128
+        noise = np.random.randint(-20, 20, (height, width, 3))
+        img = np.clip(base.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
     if not ok:
         raise RuntimeError("JPEG encode failed")
     return buf.tobytes()
 
 
-def decode_bench(width: int, height: int, quality: int, duration: float) -> None:
+def decode_bench(width: int, height: int, quality: int, duration: float,
+                  image_path: "str | None" = None) -> None:
     import cv2
     import numpy as np
 
-    jpeg_bytes = _make_test_jpeg(width, height, quality)
+    jpeg_bytes = _make_test_jpeg(width, height, quality, image_path)
+    src = image_path or "synthetic gradient+noise (NOT random noise — see module docstring)"
+    print(f"[decode-bench] source: {src}")
     print(f"[decode-bench] {width}x{height} q={quality} -> {len(jpeg_bytes)} bytes/frame")
     print(f"[decode-bench] running cv2.imdecode for {duration:.1f}s ...")
 
@@ -89,21 +119,16 @@ def decode_bench(width: int, height: int, quality: int, duration: float) -> None
           f"(single-threaded, this CPU)")
 
 
-def _send_frame(sock: socket.socket, addr, frame_id: int, jpeg_bytes: bytes, chunk_payload: int) -> None:
-    total_size = len(jpeg_bytes)
-    total_chunks = max(1, (total_size + chunk_payload - 1) // chunk_payload)
-    for idx in range(total_chunks):
-        start = idx * chunk_payload
-        payload = jpeg_bytes[start:start + chunk_payload]
-        header = struct.pack(HEADER_FORMAT, frame_id, total_size, idx, total_chunks, len(payload))
-        sock.sendto(header + payload, addr)
-
-
-def loopback_bench(width: int, height: int, quality: int, fps: float, duration: float, port: int) -> None:
-    jpeg_bytes = _make_test_jpeg(width, height, quality)
+def loopback_bench(width: int, height: int, quality: int, fps: float, duration: float, port: int,
+                    image_path: "str | None" = None) -> None:
+    jpeg_bytes = _make_test_jpeg(width, height, quality, image_path)
     chunk_payload = 1400 - HEADER_SIZE  # matches typical MTU-safe chunk size
-    n_chunks = max(1, (len(jpeg_bytes) + chunk_payload - 1) // chunk_payload)
-    print(f"[loopback-bench] {width}x{height} q={quality} -> {len(jpeg_bytes)} bytes/frame, "
+    total_size = len(jpeg_bytes)
+    n_chunks = max(1, (total_size + chunk_payload - 1) // chunk_payload)
+    # Precompute payload slices once — only the frame_id in each header changes
+    # per frame, so the hot send loop shouldn't redo this slicing/packing work.
+    payloads = [jpeg_bytes[i * chunk_payload:(i + 1) * chunk_payload] for i in range(n_chunks)]
+    print(f"[loopback-bench] {width}x{height} q={quality} -> {total_size} bytes/frame, "
           f"{n_chunks} chunks/frame")
     print(f"[loopback-bench] target {fps:.1f} fps for {duration:.1f}s over 127.0.0.1:{port}")
 
@@ -121,7 +146,9 @@ def loopback_bench(width: int, height: int, quality: int, fps: float, duration: 
         now = time.perf_counter()
         if now < next_send:
             time.sleep(max(0.0, next_send - now))
-        _send_frame(sender, addr, frame_id, jpeg_bytes, chunk_payload)
+        for idx, payload in enumerate(payloads):
+            header = struct.pack(HEADER_FORMAT, frame_id, total_size, idx, n_chunks, len(payload))
+            sender.sendto(header + payload, addr)
         frame_id += 1
         next_send += interval
 
@@ -155,6 +182,10 @@ def main() -> None:
     p_decode.add_argument("--height", type=int, default=640)
     p_decode.add_argument("--quality", type=int, default=80)
     p_decode.add_argument("--duration", type=float, default=3.0)
+    p_decode.add_argument("--image", type=str, default=None,
+                           help="Path to a real screenshot to use instead of synthetic content "
+                                "(most accurate — random noise or even synthetic gradients don't "
+                                "match real game footage compressibility)")
 
     p_loop = sub.add_parser("loopback-bench", help="Measure UDP assembly fps ceiling over 127.0.0.1")
     p_loop.add_argument("--width", type=int, default=640)
@@ -163,13 +194,14 @@ def main() -> None:
     p_loop.add_argument("--fps", type=float, default=120.0)
     p_loop.add_argument("--duration", type=float, default=5.0)
     p_loop.add_argument("--port", type=int, default=5601)
+    p_loop.add_argument("--image", type=str, default=None)
 
     args = parser.parse_args()
 
     if args.mode == "decode-bench":
-        decode_bench(args.width, args.height, args.quality, args.duration)
+        decode_bench(args.width, args.height, args.quality, args.duration, args.image)
     elif args.mode == "loopback-bench":
-        loopback_bench(args.width, args.height, args.quality, args.fps, args.duration, args.port)
+        loopback_bench(args.width, args.height, args.quality, args.fps, args.duration, args.port, args.image)
 
 
 if __name__ == "__main__":
