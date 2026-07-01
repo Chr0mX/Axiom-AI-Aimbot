@@ -16,6 +16,7 @@ Incomplete frames are dropped after `frame_timeout` seconds (handles lost
 UDP packets so a missing chunk doesn't leak memory forever).
 """
 
+import os
 import socket
 import struct
 import threading
@@ -23,6 +24,28 @@ import time
 
 HEADER_FORMAT = ">IIHHH"
 HEADER_SIZE = struct.calcsize(HEADER_FORMAT)  # 14 bytes
+
+# Eviction (time.time() + full dict scan) throttled to this interval instead
+# of running on every packet — at 120fps with dozens of chunks/frame, running
+# it per-packet burns CPU on the recv thread that's needed to keep up with
+# incoming sockets, which is a direct contributor to dropped/incomplete frames.
+_EVICT_INTERVAL = 0.25
+
+
+def _boost_thread_priority() -> None:
+    """Best-effort: raise this thread's OS priority above normal so a busy
+    GPU/inference process doesn't starve the UDP receive thread of CPU time
+    and cause the OS socket buffer to overflow (packet loss)."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        THREAD_PRIORITY_HIGHEST = 2
+        ctypes.windll.kernel32.SetThreadPriority(
+            ctypes.windll.kernel32.GetCurrentThread(), THREAD_PRIORITY_HIGHEST
+        )
+    except Exception:
+        pass
 
 
 class UdpJpegReceiver:
@@ -35,7 +58,10 @@ class UdpJpegReceiver:
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+        # 4 MB — a 1 MB kernel buffer can overflow during brief scheduling
+        # stalls at 120fps (bursts of dozens of ~1.4 KB chunks/frame), which
+        # silently drops packets and shows up as incomplete/dropped frames.
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
         self.sock.settimeout(1.0)  # ensures recvfrom wakes up periodically on Windows
         self.sock.bind((self.bind_ip, self.bind_port))
 
@@ -98,8 +124,10 @@ class UdpJpegReceiver:
             return self._latest_frame, self._latest_frame_id
 
     def _recv_loop(self):
+        _boost_thread_priority()
         _rfps_count = 0
         _rfps_t0 = time.time()
+        _last_evict = time.time()
         while self._running:
             try:
                 packet, _addr = self.sock.recvfrom(self.recv_buffer_size)
@@ -147,10 +175,13 @@ class UdpJpegReceiver:
                     _rfps_count = 0
                     _rfps_t0 = _now
 
-            self._evict_stale_frames()
+            now_t = time.time()
+            if now_t - _last_evict >= _EVICT_INTERVAL:
+                _last_evict = now_t
+                self._evict_stale_frames(now_t)
 
-    def _evict_stale_frames(self):
-        now = time.time()
+    def _evict_stale_frames(self, now=None):
+        now = now if now is not None else time.time()
         stale = [
             fid for fid, e in self._partial_frames.items()
             if now - e["first_seen"] > self.frame_timeout
