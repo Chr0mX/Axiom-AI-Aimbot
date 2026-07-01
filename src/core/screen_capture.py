@@ -21,6 +21,49 @@ if TYPE_CHECKING:
 _WARNED_MESSAGES: set[str] = set()
 _CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
 
+_JPEG_SOF_MARKERS = frozenset({
+    0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+    0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+})
+
+
+def _jpeg_dimensions(data: bytes) -> "tuple[int, int] | None":
+    """Parse a JPEG's SOF marker to get (width, height) without decoding pixels.
+
+    Used to decide whether a reduced-resolution decode is safe for the
+    current detection region before paying the cost of a full decode.
+    """
+    n = len(data)
+    i = 2  # skip SOI (FF D8)
+    while i + 3 < n:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker == 0xFF:
+            i += 1
+            continue
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        if marker == 0xD9:  # EOI
+            break
+        if i + 5 >= n:
+            break
+        seg_len = (data[i + 2] << 8) | data[i + 3]
+        if marker in _JPEG_SOF_MARKERS:
+            if i + 8 >= n:
+                break
+            height = (data[i + 5] << 8) | data[i + 6]
+            width = (data[i + 7] << 8) | data[i + 8]
+            if width > 0 and height > 0:
+                return width, height
+            return None
+        if seg_len < 2:
+            break
+        i += 2 + seg_len
+    return None
+
 # ---------------------------------------------------------------------------
 # Module-level preview frame — written by capture worker, read by GUI timer.
 # ---------------------------------------------------------------------------
@@ -1429,6 +1472,7 @@ class UdpCapture:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
         _seen_id = None
+        _logged_stream_dims = None
 
         while not self._stop.is_set():
             jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id()
@@ -1438,6 +1482,18 @@ class UdpCapture:
                 continue
 
             _seen_id = frame_id
+
+            # Parse the JPEG's real dimensions straight from its header (no decode
+            # cost) so the actual streamed resolution is known with certainty —
+            # JPEG decode throughput is dominated by entropy (Huffman) decoding of
+            # the full bitstream regardless of target resolution, so a large source
+            # resolution is a hard CPU ceiling on fps that no receiver-side decode
+            # trick can bypass. Only the sender streaming fewer pixels helps.
+            stream_dims = _jpeg_dimensions(jpeg_bytes)
+            if stream_dims is not None and stream_dims != _logged_stream_dims:
+                _logged_stream_dims = stream_dims
+                logger.info("[UDP] stream resolution: %dx%d", stream_dims[0], stream_dims[1])
+
             arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
             frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if frame_bgr is None:
