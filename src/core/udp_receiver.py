@@ -48,6 +48,9 @@ class UdpJpegReceiver:
         self._latest_frame_id = None
         self._new_frame_event = threading.Event()
         self.recv_fps: float = 0.0     # assembled frames/sec from sender
+        self.dropped_fps: float = 0.0  # incomplete frames evicted/sec (packet loss)
+        self._dfps_count = 0
+        self._dfps_t0 = time.time()
 
     def start(self):
         self._running = True
@@ -152,5 +155,11 @@ class UdpJpegReceiver:
             fid for fid, e in self._partial_frames.items()
             if now - e["first_seen"] > self.frame_timeout
         ]
+        self._dfps_count += len(stale)
+        _elapsed = now - self._dfps_t0
+        if _elapsed >= 1.0:
+            self.dropped_fps = self._dfps_count / _elapsed
+            self._dfps_count = 0
+            self._dfps_t0 = now
         for fid in stale:
             del self._partial_frames[fid]
