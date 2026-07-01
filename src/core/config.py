@@ -532,6 +532,7 @@ class Config:
         # Nominal FPS of the active capture source (UVC/NDI reports this;
         # screen capture uses monitor refresh rate or measured rate)
         self.source_nominal_fps: float = 0.0
+        self.udp_recv_fps: float = 0.0        # raw assembled-frame rate from UDP sender
 
         # Secondary inference (V1 = PaddleOCR, V2 = ONNX HUD detector)
         self.second_inference_mode: str = "off"          # "off" | "v1_ocr" | "v2_onnx"

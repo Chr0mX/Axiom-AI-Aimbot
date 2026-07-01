@@ -148,6 +148,7 @@ def _build_snapshot() -> dict:
         "model": os.path.basename(getattr(c, "model_path", "") or ""),
         "screenshot_method": str(getattr(c, "screenshot_method", "dxcam")),
         "source_fps": float(getattr(c, "source_nominal_fps", 0.0)),
+        "udp_recv_fps": round(float(getattr(c, "udp_recv_fps", 0.0)), 1),
         "capture_fps": round(_capture_fps, 1),
         "inference_fps": round(_inference_fps, 1),
     }

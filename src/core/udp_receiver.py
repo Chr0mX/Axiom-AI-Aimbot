@@ -47,6 +47,7 @@ class UdpJpegReceiver:
         self._latest_frame = None      # most recent completed JPEG bytes
         self._latest_frame_id = None
         self._new_frame_event = threading.Event()
+        self.recv_fps: float = 0.0     # assembled frames/sec from sender
 
     def start(self):
         self._running = True
@@ -86,6 +87,8 @@ class UdpJpegReceiver:
             return self._latest_frame, self._latest_frame_id
 
     def _recv_loop(self):
+        _rfps_count = 0
+        _rfps_t0 = time.time()
         while self._running:
             try:
                 packet, _addr = self.sock.recvfrom(self.recv_buffer_size)
@@ -123,6 +126,15 @@ class UdpJpegReceiver:
                     self._latest_frame_id = frame_id
                 self._new_frame_event.set()
                 del self._partial_frames[frame_id]
+
+                # Count fully assembled frames for sender-side FPS
+                _rfps_count += 1
+                _now = time.time()
+                _elapsed = _now - _rfps_t0
+                if _elapsed >= 1.0:
+                    self.recv_fps = _rfps_count / _elapsed
+                    _rfps_count = 0
+                    _rfps_t0 = _now
 
             self._evict_stale_frames()
 

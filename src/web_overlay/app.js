@@ -348,6 +348,12 @@
     const srcFps = (s.source_fps > 0) ? `${Math.round(s.source_fps)}Hz` : "—";
     const capFps = s.capture_fps   != null ? `${s.capture_fps.toFixed(1)}fps`   : "";
     const infFps = s.inference_fps != null ? `${s.inference_fps.toFixed(1)}fps` : "";
+    const recvFps = (s.udp_recv_fps != null && s.udp_recv_fps > 0)
+      ? `${s.udp_recv_fps.toFixed(1)}fps recv` : "";
+    const isUdp = capMethod === "UDP";
+    const capLine = isUdp
+      ? `cap    UDP  ${recvFps}  ${capFps} dec`
+      : `cap    ${capMethod}  ${srcFps}  ${capFps}`;
 
     const firing = s.aim_firing;
     const aimStatus = firing ? "● AIMING" : (aim ? "○ IDLE" : "○ OFF");
@@ -359,7 +365,7 @@
         color: aim ? "rgba(0,255,100,0.92)" : "rgba(255,60,60,0.9)" },
       { text: `aim status  ${aimStatus}`,  color: aimStatusColor },
       { text: `model  ${model}`,           color: "rgba(210,210,210,0.82)" },
-      { text: `cap    ${capMethod}  ${srcFps}  ${capFps}`, color: "rgba(170,170,190,0.75)" },
+      { text: capLine,                     color: "rgba(170,170,190,0.75)" },
       { text: `inf    ${infFps}`,          color: "rgba(170,170,190,0.75)" },
       { text: `targets ${count}`,          color: "rgba(0,224,160,0.88)"  },
       { text: `2pc latency  ${latStr}`,    color: "rgba(180,170,210,0.78)" },

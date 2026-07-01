@@ -1454,6 +1454,7 @@ class UdpCapture:
             _elapsed = _now - _fps_t0
             if _elapsed >= 1.0:
                 self.config.source_nominal_fps = _fps_count / _elapsed
+                self.config.udp_recv_fps = self._receiver.recv_fps
                 _fps_count = 0
                 _fps_t0 = _now
 
