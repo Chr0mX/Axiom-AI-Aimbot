@@ -19,6 +19,67 @@
   let lastPacketT = 0, packetHz = 0;
   let frames = 0, fpsT = performance.now(), drawFps = 0;
 
+  // ── HUD settings (persisted to localStorage) ──────────────────
+  const CFG_DEFAULTS = {
+    fontSize:      11,
+    bgColor:       "#000000",
+    bgOpacity:     65,
+    borderColor:   "#00e0a0",
+    borderOpacity: 60,
+    borderWidth:   1,
+    borderRadius:  4,
+    padding:       6,
+  };
+  const LS_CFG = "axiom_hud_cfg";
+  const LS_POS = "axiom_hud_pos";
+
+  function loadCfg() {
+    try { return Object.assign({}, CFG_DEFAULTS, JSON.parse(localStorage.getItem(LS_CFG) || "{}")); }
+    catch { return Object.assign({}, CFG_DEFAULTS); }
+  }
+  function saveCfg() { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); }
+
+  let cfg = loadCfg();
+
+  // HUD position (drag-repositionable)
+  let hudX = 8, hudY = 8;
+  try {
+    const p = JSON.parse(localStorage.getItem(LS_POS) || "{}");
+    if (typeof p.x === "number") hudX = p.x;
+    if (typeof p.y === "number") hudY = p.y;
+  } catch {}
+
+  function savePos() { localStorage.setItem(LS_POS, JSON.stringify({ x: hudX, y: hudY })); }
+
+  // Last drawn HUD bounding box (for drag hit-test)
+  let hudRect = { x: 0, y: 0, w: 0, h: 0 };
+
+  // ── Drag state ─────────────────────────────────────────────────
+  let dragging = false, dragOffX = 0, dragOffY = 0;
+
+  canvas.addEventListener("mousedown", (e) => {
+    const r = hudRect;
+    if (e.clientX >= r.x && e.clientX <= r.x + r.w &&
+        e.clientY >= r.y && e.clientY <= r.y + r.h) {
+      dragging = true;
+      dragOffX = e.clientX - hudX;
+      dragOffY = e.clientY - hudY;
+      canvas.classList.add("dragging");
+      e.preventDefault();
+    }
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    hudX = Math.max(0, Math.min(canvas.width  - hudRect.w, e.clientX - dragOffX));
+    hudY = Math.max(0, Math.min(canvas.height - hudRect.h, e.clientY - dragOffY));
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    canvas.classList.remove("dragging");
+    savePos();
+  });
+
   // ── Canvas sizing ──────────────────────────────────────────────
   function resize() {
     canvas.width = window.innerWidth;
@@ -27,31 +88,35 @@
   window.addEventListener("resize", resize);
   resize();
 
-  // Map backend screen-space coords → canvas coords (handles browser viewport
-  // differing from the game's render resolution).
+  // Map backend screen-space coords → canvas coords
   function scaler(s) {
     const sx = canvas.width / (s.screen.w || canvas.width);
     const sy = canvas.height / (s.screen.h || canvas.height);
     return { sx, sy };
   }
 
-  // ── Colors (parity with overlay.py _BOX_THEMES) ────────────────
+  // ── Colors ─────────────────────────────────────────────────────
   const BOX_THEMES = {
     default: [0, 255, 140, 220],
-    cyan: [0, 220, 255, 220],
-    red: [255, 60, 60, 220],
-    yellow: [255, 210, 0, 220],
-    white: [255, 255, 255, 200],
-    purple: [180, 60, 255, 210],
+    cyan:    [0, 220, 255, 220],
+    red:     [255, 60,  60,  220],
+    yellow:  [255, 210, 0,   220],
+    white:   [255, 255, 255, 200],
+    purple:  [180, 60,  255, 210],
   };
   const rgba = (c) => `rgba(${c[0]},${c[1]},${c[2]},${(c[3] ?? 255) / 255})`;
+
+  function hexToRgb(hex) {
+    const v = parseInt(hex.slice(1), 16);
+    return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+  }
 
   // ── WebSocket ──────────────────────────────────────────────────
   let ws = null;
   function connect() {
     const url = `ws://${location.hostname}:${WS_PORT}/`;
     ws = new WebSocket(url);
-    ws.onopen = () => setStatus(true);
+    ws.onopen  = () => setStatus(true);
     ws.onclose = () => { setStatus(false); setTimeout(connect, 1000); };
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
     ws.onmessage = (ev) => {
@@ -66,24 +131,20 @@
   }
 
   function setStatus(ok) {
-    statusEl.className = ok ? "connected" : "disconnected";
+    statusEl.className  = ok ? "connected" : "disconnected";
     statusEl.textContent = ok ? "● ESP" : "reconnecting…";
   }
 
-  // ── Drawing primitives (parity with overlay.py paintEvent) ─────
+  // ── Drawing primitives ─────────────────────────────────────────
   function cornerBox(x1, y1, x2, y2, color, thickness) {
     const w = x2 - x1, h = y2 - y1;
     const len = Math.max(6, Math.min(w, h) * 0.22);
     ctx.strokeStyle = rgba(color);
     ctx.lineWidth = thickness;
     ctx.beginPath();
-    // TL
     ctx.moveTo(x1, y1 + len); ctx.lineTo(x1, y1); ctx.lineTo(x1 + len, y1);
-    // TR
     ctx.moveTo(x2 - len, y1); ctx.lineTo(x2, y1); ctx.lineTo(x2, y1 + len);
-    // BL
     ctx.moveTo(x1, y2 - len); ctx.lineTo(x1, y2); ctx.lineTo(x1 + len, y2);
-    // BR
     ctx.moveTo(x2 - len, y2); ctx.lineTo(x2, y2); ctx.lineTo(x2, y2 - len);
     ctx.stroke();
   }
@@ -112,7 +173,7 @@
     } else if (st.aim_part === "custom") {
       ty = y1 + h * ((st.aim_custom_y_pct ?? 30) / 100);
     } else {
-      // center / smart — also uses custom Y offset
+      // center / smart — uses custom Y offset
       ty = y1 + h * ((st.aim_custom_y_pct ?? 50) / 100);
     }
     const r = Math.max(3, Math.min(6, w / 8));
@@ -123,6 +184,22 @@
     ctx.moveTo(tx + r, ty - r); ctx.lineTo(tx - r, ty + r);
     ctx.stroke();
     return [tx, ty];
+  }
+
+  // ── Rounded rect helper ────────────────────────────────────────
+  function roundRect(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y,     x + w, y + r,     r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x,     y + h, x,     y + h - r, r);
+    ctx.lineTo(x,     y + r);
+    ctx.arcTo(x,     y,     x + r, y,         r);
+    ctx.closePath();
   }
 
   // ── Render loop ────────────────────────────────────────────────
@@ -174,7 +251,6 @@
           const conf = i < confs.length ? confs[i] : 0.5;
           const thickness = Math.max(2, Math.min(4, 2 + Math.round(conf * 2)));
 
-          // in-FOV test in screen space
           const ox = state.center.x, oy = state.center.y;
           let inFov;
           if (st.fov_circle_filter_enabled) {
@@ -224,7 +300,7 @@
       if (st.show_crosshair) {
         const cc = st.crosshair_color, s = st.crosshair_size;
         ctx.strokeStyle = `rgb(${cc[0]},${cc[1]},${cc[2]})`;
-        ctx.fillStyle = `rgb(${cc[0]},${cc[1]},${cc[2]})`;
+        ctx.fillStyle   = `rgb(${cc[0]},${cc[1]},${cc[2]})`;
         ctx.lineWidth = 1;
         if (st.crosshair_style === "cross") {
           ctx.beginPath();
@@ -247,46 +323,147 @@
     requestAnimationFrame(render);
   }
 
+  // ── HUD draw ───────────────────────────────────────────────────
   function drawHud(s, count) {
-    ctx.font = "11px Consolas, monospace";
+    const fs = cfg.fontSize;
+    const lh = Math.round(fs * 1.35);
+    const pad = cfg.padding;
+
+    ctx.font = `${fs}px Consolas, monospace`;
+
     const aim = s.active;
     const model = (s.model || "").replace(/\.onnx$/i, "") || "none";
     const capMethod = (s.screenshot_method || "dxcam").toUpperCase();
     const srcFps = (s.source_fps > 0) ? `${Math.round(s.source_fps)}Hz` : "—";
-    const capFps = s.capture_fps != null ? `${s.capture_fps.toFixed(1)}fps` : "";
+    const capFps = s.capture_fps   != null ? `${s.capture_fps.toFixed(1)}fps`   : "";
     const infFps = s.inference_fps != null ? `${s.inference_fps.toFixed(1)}fps` : "";
 
     const lines = [
       { text: aim ? "● AIM ON" : "○ AIM OFF",
         color: aim ? "rgba(0,255,100,0.92)" : "rgba(255,60,60,0.9)" },
-      { text: `model  ${model}`,         color: "rgba(210,210,210,0.82)" },
-      { text: `cap    ${capMethod}  ${srcFps}  ${capFps}`, color: "rgba(170,170,190,0.75)" },
-      { text: `inf    ${infFps}`,        color: "rgba(170,170,190,0.75)" },
-      { text: `targets ${count}`,        color: "rgba(0,224,160,0.88)" },
-      { text: `net ${packetHz}hz  draw ${drawFps}fps`, color: "rgba(110,110,130,0.7)" },
+      { text: `model  ${model}`,                              color: "rgba(210,210,210,0.82)" },
+      { text: `cap    ${capMethod}  ${srcFps}  ${capFps}`,   color: "rgba(170,170,190,0.75)" },
+      { text: `inf    ${infFps}`,                             color: "rgba(170,170,190,0.75)" },
+      { text: `targets ${count}`,                             color: "rgba(0,224,160,0.88)"  },
+      { text: `net ${packetHz}hz  draw ${drawFps}fps`,        color: "rgba(110,110,130,0.7)" },
     ];
 
-    let y = 16;
+    // Measure widest line for background rect
+    let maxW = 0;
+    for (const ln of lines) maxW = Math.max(maxW, ctx.measureText(ln.text).width);
+
+    const boxW = maxW + pad * 2;
+    const boxH = lines.length * lh + pad * 2 - (lh - fs);
+
+    // Clamp to viewport
+    hudX = Math.max(0, Math.min(canvas.width  - boxW, hudX));
+    hudY = Math.max(0, Math.min(canvas.height - boxH, hudY));
+
+    // Update hit-test rect
+    hudRect = { x: hudX, y: hudY, w: boxW, h: boxH };
+
+    const rr = cfg.borderRadius;
+
+    // Background
+    const [br, bg, bb] = hexToRgb(cfg.bgColor);
+    ctx.fillStyle = `rgba(${br},${bg},${bb},${cfg.bgOpacity / 100})`;
+    roundRect(hudX, hudY, boxW, boxH, rr);
+    ctx.fill();
+
+    // Border
+    if (cfg.borderWidth > 0) {
+      const [er, eg, eb] = hexToRgb(cfg.borderColor);
+      ctx.strokeStyle = `rgba(${er},${eg},${eb},${cfg.borderOpacity / 100})`;
+      ctx.lineWidth = cfg.borderWidth;
+      roundRect(hudX, hudY, boxW, boxH, rr);
+      ctx.stroke();
+    }
+
+    // Text
+    const tx = hudX + pad;
+    let ty = hudY + pad + fs;
     for (const ln of lines) {
       ctx.fillStyle = ln.color;
-      ctx.fillText(ln.text, 8, y);
-      y += 14;
+      ctx.fillText(ln.text, tx, ty);
+      ty += lh;
     }
   }
 
+  // ── Settings panel wiring ──────────────────────────────────────
+  const cfgToggle = document.getElementById("cfg-toggle");
+  const cfgPanel  = document.getElementById("cfg-panel");
+
+  cfgToggle.addEventListener("click", () => cfgPanel.classList.toggle("open"));
+
+  // Close panel when clicking outside
+  document.addEventListener("mousedown", (e) => {
+    if (!cfgPanel.contains(e.target) && e.target !== cfgToggle)
+      cfgPanel.classList.remove("open");
+  });
+
+  function bindRange(id, key, valId) {
+    const el = document.getElementById(id);
+    const vl = document.getElementById(valId);
+    el.value = cfg[key];
+    vl.textContent = cfg[key];
+    el.addEventListener("input", () => {
+      cfg[key] = Number(el.value);
+      vl.textContent = el.value;
+      saveCfg();
+    });
+  }
+
+  function bindColor(id, key) {
+    const el = document.getElementById(id);
+    el.value = cfg[key];
+    el.addEventListener("input", () => {
+      cfg[key] = el.value;
+      saveCfg();
+    });
+  }
+
+  bindRange("cfg-font-size",      "fontSize",      "val-font-size");
+  bindColor("cfg-bg-color",       "bgColor");
+  bindRange("cfg-bg-opacity",     "bgOpacity",     "val-bg-opacity");
+  bindColor("cfg-border-color",   "borderColor");
+  bindRange("cfg-border-opacity", "borderOpacity", "val-border-opacity");
+  bindRange("cfg-border-width",   "borderWidth",   "val-border-width");
+  bindRange("cfg-border-radius",  "borderRadius",  "val-border-radius");
+  bindRange("cfg-padding",        "padding",       "val-padding");
+
+  document.getElementById("cfg-reset").addEventListener("click", () => {
+    cfg = Object.assign({}, CFG_DEFAULTS);
+    saveCfg();
+    // Re-sync all inputs
+    [
+      ["cfg-font-size",      "fontSize",      "val-font-size"],
+      ["cfg-bg-opacity",     "bgOpacity",     "val-bg-opacity"],
+      ["cfg-border-opacity", "borderOpacity", "val-border-opacity"],
+      ["cfg-border-width",   "borderWidth",   "val-border-width"],
+      ["cfg-border-radius",  "borderRadius",  "val-border-radius"],
+      ["cfg-padding",        "padding",       "val-padding"],
+    ].forEach(([id, key, vid]) => {
+      document.getElementById(id).value = cfg[key];
+      document.getElementById(vid).textContent = cfg[key];
+    });
+    document.getElementById("cfg-bg-color").value     = cfg.bgColor;
+    document.getElementById("cfg-border-color").value = cfg.borderColor;
+  });
+
+  // ── HSV helper ─────────────────────────────────────────────────
   function hsv2rgb(h, s, v) {
     const i = Math.floor(h * 6), f = h * 6 - i;
-    const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    const p = v*(1-s), q = v*(1-f*s), t = v*(1-(1-f)*s);
     let r, g, b;
     switch (i % 6) {
-      case 0: r = v; g = t; b = p; break;
-      case 1: r = q; g = v; b = p; break;
-      case 2: r = p; g = v; b = t; break;
-      case 3: r = p; g = q; b = v; break;
-      case 4: r = t; g = p; b = v; break;
-      default: r = v; g = p; b = q; break;
+      case 0: r=v; g=t; b=p; break;
+      case 1: r=q; g=v; b=p; break;
+      case 2: r=p; g=v; b=t; break;
+      case 3: r=p; g=q; b=v; break;
+      case 4: r=t; g=p; b=v; break;
+      default: r=v; g=p; b=q; break;
     }
-    return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    return [Math.round(r*255), Math.round(g*255), Math.round(b*255)];
   }
 
   connect();
