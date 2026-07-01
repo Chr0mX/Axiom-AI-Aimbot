@@ -81,8 +81,16 @@ class UdpJpegReceiver:
         with self._lock:
             return self._latest_frame
 
-    def get_latest_frame_with_id(self):
-        """Non-blocking: return (jpeg_bytes, frame_id) atomically. Both None if no frame yet."""
+    def get_latest_frame_with_id(self, block=False, timeout=None):
+        """Return (jpeg_bytes, frame_id) atomically. Both None if no frame yet.
+
+        If block=True, waits up to *timeout* seconds for _new_frame_event before
+        reading. The event is cleared after wait() returns so the next call will
+        block again until the next assembled frame.
+        """
+        if block:
+            self._new_frame_event.wait(timeout)
+            self._new_frame_event.clear()
         with self._lock:
             return self._latest_frame, self._latest_frame_id
 

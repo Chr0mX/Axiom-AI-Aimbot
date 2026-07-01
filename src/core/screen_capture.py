@@ -1421,19 +1421,19 @@ class UdpCapture:
         self._preview_thread.start()
 
     def _reader_worker(self) -> None:
-        # Non-blocking poll via frame_id deduplication.
-        # time.sleep(0) is a GIL-releasing yield — no Windows 15 ms scheduler
-        # penalty — so the loop reacts to new frames within one reschedule tick
-        # rather than waiting up to 15 ms per event.wait() call.
+        # Block on _new_frame_event (set by recv_loop on each assembled frame).
+        # Event.wait() wakes immediately when signaled — no Windows 15 ms scheduler
+        # penalty. The 0.1 s timeout lets us notice _stop without busy-polling.
         _fps_count = 0
         _fps_t0 = time.perf_counter()
         _seen_id = None
 
         while not self._stop.is_set():
-            jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id()
+            jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id(
+                block=True, timeout=0.1
+            )
 
             if jpeg_bytes is None or frame_id == _seen_id:
-                time.sleep(0)  # yield without incurring scheduler-quantum sleep
                 continue
 
             _seen_id = frame_id
