@@ -882,7 +882,12 @@ class StatusPanel(QWidget):
 
         # 更新 Source FPS (nominal rate from device/monitor) ──────────────────
         source_method = str(getattr(self.config, 'screenshot_method', 'mss')).lower()
-        nominal_fps = float(getattr(self.config, 'source_nominal_fps', 0.0))
+        if source_method == 'udp':
+            # udp_recv_fps = assembled frames/sec straight from the sender;
+            # source_nominal_fps for UDP is only the local decode throughput.
+            nominal_fps = float(getattr(self.config, 'udp_recv_fps', 0.0))
+        else:
+            nominal_fps = float(getattr(self.config, 'source_nominal_fps', 0.0))
 
         _source_label_map = {
             'uvc':   get_text('status_panel_source_fps_uvc',    'UVC Source FPS'),
@@ -895,7 +900,8 @@ class StatusPanel(QWidget):
                            get_text('status_panel_source_fps', 'Source FPS'))
         self.source_fps_row.label.setText(source_fps_label)
         if nominal_fps > 0:
-            self.source_fps_row.set_value(f"{nominal_fps:.0f} Hz")
+            unit = "fps" if source_method == 'udp' else "Hz"
+            self.source_fps_row.set_value(f"{nominal_fps:.0f} {unit}")
         else:
             self.source_fps_row.set_value("—")
 
