@@ -35,3 +35,14 @@ class LoopState:
     # Y-reduce velocity gate — track target Y position across frames to estimate vy.
     aim_y_last_target_y: float = 0.0
     aim_y_last_target_t: float = 0.0
+
+    # Camera motion compensation — global scene shift estimated by phase correlation in
+    # _preprocess_worker; written there, read in process_aiming to cancel shake-induced error.
+    cam_shift_x: float = 0.0
+    cam_shift_y: float = 0.0
+
+    # Sub-pixel carry — accumulates the fractional remainder that integer truncation
+    # discards each frame so micro-corrections are never silently lost and the
+    # crosshair converges exactly onto the aim point. Applies to all mouse backends.
+    aim_carry_x: float = 0.0
+    aim_carry_y: float = 0.0

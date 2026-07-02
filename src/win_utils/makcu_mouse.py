@@ -21,6 +21,8 @@ _deps_dir = os.path.join(_python_dir, 'dependencies')
 if _deps_dir not in sys.path:
     sys.path.insert(0, _deps_dir)
 
+import queue
+
 import serial
 import serial.tools.list_ports
 
@@ -63,6 +65,15 @@ class MakcuMouse:
         self._btn_mask: int = 0
         self._stream_stop  = threading.Event()
         self._stream_thread: Optional[threading.Thread] = None
+
+        # Async write thread — inference thread enqueues commands; write thread
+        # drains the queue and flushes to serial so inference is never blocked.
+        self._cmd_queue: queue.Queue = queue.Queue(maxsize=1)
+        self._write_stop = threading.Event()
+        self._write_thread: Optional[threading.Thread] = None
+
+        # Reconnect watchdog — re-establishes connection after USB glitches.
+        self._reconnect_thread: Optional[threading.Thread] = None
 
         # Legacy attribute kept so ai_loop.py can set it without errors
         self.lmb_cache_seconds: float = 0.008
@@ -111,8 +122,10 @@ class MakcuMouse:
                 self._query_info_locked()
                 logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
 
-        # Start button event stream outside the lock
+        # Start threads outside the lock
         self._start_stream()
+        self._start_write_thread()
+        self._start_reconnect_thread()
         return True
 
     def _try_open_locked(self, com_port: str, baud: int) -> bool:
@@ -189,6 +202,60 @@ class MakcuMouse:
         except Exception:
             pass
         self._btn_mask = 0
+
+    # ------------------------------------------------------------------
+    # Async write thread
+    # ------------------------------------------------------------------
+
+    def _start_write_thread(self):
+        """Start the async write thread if not already running."""
+        if self._write_thread and self._write_thread.is_alive():
+            return
+        self._write_stop.clear()
+        self._write_thread = threading.Thread(
+            target=self._write_worker, daemon=True, name="makcu-write")
+        self._write_thread.start()
+
+    def _start_reconnect_thread(self):
+        """Start the reconnect watchdog thread if not already running."""
+        if self._reconnect_thread and self._reconnect_thread.is_alive():
+            return
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_worker, daemon=True, name="makcu-reconnect")
+        self._reconnect_thread.start()
+
+    def _write_worker(self):
+        """Drain the command queue and write+flush to serial.
+
+        Runs on its own thread so the inference thread (which calls move())
+        is never blocked waiting on the serial port.
+        """
+        while not self._write_stop.is_set():
+            try:
+                cmd = self._cmd_queue.get(timeout=0.01)
+                with self._lock:
+                    if self._serial and self._serial.is_open:
+                        self._serial.write(cmd.encode('ascii'))
+                        self._serial.flush()
+            except queue.Empty:
+                continue
+            except serial.SerialException:
+                self._connected = False
+            except Exception:
+                pass
+
+    def _reconnect_worker(self):
+        """Watchdog: re-establish connection automatically after USB glitches."""
+        while not self._write_stop.is_set():
+            self._write_stop.wait(2.0)
+            if self._write_stop.is_set():
+                break
+            if not self.is_connected() and self._com_port:
+                logger.info("[MAKCU] Connection lost — reconnecting on %s", self._com_port)
+                try:
+                    self.connect(self._com_port)
+                except Exception as exc:
+                    logger.debug("[MAKCU] Reconnect failed: %s", exc)
 
     def _stream_reader(self):
         """Daemon thread: parse km. + 2-byte LE button mask frames, update _btn_mask.
@@ -276,7 +343,14 @@ class MakcuMouse:
     # ------------------------------------------------------------------
 
     def disconnect(self):
-        """Stop stream then close serial port."""
+        """Stop all threads then close serial port."""
+        self._write_stop.set()
+        if self._write_thread:
+            self._write_thread.join(timeout=1.0)
+            self._write_thread = None
+        if self._reconnect_thread:
+            self._reconnect_thread.join(timeout=1.0)
+            self._reconnect_thread = None
         self._stop_stream()
         with self._lock:
             self._close_locked()
@@ -294,19 +368,24 @@ class MakcuMouse:
     # ------------------------------------------------------------------
 
     def move(self, dx: int, dy: int):
-        """Relative mouse move. Supports int16 range (-32768 ~ 32767)."""
+        """Relative mouse move. Enqueues command for async write thread.
+
+        Latest-only: if a previous move hasn't been sent yet it is replaced,
+        so the inference thread never blocks on serial I/O.
+        """
         if not self.is_connected():
             return
         dx = max(-32768, min(32767, int(dx)))
         dy = max(-32768, min(32767, int(dy)))
+        cmd = self.CMD_MOVE.format(dx=dx, dy=dy)
+        # Drop stale command if queue is full, then enqueue the latest.
         try:
-            cmd = self.CMD_MOVE.format(dx=dx, dy=dy)
-            with self._lock:
-                if self._serial and self._serial.is_open:
-                    self._serial.write(cmd.encode('ascii'))
-        except serial.SerialException:
-            self._connected = False
-        except Exception:
+            self._cmd_queue.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            self._cmd_queue.put_nowait(cmd)
+        except queue.Full:
             pass
 
     def click(self, action: int = 1):

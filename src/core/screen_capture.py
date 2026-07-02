@@ -21,6 +21,49 @@ if TYPE_CHECKING:
 _WARNED_MESSAGES: set[str] = set()
 _CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
 
+_JPEG_SOF_MARKERS = frozenset({
+    0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
+    0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
+})
+
+
+def _jpeg_dimensions(data: bytes) -> "tuple[int, int] | None":
+    """Parse a JPEG's SOF marker to get (width, height) without decoding pixels.
+
+    Used to decide whether a reduced-resolution decode is safe for the
+    current detection region before paying the cost of a full decode.
+    """
+    n = len(data)
+    i = 2  # skip SOI (FF D8)
+    while i + 3 < n:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker == 0xFF:
+            i += 1
+            continue
+        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+            i += 2
+            continue
+        if marker == 0xD9:  # EOI
+            break
+        if i + 5 >= n:
+            break
+        seg_len = (data[i + 2] << 8) | data[i + 3]
+        if marker in _JPEG_SOF_MARKERS:
+            if i + 8 >= n:
+                break
+            height = (data[i + 5] << 8) | data[i + 6]
+            width = (data[i + 7] << 8) | data[i + 8]
+            if width > 0 and height > 0:
+                return width, height
+            return None
+        if seg_len < 2:
+            break
+        i += 2 + seg_len
+    return None
+
 # ---------------------------------------------------------------------------
 # Module-level preview frame — written by capture worker, read by GUI timer.
 # ---------------------------------------------------------------------------
@@ -686,8 +729,11 @@ class NDICapture:
         self._ndi_frame_ref: list = [None]    # list[np.ndarray | None]
         self._ndi_region_ref: list = [None]
         self._ndi_stop: threading.Event = threading.Event()
-        # FPS caching — read once from frame metadata, then skip per-frame probe
-        self._fps_cached: bool = False
+        # Live-measured receive rate — actual delivery can run slower than the
+        # source's declared/advertised rate under network contention, so track
+        # real frames/sec like the UDP backend does for the status panel.
+        self._live_fps_count: int = 0
+        self._live_fps_t0: float = time.perf_counter()
         # Ping-pong pair of BGRA buffers for the crop-path — eliminates per-frame .copy().
         # Alternating ensures the buffer just returned stays valid while grab() fills the other.
         self._bgra_bufs: list[np.ndarray | None] = [None, None]
@@ -882,30 +928,19 @@ class NDICapture:
         if raw is None:
             return None
 
+        self._live_fps_count += 1
+        _now_fps = time.perf_counter()
+        _elapsed_fps = _now_fps - self._live_fps_t0
+        if _elapsed_fps >= 1.0:
+            self.config.source_nominal_fps = self._live_fps_count / _elapsed_fps
+            self._live_fps_count = 0
+            self._live_fps_t0 = _now_fps
+
         if frame_w > 0 and frame_h > 0:
             self.preview_width = frame_w
             self.preview_height = frame_h
             self.config.ndi_width = frame_w
             self.config.ndi_height = frame_h
-
-        if not self._fps_cached:
-            _frame_fps: float = 0.0
-            try:
-                _frame_fps = float(frame_obj.get_frame_rate())
-            except Exception:
-                for _attr in ('frame_rate', 'framerate', 'fps', 'video_fps'):
-                    _v = getattr(frame_obj, _attr, None)
-                    if isinstance(_v, (int, float)) and float(_v) > 0:
-                        _frame_fps = float(_v)
-                        break
-                if _frame_fps <= 0:
-                    _num = getattr(frame_obj, 'frame_rate_N', None)
-                    _den = getattr(frame_obj, 'frame_rate_D', None)
-                    if isinstance(_num, (int, float)) and isinstance(_den, (int, float)) and float(_den) > 0:
-                        _frame_fps = float(_num) / float(_den)
-            if _frame_fps > 0:
-                self.config.source_nominal_fps = _frame_fps
-                self._fps_cached = True
 
         recv_fourcc: str = getattr(self, '_recv_fourcc', 'rgba')
 
@@ -1248,7 +1283,9 @@ class UVCCapture:
         self.preview_width = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) or width or 1))
         self.preview_height = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or height or 1))
         self.preview_fps = max(1, int(self.cap.get(cv2.CAP_PROP_FPS) or fps or 1))
-        # Publish nominal FPS so the status panel can display it.
+        # Seed with the driver-probed capability so the status panel shows
+        # something before the first live measurement below completes; the
+        # reader worker overwrites this every second with the actual received rate.
         config.source_nominal_fps = float(self.preview_fps)
 
         # Verify FOURCC was actually accepted by the driver.  Without MJPEG,
@@ -1303,11 +1340,21 @@ class UVCCapture:
             self._preview_thread.start()
 
     def _reader_worker(self) -> None:
+        _fps_count = 0
+        _fps_t0 = time.perf_counter()
         while not self._reader_stop.is_set():
             ok, frame = self.cap.read()
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
+
+                _fps_count += 1
+                _now = time.perf_counter()
+                _elapsed = _now - _fps_t0
+                if _elapsed >= 1.0:
+                    self.config.source_nominal_fps = _fps_count / _elapsed
+                    _fps_count = 0
+                    _fps_t0 = _now
             else:
                 time.sleep(0.005)
 
@@ -1421,27 +1468,60 @@ class UdpCapture:
         self._preview_thread.start()
 
     def _reader_worker(self) -> None:
+        # Non-blocking poll with time.sleep(0) between frames.
+        # On Windows, Sleep(0) yields to other runnable threads then returns
+        # in < 1 ms — no 15 ms scheduler-quantum penalty that Event.wait() incurs
+        # when used as a blocking wait. This allows the loop to react to a new
+        # frame within microseconds of it being assembled by _recv_loop.
         _fps_count = 0
         _fps_t0 = time.perf_counter()
+        _seen_id = None
+        _logged_stream_dims = None
+
         while not self._stop.is_set():
-            jpeg_bytes = self._receiver.get_latest_frame(block=True, timeout=0.5)
-            if jpeg_bytes is None:
+            jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id()
+
+            if jpeg_bytes is None or frame_id == _seen_id:
+                time.sleep(0)  # GIL-releasing yield, no scheduler-quantum penalty
                 continue
+
+            _seen_id = frame_id
+
+            # Parse the JPEG's real dimensions straight from its header (no decode
+            # cost) so the actual streamed resolution is known with certainty —
+            # JPEG decode throughput is dominated by entropy (Huffman) decoding of
+            # the full bitstream regardless of target resolution, so a large source
+            # resolution is a hard CPU ceiling on fps that no receiver-side decode
+            # trick can bypass. Only the sender streaming fewer pixels helps.
+            stream_dims = _jpeg_dimensions(jpeg_bytes)
+            if stream_dims is not None and stream_dims != _logged_stream_dims:
+                _logged_stream_dims = stream_dims
+                logger.info("[UDP] stream resolution: %dx%d", stream_dims[0], stream_dims[1])
+
             arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
             frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
             if frame_bgr is None:
                 continue
+
             h, w = frame_bgr.shape[:2]
             with self._latest_frame_lock:
                 self._latest_frame_ref[0] = frame_bgr
                 if w != self.preview_width or h != self.preview_height:
                     self.preview_width = w
                     self.preview_height = h
+
             _fps_count += 1
             _now = time.perf_counter()
             _elapsed = _now - _fps_t0
             if _elapsed >= 1.0:
                 self.config.source_nominal_fps = _fps_count / _elapsed
+                self.config.udp_recv_fps = self._receiver.recv_fps
+                self.config.udp_dropped_fps = self._receiver.dropped_fps
+                if self._receiver.dropped_fps > 0:
+                    logger.warning(
+                        "[UDP] %.1f incomplete frames/sec dropped (packet loss) — recv %.1f fps",
+                        self._receiver.dropped_fps, self._receiver.recv_fps,
+                    )
                 _fps_count = 0
                 _fps_t0 = _now
 

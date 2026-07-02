@@ -25,6 +25,206 @@ from ..base_page import BasePage
 from ..language_manager import t
 
 
+class _AimPointPreview(QWidget):
+    """Live canvas: simulated ESP box with head/body zones and aim-point X mark."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(200)
+        self._aim_part = "center"
+        self._head_h = 0.20   # fraction 0–1
+        self._head_w = 0.38   # fraction 0–1
+        self._body_w = 0.87   # fraction 0–1
+        self._custom_y = 0.30  # fraction 0–1
+
+    def setParams(self, aim_part: str, head_h_pct: float,
+                  head_w_pct: float = None, body_w_pct: float = None,
+                  custom_y_pct: float = None):
+        self._aim_part = aim_part
+        self._head_h = max(0.05, min(0.95, head_h_pct / 100.0))
+        if head_w_pct is not None:
+            self._head_w = max(0.05, min(1.0, head_w_pct / 100.0))
+        if body_w_pct is not None:
+            self._body_w = max(0.05, min(1.0, body_w_pct / 100.0))
+        if custom_y_pct is not None:
+            self._custom_y = max(0.0, min(1.0, custom_y_pct / 100.0))
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+
+        # background
+        p.fillRect(0, 0, W, H, QColor(15, 15, 20))
+
+        # full bounding box geometry (tall, centred)
+        bw = max(40, int(W * 0.28))
+        bh = int(H * 0.82)
+        bx = (W - bw) // 2
+        by = (H - bh) // 2
+        head_px = int(bh * self._head_h)
+
+        # narrowed zone widths
+        hw = max(4, int(bw * self._head_w))
+        ow = max(4, int(bw * self._body_w))
+        hx = bx + (bw - hw) // 2   # head zone x
+        ox = bx + (bw - ow) // 2   # body zone x
+
+        # zone fills (show actual width)
+        p.fillRect(hx, by,           hw, head_px,      QColor(80,  120, 220, 55))
+        p.fillRect(ox, by + head_px, ow, bh - head_px, QColor(200, 120,  40, 45))
+
+        # full corner-box (ESP style)
+        cl = max(5, min(bw, bh) // 6)
+        p.setPen(QPen(QColor(0, 220, 140), 2))
+        for sx, sy, dx, dy in ((bx, by, 1, 1), (bx+bw, by, -1, 1),
+                                (bx, by+bh, 1, -1), (bx+bw, by+bh, -1, -1)):
+            p.drawLine(sx, sy + dy*cl, sx, sy)
+            p.drawLine(sx, sy, sx + dx*cl, sy)
+
+        # head / body divider
+        p.setPen(QPen(QColor(140, 140, 200, 80), 1, Qt.PenStyle.DashLine))
+        p.drawLine(bx, by + head_px, bx + bw, by + head_px)
+
+        # aim-point position
+        ax = bx + bw // 2
+        if self._aim_part == "head":
+            ay = by + head_px // 2
+        elif self._aim_part == "body":
+            ay = by + head_px + (bh - head_px) // 2
+        elif self._aim_part in ("custom", "center"):
+            ay = by + int(bh * self._custom_y)
+
+        # red X crosshair
+        r = 6
+        p.setPen(QPen(QColor(255, 50, 50), 2))
+        p.drawLine(ax - r, ay - r, ax + r, ay + r)
+        p.drawLine(ax + r, ay - r, ax - r, ay + r)
+
+        # zone labels to the right of the box
+        fnt = p.font()
+        fnt.setPointSize(8)
+        p.setFont(fnt)
+        lx = bx + bw + 8
+        p.setPen(QColor(100, 150, 230, 200))
+        p.drawText(lx, by + head_px // 2 + 4, "Head")
+        p.setPen(QColor(220, 140, 60, 200))
+        p.drawText(lx, by + head_px + (bh - head_px) // 2 + 4, "Body")
+
+        # mode label bottom-left
+        fnt.setPointSize(7)
+        p.setFont(fnt)
+        p.setPen(QColor(160, 160, 160, 130))
+        label = {"head": "Head aim", "body": "Body aim",
+                 "custom": f"Custom ({int(self._custom_y*100)}%)",
+                 "center": f"Smart @ {int(self._custom_y*100)}%"}.get(self._aim_part, self._aim_part)
+        p.drawText(6, H - 5, label)
+
+        p.end()
+
+
+def _render_frames_pixmap(frames, W=240, H=240):
+    """Render a jitter frames list as a path on a W×H QPixmap."""
+    positions = [(0.0, 0.0)]
+    x, y = 0.0, 0.0
+    for f in frames:
+        x += f.get("dx", 0)
+        y += f.get("dy", 0)
+        positions.append((x, y))
+
+    cx, cy = W / 2, H / 2
+    pixmap = QPixmap(W, H)
+    pixmap.fill(QColor(17, 17, 17))
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    if len(positions) > 1:
+        xs = [p[0] for p in positions]
+        ys = [p[1] for p in positions]
+        span = max(max(xs) - min(xs), max(ys) - min(ys), 1)
+        scale = 100.0 / span
+        pts = [(int(cx + p[0] * scale), int(cy + p[1] * scale)) for p in positions]
+
+        painter.setPen(QPen(QColor(0, 200, 255), 1))
+        for i in range(len(pts) - 1):
+            painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 255, 80))
+        painter.drawEllipse(pts[0][0] - 4, pts[0][1] - 4, 8, 8)
+        painter.setBrush(QColor(255, 60, 60))
+        painter.drawEllipse(pts[-1][0] - 4, pts[-1][1] - 4, 8, 8)
+    else:
+        painter.setPen(QColor(120, 120, 120))
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "No movement")
+
+    painter.end()
+    return pixmap
+
+
+class _JitterLiveWindow(QDialog):
+    """Floating live preview of the jitter path being recorded."""
+
+    def __init__(self, stop_callback, parent=None):
+        super().__init__(parent, Qt.WindowType.Tool)
+        self.setWindowTitle("Jitter Recorder")
+        self.setFixedSize(280, 340)
+        self._recorder = None
+        self._stop_callback = stop_callback
+
+        self._canvas = QLabel()
+        self._canvas.setFixedSize(240, 240)
+        self._canvas.setPixmap(_render_frames_pixmap([]))
+
+        self._info = QLabel("Starting…")
+        self._info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._info.setStyleSheet("color: #888; font-size: 10px;")
+
+        self._hint = QLabel("Click anywhere in this window to finish & save")
+        self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint.setWordWrap(True)
+        self._hint.setStyleSheet("color: #0c8; font-size: 10px;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        layout.addWidget(self._canvas, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._info)
+        layout.addWidget(self._hint)
+
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._refresh)
+
+    def setCountdown(self, n):
+        self._info.setText(f"Starting in {n}…")
+
+    def setRecorder(self, recorder):
+        self._recorder = recorder
+        self._info.setText("Recording… 0 frames")
+        self._timer.start(150)
+
+    def _refresh(self):
+        frames = list(self._recorder._frames)
+        self._canvas.setPixmap(_render_frames_pixmap(frames))
+        self._info.setText(f"Recording… {len(frames)} frames")
+
+    def mousePressEvent(self, event):
+        # Clicking anywhere in the window (not a dedicated Stop button) finishes
+        # the recording — reaching for a small button would itself bake an extra
+        # cursor movement into the recorded pattern. Ignored during the
+        # countdown, before a recorder actually exists.
+        if self._recorder is not None:
+            self._timer.stop()
+            self._stop_callback()
+        else:
+            super().mousePressEvent(event)
+
+    def closeEvent(self, event):
+        self._timer.stop()
+        super().closeEvent(event)
+
+
 class _JitterPreviewDialog(QDialog):
     """Visualises a recorded jitter path before the user names and saves it."""
 
@@ -34,47 +234,9 @@ class _JitterPreviewDialog(QDialog):
         self.setFixedSize(300, 320)
         self.result_action = "save"
 
-        # --- build path points (relative, origin = 0,0) ---
-        positions = [(0.0, 0.0)]
-        x, y = 0.0, 0.0
-        for f in frames:
-            x += f.get("dx", 0)
-            y += f.get("dy", 0)
-            positions.append((x, y))
-
-        # --- render into pixmap ---
-        W, H = 240, 240
-        cx, cy = W / 2, H / 2
-        pixmap = QPixmap(W, H)
-        pixmap.fill(QColor(17, 17, 17))
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        if len(positions) > 1:
-            xs = [p[0] for p in positions]
-            ys = [p[1] for p in positions]
-            span = max(max(xs) - min(xs), max(ys) - min(ys), 1)
-            scale = 100.0 / span
-            pts = [(int(cx + p[0] * scale), int(cy + p[1] * scale)) for p in positions]
-
-            painter.setPen(QPen(QColor(0, 200, 255), 1))
-            for i in range(len(pts) - 1):
-                painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
-
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 255, 80))
-            painter.drawEllipse(pts[0][0] - 4, pts[0][1] - 4, 8, 8)
-            painter.setBrush(QColor(255, 60, 60))
-            painter.drawEllipse(pts[-1][0] - 4, pts[-1][1] - 4, 8, 8)
-        else:
-            painter.setPen(QColor(120, 120, 120))
-            painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "No movement")
-
-        painter.end()
-
         canvas = QLabel()
-        canvas.setPixmap(pixmap)
-        canvas.setFixedSize(W, H)
+        canvas.setPixmap(_render_frames_pixmap(frames))
+        canvas.setFixedSize(240, 240)
 
         info = QLabel(f"{len(frames)} frames recorded")
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -135,7 +297,7 @@ class AimPage(BasePage):
         self.generalGroup = SettingCardGroup(t("general_params"), self.scrollWidget)
 
         self.aimPartCombo = ComboBox()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("both")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)"), t("custom", "Custom")])
         self.aimPartCombo.setMinimumWidth(120)
         self.aimPartCard = SettingCard(
             FluentIcon.PEOPLE,
@@ -298,6 +460,7 @@ class AimPage(BasePage):
 
         # === PID Parameters ===
         self.pidGroup = SettingCardGroup(t("aim_speed_pid"), self.scrollWidget)
+        self.yReduceGroup = SettingCardGroup("Y-Axis Recoil Suppression", self.scrollWidget)
 
         self.pidAxisPivot = SegmentedWidget()
         self.pidAxisPivot.addItem(routeKey='x', text=t("horizontal_x"))
@@ -307,11 +470,13 @@ class AimPage(BasePage):
 
         self.pidStackedWidget = QStackedWidget()
 
+        # Kp slider travel 0–100 maps to config 0.0–0.5 (the proven-stable band) — see
+        # _onPidChanged / _loadFromConfig. The /200 display keeps the label honest.
         self.pidPxCard = SliderLabelCard(
             FluentIcon.SPEED_HIGH,
             t("reaction_speed_p"),
             0, 100,
-            format_func=lambda v: f"{v/100:.2f}",
+            format_func=lambda v: f"{v/200:.2f}",
             parent=self.pidGroup
         )
 
@@ -335,7 +500,7 @@ class AimPage(BasePage):
             FluentIcon.SPEED_HIGH,
             t("reaction_speed_p"),
             0, 100,
-            format_func=lambda v: f"{v/100:.2f}",
+            format_func=lambda v: f"{v/200:.2f}",
             parent=self.pidGroup
         )
 
@@ -359,7 +524,7 @@ class AimPage(BasePage):
             FluentIcon.CARE_UP_SOLID,
             t("aim_y_reduce_enable"),
             "",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceDelayCard = SliderLabelCard(
@@ -367,7 +532,7 @@ class AimPage(BasePage):
             t("aim_y_reduce_delay"),
             0, 500,
             format_func=lambda v: f"{v/100:.2f} s",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceFloorCard = SliderLabelCard(
@@ -376,7 +541,7 @@ class AimPage(BasePage):
             0, 100,
             format_func=lambda v: f"{v/100:.2f}",
             description="Min Y multiplier after ramp — 0.00 = full cut, 1.00 = no suppression",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceRampCard = SliderLabelCard(
@@ -385,7 +550,7 @@ class AimPage(BasePage):
             0, 200,
             format_func=lambda v: f"{v/100:.2f} s",
             description="Time to fade 1.0 → floor after delay (0 = instant cut)",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceSettleCard = SliderLabelCard(
@@ -394,7 +559,7 @@ class AimPage(BasePage):
             0, 50,
             format_func=lambda v: "Off" if v == 0 else f"{v} px",
             description="Skip suppression while vertical error > this — waits until aim is settled (0 = off)",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         self.pidYReduceVelCard = SliderLabelCard(
@@ -403,7 +568,7 @@ class AimPage(BasePage):
             0, 500,
             format_func=lambda v: "Off" if v == 0 else f"{v} px/s",
             description="Restore full Y tracking if target moves vertically faster than this (0 = off)",
-            parent=self.pidGroup
+            parent=self.yReduceGroup
         )
 
         # === Anti-Detection (Smart Jitter only) ===
@@ -511,6 +676,33 @@ class AimPage(BasePage):
         # === Target Tracking ===
         self.trackingGroup = SettingCardGroup(t("target_tracking", "Target Tracking"), self.scrollWidget)
 
+        self.boxEmaEnableCard = SwitchSettingCard(
+            FluentIcon.FILTER,
+            t("box_ema_enabled", "Box EMA"),
+            t("box_ema_desc", "Smooth raw detection box coordinates before aim calculation. Reduces jitter at high Kp."),
+            parent=self.trackingGroup
+        )
+
+        self.boxEmaAlphaXCard = SliderLabelCard(
+            FluentIcon.LEFT_ARROW,
+            t("box_ema_alpha_x", "Box EMA Alpha X"),
+            10, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("box_ema_alpha_x_desc", "X-axis smoothing. Lower = heavier smooth, less jitter. Higher = more responsive."),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
+        self.boxEmaAlphaYCard = SliderLabelCard(
+            FluentIcon.UP,
+            t("box_ema_alpha_y", "Box EMA Alpha Y"),
+            10, 100,
+            format_func=lambda v: f"{v / 100:.2f}",
+            description=t("box_ema_alpha_y_desc", "Y-axis smoothing. Lower = heavier smooth."),
+            slider_width=160,
+            parent=self.trackingGroup
+        )
+
         self.emaEnableCard = SwitchSettingCard(
             FluentIcon.SPEED_MEDIUM,
             t("ema_enabled", "EMA Smoothing"),
@@ -616,6 +808,102 @@ class AimPage(BasePage):
             parent=self.trackingGroup
         )
 
+        self.camMotionCompCard = SwitchSettingCard(
+            FluentIcon.GLOBE,
+            t("cam_motion_comp_enabled", "Camera Motion Compensation"),
+            t("cam_motion_comp_desc", "Subtract per-frame global scene shift (phase correlation) from aim error to cancel camera shake."),
+            parent=self.trackingGroup
+        )
+
+        self.camMotionCompSizeSegment = SegmentedWidget()
+        for _lbl, _key in [("128", "128"), ("256", "256")]:
+            self.camMotionCompSizeSegment.addItem(routeKey=_key, text=_lbl)
+        self.camMotionCompSizeSegment.setCurrentItem("128")
+        self.camMotionCompSizeCard = SettingCard(
+            FluentIcon.ZOOM_IN,
+            t("cam_motion_comp_size", "Compensation Resolution"),
+            t("cam_motion_comp_size_desc", "128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)"),
+            self.trackingGroup
+        )
+        self.camMotionCompSizeCard.hBoxLayout.addWidget(self.camMotionCompSizeSegment, 0, Qt.AlignmentFlag.AlignRight)
+        self.camMotionCompSizeCard.hBoxLayout.addSpacing(16)
+
+        # === Target Area (shared by aim-point calculation and auto-fire hit zone) ===
+        self.targetAreaGroup = SettingCardGroup(t("target_area_settings"), self.scrollWidget)
+        self.aimPreview = _AimPointPreview(self.targetAreaGroup)
+
+        self.customYCard = SliderLabelCard(
+            FluentIcon.MOVE,
+            t("aim_custom_y_pct", "Custom Aim Y Position (%)"),
+            0, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("aim_custom_y_desc", "0% = top of box, 100% = bottom. ~20% = head, ~60% = body."),
+            slider_width=200,
+            parent=self.targetAreaGroup
+        )
+
+        self.headWidthCard = SliderLabelCard(
+            FluentIcon.CONSTRACT,
+            t("head_width_ratio"),
+            10, 100,
+            format_func=lambda v: f"{v}%",
+            slider_width=200,
+            parent=self.targetAreaGroup
+        )
+
+        self.headHeightCard = SliderLabelCard(
+            FluentIcon.FIT_PAGE,
+            t("head_height_ratio"),
+            10, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("body_height_note"),
+            slider_width=200,
+            parent=self.targetAreaGroup
+        )
+
+        self.bodyWidthCard = SliderLabelCard(
+            FluentIcon.CONSTRACT,
+            t("body_width_ratio"),
+            10, 100,
+            format_func=lambda v: f"{v}%",
+            slider_width=200,
+            parent=self.targetAreaGroup
+        )
+
+        self.adaptiveRatioCard = SwitchSettingCard(
+            FluentIcon.FIT_PAGE,
+            t("aim_adaptive_ratio_enabled", "Distance-Adaptive Ratio"),
+            t("aim_adaptive_ratio_desc", "Scale head ratio inversely with box size — keeps head aim accurate from close to long range."),
+            parent=self.targetAreaGroup
+        )
+
+        self.adaptiveRatioRefHCard = SliderLabelCard(
+            FluentIcon.ZOOM_IN,
+            t("aim_adaptive_ratio_ref_h", "Reference Box Height"),
+            20, 200,
+            format_func=lambda v: f"{v} px",
+            description=t("aim_adaptive_ratio_ref_h_desc", "Box height (px) where head ratio is nominal. Match to your typical close-range target."),
+            slider_width=180,
+            parent=self.targetAreaGroup
+        )
+
+        self.postureAwareCard = SwitchSettingCard(
+            FluentIcon.PEOPLE,
+            t("aim_posture_aware_enabled", "Posture-Aware Targeting"),
+            t("aim_posture_aware_desc", "Fall back to center-mass when box is wider than tall (crouch / slide / prone)."),
+            parent=self.targetAreaGroup
+        )
+
+        self.crouchAspectCard = SliderLabelCard(
+            FluentIcon.CONSTRACT,
+            t("aim_crouch_aspect_threshold", "Crouch Aspect Threshold"),
+            80, 200,
+            format_func=lambda v: f"{v / 100:.1f}×",
+            description=t("aim_crouch_aspect_desc", "box_w / box_h above which player is treated as crouching. Default 1.2×."),
+            slider_width=180,
+            parent=self.targetAreaGroup
+        )
+
     def _initLayout(self):
         """Layout all controls"""
         # General
@@ -666,12 +954,7 @@ class AimPage(BasePage):
         yPageLayout.addWidget(self.pidPyCard)
         yPageLayout.addWidget(self.pidIyCard)
         yPageLayout.addWidget(self.pidDyCard)
-        yPageLayout.addWidget(self.pidYReduceEnableCard)
-        yPageLayout.addWidget(self.pidYReduceDelayCard)
-        yPageLayout.addWidget(self.pidYReduceFloorCard)
-        yPageLayout.addWidget(self.pidYReduceRampCard)
-        yPageLayout.addWidget(self.pidYReduceSettleCard)
-        yPageLayout.addWidget(self.pidYReduceVelCard)
+        yPageLayout.addStretch(1)
 
         self.pidStackedWidget.addWidget(self.pidXPage)
         self.pidStackedWidget.addWidget(self.pidYPage)
@@ -679,6 +962,15 @@ class AimPage(BasePage):
         self.pidGroup.vBoxLayout.addWidget(pivotWidget)
         self.pidGroup.vBoxLayout.addWidget(self.pidStackedWidget)
         self.addContent(self.pidGroup)
+
+        # Y-Axis Recoil Suppression (separate group so X tab has no height gap)
+        self.yReduceGroup.addSettingCard(self.pidYReduceEnableCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceDelayCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceFloorCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceRampCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceSettleCard)
+        self.yReduceGroup.addSettingCard(self.pidYReduceVelCard)
+        self.addContent(self.yReduceGroup)
 
         # Anti-Recoil (Smart Jitter)
         self.antiRecoilGroup.addSettingCard(self.smartJitterEnableCard)
@@ -696,6 +988,9 @@ class AimPage(BasePage):
         self.addContent(self.targetPriorityGroup)
 
         # Target Tracking
+        self.trackingGroup.addSettingCard(self.boxEmaEnableCard)
+        self.trackingGroup.addSettingCard(self.boxEmaAlphaXCard)
+        self.trackingGroup.addSettingCard(self.boxEmaAlphaYCard)
         self.trackingGroup.addSettingCard(self.emaEnableCard)
         self.trackingGroup.addSettingCard(self.emaAlphaCard)
         self.trackingGroup.addSettingCard(self.predictionEnableCard)
@@ -708,7 +1003,21 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.kalmanEnableCard)
         self.trackingGroup.addSettingCard(self.kalmanProcessNoiseCard)
         self.trackingGroup.addSettingCard(self.kalmanMeasNoiseCard)
+        self.trackingGroup.addSettingCard(self.camMotionCompCard)
+        self.trackingGroup.addSettingCard(self.camMotionCompSizeCard)
         self.addContent(self.trackingGroup)
+
+        # Target Area (shared aim-point geometry + auto-fire hit zone)
+        self.targetAreaGroup.addSettingCard(self.aimPreview)
+        self.targetAreaGroup.addSettingCard(self.customYCard)
+        self.targetAreaGroup.addSettingCard(self.headWidthCard)
+        self.targetAreaGroup.addSettingCard(self.headHeightCard)
+        self.targetAreaGroup.addSettingCard(self.bodyWidthCard)
+        self.targetAreaGroup.addSettingCard(self.adaptiveRatioCard)
+        self.targetAreaGroup.addSettingCard(self.adaptiveRatioRefHCard)
+        self.targetAreaGroup.addSettingCard(self.postureAwareCard)
+        self.targetAreaGroup.addSettingCard(self.crouchAspectCard)
+        self.addContent(self.targetAreaGroup)
 
         self.scrollLayout.addStretch(1)
 
@@ -763,6 +1072,9 @@ class AimPage(BasePage):
         self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
 
         # Target Tracking
+        self.boxEmaEnableCard.checkedChanged.connect(self._onBoxEmaEnableChanged)
+        self.boxEmaAlphaXCard.valueChanged.connect(self._onBoxEmaAlphaXChanged)
+        self.boxEmaAlphaYCard.valueChanged.connect(self._onBoxEmaAlphaYChanged)
         self.emaEnableCard.checkedChanged.connect(self._onEmaEnableChanged)
         self.emaAlphaCard.valueChanged.connect(self._onEmaAlphaChanged)
         self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
@@ -775,6 +1087,18 @@ class AimPage(BasePage):
         self.kalmanEnableCard.checkedChanged.connect(self._onKalmanEnableChanged)
         self.kalmanProcessNoiseCard.valueChanged.connect(self._onKalmanProcessNoiseChanged)
         self.kalmanMeasNoiseCard.valueChanged.connect(self._onKalmanMeasNoiseChanged)
+        self.camMotionCompCard.checkedChanged.connect(self._onCamMotionCompChanged)
+        self.camMotionCompSizeSegment.currentItemChanged.connect(self._onCamMotionCompSizeChanged)
+
+        # Target Area
+        self.headWidthCard.valueChanged.connect(self._onHeadWidthChanged)
+        self.headHeightCard.valueChanged.connect(self._onHeadHeightChanged)
+        self.bodyWidthCard.valueChanged.connect(self._onBodyWidthChanged)
+        self.customYCard.valueChanged.connect(self._onCustomYChanged)
+        self.adaptiveRatioCard.checkedChanged.connect(self._onAdaptiveRatioChanged)
+        self.adaptiveRatioRefHCard.valueChanged.connect(self._onAdaptiveRatioRefHChanged)
+        self.postureAwareCard.checkedChanged.connect(self._onPostureAwareChanged)
+        self.crouchAspectCard.valueChanged.connect(self._onCrouchAspectChanged)
 
     def _loadFromConfig(self):
         """Load values from Config"""
@@ -783,9 +1107,10 @@ class AimPage(BasePage):
         self._isLoadingConfig = True
         try:
             # General
-            aim_parts = ["head", "body", "both"]
-            if self._config.aim_part in aim_parts:
-                self.aimPartCombo.setCurrentIndex(aim_parts.index(self._config.aim_part))
+            aim_parts = ["head", "body", "center", "custom"]
+            part = self._config.aim_part if self._config.aim_part in aim_parts else "center"
+            self.aimPartCombo.setCurrentIndex(aim_parts.index(part))
+            self._updateTargetAreaVisibility(part)
 
             mouse_methods = ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]
             if self._config.mouse_move_method in mouse_methods:
@@ -814,11 +1139,12 @@ class AimPage(BasePage):
             self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
             self._updateXboxConnectionStatus()
 
-            # PID
-            self.pidPxCard.setValue(int(self._config.pid_kp_x * 100))
+            # PID — Kp sliders are scaled x200 (slider 0–100 → config 0.0–0.5), clamped
+            # to the slider max so a saved value keeps its exact effective gain.
+            self.pidPxCard.setValue(min(100, int(self._config.pid_kp_x * 200)))
             self.pidIxCard.setValue(int(self._config.pid_ki_x * 100))
             self.pidDxCard.setValue(int(self._config.pid_kd_x * 100))
-            self.pidPyCard.setValue(int(self._config.pid_kp_y * 100))
+            self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * 200)))
             self.pidIyCard.setValue(int(self._config.pid_ki_y * 100))
             self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
             self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
@@ -863,6 +1189,12 @@ class AimPage(BasePage):
             self.targetPriorityWeightCard.setValue(int(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100))
 
             # Target Tracking
+            box_ema_on = bool(getattr(self._config, 'box_ema_enabled', True))
+            self.boxEmaEnableCard.setChecked(box_ema_on)
+            self.boxEmaAlphaXCard.setValue(int(getattr(self._config, 'box_ema_alpha_x', 0.55) * 100))
+            self.boxEmaAlphaYCard.setValue(int(getattr(self._config, 'box_ema_alpha_y', 0.45) * 100))
+            self.boxEmaAlphaXCard.setEnabled(box_ema_on)
+            self.boxEmaAlphaYCard.setEnabled(box_ema_on)
             self.emaEnableCard.setChecked(bool(getattr(self._config, 'ema_enabled', False)))
             self.emaAlphaCard.setValue(int(getattr(self._config, 'ema_alpha', 0.7) * 100))
             self.predictionEnableCard.setChecked(bool(getattr(self._config, 'prediction_enabled', False)))
@@ -885,6 +1217,28 @@ class AimPage(BasePage):
                 self.emaEnableCard.setChecked(False)
                 if self._config:
                     self._config.ema_enabled = False
+
+            cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
+            self.camMotionCompCard.setChecked(cmc_on)
+            cmc_size = str(getattr(self._config, 'cam_motion_comp_size', 128))
+            if cmc_size not in ("128", "256"):
+                cmc_size = "128"
+            self.camMotionCompSizeSegment.setCurrentItem(cmc_size)
+            self.camMotionCompSizeCard.setEnabled(cmc_on)
+
+            # Target Area
+            self.customYCard.setValue(int(getattr(self._config, 'aim_custom_y_pct', 30.0)))
+            self.headWidthCard.setValue(int(self._config.head_width_ratio * 100))
+            self.headHeightCard.setValue(int(self._config.head_height_ratio * 100))
+            self.bodyWidthCard.setValue(int(self._config.body_width_ratio * 100))
+            adaptive_on = bool(getattr(self._config, 'aim_adaptive_ratio_enabled', False))
+            self.adaptiveRatioCard.setChecked(adaptive_on)
+            self.adaptiveRatioRefHCard.setValue(int(getattr(self._config, 'aim_adaptive_ratio_ref_h', 80.0)))
+            self.adaptiveRatioRefHCard.setEnabled(adaptive_on)
+            posture_on = bool(getattr(self._config, 'aim_posture_aware_enabled', False))
+            self.postureAwareCard.setChecked(posture_on)
+            self.crouchAspectCard.setValue(int(getattr(self._config, 'aim_crouch_aspect_threshold', 1.2) * 100))
+            self.crouchAspectCard.setEnabled(posture_on)
         finally:
             self._isLoadingConfig = False
 
@@ -950,9 +1304,32 @@ class AimPage(BasePage):
     # ── General Callbacks ────────────────────────
 
     def _onAimPartChanged(self, index):
-        if self._config:
-            parts = ["head", "body", "both"]
+        parts = ["head", "body", "center", "custom"]
+        if self._config and 0 <= index < len(parts):
             self._config.aim_part = parts[index]
+        self._updateTargetAreaVisibility(parts[index] if 0 <= index < len(parts) else "head")
+
+    def _updateTargetAreaVisibility(self, aim_part):
+        is_smart = aim_part == "center"
+        is_custom = aim_part == "custom"
+        uses_custom_y = is_smart or is_custom
+        if is_smart:
+            suffix = t("aim_smart_mode_note", " — Smart + Custom Y")
+        elif is_custom:
+            suffix = t("aim_custom_mode_note", " — Custom Y mode")
+        else:
+            suffix = t("aim_smart_mode_only", " — Smart mode only")
+        self.targetAreaGroup.titleLabel.setText(t("target_area_settings") + suffix)
+        for card in [self.headWidthCard, self.headHeightCard, self.bodyWidthCard,
+                     self.adaptiveRatioCard, self.adaptiveRatioRefHCard,
+                     self.postureAwareCard, self.crouchAspectCard]:
+            card.setEnabled(is_smart)
+        self.customYCard.setEnabled(uses_custom_y)
+        head_h = self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20
+        head_w = self.headWidthCard.value() if hasattr(self.headWidthCard, 'value') else 38
+        body_w = self.bodyWidthCard.value() if hasattr(self.bodyWidthCard, 'value') else 87
+        custom_y = self.customYCard.value() if hasattr(self.customYCard, 'value') else 30
+        self.aimPreview.setParams(aim_part, head_h, head_w, body_w, custom_y)
 
     def _onMouseMoveChanged(self, text):
         if self._config:
@@ -1171,7 +1548,10 @@ class AimPage(BasePage):
             if is_bool:
                 setattr(self._config, attr, value)
             else:
-                setattr(self._config, attr, value / 100.0)
+                # Kp sliders are scaled so full travel (0–100) spans config 0.0–0.5,
+                # keeping the whole strength slider inside the stable band. Ki/Kd use /100.
+                divisor = 200.0 if attr in ('pid_kp_x', 'pid_kp_y') else 100.0
+                setattr(self._config, attr, value / divisor)
 
     # === Smart Jitter Callbacks ===
 
@@ -1203,6 +1583,9 @@ class AimPage(BasePage):
         self._jitterCountdown = 3
         self.jitterRecordBtn.setEnabled(False)
         self.jitterRecordBtn.setText("3...")
+        self._jitterLiveWin = _JitterLiveWindow(stop_callback=self._onJitterRecordClicked, parent=self)
+        self._jitterLiveWin.setCountdown(3)
+        self._jitterLiveWin.show()
         self._jitterCountdownTimer = QTimer(self)
         self._jitterCountdownTimer.timeout.connect(self._onJitterCountdownTick)
         self._jitterCountdownTimer.start(1000)
@@ -1211,6 +1594,8 @@ class AimPage(BasePage):
         self._jitterCountdown -= 1
         if self._jitterCountdown > 0:
             self.jitterRecordBtn.setText(f"{self._jitterCountdown}...")
+            if getattr(self, '_jitterLiveWin', None):
+                self._jitterLiveWin.setCountdown(self._jitterCountdown)
         else:
             self._jitterCountdownTimer.stop()
             self._jitterCountingDown = False
@@ -1220,9 +1605,19 @@ class AimPage(BasePage):
             self._jitterRecorder.start()
             self._jitterRecording = True
             self.jitterRecordBtn.setText("■ Stop & Save")
+            if getattr(self, '_jitterLiveWin', None):
+                self._jitterLiveWin.setRecorder(self._jitterRecorder)
 
     def _onJitterRecordClicked(self) -> None:
         if self._jitterCountingDown:
+            # Cancel countdown and close window if user presses the main button during countdown
+            self._jitterCountdownTimer.stop()
+            self._jitterCountingDown = False
+            self.jitterRecordBtn.setEnabled(True)
+            self.jitterRecordBtn.setText("● Record")
+            if getattr(self, '_jitterLiveWin', None):
+                self._jitterLiveWin.close()
+                self._jitterLiveWin = None
             return
         if not self._jitterRecording:
             self._startJitterCountdown()
@@ -1231,6 +1626,9 @@ class AimPage(BasePage):
             frames = self._jitterRecorder.stop()
             self._jitterRecording = False
             self.jitterRecordBtn.setText("● Record")
+            if getattr(self, '_jitterLiveWin', None):
+                self._jitterLiveWin.close()
+                self._jitterLiveWin = None
             if not frames:
                 QMessageBox.information(self, "Jitter Recorder", "No movement detected — nothing saved.")
                 return
@@ -1285,6 +1683,20 @@ class AimPage(BasePage):
             self._config.target_priority_confidence_weight = value / 100.0
 
     # === Target Tracking Callbacks ===
+
+    def _onBoxEmaEnableChanged(self, checked):
+        if self._config:
+            self._config.box_ema_enabled = bool(checked)
+        self.boxEmaAlphaXCard.setEnabled(bool(checked))
+        self.boxEmaAlphaYCard.setEnabled(bool(checked))
+
+    def _onBoxEmaAlphaXChanged(self, value):
+        if self._config:
+            self._config.box_ema_alpha_x = value / 100.0
+
+    def _onBoxEmaAlphaYChanged(self, value):
+        if self._config:
+            self._config.box_ema_alpha_y = value / 100.0
 
     def _onEmaEnableChanged(self, checked):
         if self._config:
@@ -1350,6 +1762,65 @@ class AimPage(BasePage):
         if self._config:
             self._config.kalman_measurement_noise = value / 100.0
 
+    def _onCamMotionCompChanged(self, checked):
+        if self._config:
+            self._config.cam_motion_comp_enabled = bool(checked)
+        self.camMotionCompSizeCard.setEnabled(bool(checked))
+
+    def _onCamMotionCompSizeChanged(self, key):
+        if self._config:
+            self._config.cam_motion_comp_size = int(key)
+
+    def _onHeadWidthChanged(self, value):
+        if self._config:
+            self._config.head_width_ratio = value / 100.0
+        self._refreshPreview()
+
+    def _onHeadHeightChanged(self, value):
+        if self._config:
+            self._config.head_height_ratio = value / 100.0
+        self._refreshPreview()
+
+    def _onBodyWidthChanged(self, value):
+        if self._config:
+            self._config.body_width_ratio = value / 100.0
+        self._refreshPreview()
+
+    def _onCustomYChanged(self, value):
+        if self._config:
+            self._config.aim_custom_y_pct = float(value)
+        self._refreshPreview()
+
+    def _refreshPreview(self):
+        parts = ["head", "body", "center", "custom"]
+        idx = self.aimPartCombo.currentIndex()
+        aim_part = parts[idx] if 0 <= idx < len(parts) else "center"
+        self.aimPreview.setParams(
+            aim_part,
+            self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20,
+            self.headWidthCard.value()  if hasattr(self.headWidthCard,  'value') else 38,
+            self.bodyWidthCard.value()  if hasattr(self.bodyWidthCard,  'value') else 87,
+            self.customYCard.value()    if hasattr(self.customYCard,    'value') else 30,
+        )
+
+    def _onAdaptiveRatioChanged(self, checked):
+        if self._config:
+            self._config.aim_adaptive_ratio_enabled = bool(checked)
+        self.adaptiveRatioRefHCard.setEnabled(bool(checked))
+
+    def _onAdaptiveRatioRefHChanged(self, value):
+        if self._config:
+            self._config.aim_adaptive_ratio_ref_h = float(value)
+
+    def _onPostureAwareChanged(self, checked):
+        if self._config:
+            self._config.aim_posture_aware_enabled = bool(checked)
+        self.crouchAspectCard.setEnabled(bool(checked))
+
+    def _onCrouchAspectChanged(self, value):
+        if self._config:
+            self._config.aim_crouch_aspect_threshold = value / 100.0
+
     def retranslateUi(self):
         """Refresh translations"""
         super().retranslateUi()
@@ -1388,6 +1859,7 @@ class AimPage(BasePage):
         self.pidPyCard.titleLabel.setText(t("reaction_speed_p"))
         self.pidIyCard.titleLabel.setText(t("error_correction_i"))
         self.pidDyCard.titleLabel.setText(t("stability_suppression_d"))
+        self.yReduceGroup.titleLabel.setText("Y-Axis Recoil Suppression")
         self.pidYReduceEnableCard.titleLabel.setText(t("aim_y_reduce_enable"))
         self.pidYReduceDelayCard.titleLabel.setText(t("aim_y_reduce_delay"))
         self.pidYReduceFloorCard.titleLabel.setText("Y Floor")
@@ -1415,7 +1887,15 @@ class AimPage(BasePage):
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
 
+        parts = ["head", "body", "center"]
+        idx = self.aimPartCombo.currentIndex()
+        self._updateTargetAreaVisibility(parts[idx] if 0 <= idx < len(parts) else "head")
+        self.headWidthCard.titleLabel.setText(t("head_width_ratio"))
+        self.headHeightCard.titleLabel.setText(t("head_height_ratio"))
+        self.headHeightCard.contentLabel.setText(t("body_height_note"))
+        self.bodyWidthCard.titleLabel.setText(t("body_width_ratio"))
+
         current_aim = self.aimPartCombo.currentIndex()
         self.aimPartCombo.clear()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("both")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)"), t("custom", "Custom")])
         self.aimPartCombo.setCurrentIndex(current_aim)

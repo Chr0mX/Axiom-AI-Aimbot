@@ -68,20 +68,67 @@ def _get_predictor(config: Config) -> VelocityPredictor:
     return _predictor
 
 
-def calculate_aim_target(box: List[float], aim_part: str, head_height_ratio: float) -> Tuple[float, float]:
+def calculate_aim_target(
+    box: List[float],
+    aim_part: str,
+    head_height_ratio: float,
+    config=None,
+) -> Tuple[float, float]:
     """Calculate aim-point coordinates from a detection box."""
 
     abs_x1, abs_y1, abs_x2, abs_y2 = box
     box_w, box_h = abs_x2 - abs_x1, abs_y2 - abs_y1
     box_center_x = abs_x1 + box_w * 0.5
 
-    if aim_part == 'head':
+    # --- Distance-adaptive ratio ---
+    # Scales head_height_ratio inversely with box height so the aim point stays
+    # on the head at all ranges. Large box (close) → ratio shrinks; small box
+    # (far) → ratio grows. Clamped to [0.4×, 2.5×] of the nominal value.
+    ratio = head_height_ratio
+    if config is not None and getattr(config, 'aim_adaptive_ratio_enabled', False) and box_h > 0:
+        ref_h = float(getattr(config, 'aim_adaptive_ratio_ref_h', 80.0))
+        scale = ref_h / max(box_h, 1.0)
+        ratio = max(head_height_ratio * 0.4, min(head_height_ratio * 2.5, head_height_ratio * scale))
+
+    # --- Posture-aware targeting ---
+    # When box_w / box_h exceeds the threshold the player is likely crouching,
+    # sliding, or prone. Fall back to center-mass to avoid overshooting above them.
+    if config is not None and getattr(config, 'aim_posture_aware_enabled', False) and box_h > 0:
+        threshold = float(getattr(config, 'aim_crouch_aspect_threshold', 1.2))
+        if box_w / box_h >= threshold:
+            return box_center_x, abs_y1 + box_h * 0.5
+
+    if aim_part == 'custom':
         target_x = box_center_x
-        target_y = abs_y1 + box_h * head_height_ratio * 0.5
+        pct = float(getattr(config, 'aim_custom_y_pct', 30.0)) / 100.0
+        target_y = abs_y1 + box_h * pct
+    elif aim_part == 'center':
+        # Smart (center-mass): intelligent target selection + custom Y offset within box.
+        target_x = box_center_x
+        pct = float(getattr(config, 'aim_custom_y_pct', 50.0)) / 100.0
+        target_y = abs_y1 + box_h * pct
+    elif aim_part == 'head':
+        target_x = box_center_x
+        target_y = abs_y1 + box_h * ratio * 0.5
     else:
         target_x = box_center_x
-        head_h = box_h * head_height_ratio
+        head_h = box_h * ratio
         target_y = (abs_y1 + head_h + abs_y2) * 0.5
+
+    # TODO: X-axis offset (aim_x_offset_frac) — nudge target_x by ± fraction of box_w
+    #       to correct for systematic model bounding-box bias. Config: aim_x_offset_frac.
+
+    # TODO: Fine Y nudge (aim_y_offset_frac) — additive fraction of box_h applied after
+    #       the ratio formula for per-game calibration without re-deriving head_height_ratio.
+    #       Config: aim_y_offset_frac (positive = lower in box).
+
+    # TODO: Per-class routing — when model outputs separate head/body class IDs, bypass
+    #       the ratio formula: aim at box center for head class, body formula for body class.
+    #       Requires passing class_id and config._detect_class_names here.
+
+    # TODO: Confidence-weighted fallback — blend aim point toward center-mass when detection
+    #       confidence is below a threshold (partially occluded target). Config:
+    #       aim_low_conf_threshold, aim_low_conf_blend (0–1).
 
     return target_x, target_y
 
@@ -194,7 +241,7 @@ def process_aiming(
     valid_targets = []
     confidences = getattr(config, '_current_confidences', [])
     for i, box in enumerate(boxes):
-        target_x, target_y = calculate_aim_target(box, aim_part, head_height_ratio)
+        target_x, target_y = calculate_aim_target(box, aim_part, head_height_ratio, config)
         moveX = target_x - crosshair_x
         moveY = target_y - crosshair_y
         distance_sq = moveX * moveX + moveY * moveY
@@ -255,7 +302,7 @@ def process_aiming(
                     ax * raw_box[2] + (1.0 - ax) * sb[2],
                     ay * raw_box[3] + (1.0 - ay) * sb[3],
                 ]
-            target_x, target_y = calculate_aim_target(state.smoothed_box, aim_part, head_height_ratio)
+            target_x, target_y = calculate_aim_target(state.smoothed_box, aim_part, head_height_ratio, config)
             selected_box = state.smoothed_box
         else:
             state.smoothed_box = list(selected_box)
@@ -296,6 +343,11 @@ def process_aiming(
 
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
+
+        # --- Camera motion compensation — cancel shake-induced scene shift ---
+        if getattr(config, 'cam_motion_comp_enabled', False):
+            errorX -= state.cam_shift_x
+            errorY -= state.cam_shift_y
 
         # --- Adaptive deadzone (new feature from Someone_idea) ---
         if getattr(config, 'aim_deadzone_enabled', False):
@@ -353,7 +405,17 @@ def process_aiming(
                 return
             dx, dy = _result
 
-        move_x, move_y = int(round(dx)), int(round(dy))
+        # Sub-pixel carry (all backends): accumulate the fractional remainder that
+        # integer truncation would otherwise discard, so micro-corrections (e.g. a
+        # PID output of 0.4 px) are carried forward and applied on a later frame.
+        # This lets the crosshair converge exactly onto the aim point instead of
+        # dithering ±0.5 px from per-frame rounding.
+        raw_x = dx + state.aim_carry_x
+        raw_y = dy + state.aim_carry_y
+        move_x = int(raw_x)
+        move_y = int(raw_y)
+        state.aim_carry_x = raw_x - move_x
+        state.aim_carry_y = raw_y - move_y
 
         # --- Per-frame pixel cap (new feature from Someone_idea) ---
         if getattr(config, 'max_move_per_frame_px', 0) > 0:
@@ -427,6 +489,8 @@ def process_aiming(
             config.display_locked_box = None
             config.display_locked_box_is_decaying = False
         state.smoothed_box = None
+        state.aim_carry_x = 0.0
+        state.aim_carry_y = 0.0
         pid_x.reset()
         pid_y.reset()
         state.aim_y_last_target_y = 0.0

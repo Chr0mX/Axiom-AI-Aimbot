@@ -1,0 +1,144 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+#esp {
+  display: block;
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  cursor: default;
+}
+
+#esp.dragging { cursor: grabbing; }
+
+/* ── WS status badge (top-right) ──────────────────────────────── */
+#status {
+  position: fixed;
+  top: 8px; right: 8px;
+  font: 12px/1.4 "Consolas", "Menlo", monospace;
+  padding: 3px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 10;
+}
+#status.connected    { color: #00e0a0; background: rgba(0,0,0,0.35); }
+#status.disconnected { color: #ff6060; background: rgba(0,0,0,0.45); }
+
+/* ── Settings toggle button (bottom-right) ────────────────────── */
+#cfg-toggle {
+  position: fixed;
+  bottom: 12px; right: 12px;
+  width: 34px; height: 34px;
+  background: rgba(20, 20, 28, 0.82);
+  border: 1px solid rgba(0, 224, 160, 0.4);
+  border-radius: 6px;
+  color: #00e0a0;
+  font-size: 16px;
+  cursor: pointer;
+  z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 1;
+  transition: background 0.15s, border-color 0.15s, opacity 0.4s ease;
+}
+#cfg-toggle:hover {
+  background: rgba(0, 224, 160, 0.15);
+  border-color: rgba(0, 224, 160, 0.7);
+  opacity: 1;
+}
+#cfg-toggle.faded {
+  opacity: 0;
+}
+
+/* ── Settings panel ───────────────────────────────────────────── */
+#cfg-panel {
+  position: fixed;
+  bottom: 54px; right: 12px;
+  width: 240px;
+  background: rgba(14, 14, 20, 0.92);
+  border: 1px solid rgba(0, 224, 160, 0.35);
+  border-radius: 8px;
+  padding: 12px;
+  font: 12px/1.5 "Consolas", "Menlo", monospace;
+  color: #c8c8d4;
+  z-index: 20;
+  display: none;
+  user-select: none;
+}
+#cfg-panel.open { display: block; }
+
+.cfg-title {
+  font-size: 13px;
+  font-weight: bold;
+  color: #00e0a0;
+  margin-bottom: 10px;
+  letter-spacing: 0.04em;
+}
+
+.cfg-section {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(0, 224, 160, 0.6);
+  margin: 10px 0 4px;
+  border-bottom: 1px solid rgba(0, 224, 160, 0.15);
+  padding-bottom: 2px;
+}
+
+.cfg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+.cfg-row label {
+  width: 56px;
+  flex-shrink: 0;
+  color: #9898a8;
+  font-size: 11px;
+}
+.cfg-row input[type="range"] {
+  flex: 1;
+  height: 4px;
+  accent-color: #00e0a0;
+  cursor: pointer;
+}
+.cfg-row input[type="color"] {
+  width: 32px; height: 22px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+  padding: 1px;
+}
+.cfg-val {
+  min-width: 22px;
+  text-align: right;
+  color: #e0e0f0;
+  font-size: 11px;
+}
+.cfg-unit {
+  color: #6060708;
+  font-size: 10px;
+  width: 16px;
+}
+
+#cfg-reset {
+  margin-top: 10px;
+  width: 100%;
+  padding: 5px 0;
+  background: rgba(255,60,60,0.12);
+  border: 1px solid rgba(255,60,60,0.3);
+  border-radius: 4px;
+  color: #ff8888;
+  font: 11px "Consolas", monospace;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#cfg-reset:hover { background: rgba(255,60,60,0.25); }

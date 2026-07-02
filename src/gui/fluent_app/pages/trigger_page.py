@@ -1,12 +1,12 @@
 # trigger_page.py
-"""自動扳機頁面 - 自動射擊設定、目標區域"""
+"""自動扳機頁面 - 自動射擊設定"""
 
 from PyQt6.QtCore import Qt
 from qfluentwidgets import (
     SettingCardGroup, SettingCard, SwitchSettingCard,
     FluentIcon, ComboBox
 )
-from ..components.slider_spin_card import SliderDoubleSpinCard, SliderLabelCard
+from ..components.slider_spin_card import SliderDoubleSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
@@ -91,40 +91,6 @@ class TriggerPage(BasePage):
             parent=self.fireGroup
         )
 
-        # === 目標區域設定 ===
-        self.areaGroup = SettingCardGroup(t("target_area_settings"), self.scrollWidget)
-
-        # 頭部寬度比例 - 使用 SliderLabelCard
-        self.headWidthCard = SliderLabelCard(
-            FluentIcon.CONSTRACT,
-            t("head_width_ratio"),
-            10, 100,
-            format_func=lambda v: f"{v}%",
-            slider_width=200,
-            parent=self.areaGroup
-        )
-
-        # 頭部高度比例 - 使用 SliderLabelCard
-        self.headHeightCard = SliderLabelCard(
-            FluentIcon.FIT_PAGE,
-            t("head_height_ratio"),
-            10, 100,
-            format_func=lambda v: f"{v}%",
-            description=t("body_height_note"),
-            slider_width=200,
-            parent=self.areaGroup
-        )
-
-        # 身體寬度比例 - 使用 SliderLabelCard
-        self.bodyWidthCard = SliderLabelCard(
-            FluentIcon.CONSTRACT,
-            t("body_width_ratio"),
-            10, 100,
-            format_func=lambda v: f"{v}%",
-            slider_width=200,
-            parent=self.areaGroup
-        )
-
     def _initLayout(self):
         """排版所有控制項"""
         # 自動射擊設定
@@ -134,11 +100,6 @@ class TriggerPage(BasePage):
         self.fireGroup.addSettingCard(self.scopeDelayCard)
         self.fireGroup.addSettingCard(self.fireIntervalCard)
         self.addContent(self.fireGroup)
-
-        self.areaGroup.addSettingCard(self.headWidthCard)
-        self.areaGroup.addSettingCard(self.headHeightCard)
-        self.areaGroup.addSettingCard(self.bodyWidthCard)
-        self.addContent(self.areaGroup)
 
         self.scrollLayout.addStretch(1)
 
@@ -150,11 +111,6 @@ class TriggerPage(BasePage):
         self.mouseClickCombo.currentTextChanged.connect(self._onMouseClickChanged)
         self.scopeDelayCard.valueChanged.connect(self._onScopeDelayChanged)
         self.fireIntervalCard.valueChanged.connect(self._onFireIntervalChanged)
-
-        # 目標區域設定
-        self.headWidthCard.valueChanged.connect(self._onHeadWidthChanged)
-        self.headHeightCard.valueChanged.connect(self._onHeadHeightChanged)
-        self.bodyWidthCard.valueChanged.connect(self._onBodyWidthChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -178,11 +134,6 @@ class TriggerPage(BasePage):
 
         # 射擊間隔 - 使用新組件的 setValue
         self.fireIntervalCard.setValue(self._config.auto_fire_interval)
-
-        # 目標區域設定 - 使用新組件的 setValue
-        self.headWidthCard.setValue(int(self._config.head_width_ratio * 100))
-        self.headHeightCard.setValue(int(self._config.head_height_ratio * 100))
-        self.bodyWidthCard.setValue(int(self._config.body_width_ratio * 100))
 
     # === 回調函數 ===
     def _onFireTargetChanged(self, index):
@@ -217,25 +168,12 @@ class TriggerPage(BasePage):
         if self._config:
             self._config.auto_fire_interval = value
 
-    def _onHeadWidthChanged(self, value):
-        if self._config:
-            self._config.head_width_ratio = value / 100.0
-
-    def _onHeadHeightChanged(self, value):
-        if self._config:
-            self._config.head_height_ratio = value / 100.0
-
-    def _onBodyWidthChanged(self, value):
-        if self._config:
-            self._config.body_width_ratio = value / 100.0
-
     def retranslateUi(self):
         """刷新翻譯"""
         super().retranslateUi()
 
         # 群組標題
         self.fireGroup.titleLabel.setText(t("keys_and_auto_fire"))
-        self.areaGroup.titleLabel.setText(t("target_area_settings"))
 
         # 自動射擊設定
         self.fireTargetCard.titleLabel.setText(t("auto_fire_target"))
@@ -250,8 +188,3 @@ class TriggerPage(BasePage):
         self.fireTargetCombo.addItems([t("head"), t("body"), t("both")])
         self.fireTargetCombo.setCurrentIndex(current_target)
 
-        # 目標區域設定
-        self.headWidthCard.titleLabel.setText(t("head_width_ratio"))
-        self.headHeightCard.titleLabel.setText(t("head_height_ratio"))
-        self.headHeightCard.contentLabel.setText(t("body_height_note"))
-        self.bodyWidthCard.titleLabel.setText(t("body_width_ratio"))

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Axiom ESP</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <canvas id="esp"></canvas>
+  <div id="status" class="disconnected">connecting…</div>
+
+  <!-- HUD settings panel -->
+  <button id="cfg-toggle" title="HUD Settings">⚙</button>
+  <div id="cfg-panel">
+    <div class="cfg-title">HUD Settings</div>
+
+    <div class="cfg-row">
+      <label>Font Size</label>
+      <input type="range" id="cfg-font-size" min="8" max="20" value="11">
+      <span class="cfg-val" id="val-font-size">11</span><span class="cfg-unit">px</span>
+    </div>
+
+    <div class="cfg-section">Background</div>
+    <div class="cfg-row">
+      <label>Color</label>
+      <input type="color" id="cfg-bg-color" value="#000000">
+    </div>
+    <div class="cfg-row">
+      <label>Opacity</label>
+      <input type="range" id="cfg-bg-opacity" min="0" max="100" value="65">
+      <span class="cfg-val" id="val-bg-opacity">65</span><span class="cfg-unit">%</span>
+    </div>
+
+    <div class="cfg-section">Border</div>
+    <div class="cfg-row">
+      <label>Color</label>
+      <input type="color" id="cfg-border-color" value="#00e0a0">
+    </div>
+    <div class="cfg-row">
+      <label>Opacity</label>
+      <input type="range" id="cfg-border-opacity" min="0" max="100" value="60">
+      <span class="cfg-val" id="val-border-opacity">60</span><span class="cfg-unit">%</span>
+    </div>
+    <div class="cfg-row">
+      <label>Width</label>
+      <input type="range" id="cfg-border-width" min="0" max="6" value="1">
+      <span class="cfg-val" id="val-border-width">1</span><span class="cfg-unit">px</span>
+    </div>
+    <div class="cfg-row">
+      <label>Radius</label>
+      <input type="range" id="cfg-border-radius" min="0" max="12" value="4">
+      <span class="cfg-val" id="val-border-radius">4</span><span class="cfg-unit">px</span>
+    </div>
+
+    <div class="cfg-section">Padding</div>
+    <div class="cfg-row">
+      <label>Inner</label>
+      <input type="range" id="cfg-padding" min="2" max="16" value="6">
+      <span class="cfg-val" id="val-padding">6</span><span class="cfg-unit">px</span>
+    </div>
+
+    <button id="cfg-reset">Reset to defaults</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

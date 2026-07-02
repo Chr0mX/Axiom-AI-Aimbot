@@ -66,25 +66,20 @@ class PIDController:
         return output
     
     def _calculate_adjusted_kp(self, kp: float) -> float:
-        """Calculate dynamically adjusted P parameter
-        
-        Implements non-linear P parameter response curve:
-        - 0% ~ 50%: Linear growth, maintains original proportion
-        - 50% ~ 100%: Accelerated growth, eventually scaling to 200%
-        
-        This design allows for smoother low sensitivity and more aggressive high sensitivity.
-        
+        """Linear, predictable P response — effective Kp equals the configured Kp.
+
+        The previous curve tripled the gain above 0.5 (kp=1.0 → 2.0), which made the
+        upper half of the strength slider overshoot and wobble. With a clamped identity
+        the response is monotonic and stable across the whole range; the GUI Kp slider
+        is scaled so its full travel stays inside the proven-stable band.
+
         Args:
-            kp: Original P parameter value (0.0 ~ 1.0)
-            
+            kp: Configured P parameter value (0.0 ~ 1.0)
+
         Returns:
-            Adjusted P parameter value (0.0 ~ 2.0)
+            Effective P parameter value (0.0 ~ 1.0)
         """
-        if kp <= 0.5:
-            return kp
-        else:
-            # When kp=0.5, output=0.5; when kp=1.0, output=2.0
-            return 0.5 + (kp - 0.5) * 3.0
+        return max(0.0, min(1.0, kp))
 
 
 def preprocess_image(

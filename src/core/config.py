@@ -91,6 +91,8 @@ _FIELD_MAP = {
     'kalman_measurement_noise':   'aim.kalman.measurement_noise',
     'ema_enabled':                'aim.ema.enabled',
     'ema_alpha':                  'aim.ema.alpha',
+    'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
+    'cam_motion_comp_size':       'aim.cam_motion_comp.size',
     'jitter_enabled':             'aim.jitter.enabled',
     'jitter_strength':            'aim.jitter.strength',
     'smart_jitter_enabled':       'aim.smart_jitter.enabled',
@@ -110,6 +112,11 @@ _FIELD_MAP = {
     'head_width_ratio':           'aim.target_area.head_width_ratio',
     'head_height_ratio':          'aim.target_area.head_height_ratio',
     'body_width_ratio':           'aim.target_area.body_width_ratio',
+    'aim_adaptive_ratio_enabled': 'aim.target_area.adaptive_ratio.enabled',
+    'aim_adaptive_ratio_ref_h':   'aim.target_area.adaptive_ratio.ref_h',
+    'aim_posture_aware_enabled':  'aim.target_area.posture_aware.enabled',
+    'aim_crouch_aspect_threshold':'aim.target_area.posture_aware.crouch_aspect',
+    'aim_custom_y_pct':           'aim.target_area.custom_y_pct',
 
     # --- autofire ---
     'auto_fire_key':              'autofire.key',
@@ -169,6 +176,10 @@ _FIELD_MAP = {
     'show_crosshair':             'display.crosshair.show',
     'crosshair_style':            'display.crosshair.style',
     'crosshair_size':             'display.crosshair.size',
+    'web_esp_enabled':            'web_esp.enabled',
+    'web_esp_http_port':          'web_esp.http_port',
+    'web_esp_ws_port':            'web_esp.ws_port',
+    'web_esp_fps':                'web_esp.fps',
 
     # --- hardware ---
     'mouse_move_method':          'hardware.mouse_move_method',
@@ -306,14 +317,25 @@ class Config:
         self.head_width_ratio: float = 0.38    # 頭部寬度占檢測框寬度的比例
         self.head_height_ratio: float = 0.26   # 頭部高度占檢測框高度的比例
         self.body_width_ratio: float = 0.87    # 身體寬度占檢測框寬度的比例
+
+        # Distance-adaptive head ratio — scales head_height_ratio inversely with box height
+        # so the aim point stays on the head at all engagement ranges.
+        self.aim_adaptive_ratio_enabled: bool = False
+        self.aim_adaptive_ratio_ref_h: float = 80.0  # box height (px) where ratio is nominal
+
+        # Posture-aware targeting — detects crouch/slide/prone via box aspect ratio and
+        # falls back to center-mass so the aim doesn't overshoot into empty space.
+        self.aim_posture_aware_enabled: bool = False
+        self.aim_crouch_aspect_threshold: float = 1.2  # box_w/box_h above which = crouching
+        self.aim_custom_y_pct: float = 30.0  # Custom aim Y as % of box height (0=top, 100=bottom)
         
         # PID 控制器參數 (分離 X 和 Y 軸)
         self.pid_kp_x: float = 0.26      # 水平 P: 比例 - 主要影響反應速度
         self.pid_ki_x: float = 0.0       # 水平 I: 積分 - 修正靜態誤差
-        self.pid_kd_x: float = 0.0       # 水平 D: 微分 - 抑制抖動與過衝
+        self.pid_kd_x: float = 0.12      # 水平 D: 微分 - 抑制抖動與過衝
         self.pid_kp_y: float = 0.26      # 垂直 P: 比例
         self.pid_ki_y: float = 0.0       # 垂直 I: 積分
-        self.pid_kd_y: float = 0.0       # 垂直 D: 微分
+        self.pid_kd_y: float = 0.08      # 垂直 D: 微分
 
         # Y軸壓槍速度逐漸歸零
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能
@@ -443,6 +465,10 @@ class Config:
         self.ema_enabled: bool = False
         self.ema_alpha: float = 0.7  # 1.0=原始，0.3=強平滑
 
+        # Camera motion compensation — subtract per-frame global scene shift before PID
+        self.cam_motion_comp_enabled: bool = False
+        self.cam_motion_comp_size: int = 128   # downsample resolution for phase correlation (128 or 256)
+
         # 速度預測瞄準（基於歷史位置估算目標未來位置）
         self.prediction_enabled: bool = False
         self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
@@ -454,12 +480,18 @@ class Config:
         self.lock_decay_frames: int = 15
         self.lock_iou_threshold: float = 0.3
         self.sticky_adaptive_iou: bool = True
-        self.box_ema_enabled: bool = False
-        self.box_ema_alpha_x: float = 0.8
-        self.box_ema_alpha_y: float = 0.5
+        self.box_ema_enabled: bool = True
+        self.box_ema_alpha_x: float = 0.55
+        self.box_ema_alpha_y: float = 0.45
 
         # FOV filter mode
         self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square
+
+        # Web ESP overlay — stream detection state to a browser Canvas renderer over LAN
+        self.web_esp_enabled: bool = False
+        self.web_esp_http_port: int = 8080   # static page server
+        self.web_esp_ws_port: int = 8765     # state broadcast websocket
+        self.web_esp_fps: int = 60           # broadcast tick rate (latest-state wins)
 
         # Aim shaping (ported from Someone_idea)
         self.aim_deadzone_enabled: bool = False
@@ -500,6 +532,8 @@ class Config:
         # Nominal FPS of the active capture source (UVC/NDI reports this;
         # screen capture uses monitor refresh rate or measured rate)
         self.source_nominal_fps: float = 0.0
+        self.udp_recv_fps: float = 0.0        # raw assembled-frame rate from UDP sender
+        self.udp_dropped_fps: float = 0.0     # incomplete frames evicted/sec (packet loss)
 
         # Secondary inference (V1 = PaddleOCR, V2 = ONNX HUD detector)
         self.second_inference_mode: str = "off"          # "off" | "v1_ocr" | "v2_onnx"

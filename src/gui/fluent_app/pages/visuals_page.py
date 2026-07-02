@@ -1,13 +1,17 @@
 # visuals_page.py
 """Visual Settings Page - Display Toggles, Detection Range"""
 
+import webbrowser
+
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QGridLayout, QSizePolicy, QWidget
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, SettingCard,
-    FluentIcon, CheckBox, ComboBox
+    FluentIcon, CheckBox, ComboBox, BodyLabel, PushButton
 )
 from ..components.slider_spin_card import SliderLabelCard
+from ..components.no_wheel_widgets import NoWheelSpinBox
 
 from ..base_page import BasePage
 from ..language_manager import t
@@ -138,8 +142,8 @@ class VisualsPage(BasePage):
         self.spMouseMoveCheck = CheckBox(self._shortText("mouse_move_method"), self.statusPanelElementsWidget)
         self.spMouseClickCheck = CheckBox(self._shortText("mouse_click_method"), self.statusPanelElementsWidget)
         self.spScreenshotMethodCheck = CheckBox(self._shortText("screenshot_method"), self.statusPanelElementsWidget)
-        self.spScreenshotFpsCheck = CheckBox(t("status_panel_screenshot_fps", "Screenshot FPS"), self.statusPanelElementsWidget)
-        self.spDetectionFpsCheck = CheckBox(t("status_panel_detection_fps", "Detection FPS"), self.statusPanelElementsWidget)
+        self.spScreenshotFpsCheck = CheckBox(t("status_panel_screenshot_fps", "Capture FPS"), self.statusPanelElementsWidget)
+        self.spDetectionFpsCheck = CheckBox(t("status_panel_detection_fps", "Inference FPS"), self.statusPanelElementsWidget)
 
         self._statusPanelChecks = [
             self.spAutoAimCheck,
@@ -242,6 +246,60 @@ class VisualsPage(BasePage):
             parent=self.appearanceGroup
         )
 
+        # === Web ESP Overlay ===
+        self.webEspGroup = SettingCardGroup(t("web_esp_settings", "Web ESP Overlay"), self.scrollWidget)
+
+        self.webEspEnableCard = SwitchSettingCard(
+            FluentIcon.GLOBE,
+            t("web_esp_enabled", "Enable Web ESP"),
+            t("web_esp_desc", "Stream the ESP to a browser on this PC or any device on your LAN."),
+            parent=self.webEspGroup
+        )
+
+        self.webEspHttpPortSpin = NoWheelSpinBox()
+        self.webEspHttpPortSpin.setRange(1024, 65535)
+        self.webEspHttpPortCard = SettingCard(
+            FluentIcon.LINK,
+            t("web_esp_http_port", "HTTP Port"),
+            t("web_esp_http_port_desc", "Port for the overlay web page."),
+            self.webEspGroup
+        )
+        self.webEspHttpPortCard.hBoxLayout.addWidget(self.webEspHttpPortSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.webEspHttpPortCard.hBoxLayout.addSpacing(16)
+
+        self.webEspWsPortSpin = NoWheelSpinBox()
+        self.webEspWsPortSpin.setRange(1024, 65535)
+        self.webEspWsPortCard = SettingCard(
+            FluentIcon.WIFI,
+            t("web_esp_ws_port", "WebSocket Port"),
+            t("web_esp_ws_port_desc", "Port for the live state stream."),
+            self.webEspGroup
+        )
+        self.webEspWsPortCard.hBoxLayout.addWidget(self.webEspWsPortSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.webEspWsPortCard.hBoxLayout.addSpacing(16)
+
+        # Connect card — URL text, QR code, and an "open in browser" button
+        self.webEspConnectCard = SettingCard(
+            FluentIcon.QRCODE,
+            t("web_esp_connect", "Connect"),
+            t("web_esp_connect_desc", "Open this URL on the same PC, or scan the QR from a phone on the same Wi-Fi."),
+            self.webEspGroup
+        )
+        self._webEspConnectWidget = QWidget()
+        _cv = QVBoxLayout(self._webEspConnectWidget)
+        _cv.setContentsMargins(0, 4, 0, 4)
+        _cv.setSpacing(8)
+        self.webEspQrLabel = QLabel()
+        self.webEspQrLabel.setFixedSize(160, 160)
+        self.webEspQrLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.webEspOpenBtn = PushButton(t("web_esp_open", "Open in browser"))
+        self.webEspOpenBtn.setMinimumWidth(140)
+        _cv.addWidget(self.webEspQrLabel)
+        _cv.addWidget(self.webEspOpenBtn)
+        self.webEspConnectCard.hBoxLayout.addStretch(1)
+        self.webEspConnectCard.hBoxLayout.addWidget(self._webEspConnectWidget)
+        self.webEspConnectCard.hBoxLayout.addSpacing(16)
+
 
     def _initLayout(self):
         """Lays out all controls"""
@@ -275,6 +333,13 @@ class VisualsPage(BasePage):
         self.appearanceGroup.addSettingCard(self.windowAlphaCard)
 
         self.addContent(self.appearanceGroup)
+
+        # Web ESP overlay settings
+        self.webEspGroup.addSettingCard(self.webEspEnableCard)
+        self.webEspGroup.addSettingCard(self.webEspHttpPortCard)
+        self.webEspGroup.addSettingCard(self.webEspWsPortCard)
+        self.webEspGroup.addSettingCard(self.webEspConnectCard)
+        self.addContent(self.webEspGroup)
 
         self.scrollLayout.addStretch(1)
 
@@ -310,6 +375,12 @@ class VisualsPage(BasePage):
         self.enableAcrylicCard.checkedChanged.connect(self._onAcrylicEnabledChanged)
         self.windowAlphaCard.valueChanged.connect(self._onWindowAlphaChanged)
         self.windowAlphaCard.slider.sliderReleased.connect(self._onWindowAlphaCommit)
+
+        # Web ESP overlay
+        self.webEspEnableCard.checkedChanged.connect(self._onWebEspEnableChanged)
+        self.webEspHttpPortSpin.valueChanged.connect(self._onWebEspHttpPortChanged)
+        self.webEspWsPortSpin.valueChanged.connect(self._onWebEspWsPortChanged)
+        self.webEspOpenBtn.clicked.connect(self._onWebEspOpen)
 
 
     def _loadFromConfig(self):
@@ -352,6 +423,16 @@ class VisualsPage(BasePage):
         if self._config.acrylic_window_alpha != safe_alpha:
             self._config.acrylic_window_alpha = safe_alpha
         self.windowAlphaCard.setValue(safe_alpha)
+
+        # Web ESP overlay
+        web_on = bool(getattr(self._config, 'web_esp_enabled', False))
+        self.webEspEnableCard.setChecked(web_on)
+        self.webEspHttpPortSpin.setValue(int(getattr(self._config, 'web_esp_http_port', 8080)))
+        self.webEspWsPortSpin.setValue(int(getattr(self._config, 'web_esp_ws_port', 8765)))
+        self.webEspHttpPortCard.setEnabled(web_on)
+        self.webEspWsPortCard.setEnabled(web_on)
+        self.webEspConnectCard.setEnabled(web_on)
+        self._refreshWebEspConnect()
 
     # === Callback Functions ===
     def _onShowFovChanged(self, checked):
@@ -456,6 +537,72 @@ class VisualsPage(BasePage):
     def _onWindowAlphaCommit(self):
         self._refreshWindowEffect()
 
+    # ── Web ESP overlay ──────────────────────────────────
+    def _onWebEspEnableChanged(self, checked):
+        checked = bool(checked)
+        if self._config:
+            self._config.web_esp_enabled = checked
+        self.webEspHttpPortCard.setEnabled(checked)
+        self.webEspWsPortCard.setEnabled(checked)
+        self.webEspConnectCard.setEnabled(checked)
+        # Start/stop the server live so the URL+QR appear immediately.
+        try:
+            from core import esp_server
+            if checked:
+                esp_server.start(self._config)
+            else:
+                esp_server.stop()
+        except Exception:
+            pass
+        self._refreshWebEspConnect()
+
+    def _onWebEspHttpPortChanged(self, value):
+        if self._config:
+            self._config.web_esp_http_port = int(value)
+
+    def _onWebEspWsPortChanged(self, value):
+        if self._config:
+            self._config.web_esp_ws_port = int(value)
+
+    def _onWebEspOpen(self):
+        try:
+            from core import esp_server
+            url = esp_server.connect_url()
+            if url:
+                webbrowser.open(url)
+        except Exception:
+            pass
+
+    def _refreshWebEspConnect(self):
+        """Update the connect URL label and QR image from the running server."""
+        url = ""
+        try:
+            from core import esp_server
+            if esp_server.is_running():
+                url = esp_server.connect_url()
+        except Exception:
+            url = ""
+
+        if not url:
+            self.webEspQrLabel.clear()
+            self.webEspOpenBtn.setEnabled(False)
+            return
+
+        self.webEspOpenBtn.setEnabled(True)
+        # QR code via segno if available; otherwise URL text alone is enough.
+        try:
+            import io
+            import segno
+            buf = io.BytesIO()
+            segno.make(url, error='m').save(buf, kind='png', scale=4, border=2)
+            pix = QPixmap()
+            pix.loadFromData(buf.getvalue())
+            self.webEspQrLabel.setPixmap(
+                pix.scaled(160, 160, Qt.AspectRatioMode.KeepAspectRatio,
+                           Qt.TransformationMode.SmoothTransformation))
+        except Exception:
+            self.webEspQrLabel.setText(t("web_esp_qr_unavailable", "(install 'segno' for QR)"))
+
     def _scheduleAcrylicRefresh(self):
         if self._acrylicRefreshTimer.isActive():
             self._acrylicRefreshTimer.stop()
@@ -504,8 +651,8 @@ class VisualsPage(BasePage):
         self.spMouseMoveCheck.setText(self._shortText("mouse_move_method"))
         self.spMouseClickCheck.setText(self._shortText("mouse_click_method"))
         self.spScreenshotMethodCheck.setText(self._shortText("screenshot_method"))
-        self.spScreenshotFpsCheck.setText(t("status_panel_screenshot_fps", "Screenshot FPS"))
-        self.spDetectionFpsCheck.setText(t("status_panel_detection_fps", "Detection FPS"))
+        self.spScreenshotFpsCheck.setText(t("status_panel_screenshot_fps", "Capture FPS"))
+        self.spDetectionFpsCheck.setText(t("status_panel_detection_fps", "Inference FPS"))
 
         # Crosshair settings
         self.crosshairGroup.titleLabel.setText(t("crosshair_settings", "Crosshair"))

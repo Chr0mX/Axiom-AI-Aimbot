@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _HUD_ROI_DEFAULT_STR = "1490,953,1870,1041"
+_IDLE_TEARDOWN_S = 5.0  # seconds before releasing an idle child process
 
 
 def _parse_roi(coords: str) -> dict[str, int] | None:
@@ -105,12 +106,11 @@ def trigger_hud_scan() -> None:
     _scan_flag.set()
 
 
-def start(config: "Config") -> None:
-    """Spawn the HUD child process and feeder thread. No-op if already running."""
-    global _proc, _proc_stop, _frame_q, _result_q, _stop_event, _feeder_thread
-    if _feeder_thread is not None and _feeder_thread.is_alive():
+def _ensure_proc() -> None:
+    """Spawn the HUD child process if not already alive. Called from the feeder."""
+    global _proc, _proc_stop, _frame_q, _result_q
+    if _proc is not None and _proc.is_alive():
         return
-
     try:
         ctx = mp.get_context("spawn")
         _frame_q = ctx.Queue(maxsize=1)
@@ -121,9 +121,43 @@ def start(config: "Config") -> None:
             name="HUDProcess", daemon=True,
         )
         _proc.start()
+        logger.info("[HUD] child process started (pid=%s)", _proc.pid)
     except Exception as exc:
         logger.error("[HUD] Failed to start HUD process: %s", exc)
         _proc = None
+
+
+def _kill_proc() -> None:
+    """Tear down the HUD child process, leaving the feeder thread running."""
+    global _proc, _proc_stop, _frame_q, _result_q
+    if _proc_stop is not None:
+        try:
+            _proc_stop.set()
+        except Exception:
+            pass
+    if _frame_q is not None:
+        try:
+            _frame_q.put_nowait(None)  # sentinel
+        except Exception:
+            pass
+    if _proc is not None:
+        try:
+            _proc.join(timeout=1.0)
+            if _proc.is_alive():
+                _proc.terminate()
+        except Exception:
+            pass
+        logger.info("[HUD] child process released")
+    _proc = None
+    _proc_stop = None
+    _frame_q = None
+    _result_q = None
+
+
+def start(config: "Config") -> None:
+    """Start the HUD feeder thread. Child process is spawned lazily on first use. No-op if running."""
+    global _stop_event, _feeder_thread
+    if _feeder_thread is not None and _feeder_thread.is_alive():
         return
 
     _stop_event = threading.Event()
@@ -135,32 +169,12 @@ def start(config: "Config") -> None:
 
 def stop() -> None:
     """Stop feeder thread and HUD child process."""
-    global _proc, _proc_stop, _frame_q, _result_q, _stop_event, _feeder_thread
+    global _stop_event, _feeder_thread
     if _stop_event is not None:
         _stop_event.set()
-    if _proc_stop is not None:
-        try:
-            _proc_stop.set()
-        except Exception:
-            pass
-    if _frame_q is not None:
-        try:
-            _frame_q.put_nowait(None)
-        except Exception:
-            pass
+    _kill_proc()
     if _feeder_thread is not None and _feeder_thread.is_alive():
         _feeder_thread.join(timeout=2.0)
-    if _proc is not None:
-        try:
-            _proc.join(timeout=2.0)
-            if _proc.is_alive():
-                _proc.terminate()
-        except Exception:
-            pass
-    _proc = None
-    _proc_stop = None
-    _frame_q = None
-    _result_q = None
     _stop_event = None
     _feeder_thread = None
 
@@ -189,6 +203,7 @@ def _drain(q) -> None:
 
 
 def _collect_results() -> None:
+    global _model_input_wh
     latest = None
     try:
         while True:
@@ -473,6 +488,7 @@ def _feeder(config: "Config", stop_event: threading.Event) -> None:
 
     global _roi_image
     log_once: list = []
+    _idle_since: float | None = None
 
     _src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     _project_root = os.path.dirname(_src)
@@ -486,7 +502,24 @@ def _feeder(config: "Config", stop_event: threading.Event) -> None:
         if forced:
             _scan_flag.clear()
 
-        if (enabled or forced) and hud_model_rel:
+        active = (enabled or forced) and bool(hud_model_rel)
+
+        if active:
+            # Detect and log child crashes before respawning
+            if _proc is not None and not _proc.is_alive():
+                logger.warning("[HUD] child process died (exit=%s); respawning", _proc.exitcode)
+                _kill_proc()
+            _ensure_proc()
+            _idle_since = None
+        elif _proc is not None:
+            # Release idle child after timeout
+            if _idle_since is None:
+                _idle_since = t0
+            elif (t0 - _idle_since) > _IDLE_TEARDOWN_S:
+                _kill_proc()
+                _idle_since = None
+
+        if active:
             coords_str = getattr(config, "hud_roi_coords", _HUD_ROI_DEFAULT_STR) or _HUD_ROI_DEFAULT_STR
             roi_dict = _parse_roi(coords_str) or _parse_roi(_HUD_ROI_DEFAULT_STR)
             model_path = (hud_model_rel if os.path.isabs(hud_model_rel)
@@ -512,5 +545,5 @@ def _feeder(config: "Config", stop_event: threading.Event) -> None:
 
         fps = max(1, min(10, int(getattr(config, "second_inference_fps", 2))))
         elapsed = time.perf_counter() - t0
-        interval = 0.2 if not (enabled or forced) else max((1.0 / fps) - elapsed, 0.05)
+        interval = 0.2 if not active else max((1.0 / fps) - elapsed, 0.05)
         stop_event.wait(interval)

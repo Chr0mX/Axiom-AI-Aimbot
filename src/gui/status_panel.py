@@ -17,6 +17,7 @@ from PyQt6.QtGui import (QPainter, QColor, QFont, QPixmap, QLinearGradient,
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
 
 from core.language_manager import get_text, language_manager
+from version import __version__
 
 # Try to import theme functions from qfluentwidgets
 try:
@@ -510,7 +511,7 @@ class StatusPanel(QWidget):
         self.title_label = QLabel("Axiom")
         self.title_label.setObjectName("titleLabel")
         
-        self.version_label = QLabel("v6.1")
+        self.version_label = QLabel(f"v{__version__}")
         self.version_label.setObjectName("versionLabel")
 
         # self.header_layout.addWidget(self.logo_label) # 移除原本的添加
@@ -555,10 +556,10 @@ class StatusPanel(QWidget):
         self.screenshot_row = StatusRow(get_text('screenshot_method'))
 
         # 8. 狀態行 - 截圖 FPS (measured capture rate)
-        self.screenshot_fps_row = StatusRow(get_text('status_panel_screenshot_fps', 'Screenshot FPS'))
+        self.screenshot_fps_row = StatusRow(get_text('status_panel_screenshot_fps', 'Capture FPS'))
 
         # 9. 狀態行 - 偵測 FPS
-        self.detection_fps_row = StatusRow(get_text('status_panel_detection_fps', 'Detection FPS'))
+        self.detection_fps_row = StatusRow(get_text('status_panel_detection_fps', 'Inference FPS'))
 
         # 10. 狀態行 - Source FPS (nominal rate reported by the source device)
         self.source_fps_row = StatusRow(get_text('status_panel_source_fps', 'Source FPS'))
@@ -882,7 +883,12 @@ class StatusPanel(QWidget):
 
         # 更新 Source FPS (nominal rate from device/monitor) ──────────────────
         source_method = str(getattr(self.config, 'screenshot_method', 'mss')).lower()
-        nominal_fps = float(getattr(self.config, 'source_nominal_fps', 0.0))
+        if source_method == 'udp':
+            # udp_recv_fps = assembled frames/sec straight from the sender;
+            # source_nominal_fps for UDP is only the local decode throughput.
+            nominal_fps = float(getattr(self.config, 'udp_recv_fps', 0.0))
+        else:
+            nominal_fps = float(getattr(self.config, 'source_nominal_fps', 0.0))
 
         _source_label_map = {
             'uvc':   get_text('status_panel_source_fps_uvc',    'UVC Source FPS'),
@@ -895,7 +901,20 @@ class StatusPanel(QWidget):
                            get_text('status_panel_source_fps', 'Source FPS'))
         self.source_fps_row.label.setText(source_fps_label)
         if nominal_fps > 0:
-            self.source_fps_row.set_value(f"{nominal_fps:.0f} Hz")
+            unit = "fps" if source_method == 'udp' else "Hz"
+            fps_text = f"{nominal_fps:.0f} {unit}"
+            fps_color = None
+            if source_method == 'udp':
+                # Surface real packet loss directly in the status panel instead of
+                # only in the log — makes the verdict visible at a glance without
+                # digging through logs or running a separate benchmark.
+                dropped_fps = float(getattr(self.config, 'udp_dropped_fps', 0.0))
+                if dropped_fps >= 1.0:
+                    fps_text += f"  ⚠ {dropped_fps:.0f} dropped/s"
+                    fps_color = FluentColors.to_css_rgba(FluentColors.get_error_color())
+                else:
+                    fps_color = FluentColors.to_css_rgba(FluentColors.get_success_color())
+            self.source_fps_row.set_value(fps_text, fps_color)
         else:
             self.source_fps_row.set_value("—")
 
