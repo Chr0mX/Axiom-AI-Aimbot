@@ -16,6 +16,7 @@ from qfluentwidgets import (
 from ..base_page import BasePage
 from ..language_manager import t
 from win_utils.makcu_mouse import makcu_mouse as _makcu_mouse, is_makcu_connected
+from version import __version__
 
 
 class OtherPage(BasePage):
@@ -192,7 +193,7 @@ class OtherPage(BasePage):
         self.aboutTitle = SubtitleLabel(t("about_title"))
         self.aboutSubtitle = CaptionLabel(t("about_subtitle"))
         self.aboutSubtitle.setWordWrap(True)
-        self.versionLabel = BodyLabel(t("version_info"))
+        self.versionLabel = BodyLabel(f"{t('version_info')} {__version__}")
 
         # 社群連結
         self.communityLabel = BodyLabel(t("community_links"))
@@ -618,7 +619,7 @@ class OtherPage(BasePage):
         # 關於內容
         self.aboutTitle.setText(t("about_title"))
         self.aboutSubtitle.setText(t("about_subtitle"))
-        self.versionLabel.setText(t("version_info"))
+        self.versionLabel.setText(f"{t('version_info')} {__version__}")
         self.communityLabel.setText(t("community_links"))
 
         # MAKCU Hardware

@@ -17,6 +17,7 @@ from PyQt6.QtGui import (QPainter, QColor, QFont, QPixmap, QLinearGradient,
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
 
 from core.language_manager import get_text, language_manager
+from version import __version__
 
 # Try to import theme functions from qfluentwidgets
 try:
@@ -510,7 +511,7 @@ class StatusPanel(QWidget):
         self.title_label = QLabel("Axiom")
         self.title_label.setObjectName("titleLabel")
         
-        self.version_label = QLabel("v6.1")
+        self.version_label = QLabel(f"v{__version__}")
         self.version_label.setObjectName("versionLabel")
 
         # self.header_layout.addWidget(self.logo_label) # 移除原本的添加
