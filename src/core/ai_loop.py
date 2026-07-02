@@ -19,6 +19,7 @@ from win_utils import is_key_pressed
 
 logger = logging.getLogger(__name__)
 
+from . import ai_aiming
 from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
 from .ai_loop_utils import (
@@ -655,14 +656,36 @@ def ai_logic_loop(
                         confidences=confidences,
                     )
                 else:
-                    pid_x.reset()
-                    pid_y.reset()
-                    state.smooth_x = 0.0
-                    state.smooth_y = 0.0
-                    state.locked_box = None
-                    state.no_detection_frames = 0
-                    config.display_locked_box = None
-                    config.display_locked_box_is_decaying = False
+                    # No detections this frame. If sticky lock is enabled and a
+                    # target is currently locked, hold the lock (and all PID /
+                    # smoothing state) for up to lock_decay_frames frames before
+                    # giving up, instead of dropping it instantly.
+                    sticky = getattr(config, 'sticky_lock_enabled', False)
+                    holding_lock = False
+                    if sticky and state.locked_box is not None:
+                        decay = int(getattr(config, 'lock_decay_frames', 15))
+                        state.no_detection_frames += 1
+                        config.display_locked_box_is_decaying = True
+                        holding_lock = state.no_detection_frames < decay
+
+                    if not holding_lock:
+                        pid_x.reset()
+                        pid_y.reset()
+                        state.smooth_x = 0.0
+                        state.smooth_y = 0.0
+                        state.locked_box = None
+                        state.no_detection_frames = 0
+                        state.smoothed_box = None
+                        state.aim_carry_x = 0.0
+                        state.aim_carry_y = 0.0
+                        config.display_locked_box = None
+                        config.display_locked_box_is_decaying = False
+                        # Target lost — clear stale prediction/smoothing state so a
+                        # newly-acquired target isn't corrupted by the old one's history.
+                        if ai_aiming._predictor is not None:
+                            ai_aiming._predictor.reset()
+                        if ai_aiming._kalman is not None:
+                            ai_aiming._kalman.reset()
 
                 update_queues(
                     overlay_boxes_queue,

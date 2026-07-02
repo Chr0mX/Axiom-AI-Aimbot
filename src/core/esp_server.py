@@ -271,11 +271,17 @@ def _accept_loop(port: int):
                 logger.error("[WebESP] WS listener failed after 10 attempts: %s", exc)
                 return
     while not _stop.is_set():
+        listener = _ws_listener
+        if listener is None:
+            break
         try:
-            conn, _addr = _ws_listener.accept()
+            conn, _addr = listener.accept()
         except socket.timeout:
             continue
         except OSError:
+            break
+        except (AttributeError, TypeError):
+            # _ws_listener was concurrently set to None by stop() mid-iteration.
             break
         try:
             if _ws_handshake(conn):

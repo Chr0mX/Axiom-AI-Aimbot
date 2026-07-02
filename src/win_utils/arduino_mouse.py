@@ -46,6 +46,10 @@ class ArduinoMouse:
 
         Returns:
             Whether the connection was successful
+
+        Note: the lock is released before the post-open sleep (Leonardo USB
+        re-enumeration delay) and is not held during it, so move()/click()
+        are never blocked on this connection handshake.
         """
         with self._lock:
             # Close old connection
@@ -64,10 +68,6 @@ class ArduinoMouse:
                 self._com_port = com_port
                 self._baud_rate = actual_baud
                 self._connected = True
-                # Wait for Arduino to restart (Leonardo automatically restarts on connection)
-                time.sleep(2)
-                print(f"[Arduino] Successfully connected to {com_port} @ {actual_baud} baud")
-                return True
             except serial.SerialException as e:
                 print(f"[Arduino] Connection failed: {e}")
                 self._connected = False
@@ -76,6 +76,12 @@ class ArduinoMouse:
                 print(f"[Arduino] Error occurred during connection: {e}")
                 self._connected = False
                 return False
+
+        # Wait for Arduino to restart (Leonardo automatically restarts on
+        # connection) outside the lock so move()/click() are never blocked.
+        time.sleep(2)
+        print(f"[Arduino] Successfully connected to {com_port} @ {actual_baud} baud")
+        return True
 
     def _open_serial(self, com_port: str, baud_rate: int) -> int | None:
         """Open serial port at requested baud rate, falling back to 115200 on failure.

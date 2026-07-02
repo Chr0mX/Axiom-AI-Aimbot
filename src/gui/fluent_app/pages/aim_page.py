@@ -1887,7 +1887,7 @@ class AimPage(BasePage):
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
 
-        parts = ["head", "body", "center"]
+        parts = ["head", "body", "center", "custom"]
         idx = self.aimPartCombo.currentIndex()
         self._updateTargetAreaVisibility(parts[idx] if 0 <= idx < len(parts) else "head")
         self.headWidthCard.titleLabel.setText(t("head_width_ratio"))

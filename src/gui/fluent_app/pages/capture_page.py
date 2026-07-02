@@ -1044,4 +1044,3 @@ class CapturePage(BasePage):
         self.ocrScanCard.titleLabel.setText("Scan ROI")
         self.ocrScanBtn.setText("Scan ROI")
         self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "Detected"))
-        self.ocrRoiCard.titleLabel.setText("ROI Preview")

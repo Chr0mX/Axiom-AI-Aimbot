@@ -550,6 +550,11 @@ class VisualsPage(BasePage):
             from core import esp_server
             if checked:
                 esp_server.start(self._config)
+                # _actual_ws_port is set asynchronously inside the accept-loop's
+                # bind-with-fallback, which may still be settling when start()
+                # returns — re-check shortly after so the URL/QR reflect the
+                # real bound port instead of a stale/guessed one.
+                QTimer.singleShot(400, self._refreshWebEspConnect)
             else:
                 esp_server.stop()
         except Exception:
@@ -644,6 +649,8 @@ class VisualsPage(BasePage):
         self.showTracerLineCard.contentLabel.setText(t("show_tracer_line_hint", "Draw a line from screen center to each detected target"))
         self.boxThemeCard.titleLabel.setText(t("box_color_theme", "Box Color Theme"))
         self.boxThemeCard.contentLabel.setText(t("box_color_theme_hint", "Color preset for detection boxes"))
+        self.chromaSpeedCard.titleLabel.setText(t("chroma_box_speed", "Chroma Speed"))
+        self.chromaSpeedCard.contentLabel.setText(t("chroma_box_speed_hint", "Rainbow cycle speed for boxes inside FOV. 0 = off."))
         self.statusPanelElementsCard.titleLabel.setText(t("status_panel_elements", "Status Panel Elements"))
         self.statusPanelElementsCard.contentLabel.setText(t("status_panel_elements_hint", "Choose which rows are shown in status panel"))
         self.spAutoAimCheck.setText(self._shortText("auto_aim"))
@@ -669,3 +676,15 @@ class VisualsPage(BasePage):
         self.enableAcrylicCard.contentLabel.setText(t("enable_acrylic_hint"))
         self.windowAlphaCard.titleLabel.setText(t("acrylic_window_alpha"))
         self.windowAlphaCard.contentLabel.setText("")
+
+        # Web ESP overlay settings
+        self.webEspGroup.titleLabel.setText(t("web_esp_settings", "Web ESP Overlay"))
+        self.webEspEnableCard.titleLabel.setText(t("web_esp_enabled", "Enable Web ESP"))
+        self.webEspEnableCard.contentLabel.setText(t("web_esp_desc", "Stream the ESP to a browser on this PC or any device on your LAN."))
+        self.webEspHttpPortCard.titleLabel.setText(t("web_esp_http_port", "HTTP Port"))
+        self.webEspHttpPortCard.contentLabel.setText(t("web_esp_http_port_desc", "Port for the overlay web page."))
+        self.webEspWsPortCard.titleLabel.setText(t("web_esp_ws_port", "WebSocket Port"))
+        self.webEspWsPortCard.contentLabel.setText(t("web_esp_ws_port_desc", "Port for the live state stream."))
+        self.webEspConnectCard.titleLabel.setText(t("web_esp_connect", "Connect"))
+        self.webEspConnectCard.contentLabel.setText(t("web_esp_connect_desc", "Open this URL on the same PC, or scan the QR from a phone on the same Wi-Fi."))
+        self.webEspOpenBtn.setText(t("web_esp_open", "Open in browser"))

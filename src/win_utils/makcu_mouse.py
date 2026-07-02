@@ -88,39 +88,69 @@ class MakcuMouse:
         Always targets 4 Mbaud regardless of baud_rate. Tries 4M first
         (warm start / same power cycle), then falls back to sending the
         DE AD baud-change frame at 115200 before reopening at 4M.
+
+        The lock is only ever held around the actual state mutations
+        (opening the port, writing bytes, flipping _connected/_com_port) —
+        never across a time.sleep() — so move()/click() from the inference
+        thread are never blocked for the ~2s this handshake can take.
         """
+        # Fresh attempt: clear any stale stop signal left over from a prior
+        # disconnect() so this attempt isn't immediately treated as
+        # mid-disconnect. If disconnect() sets it again while we're running,
+        # that's a genuine cancel request for *this* attempt (checked below).
+        self._write_stop.clear()
+
         with self._lock:
             self._close_locked()
 
-            # Step 1: device may already be at 4M from a previous session
-            if self._try_open_locked(com_port, _OPERATING_BAUD):
+        if self._write_stop.is_set():
+            return False
+
+        # Step 1: device may already be at 4M from a previous session
+        if self._try_open(com_port, _OPERATING_BAUD):
+            with self._lock:
                 self._connected = True
                 self._com_port = com_port
-                self._query_info_locked()
-                logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
-            else:
-                # Step 2: send DE AD baud-change at 115200 then reopen at 4M
-                try:
-                    s = serial.Serial(com_port, 115200, timeout=0.5, write_timeout=0.1)
-                    time.sleep(0.05)
-                    s.write(_BAUD_CHANGE_FRAME)
-                    s.flush()
-                    time.sleep(0.1)
-                    s.close()
-                except serial.SerialException as exc:
-                    logger.error("[MAKCU] Baud-change frame failed: %s", exc)
-                    return False
+            self._query_info()
+            logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
+        else:
+            if self._write_stop.is_set():
+                return False
 
+            # Step 2: send DE AD baud-change at 115200 then reopen at 4M
+            try:
+                s = serial.Serial(com_port, 115200, timeout=0.5, write_timeout=0.1)
                 time.sleep(0.05)
+                s.write(_BAUD_CHANGE_FRAME)
+                s.flush()
+                time.sleep(0.1)
+                s.close()
+            except serial.SerialException as exc:
+                logger.error("[MAKCU] Baud-change frame failed: %s", exc)
+                return False
 
-                if not self._try_open_locked(com_port, _OPERATING_BAUD):
-                    logger.error("[MAKCU] Could not connect to %s after baud change", com_port)
-                    return False
+            if self._write_stop.is_set():
+                return False
+            time.sleep(0.05)
 
+            if self._write_stop.is_set():
+                return False
+            if not self._try_open(com_port, _OPERATING_BAUD):
+                logger.error("[MAKCU] Could not connect to %s after baud change", com_port)
+                return False
+
+            with self._lock:
                 self._connected = True
                 self._com_port = com_port
-                self._query_info_locked()
-                logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
+            self._query_info()
+            logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
+
+        if self._write_stop.is_set():
+            # disconnect() requested mid-flight — tear back down instead of
+            # leaving a live connection behind after disconnect() already ran.
+            with self._lock:
+                self._close_locked()
+            return False
 
         # Start threads outside the lock
         self._start_stream()
@@ -128,35 +158,49 @@ class MakcuMouse:
         self._start_reconnect_thread()
         return True
 
-    def _try_open_locked(self, com_port: str, baud: int) -> bool:
-        """Open port at baud, probe with km.version(). Returns True if km.MAKCU found."""
+    def _try_open(self, com_port: str, baud: int) -> bool:
+        """Open port at baud, probe with km.version(). Returns True if km.MAKCU found.
+
+        Acquires _lock only around the individual serial operations — never
+        across a sleep — so it never blocks move()/click() for the duration
+        of this handshake.
+        """
         try:
-            self._serial = serial.Serial(com_port, baud, timeout=0.3, write_timeout=0.1)
+            with self._lock:
+                self._serial = serial.Serial(com_port, baud, timeout=0.3, write_timeout=0.1)
+                ser = self._serial
             time.sleep(0.05)
-            self._serial.reset_input_buffer()
-            self._serial.write(self.CMD_VERSION.encode('ascii'))
-            self._serial.flush()
+            with self._lock:
+                ser.reset_input_buffer()
+                ser.write(self.CMD_VERSION.encode('ascii'))
+                ser.flush()
             deadline = time.monotonic() + 0.5
             raw = b''
             while time.monotonic() < deadline:
-                if self._serial.in_waiting:
-                    raw += self._serial.read(self._serial.in_waiting)
-                    if b'km.MAKCU' in raw:
-                        break
-                else:
+                with self._lock:
+                    waiting = ser.in_waiting
+                    if waiting:
+                        raw += ser.read(waiting)
+                if b'km.MAKCU' in raw:
+                    break
+                if not waiting:
                     time.sleep(0.01)
             if b'km.MAKCU' not in raw:
-                self._close_locked()
+                with self._lock:
+                    self._close_locked()
                 return False
             self._version_string = raw.decode('ascii', errors='ignore').replace('>>>', '').strip()
-            self._serial.write(self.CMD_ECHO_OFF.encode('ascii'))
-            self._serial.flush()
+            with self._lock:
+                ser.write(self.CMD_ECHO_OFF.encode('ascii'))
+                ser.flush()
             time.sleep(0.1)
-            self._serial.reset_input_buffer()
+            with self._lock:
+                ser.reset_input_buffer()
             return True
         except serial.SerialException as exc:
-            logger.debug("[MAKCU] _try_open_locked %s@%d failed: %s", com_port, baud, exc)
-            self._close_locked()
+            logger.debug("[MAKCU] _try_open %s@%d failed: %s", com_port, baud, exc)
+            with self._lock:
+                self._close_locked()
             return False
 
     def _close_locked(self):
@@ -298,22 +342,35 @@ class MakcuMouse:
                 else:
                     time.sleep(0.001)
             except Exception:
+                # Device likely dropped mid-read. Mark disconnected (matches
+                # the write-path pattern in _write_worker/click()) so the
+                # reconnect watchdog notices instead of the button state
+                # (lmb_held/rmb_held) silently freezing forever.
+                self._connected = False
                 break
 
     # ------------------------------------------------------------------
     # Info query
     # ------------------------------------------------------------------
 
-    def _query_info_locked(self) -> dict:
-        """Send km.info() and parse key=value pairs. Caller must hold _lock."""
-        if not self._serial:
-            return {}
+    def _query_info(self) -> dict:
+        """Send km.info() and parse key=value pairs.
+
+        Manages its own locking, releasing it across the reply-wait sleep,
+        so it never blocks move()/click() for the duration of the query.
+        """
         try:
-            self._serial.reset_input_buffer()
-            self._serial.write(self.CMD_INFO.encode('ascii'))
-            self._serial.flush()
+            with self._lock:
+                if not self._serial:
+                    return {}
+                self._serial.reset_input_buffer()
+                self._serial.write(self.CMD_INFO.encode('ascii'))
+                self._serial.flush()
             time.sleep(0.15)
-            raw = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore')
+            with self._lock:
+                if not self._serial:
+                    return {}
+                raw = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore')
             info = {}
             for line in raw.splitlines():
                 line = line.strip().replace('>>>', '').strip()
@@ -327,8 +384,7 @@ class MakcuMouse:
 
     def query_info(self) -> dict:
         """Return parsed km.info() dict."""
-        with self._lock:
-            return self._query_info_locked()
+        return self._query_info()
 
     @property
     def device_info(self) -> dict:
