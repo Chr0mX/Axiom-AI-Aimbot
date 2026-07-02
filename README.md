@@ -9,6 +9,8 @@
 <h1>Axiom AI</h1>
 <p>Adaptive aim assistance powered by computer vision to support gamers who need it most.</p>
 
+## <a href="https://discord.gg/DpcqaQEj5b">Discord (Support)</a>
+
 <p>
   <img src="./guidemo.gif" alt="Demo GIF" width="720">
 </p>
@@ -423,6 +425,7 @@ For full license details, see [LICENSE.txt](LICENSE.txt) or visit [PolyForm Nonc
 
 ## 📞 Contact & Support
 
+- **Discord**: [Join for support](https://discord.gg/DpcqaQEj5b)
 - **GitHub Issues**: [Chr0mX/Axiom-AI-Aimbot](https://github.com/Chr0mX/Axiom-AI-Aimbot/issues) — bug reports and feature requests for this fork.
 
 The original project's Discord/contact channels are no longer affiliated with this repository and aren't listed here to avoid pointing people at stale/inactive links.
