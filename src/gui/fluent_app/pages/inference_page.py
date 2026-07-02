@@ -476,12 +476,15 @@ class InferencePage(BasePage):
 
         self.fovCard.titleLabel.setText(t("fov_size"))
         self.fovFollowCard.titleLabel.setText(t("fov_follow_mouse"))
+        self.fovCircleCard.titleLabel.setText(t("fov_circle_filter", "Circular FOV Filter"))
+        self.fovCircleCard.contentLabel.setText(t("fov_circle_filter_desc", "Only track targets inside the FOV circle, not the full square region"))
         self.detectRangeCard.titleLabel.setText(t("detect_range_size"))
         self.detectRangeCard.contentLabel.setText(t("detect_range_note"))
 
         self.detectIntervalCard.titleLabel.setText(t("detect_interval"))
         self.confidenceCard.titleLabel.setText(t("min_confidence"))
         self.semanticFilterCard.titleLabel.setText(t("semantic_filter_enabled", "Semantic FP Filter"))
+        self.semanticFilterCard.contentLabel.setText(t("semantic_filter_desc", "Discard trees, vehicles, and HUD elements by class name and geometry"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
@@ -492,9 +495,12 @@ class InferencePage(BasePage):
 
         self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
         self.skipLetterboxCard.contentLabel.setText(t("skip_letterbox_desc"))
+        self.cudaIoBindingCard.titleLabel.setText(t("cuda_io_binding", "CUDA IO Binding"))
+        self.cudaIoBindingCard.contentLabel.setText(t("cuda_io_binding_desc", "Zero-copy GPU inference. Effective only with CUDA or TensorRT backend."))
         self.frameSkipCard.titleLabel.setText(t("frame_skip_enabled", "Frame Skip Gate"))
         self.frameSkipCard.contentLabel.setText(t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."))
         self.frameSkipThresholdCard.titleLabel.setText(t("frame_skip_threshold", "Skip Threshold"))
+        self.frameSkipThresholdCard.contentLabel.setText(t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"))
 
         self.boxSmoothGroup.titleLabel.setText("Box Smoothing")
         self.boxEmaEnableCard.titleLabel.setText("Box Smoothing")

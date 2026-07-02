@@ -308,9 +308,12 @@ class ConvertPage(BasePage):
         super().retranslateUi()
         self.convertGroup.titleLabel.setText(t("trt_convert_settings", "Engine Conversion"))
         self.modelCard.titleLabel.setText(t("trt_source_model", "Source ONNX Model"))
+        self.modelCard.contentLabel.setText(t("trt_source_model_desc", "Select the .onnx model to compile into a TensorRT engine."))
         self.browseBtn.setText(t("trt_browse", "Browse"))
         self.fp16Card.titleLabel.setText(t("trt_fp16", "FP16 Precision"))
+        self.fp16Card.contentLabel.setText(t("trt_fp16_desc", "Half precision — ~2× faster on RTX GPUs, negligible accuracy loss."))
         self.workspaceCard.titleLabel.setText(t("trt_workspace", "Builder Workspace (MiB)"))
+        self.workspaceCard.contentLabel.setText(t("trt_workspace_desc", "GPU memory budget for the build. Increase for larger models."))
         self.outputCard.titleLabel.setText(t("trt_output", "Output Cache Directory"))
         self.logLabel.setText(t("trt_build_log", "Build Log"))
         if not (self._worker and self._worker.isRunning()):
