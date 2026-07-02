@@ -44,11 +44,16 @@ html, body {
   cursor: pointer;
   z-index: 20;
   display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s, border-color 0.15s;
+  opacity: 1;
+  transition: background 0.15s, border-color 0.15s, opacity 0.4s ease;
 }
 #cfg-toggle:hover {
   background: rgba(0, 224, 160, 0.15);
   border-color: rgba(0, 224, 160, 0.7);
+  opacity: 1;
+}
+#cfg-toggle.faded {
+  opacity: 0;
 }
 
 /* ── Settings panel ───────────────────────────────────────────── */

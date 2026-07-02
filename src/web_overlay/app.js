@@ -342,34 +342,30 @@
 
     ctx.font = `${fs}px Consolas, monospace`;
 
+    const GREEN = "rgba(0,255,100,0.92)";
+    const RED   = "rgba(255,60,60,0.9)";
+    const NEUTRAL = "rgba(200,200,214,0.82)";
+
     const aim = s.active;
+    const firing = s.aim_firing;
     const model = (s.model || "").replace(/\.onnx$/i, "") || "none";
     const capMethod = (s.screenshot_method || "dxcam").toUpperCase();
-    const srcFps = (s.source_fps > 0) ? `${Math.round(s.source_fps)}Hz` : "—";
-    const capFps = s.capture_fps   != null ? `${s.capture_fps.toFixed(1)}fps`   : "";
-    const infFps = s.inference_fps != null ? `${s.inference_fps.toFixed(1)}fps` : "";
-    const recvFps = (s.udp_recv_fps != null && s.udp_recv_fps > 0)
-      ? `${s.udp_recv_fps.toFixed(1)}fps recv` : "";
-    const isUdp = capMethod === "UDP";
-    const capLine = isUdp
-      ? `cap    UDP  ${recvFps}  ${capFps} dec`
-      : `cap    ${capMethod}  ${srcFps}  ${capFps}`;
-
-    const firing = s.aim_firing;
-    const aimStatus = firing ? "● AIMING" : (aim ? "○ IDLE" : "○ OFF");
-    const aimStatusColor = firing ? "rgba(255,200,0,0.95)" : (aim ? "rgba(160,200,160,0.8)" : "rgba(150,150,160,0.7)");
+    const capFps = s.capture_fps   != null ? `${s.capture_fps.toFixed(1)} fps`   : "—";
+    const infFps = s.inference_fps != null ? `${s.inference_fps.toFixed(1)} fps` : "—";
     const latStr = latencyMs != null ? `${latencyMs}ms` : "—";
 
     const lines = [
-      { text: aim ? "● AIM ON" : "○ AIM OFF",
-        color: aim ? "rgba(0,255,100,0.92)" : "rgba(255,60,60,0.9)" },
-      { text: `aim status  ${aimStatus}`,  color: aimStatusColor },
-      { text: `model  ${model}`,           color: "rgba(210,210,210,0.82)" },
-      { text: capLine,                     color: "rgba(170,170,190,0.75)" },
-      { text: `inf    ${infFps}`,          color: "rgba(170,170,190,0.75)" },
-      { text: `targets ${count}`,          color: "rgba(0,224,160,0.88)"  },
-      { text: `2pc latency  ${latStr}`,    color: "rgba(180,170,210,0.78)" },
-      { text: `net ${packetHz}hz  draw ${drawFps}fps`, color: "rgba(110,110,130,0.7)" },
+      { text: aim ? "● Aim ON" : "● Aim OFF",
+        color: aim ? GREEN : RED },
+      { text: `Aim Status  ${firing ? "● Active" : "● Idle"}`,
+        color: firing ? GREEN : RED },
+      { text: `Model: ${model}`,                    color: NEUTRAL },
+      { text: `Capture Method: ${capMethod}`,        color: NEUTRAL },
+      { text: `Capture FPS: ${capFps}`,              color: NEUTRAL },
+      { text: `Inference FPS: ${infFps}`,            color: NEUTRAL },
+      { text: `Target: ${count}`,                    color: "rgba(0,224,160,0.88)" },
+      { text: `Net Latency: ${latStr}  |  Draw FPS: ${drawFps}`,
+        color: "rgba(110,110,130,0.7)" },
     ];
 
     // Measure widest line for background rect
@@ -424,6 +420,20 @@
     if (!cfgPanel.contains(e.target) && e.target !== cfgToggle)
       cfgPanel.classList.remove("open");
   });
+
+  // ── Gear auto-fade: hide after 5s idle, reappear on any activity/hover ──
+  let idleTimer = null;
+  function scheduleGearFade() {
+    cfgToggle.classList.remove("faded");
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      if (!cfgPanel.classList.contains("open")) cfgToggle.classList.add("faded");
+    }, 5000);
+  }
+  window.addEventListener("mousemove", scheduleGearFade);
+  window.addEventListener("mousedown", scheduleGearFade);
+  cfgToggle.addEventListener("mouseenter", scheduleGearFade);
+  scheduleGearFade();
 
   function bindRange(id, key, valId) {
     const el = document.getElementById(id);

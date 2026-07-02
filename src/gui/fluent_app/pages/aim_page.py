@@ -181,16 +181,17 @@ class _JitterLiveWindow(QDialog):
         self._info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._info.setStyleSheet("color: #888; font-size: 10px;")
 
-        self._stop_btn = QPushButton("■ Stop & Save")
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self._onStopClicked)
+        self._hint = QLabel("Click anywhere in this window to finish & save")
+        self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint.setWordWrap(True)
+        self._hint.setStyleSheet("color: #0c8; font-size: 10px;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(8)
         layout.addWidget(self._canvas, alignment=Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._info)
-        layout.addWidget(self._stop_btn)
+        layout.addWidget(self._hint)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
@@ -200,7 +201,6 @@ class _JitterLiveWindow(QDialog):
 
     def setRecorder(self, recorder):
         self._recorder = recorder
-        self._stop_btn.setEnabled(True)
         self._info.setText("Recording… 0 frames")
         self._timer.start(150)
 
@@ -209,9 +209,16 @@ class _JitterLiveWindow(QDialog):
         self._canvas.setPixmap(_render_frames_pixmap(frames))
         self._info.setText(f"Recording… {len(frames)} frames")
 
-    def _onStopClicked(self):
-        self._timer.stop()
-        self._stop_callback()
+    def mousePressEvent(self, event):
+        # Clicking anywhere in the window (not a dedicated Stop button) finishes
+        # the recording — reaching for a small button would itself bake an extra
+        # cursor movement into the recorded pattern. Ignored during the
+        # countdown, before a recorder actually exists.
+        if self._recorder is not None:
+            self._timer.stop()
+            self._stop_callback()
+        else:
+            super().mousePressEvent(event)
 
     def closeEvent(self, event):
         self._timer.stop()

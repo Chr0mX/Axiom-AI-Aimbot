@@ -729,8 +729,11 @@ class NDICapture:
         self._ndi_frame_ref: list = [None]    # list[np.ndarray | None]
         self._ndi_region_ref: list = [None]
         self._ndi_stop: threading.Event = threading.Event()
-        # FPS caching — read once from frame metadata, then skip per-frame probe
-        self._fps_cached: bool = False
+        # Live-measured receive rate — actual delivery can run slower than the
+        # source's declared/advertised rate under network contention, so track
+        # real frames/sec like the UDP backend does for the status panel.
+        self._live_fps_count: int = 0
+        self._live_fps_t0: float = time.perf_counter()
         # Ping-pong pair of BGRA buffers for the crop-path — eliminates per-frame .copy().
         # Alternating ensures the buffer just returned stays valid while grab() fills the other.
         self._bgra_bufs: list[np.ndarray | None] = [None, None]
@@ -925,30 +928,19 @@ class NDICapture:
         if raw is None:
             return None
 
+        self._live_fps_count += 1
+        _now_fps = time.perf_counter()
+        _elapsed_fps = _now_fps - self._live_fps_t0
+        if _elapsed_fps >= 1.0:
+            self.config.source_nominal_fps = self._live_fps_count / _elapsed_fps
+            self._live_fps_count = 0
+            self._live_fps_t0 = _now_fps
+
         if frame_w > 0 and frame_h > 0:
             self.preview_width = frame_w
             self.preview_height = frame_h
             self.config.ndi_width = frame_w
             self.config.ndi_height = frame_h
-
-        if not self._fps_cached:
-            _frame_fps: float = 0.0
-            try:
-                _frame_fps = float(frame_obj.get_frame_rate())
-            except Exception:
-                for _attr in ('frame_rate', 'framerate', 'fps', 'video_fps'):
-                    _v = getattr(frame_obj, _attr, None)
-                    if isinstance(_v, (int, float)) and float(_v) > 0:
-                        _frame_fps = float(_v)
-                        break
-                if _frame_fps <= 0:
-                    _num = getattr(frame_obj, 'frame_rate_N', None)
-                    _den = getattr(frame_obj, 'frame_rate_D', None)
-                    if isinstance(_num, (int, float)) and isinstance(_den, (int, float)) and float(_den) > 0:
-                        _frame_fps = float(_num) / float(_den)
-            if _frame_fps > 0:
-                self.config.source_nominal_fps = _frame_fps
-                self._fps_cached = True
 
         recv_fourcc: str = getattr(self, '_recv_fourcc', 'rgba')
 
@@ -1291,7 +1283,9 @@ class UVCCapture:
         self.preview_width = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) or width or 1))
         self.preview_height = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or height or 1))
         self.preview_fps = max(1, int(self.cap.get(cv2.CAP_PROP_FPS) or fps or 1))
-        # Publish nominal FPS so the status panel can display it.
+        # Seed with the driver-probed capability so the status panel shows
+        # something before the first live measurement below completes; the
+        # reader worker overwrites this every second with the actual received rate.
         config.source_nominal_fps = float(self.preview_fps)
 
         # Verify FOURCC was actually accepted by the driver.  Without MJPEG,
@@ -1346,11 +1340,21 @@ class UVCCapture:
             self._preview_thread.start()
 
     def _reader_worker(self) -> None:
+        _fps_count = 0
+        _fps_t0 = time.perf_counter()
         while not self._reader_stop.is_set():
             ok, frame = self.cap.read()
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
+
+                _fps_count += 1
+                _now = time.perf_counter()
+                _elapsed = _now - _fps_t0
+                if _elapsed >= 1.0:
+                    self.config.source_nominal_fps = _fps_count / _elapsed
+                    _fps_count = 0
+                    _fps_t0 = _now
             else:
                 time.sleep(0.005)
 
