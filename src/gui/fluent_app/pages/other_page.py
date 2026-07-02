@@ -208,6 +208,12 @@ class OtherPage(BasePage):
         self.githubBtn = PushButton(t("github"))
         self.githubBtn.setIcon(FluentIcon.GITHUB)
 
+        self.discordOriginalBtn = PushButton(t("discord_original", "Discord (Original)"))
+        self._updateDiscordOriginalIcon()
+
+        self.githubOriginalBtn = PushButton(t("github_original", "Github (Original)"))
+        self.githubOriginalBtn.setIcon(FluentIcon.GITHUB)
+
         self.donateBtn = PushButton(t("donate"))
         self.donateBtn.setIcon(FluentIcon.HEART)
     
@@ -271,6 +277,8 @@ class OtherPage(BasePage):
         btnLayout.setSpacing(12)
         btnLayout.addWidget(self.discordBtn)
         btnLayout.addWidget(self.githubBtn)
+        btnLayout.addWidget(self.discordOriginalBtn)
+        btnLayout.addWidget(self.githubOriginalBtn)
         btnLayout.addWidget(self.donateBtn)
         btnLayout.addStretch(1)
         aboutLayout.addLayout(btnLayout)
@@ -302,8 +310,10 @@ class OtherPage(BasePage):
         self._makcuHwTimer.start(3000)
 
         # 社群按鈕
-        self.discordBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")))
-        self.githubBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/iisHong0w0/Axiom-AI-Aimbot")))
+        self.discordBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/DpcqaQEj5b")))
+        self.githubBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/Chr0mX/Axiom-AI-Aimbot")))
+        self.discordOriginalBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")))
+        self.githubOriginalBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/iisHong0w0/Axiom-AI-Aimbot")))
         self.donateBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(os.path.join(self.base_path, "..", "..", "MVP.html")))))
     
     def _loadFromConfig(self):
@@ -586,6 +596,16 @@ class OtherPage(BasePage):
         if os.path.exists(icon_path):
             self.discordBtn.setIcon(QIcon(icon_path))
 
+    def _updateDiscordOriginalIcon(self):
+        """根據當前主題更新 Discord (Original) 圖標顏色"""
+        if isDarkTheme():
+            icon_file = "discord_white.svg"
+        else:
+            icon_file = "discord.svg"
+        icon_path = os.path.join(self.base_path, "assets", icon_file)
+        if os.path.exists(icon_path):
+            self.discordOriginalBtn.setIcon(QIcon(icon_path))
+
     def retranslateUi(self):
         """刷新翻譯"""
         super().retranslateUi()
@@ -621,6 +641,11 @@ class OtherPage(BasePage):
         self.aboutSubtitle.setText(t("about_subtitle"))
         self.versionLabel.setText(f"{t('version_info')} {__version__}")
         self.communityLabel.setText(t("community_links"))
+        self.discordBtn.setText(t("discord"))
+        self.githubBtn.setText(t("github"))
+        self.discordOriginalBtn.setText(t("discord_original", "Discord (Original)"))
+        self.githubOriginalBtn.setText(t("github_original", "Github (Original)"))
+        self.donateBtn.setText(t("donate"))
 
         # MAKCU Hardware
         self.makcuHwGroup.titleLabel.setText(t("makcu_hw_info", "MAKCU Hardware"))
@@ -634,3 +659,4 @@ class OtherPage(BasePage):
 
         # 更新 Discord 圖標
         self._updateDiscordIcon()
+        self._updateDiscordOriginalIcon()

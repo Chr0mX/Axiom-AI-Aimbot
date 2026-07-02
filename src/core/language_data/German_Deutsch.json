@@ -144,6 +144,8 @@
     "theme_toggle": "Thema wechseln",
     "discord": "Discord",
     "github": "Github",
+    "discord_original": "Discord (Original)",
+    "github_original": "Github (Original)",
     "update_available_title": "Neue Version verfügbar",
     "update_available_content": "Neue Version {new_version} erkannt. Möchten Sie diese herunterladen?\n\nAktuelle Version: v{current_version}",
     "update_yes": "Jetzt herunterladen",

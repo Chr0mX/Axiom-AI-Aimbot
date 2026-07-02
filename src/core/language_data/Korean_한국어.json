@@ -144,6 +144,8 @@
     "theme_toggle": "테마 전환",
     "discord": "Discord",
     "github": "Github",
+    "discord_original": "Discord (원본)",
+    "github_original": "Github (원본)",
     "update_available_title": "새로운 버전을 사용할 수 있습니다",
     "update_available_content": "새로운 버전 {new_version}이(가) 감지되었습니다. 다운로드하시겠습니까?\n\n현재 버전: v{current_version}",
     "update_yes": "지금 다운로드",

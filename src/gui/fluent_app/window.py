@@ -508,16 +508,16 @@ class AxiomWindow(FluentWindow):
             routeKey="discord",
             icon=QIcon(os.path.join(self.base_path, "assets", "discord.svg")),
             text=t("discord"),
-            onClick=lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")),
+            onClick=lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/DpcqaQEj5b")),
             position=NavigationItemPosition.BOTTOM
         )
-        
+
         # Github
         self.githubButton = self.navigationInterface.addItem(
             routeKey="github",
             icon=FluentIcon.GITHUB,
             text=t("github"),
-            onClick=lambda: QDesktopServices.openUrl(QUrl("https://github.com/iisHong0w0/Axiom-AI-Aimbot")),
+            onClick=lambda: QDesktopServices.openUrl(QUrl("https://github.com/Chr0mX/Axiom-AI-Aimbot")),
             position=NavigationItemPosition.BOTTOM
         )
         

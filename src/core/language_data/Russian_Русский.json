@@ -144,6 +144,8 @@
     "theme_toggle": "Сменить тему",
     "discord": "Discord",
     "github": "Github",
+    "discord_original": "Discord (Оригинал)",
+    "github_original": "Github (Оригинал)",
     "update_available_title": "Доступна новая версия",
     "update_available_content": "Обнаружена новая версия {new_version}. Хотите скачать её?\n\nТекущая версия: v{current_version}",
     "update_yes": "Скачать",

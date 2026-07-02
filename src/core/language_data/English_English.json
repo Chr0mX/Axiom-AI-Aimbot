@@ -155,6 +155,8 @@
     "theme_toggle": "Toggle Theme",
     "discord": "Discord",
     "github": "Github",
+    "discord_original": "Discord (Original)",
+    "github_original": "Github (Original)",
     "key_mouse_left": "Mouse Left",
     "key_mouse_right": "Mouse Right",
     "key_mouse_middle": "Mouse Middle",
