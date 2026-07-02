@@ -15,6 +15,7 @@ from qfluentwidgets import (
 
 from ..base_page import BasePage
 from ..language_manager import t
+from ..theme_colors import ThemeColors
 from win_utils.makcu_mouse import makcu_mouse as _makcu_mouse, is_makcu_connected
 from version import __version__
 
@@ -314,7 +315,7 @@ class OtherPage(BasePage):
         self.githubBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/Chr0mX/Axiom-AI-Aimbot")))
         self.discordOriginalBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")))
         self.githubOriginalBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/iisHong0w0/Axiom-AI-Aimbot")))
-        self.donateBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(os.path.join(self.base_path, "..", "..", "MVP.html")))))
+        self.donateBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(os.path.join(self.base_path, "..", "MVP.html")))))
     
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -506,6 +507,7 @@ class OtherPage(BasePage):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         cache_dir = os.path.join(project_root, "trt_cache")
         self.trtCacheCard.contentLabel.setText(cache_dir)
+        self.trtCacheCard.contentLabel.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY.get()};")
 
         # AppData packages path
         localappdata = os.environ.get("LOCALAPPDATA", "")

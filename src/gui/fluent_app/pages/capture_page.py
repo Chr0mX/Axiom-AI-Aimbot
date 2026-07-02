@@ -17,6 +17,7 @@ from qfluentwidgets import (
 from ..components.slider_spin_card import SliderSpinCard
 from ..base_page import BasePage
 from ..language_manager import t
+from ..theme_colors import ThemeColors
 
 
 def _get_local_ips() -> list[str]:
@@ -392,7 +393,11 @@ class CapturePage(BasePage):
         self.ocrRoiLabel.setFixedHeight(58)
         self.ocrRoiLabel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.ocrRoiLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ocrRoiLabel.setStyleSheet("background: #111; border-radius: 3px;")
+        self.ocrRoiLabel.setStyleSheet(
+            f"background: {ThemeColors.CARD_BACKGROUND.get()}; "
+            f"border: 1px solid {ThemeColors.CARD_BORDER.get()}; "
+            f"border-radius: 8px;"
+        )
         _roi_vbox.addWidget(self.ocrRoiLabel)
 
         self._ocrRefreshTimer = QTimer(self)
@@ -1040,6 +1045,11 @@ class CapturePage(BasePage):
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")
         self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")
         self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Active Weapon"))
+        self.ocrRoiLabel.setStyleSheet(
+            f"background: {ThemeColors.CARD_BACKGROUND.get()}; "
+            f"border: 1px solid {ThemeColors.CARD_BORDER.get()}; "
+            f"border-radius: 8px;"
+        )
         self.ocrFpsCard.titleLabel.setText("2nd Inference FPS")
         self.ocrScanCard.titleLabel.setText("Scan ROI")
         self.ocrScanBtn.setText("Scan ROI")

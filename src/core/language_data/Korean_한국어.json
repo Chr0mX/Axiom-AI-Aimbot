@@ -1,7 +1,7 @@
 {
     "about": "정보",
-    "about_subtitle": "대충 만든 평범한 AI 오토에임입니다. 질문이나 제안이 있거나 모델 및 설정을 공유보고 싶다면 디스코드 서버에 참여하세요.",
-    "about_title": "Axiom V6 정보",
+    "about_subtitle": "원본 Axiom AI Aimbot 프로젝트를 커뮤니티가 이어받아 유지 중인 버전입니다. 질문이나 제안이 있거나 모델 및 설정을 공유하고 싶다면 디스코드 서버에 참여하세요.",
+    "about_title": "Axiom 정보",
     "arduino_com_port": "COM 포트:",
     "connected": "연결됨",
     "disconnected": "연결 안됨",
