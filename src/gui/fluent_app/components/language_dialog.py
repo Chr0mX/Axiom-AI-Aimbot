@@ -115,9 +115,12 @@ class LanguageDialog(MaskDialogBase):
         self.currentLanguage = currentLanguage
         self.selectedLanguage = currentLanguage
         self.languageCards = []
-        
-        # Main widget
-        self.widget = QWidget(self)
+
+        # Build directly onto the base class's existing self.widget (a QFrame
+        # already added to MaskDialogBase's centering _hBoxLayout) instead of
+        # replacing it — replacing it left the real centering layout pointing
+        # at an empty orphaned frame while this dialog's actual content sat
+        # in a brand-new QWidget that no layout ever positioned.
         self.widget.setFixedSize(400, 500)
         self._applyWidgetStyles()
         

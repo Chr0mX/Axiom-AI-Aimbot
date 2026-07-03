@@ -647,6 +647,13 @@ class SetupWizard(QDialog):
             cur_backend = getattr(self._config, 'inference_backend', 'auto')
             auto_idx = 1 if cur_backend == "directml" else 0
 
+        # Explicitly sync config to the initial selection rather than relying
+        # on currentIndexChanged to fire it: Qt only emits that signal when
+        # the index actually differs from the combo's default of 0, so if
+        # auto_idx == 0 the signal never fires and self._config.inference_backend
+        # would silently keep whatever stale value it had before, while the
+        # combo visually shows "TensorRT (NVIDIA GPU)".
+        self._config.inference_backend = "directml" if auto_idx == 1 else "tensorrt"
         self._combo_backend.setCurrentIndex(auto_idx)
         self._combo_backend.currentIndexChanged.connect(self._onBackendChanged)
         backend_row.addWidget(self._combo_backend)
@@ -798,9 +805,10 @@ class SetupWizard(QDialog):
             except Exception:
                 trt_ready = False
             if not trt_ready:
-                # setup_wizard.py lives at src/gui/fluent_app/ → up 3 = project root
-                project_root = os.path.dirname(os.path.dirname(
-                    os.path.dirname(os.path.abspath(__file__))))
+                # setup_wizard.py lives at src/gui/fluent_app/ → up 4 = project root
+                # (fluent_app→gui→src→project root; matches _refreshModelCombo() above)
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__)))))
                 bat = os.path.join(project_root, "Install TensorRT.bat")
                 if os.path.exists(bat):
                     import subprocess

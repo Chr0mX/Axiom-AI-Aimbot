@@ -7,6 +7,7 @@ import dataclasses
 import json
 import logging
 import os
+import re
 import shutil
 from datetime import datetime
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
@@ -17,6 +18,24 @@ logger = logging.getLogger(__name__)
 
 # Bundled built-in presets shipped with the app (seeded into the user config dir).
 _BUILTIN_PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'presets')
+
+_INVALID_NAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+
+def _sanitize_config_name(name: str) -> str:
+    """Strip path separators and other filesystem-unsafe characters from a
+    preset name before it's interpolated into a file path.
+
+    Names reach here from free-text GUI dialogs and from the 'name' field of
+    an imported JSON file — both untrusted. Without this, a name like
+    "../../whatever" would escape configs_dir via os.path.join(). basename()
+    strips any directory components; the regex then strips characters that
+    are invalid in Windows filenames (or which qfluentwidgets dialogs allow
+    but the filesystem doesn't).
+    """
+    name = os.path.basename(str(name or '')).strip()
+    name = _INVALID_NAME_CHARS.sub('_', name)
+    return name.strip('. ')
 
 if TYPE_CHECKING:
     from .config import Config
@@ -76,8 +95,11 @@ class ConfigManager:
     
     def save_config(self, config_instance: Config, config_name: str) -> bool:
         """保存當前配置為參數配置"""
+        config_name = _sanitize_config_name(config_name)
+        if not config_name:
+            return False
         config_path = os.path.join(self.configs_dir, f"{config_name}.json")
-        
+
         # 創建參數配置數據
         config_data = {
             'name': config_name,
@@ -134,8 +156,11 @@ class ConfigManager:
     
     def load_config(self, config_instance: Config, config_name: str) -> bool:
         """載入參數配置"""
+        config_name = _sanitize_config_name(config_name)
+        if not config_name:
+            return False
         config_path = os.path.join(self.configs_dir, f"{config_name}.json")
-        
+
         if not os.path.exists(config_path):
             return False
             
@@ -153,8 +178,11 @@ class ConfigManager:
     
     def delete_config(self, config_name: str) -> bool:
         """刪除參數配置"""
+        config_name = _sanitize_config_name(config_name)
+        if not config_name:
+            return False
         config_path = os.path.join(self.configs_dir, f"{config_name}.json")
-        
+
         if os.path.exists(config_path):
             try:
                 os.remove(config_path)
@@ -166,9 +194,13 @@ class ConfigManager:
     
     def rename_config(self, old_name: str, new_name: str) -> bool:
         """重命名參數配置"""
+        old_name = _sanitize_config_name(old_name)
+        new_name = _sanitize_config_name(new_name)
+        if not old_name or not new_name:
+            return False
         old_path = os.path.join(self.configs_dir, f"{old_name}.json")
         new_path = os.path.join(self.configs_dir, f"{new_name}.json")
-        
+
         if os.path.exists(old_path) and not os.path.exists(new_path):
             try:
                 # 讀取舊文件並更新名稱
@@ -190,8 +222,11 @@ class ConfigManager:
     
     def export_config(self, config_name: str, export_path: str) -> bool:
         """匯出參數配置"""
+        config_name = _sanitize_config_name(config_name)
+        if not config_name:
+            return False
         config_path = os.path.join(self.configs_dir, f"{config_name}.json")
-        
+
         if os.path.exists(config_path):
             try:
                 shutil.copy2(config_path, export_path)
@@ -216,9 +251,11 @@ class ConfigManager:
             with open(import_path, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
             
-            # 獲取配置名稱
-            config_name = config_data.get('name', 'imported_config')
-            
+            # 獲取配置名稱 (untrusted — comes from the imported file's own content)
+            config_name = _sanitize_config_name(config_data.get('name', 'imported_config'))
+            if not config_name:
+                config_name = 'imported_config'
+
             # 確保名稱唯一
             original_name = config_name
             counter = 1

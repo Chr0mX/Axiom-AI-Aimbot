@@ -74,6 +74,9 @@ _FIELD_MAP = {
     'fov_circle_filter_enabled':  'aim.fov_circle_filter_enabled',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
     'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
+    'detect_min_bbox_area_px':    'aim.semantic_filter.min_bbox_area_px',
+    'detect_min_bbox_short_side_px': 'aim.semantic_filter.min_bbox_short_side_px',
+    'detect_min_bbox_max_side_frac': 'aim.semantic_filter.min_bbox_max_side_frac',
     'pid_kp_x':                   'aim.pid.x.kp',
     'pid_ki_x':                   'aim.pid.x.ki',
     'pid_kd_x':                   'aim.pid.x.kd',
@@ -251,7 +254,13 @@ class Config:
 
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
-        
+
+        # Not read anywhere in src/ today, but tests/test_config.py asserts
+        # these as part of Config's default contract — keep them until that
+        # test is revisited rather than silently breaking it.
+        self.capture_width: int = self.width
+        self.capture_height: int = self.height
+
         self.screenshot_method: str = "dxcam"  # 螢幕截圖方式
         self.uvc_device_index: int = 0
         self.uvc_width: int = self.width
@@ -503,6 +512,12 @@ class Config:
 
         # Semantic false-positive filter (ported from Someone_idea)
         self.detect_semantic_filter_enabled: bool = False
+        # Minimum-geometry layer of the semantic filter (detection_semantics.py).
+        # 0 = disabled (matches pre-existing behavior); not yet exposed in the
+        # GUI, but now a real persisted field instead of an unreachable default.
+        self.detect_min_bbox_area_px: float = 0.0
+        self.detect_min_bbox_short_side_px: float = 0.0
+        self.detect_min_bbox_max_side_frac: float = 0.0
 
         # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
         self.display_locked_box: list | None = None

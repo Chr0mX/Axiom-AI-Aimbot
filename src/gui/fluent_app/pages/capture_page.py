@@ -1050,7 +1050,7 @@ class CapturePage(BasePage):
             f"border: 1px solid {ThemeColors.CARD_BORDER.get()}; "
             f"border-radius: 8px;"
         )
-        self.ocrFpsCard.titleLabel.setText("2nd Inference FPS")
+        self.ocrFpsCard.titleLabel.setText("OCR Capture FPS")
         self.ocrScanCard.titleLabel.setText("Scan ROI")
         self.ocrScanBtn.setText("Scan ROI")
         self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "Detected"))

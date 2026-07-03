@@ -651,7 +651,8 @@ def ai_logic_loop(
                 config.latest_all_boxes = all_boxes
                 config.latest_all_confidences = all_confidences
 
-                if is_aiming and boxes:
+                aimed_this_frame = bool(is_aiming and boxes)
+                if aimed_this_frame:
                     process_aiming(
                         config,
                         boxes,
@@ -697,9 +698,15 @@ def ai_logic_loop(
                             ai_aiming._kalman.reset()
 
                 if config.single_target_mode:
-                    if boxes and state.locked_box is not None:
+                    if aimed_this_frame and state.locked_box is not None:
                         # Reflects process_aiming()'s actual post-sticky-lock pick
                         # for this frame, not a separate lock-blind selection.
+                        # Gated on aimed_this_frame (not just "boxes truthy") so a
+                        # stale lock held over from an earlier aiming frame is
+                        # never reused on a frame where process_aiming() didn't
+                        # run — e.g. idle-detect frames while sticky lock is still
+                        # decaying a hold from before. Falls through to the
+                        # lock-blind pick below instead.
                         config.latest_boxes = [list(state.locked_box)]
                         config.latest_confidences = [state.locked_confidence]
                     elif boxes:

@@ -30,12 +30,41 @@ class ArduinoMouse:
     Uses the USB HID function of Arduino Leonardo to simulate mouse movement.
     """
 
+    _RECONNECT_POLL_S = 2.0
+
     def __init__(self):
         self._serial: Optional[serial.Serial] = None
         self._lock = threading.Lock()
         self._connected = False
         self._com_port: str = ""
         self._baud_rate: int = 115200
+        self._stop = threading.Event()
+        self._reconnect_thread: Optional[threading.Thread] = None
+
+    def _start_reconnect_thread(self):
+        """Start the reconnect watchdog thread if not already running.
+
+        Mirrors makcu_mouse.py's self-healing design: a mid-session unplug
+        used to leave the connection dead until the user manually reconnected
+        from the GUI. This watchdog notices via is_connected() and retries.
+        """
+        if self._reconnect_thread and self._reconnect_thread.is_alive():
+            return
+        self._stop.clear()
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_worker, daemon=True, name="arduino-reconnect")
+        self._reconnect_thread.start()
+
+    def _reconnect_worker(self):
+        while not self._stop.is_set():
+            self._stop.wait(self._RECONNECT_POLL_S)
+            if self._stop.is_set():
+                break
+            if not self.is_connected() and self._com_port:
+                try:
+                    self.connect(self._com_port, self._baud_rate)
+                except Exception as e:
+                    print(f"[Arduino] Reconnect attempt failed: {e}")
 
     def connect(self, com_port: str, baud_rate: int = 115200) -> bool:
         """Connect to Arduino Leonardo
@@ -51,6 +80,12 @@ class ArduinoMouse:
         re-enumeration delay) and is not held during it, so move()/click()
         are never blocked on this connection handshake.
         """
+        # Remember the target port/baud (even if this attempt fails) so the
+        # reconnect watchdog knows what to retry, and make sure it's running.
+        self._com_port = com_port
+        self._baud_rate = baud_rate
+        self._start_reconnect_thread()
+
         with self._lock:
             # Close old connection
             if self._serial and self._serial.is_open:
@@ -65,7 +100,6 @@ class ArduinoMouse:
                 if actual_baud is None:
                     self._connected = False
                     return False
-                self._com_port = com_port
                 self._baud_rate = actual_baud
                 self._connected = True
             except serial.SerialException as e:
@@ -106,6 +140,11 @@ class ArduinoMouse:
 
     def disconnect(self):
         """Disconnect"""
+        self._stop.set()
+        if self._reconnect_thread:
+            self._reconnect_thread.join(timeout=1.0)
+            self._reconnect_thread = None
+        self._com_port = ""  # stop the (now-dead) watchdog from ever retrying a stale port
         with self._lock:
             if self._serial and self._serial.is_open:
                 try:

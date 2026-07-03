@@ -284,13 +284,22 @@ class ConfigsPage(BasePage):
     def _onCreateConfig(self):
         name, ok = QInputDialog.getText(self, t("create_config"), t("create_config") + ":")
         if ok and name and self._configManager and self._config:
+            if name in self._configManager.get_config_list():
+                reply = QMessageBox.question(
+                    self, t("confirm_overwrite"), f"{t('confirm_overwrite')}: {name}?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
             try:
-                self._configManager.save_config(self._config, name)
-                self._refreshConfigList()
-                self._showInfo(t("config_success"), t("config_saved"))
+                if self._configManager.save_config(self._config, name):
+                    self._refreshConfigList()
+                    self._showInfo(t("config_success"), t("config_saved"))
+                else:
+                    self._showInfo(t("config_error"), t("config_save_failed"), False)
             except Exception as e:
                 self._showInfo(t("config_error"), str(e), False)
-    
+
     def _onLoadConfig(self):
         name = self._getSelectedConfig()
         if not name:
@@ -298,14 +307,16 @@ class ConfigsPage(BasePage):
             return
         if self._configManager and self._config:
             try:
-                self._configManager.load_config(self._config, name)
-                self._showInfo(t("config_success"), t("config_loaded"))
-                window = self.window()
-                if hasattr(window, '_refreshAllPages'):
-                    window._refreshAllPages()
+                if self._configManager.load_config(self._config, name):
+                    self._showInfo(t("config_success"), t("config_loaded"))
+                    window = self.window()
+                    if hasattr(window, '_refreshAllPages'):
+                        window._refreshAllPages()
+                else:
+                    self._showInfo(t("config_error"), t("config_load_failed"), False)
             except Exception as e:
                 self._showInfo(t("config_error"), t("config_load_failed"), False)
-    
+
     def _onSaveConfig(self):
         name = self._getSelectedConfig()
         if not name:
@@ -318,11 +329,13 @@ class ConfigsPage(BasePage):
         if reply == QMessageBox.StandardButton.Yes:
             if self._configManager and self._config:
                 try:
-                    self._configManager.save_config(self._config, name)
-                    self._showInfo(t("config_success"), t("config_saved"))
+                    if self._configManager.save_config(self._config, name):
+                        self._showInfo(t("config_success"), t("config_saved"))
+                    else:
+                        self._showInfo(t("config_error"), t("config_save_failed"), False)
                 except Exception as e:
                     self._showInfo(t("config_error"), t("config_save_failed"), False)
-    
+
     def _onDeleteConfig(self):
         name = self._getSelectedConfig()
         if not name:
@@ -335,12 +348,14 @@ class ConfigsPage(BasePage):
         if reply == QMessageBox.StandardButton.Yes:
             if self._configManager:
                 try:
-                    self._configManager.delete_config(name)
-                    self._refreshConfigList()
-                    self._showInfo(t("config_success"), t("config_saved"))
+                    if self._configManager.delete_config(name):
+                        self._refreshConfigList()
+                        self._showInfo(t("config_success"), t("config_deleted", "Config deleted"))
+                    else:
+                        self._showInfo(t("config_error"), t("config_delete_failed", "Failed to delete config"), False)
                 except Exception as e:
                     self._showInfo(t("config_error"), str(e), False)
-    
+
     def _onRenameConfig(self):
         old_name = self._getSelectedConfig()
         if not old_name:
@@ -352,9 +367,11 @@ class ConfigsPage(BasePage):
         if ok and new_name and new_name != old_name:
             if self._configManager:
                 try:
-                    self._configManager.rename_config(old_name, new_name)
-                    self._refreshConfigList()
-                    self._showInfo(t("config_success"), t("config_saved"))
+                    if self._configManager.rename_config(old_name, new_name):
+                        self._refreshConfigList()
+                        self._showInfo(t("config_success"), t("config_saved"))
+                    else:
+                        self._showInfo(t("config_error"), t("config_rename_failed", "Failed to rename config"), False)
                 except Exception as e:
                     self._showInfo(t("config_error"), str(e), False)
     
