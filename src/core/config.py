@@ -525,6 +525,11 @@ class Config:
         self.detection_frame_count: int = 0
         self.latest_boxes: List[List[float]] = []
         self.latest_confidences: List[float] = []
+        # Unreduced by single_target_mode — same set the in-game overlay draws.
+        # Web ESP reads this instead of latest_boxes so it shows every detection
+        # regardless of single-target aiming mode.
+        self.latest_all_boxes: List[List[float]] = []
+        self.latest_all_confidences: List[float] = []
 
         # Runtime-only flags — never persisted to config.json
         # Set to True to pause inference without stopping threads or closing UI

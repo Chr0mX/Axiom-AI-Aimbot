@@ -641,6 +641,10 @@ def ai_logic_loop(
                 # Runtime cache for UVC preview overlay rendering
                 config.latest_boxes = boxes
                 config.latest_confidences = confidences
+                # Unreduced set — same list the in-game overlay draws from, used
+                # by Web ESP so it isn't narrowed down by single_target_mode.
+                config.latest_all_boxes = all_boxes
+                config.latest_all_confidences = all_confidences
 
                 if is_aiming and boxes:
                     process_aiming(
