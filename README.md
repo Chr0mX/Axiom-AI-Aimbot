@@ -270,7 +270,7 @@ Axiom supports three ONNX Runtime acceleration paths on Windows, with automatic 
 
 - **TensorRT (optional, NVIDIA-only, fastest)**
   - Builds a cached TensorRT engine from your ONNX model via the **Convert** tab (`src/core/convert_to_engine.py`).
-  - Engines are cached in `%LOCALAPPDATA%\AxiomAI\` and rebuilt automatically if the source model changes.
+  - Engines are cached in `trt_cache/` at the project root and rebuilt automatically if the source model changes. (`%LOCALAPPDATA%\AxiomAI\` is where the TensorRT pip package itself gets installed by `Install TensorRT.bat` — a separate, one-time setup step, not the engine cache.)
   - Falls back to DirectML/CUDA/CPU automatically if TensorRT isn't available or engine build fails.
 
 ### Install options
@@ -332,8 +332,16 @@ You can also save/load named presets via the **Configs** tab. Recorded jitter pa
 ```
 Axiom/
 ├── 啟動Launcher.bat              # Quick-start launcher
+├── Install TensorRT.bat          # One-time TensorRT pip-package installer
+├── Install PaddleOCR.bat         # One-time PaddleOCR installer (secondary weapon-name OCR)
+├── requirements-tensorrt.txt     # Extra deps for the TensorRT inference path
+├── CHANGELOG.md                  # Version history
+├── docs/
+│   └── MAKCU_Native_API.md       # MAKCU serial wire-protocol reference
 ├── config/                       # Saved configuration presets
 ├── Model/                        # ONNX model files
+├── Model_Hud/                    # Secondary weapon/attachment HUD detector model
+├── trt_cache/                    # Built TensorRT engines (auto-created)
 ├── config.json                   # Runtime settings (v2 grouped schema)
 ├── state.json                    # One-time app state (disclaimer, first-run)
 ├── language.json                 # UI language selection
@@ -372,7 +380,7 @@ Axiom/
 │   │   ├── app.js
 │   │   └── styles.css
 │   ├── gui/
-│   │   ├── overlay.py            # DirectX overlay (FOV, bounding boxes, crosshair)
+│   │   ├── overlay.py            # Transparent click-through PyQt overlay (FOV, boxes, tracer, crosshair)
 │   │   ├── status_panel.py       # In-game status panel
 │   │   └── fluent_app/           # Fluent Design main window & pages
 │   │       ├── window.py         # AxiomWindow: navigation, acrylic, preview panel

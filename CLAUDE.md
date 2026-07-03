@@ -18,10 +18,12 @@ pytest tests/
 pytest tests/test_inference.py
 
 # Single test
-pytest tests/test_config.py::TestConfig::test_defaults
+pytest tests/test_config.py::TestConfigInit::test_screen_dimensions
 ```
 
 Tests add `src/` to `sys.path` via `tests/conftest.py` — no install step needed.
+
+**On non-Windows (e.g. this sandbox)**: this is fundamentally a Windows app — `pytest tests/` currently reports a stable baseline of 160 failed / 183 passed, all environment-only (missing `win32api`/PyQt6/pywin32, not code bugs). When verifying a change doesn't regress anything, compare the failed/passed counts against this baseline rather than expecting a clean run. Any module with a top-level `import win32api` (or that transitively imports one, e.g. anything importing `win_utils`) fails at **collection**, not just at test-run time, which aborts the whole suite unless the import is deferred — the established pattern here is a pytest fixture (or an in-test `from ... import ...`) that does the import lazily, so a missing `win32api` fails just that file's tests individually instead of blocking every other test file's collection. `ai_loop_utils.py`, `ai_loop.py`, and `ai_aiming.py` (via `win_utils`) all hit this; `detection_semantics.py`, `udp_receiver.py`, and `esp_server.py` don't and are fully testable here.
 
 ## Architecture
 
@@ -57,7 +59,7 @@ Single `Config` class — all runtime state lives here. Persistence is driven by
 - `state.json` — one-time app state in `STATE_FIELDS` (`disclaimer_agreed`, `first_run_complete`, `ndi_installer_ran_once`)
 - `language.json` — current UI language selection
 
-`config_manager.py` owns load/save lifecycle, preset management, and migration from v1 flat format.
+`config_manager.py` owns load/save lifecycle, preset management, and migration from v1 flat format. Presets are full config snapshots saved as JSON to `config/*.json` (derived from `_FIELD_MAP`, so they can't drift from `Config`'s current field set); `src/core/presets/*.json` holds bundled built-in presets that get seeded into the user's `config/` dir on first run (never overwriting a same-named file the user already has). Preset names are sanitized (`_sanitize_config_name()`) before being interpolated into a file path — they can come from free-text GUI dialogs or an imported file's own `name` field, both untrusted.
 
 ### Aiming & Anti-Recoil (`src/core/ai_aiming.py`)
 `process_aiming()` is the per-frame entry point, called from `ai_loop.py` with the **full** FOV-filtered candidate list (never pre-reduced — see single-target note below). Key subsystems:
@@ -92,6 +94,11 @@ Optional LAN-accessible browser overlay (`web_esp_enabled`), modeled as "backend
 
 Reads `config.latest_all_boxes` / `latest_all_confidences` (unreduced by `single_target_mode` — same set the in-game overlay draws), not `config.latest_boxes`, so the web view always shows every detection regardless of aiming mode.
 
+### In-Game Overlay & Status Panel (`src/gui/`)
+The actual on-device renderer referenced above — plain PyQt widgets, not part of `fluent_app/`:
+- **`overlay.py`** — transparent, click-through `QWidget` drawing FOV/detect-range circles, detection boxes, confidence text, tracer lines, and the aim-point X marker directly over the game window. Colors go through the `OverlayColors` static-method wrapper (`get_fov_color()`, `get_box_color()`, `get_tracer_color()`, `get_aim_marker_color()`, etc.), each backed by a `ThemeColors.OVERLAY_*` entry — never hardcode a color here directly, add a new `ThemeColors` entry and getter instead. `box_color_theme` can override the detect-box color with a named preset instead of the theme default.
+- **`status_panel.py`** — the on-screen status HUD (aim state, FPS, model name, MAKCU/Xbox connection). Supports Windows Acrylic blur via the legacy `SetWindowCompositionAttribute` API; re-reads language strings on its own refresh timer rather than needing a `retranslateUi()` call.
+
 ### Jitter Recorder (`src/core/jitter_recorder.py`)
 Standalone terminal script (run as `python src/core/jitter_recorder.py`) and importable library. Polls `win32api.GetCursorPos()` at ~1 ms. Patterns are zero-net-displacement: `_normalize_frames()` appends a correction frame `{dx: -Σdx, dy: -Σdy}` so each loop cycle returns to origin. Patterns saved as JSON to `src/core/jitter_patterns/`.
 
@@ -103,7 +110,7 @@ Public API consumed by the GUI:
 ### Mouse/Device Backends (`src/win_utils/`)
 All backends expose `send_mouse_move_<method>(dx, dy)` and `send_mouse_click_<method>()`. Selected at runtime from `config.mouse_move_method`. Methods:
 - `sendinput` / `mouse_event` — Windows `SendInput` / `mouse_event` API
-- `makcu` — MAKCU USB HID device at 4 Mbaud (`_OPERATING_BAUD`). `move()` and `click()` must never hold `self._lock` across a `time.sleep()` — lock must be released before any sleep. Scroll-wheel input excluded from aim-button detection. MAKCU click state is reported to `status_panel.py` via a dedicated callback.
+- `makcu` — MAKCU USB HID device at 4 Mbaud (`_OPERATING_BAUD`), ASCII protocol; see `docs/MAKCU_Native_API.md` for the wire protocol reference. `move()` and `click()` must never hold `self._lock` across a `time.sleep()` — lock must be released before any sleep. Scroll-wheel input excluded from aim-button detection (masked to bits 0-4, `_BTN_BITS`). Self-healing: a background reconnect-watchdog thread retries the connection automatically on USB glitches. MAKCU click state is reported to `status_panel.py` via a dedicated callback. `makcu_mouse_binary.py` (the V2 binary-protocol variant) is unused in production today — kept in place for a future MAKCU firmware version; don't wire it in without first fixing the lock-across-sleep violation in its `connect()`/`_send_cmd()`.
 - `arduino` — Arduino Leonardo HID (`arduino_mouse.py`, `arduino_spoofer.py`)
 - `ddxoft` — ddxoft driver (`ddxoft_mouse.py`)
 - `xbox` — Virtual Xbox 360 controller via ViGEmBus (`xbox_controller.py`, `gamepad_input.py`)
@@ -130,8 +137,14 @@ Each page extends `BasePage` and calls `setConfig(config)` to bind to the live `
 
 **Aim page Anti-Recoil section** contains: Smart Jitter enable toggle, LMB gate, jitter strength, box threshold, "Record Jitter" push-button (inline toggle: ● Record / ■ Stop & Save), and a "Recorded Pattern" combo that lists all `jitter_patterns/*.json` files.
 
+**Theming** (`fluent_app/theme_colors.py`) — a single `ThemeColors` class of `ColorPair`/`ColorPairWithAlpha` descriptors (`.get()` returns a CSS color string, `.qcolor()` a `QColor`), each with light/dark defaults and an optional override from a user `theme_colors.json`. `isDarkTheme()` (qfluentwidgets) picks which side of the pair applies. Any `setStyleSheet(...)` call with a literal hex/rgb color instead of a `ThemeColors.*.get()` reference is a theming bug — it won't adapt to a light/dark toggle. (`theme_manager.py`, a separate unused QSS-generator module, was deleted as dead code — it was never invoked anywhere.)
+
+**First-run flow**: `fluent_app/setup_wizard.py` (Welcome → Language → Theme → Acrylic → Performance → Done, gated on `state.json`'s `first_run_complete`) followed by `gui/disclaimer_dialog.py` (gated on `disclaimer_agreed`; body text loaded from a single English-only `Disclaimer.md`, deliberately not localized — translating just the button chrome around a permanently-English legal document would be a confusing half-measure). The wizard tracks its own in-progress theme preview (`self._isDark`) separately from the app's real theme — `setTheme()` isn't actually called until the wizard closes (`applyChosenTheme()`, invoked from `main.py`), so any wizard-page widget that needs to look right in both previews must read the wizard's own state, not `isDarkTheme()`.
+
+**i18n**: `t(key, default)` (`fluent_app/language_manager.py`) looks up `key` in the active language's JSON (`src/core/language_data/*.json`, 10 languages) and falls back to `default` (always English) if the key is missing — a missing key never crashes or shows blank, just shows English regardless of the selected language. Widgets built with a `t()`-wrapped title/description at construction must have the *same* call repeated inside that page's `retranslateUi()` (called from `window.py`'s `_refreshUI()` on every language switch) or the text goes stale after the first switch — this has been a recurring bug source; when adding a new card/label, grep an existing correct one in the same file for the exact `titleLabel`/`contentLabel` API before wiring a new one in. Translation completeness varies — English has the most keys (~290); other languages are missing anywhere from ~20 to ~75 of them (pre-existing, not something a single pass has closed).
+
 ### ONNX / TensorRT
-Models go in `Model/`. The preprocess fast-path fires when the captured frame is already `model_input_size × model_input_size` (no resize needed). `skip_letterbox=True` skips letterboxing for square captures. TensorRT engines are built by `src/core/convert_to_engine.py` and cached in `%LOCALAPPDATA%\AxiomAI\`. `cuda_io_binding_enabled` enables zero-copy CUDA inference (CUDA provider only).
+Models go in `Model/` (`Model_Hud/` for the secondary weapon-detector model). The preprocess fast-path fires when the captured frame is already `model_input_size × model_input_size` (no resize needed). `skip_letterbox=True` skips letterboxing for square captures. TensorRT engines are built by `src/core/convert_to_engine.py` and cached in `trt_cache/` at the project root (`session_utils.py`'s `_TRT_CACHE_DIR`) — **not** `%LOCALAPPDATA%\AxiomAI\`, which is only where the TensorRT *pip package itself* gets installed by `Install TensorRT.bat`, a separate concern. `cuda_io_binding_enabled` enables zero-copy CUDA inference (CUDA provider only).
 
 ## Key Config Fields to Know
 
