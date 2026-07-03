@@ -23,6 +23,7 @@ from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
+from ..theme_colors import ThemeColors
 
 
 class _AimPointPreview(QWidget):
@@ -179,12 +180,12 @@ class _JitterLiveWindow(QDialog):
 
         self._info = QLabel("Starting…")
         self._info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._info.setStyleSheet("color: #888; font-size: 10px;")
+        self._info.setStyleSheet(f"color: {ThemeColors.TEXT_TERTIARY.get()}; font-size: 10px;")
 
         self._hint = QLabel("Click anywhere in this window to finish & save")
         self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._hint.setWordWrap(True)
-        self._hint.setStyleSheet("color: #0c8; font-size: 10px;")
+        self._hint.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-size: 10px;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -240,7 +241,7 @@ class _JitterPreviewDialog(QDialog):
 
         info = QLabel(f"{len(frames)} frames recorded")
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        info.setStyleSheet("color: #888; font-size: 10px;")
+        info.setStyleSheet(f"color: {ThemeColors.TEXT_TERTIARY.get()}; font-size: 10px;")
 
         save_btn = QPushButton("Save")
         rerecord_btn = QPushButton("Re-record")
@@ -354,7 +355,7 @@ class AimPage(BasePage):
         self.arduinoBaudCard.hBoxLayout.addSpacing(16)
 
         self.connectionLabel = BodyLabel(t("disconnected"))
-        self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.connectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
         self.connectionCard = SettingCard(
             FluentIcon.WIFI,
             t("connected") + " / " + t("disconnected"),
@@ -437,7 +438,7 @@ class AimPage(BasePage):
         )
 
         self.xboxConnectionLabel = BodyLabel(t("disconnected"))
-        self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
         self.xboxConnectionCard = SettingCard(
             FluentIcon.GAME,
             t("connected") + " / " + t("disconnected"),
@@ -1388,16 +1389,16 @@ class AimPage(BasePage):
             if is_arduino_connected():
                 self._isArduinoConnected = True
                 self.connectionLabel.setText(t("connected"))
-                self.connectionLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+                self.connectionLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-weight: bold;")
                 self.arduinoConnectBtn.setText(t("arduino_disconnect"))
             else:
                 self._isArduinoConnected = False
                 self.connectionLabel.setText(t("disconnected"))
-                self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.connectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
                 self.arduinoConnectBtn.setText(t("arduino_connect"))
         except ImportError:
             self.connectionLabel.setText("pyserial N/A")
-            self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.connectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
 
     def _onOpenGuide(self):
         from PyQt6.QtCore import QUrl
@@ -1521,22 +1522,22 @@ class AimPage(BasePage):
             from win_utils import is_xbox_connected, is_xbox_available
             if not is_xbox_available():
                 self.xboxConnectionLabel.setText("vgamepad " + t("disconnected"))
-                self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
                 self.xboxConnectBtn.setText(t("xbox_connect"))
                 return
             if is_xbox_connected():
                 self._isXboxConnected = True
                 self.xboxConnectionLabel.setText(t("connected"))
-                self.xboxConnectionLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+                self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-weight: bold;")
                 self.xboxConnectBtn.setText(t("xbox_disconnect"))
             else:
                 self._isXboxConnected = False
                 self.xboxConnectionLabel.setText(t("disconnected"))
-                self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
                 self.xboxConnectBtn.setText(t("xbox_connect"))
         except ImportError:
             self.xboxConnectionLabel.setText("vgamepad N/A")
-            self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
 
     # === PID Callbacks ===
 

@@ -78,10 +78,20 @@ class _StepDots(QWidget):
         super().__init__(parent)
         self._total = total
         self._current = 0
+        self._is_dark = True  # matches AxiomSetupWizard's own default preview state
         self.setFixedHeight(20)
 
     def setCurrent(self, idx: int):
         self._current = idx
+        self.update()
+
+    def setDark(self, is_dark: bool):
+        """Track the wizard's own in-progress theme preview (self._isDark),
+        not the global qfluentwidgets theme — setTheme() isn't actually
+        called until the wizard closes (see applyChosenTheme()), so
+        isDarkTheme() wouldn't reflect the user's live choice while still
+        on the theme-selection step."""
+        self._is_dark = is_dark
         self.update()
 
     def paintEvent(self, _):
@@ -103,7 +113,7 @@ class _StepDots(QWidget):
                 p.setPen(Qt.PenStyle.NoPen)
                 p.drawEllipse(cx - r, oy - r, 2 * r, 2 * r)
             else:
-                p.setBrush(QColor("#D0D0D0"))
+                p.setBrush(QColor("#5A5A5A" if self._is_dark else "#D0D0D0"))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.drawEllipse(cx - r, oy - r, 2 * r, 2 * r)
 
@@ -835,6 +845,7 @@ class SetupWizard(QDialog):
         self._isDark = (mode == "dark")
         self._card_light.setSelected(mode == "light")
         self._card_dark.setSelected(mode == "dark")
+        self._dots.setDark(self._isDark)
         # 即時預覽精靈主題
         if self._isDark:
             self._applyDarkStyle()

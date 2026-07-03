@@ -82,10 +82,10 @@ class ConfigsPage(BasePage):
         self.renameBtn = PushButton(FluentIcon.EDIT, t("rename_config"))
         self.refreshBtn = PushButton(FluentIcon.SYNC, t("refresh_config"))
         
-        # 分隔線
+        # 分隔線 — styled in _applyPanelStyles(), called from _initLayout() right
+        # after this widget is constructed, so no initial stylesheet is needed here.
         self.separator = QFrame()
         self.separator.setFrameShape(QFrame.Shape.HLine)
-        self.separator.setStyleSheet("background-color: rgba(128, 128, 128, 0.3);")
         self.separator.setFixedHeight(1)
         
         self.importBtn = PushButton(FluentIcon.FOLDER_ADD, t("import_config"))
@@ -196,7 +196,7 @@ class ConfigsPage(BasePage):
             item_hover_border = base_item_hover_border
             item_selected_bg = base_item_selected_bg
             item_selected_border = base_item_selected_border
-            separator_color = "rgba(128, 128, 128, 0.3)"
+            separator_color = ThemeColors.BORDER_SUBTLE.get()
 
         text_color = ThemeColors.TEXT_PRIMARY.get()
         

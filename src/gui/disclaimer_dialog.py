@@ -4,19 +4,22 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QTextBrowser, QPushButton,
 from PyQt6.QtCore import Qt
 from qfluentwidgets import PrimaryPushButton, PushButton, StrongBodyLabel
 
+from .fluent_app.theme_colors import ThemeColors
+
 class DisclaimerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Axiom - Disclaimer / Terms of Use")
         self.resize(800, 600)
         # self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog) # Optional: keep frameless if desired
-        
+
         self.setup_ui()
         self.load_disclaimer()
-        
-        # Simple styling
-        self.setStyleSheet("background-color: white; color: black;")
-        # If dark mode needed, we might need more logic or just rely on system title bar
+
+        self.setStyleSheet(
+            f"background-color: {ThemeColors.BACKGROUND_PRIMARY.get()}; "
+            f"color: {ThemeColors.TEXT_PRIMARY.get()};"
+        )
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -33,15 +36,15 @@ class DisclaimerDialog(QDialog):
         self.text_browser = QTextBrowser()
         self.text_browser.setOpenExternalLinks(True)
         # Basic clean style
-        self.text_browser.setStyleSheet("""
-            QTextBrowser {
-                border: 1px solid #ccc;
+        self.text_browser.setStyleSheet(f"""
+            QTextBrowser {{
+                border: 1px solid {ThemeColors.CARD_BORDER.get()};
                 border-radius: 18px;
-                background-color: #f9f9f9;
+                background-color: {ThemeColors.CARD_BACKGROUND.get()};
                 padding: 10px;
                 font-size: 14px;
-                color: #333;
-            }
+                color: {ThemeColors.TEXT_PRIMARY.get()};
+            }}
         """)
         layout.addWidget(self.text_browser)
         

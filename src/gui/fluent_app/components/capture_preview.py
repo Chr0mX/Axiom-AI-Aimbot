@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..language_manager import t
+from ..theme_colors import ThemeColors
 
 
 def _frame_to_pixmap(frame, max_w: int, max_h: int) -> "QPixmap | None":
@@ -101,7 +102,7 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
         layout.setSpacing(2)
 
         fps_label = QLabel(t("preview_fps_placeholder", "-- fps"))
-        fps_label.setStyleSheet("font-size: 9px; color: #888;")
+        fps_label.setStyleSheet(f"font-size: 9px; color: {ThemeColors.TEXT_TERTIARY.get()};")
         fps_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(fps_label)
 
@@ -172,7 +173,7 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
         self._header_label = QLabel(t("preview_header", "Preview"))
         self._header_label.setStyleSheet("font-weight: bold; font-size: 11px;")
         fps_label = QLabel(t("preview_fps_placeholder", "-- fps"))
-        fps_label.setStyleSheet("font-size: 9px; color: #888;")
+        fps_label.setStyleSheet(f"font-size: 9px; color: {ThemeColors.TEXT_TERTIARY.get()};")
         fps_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         header_row.addWidget(self._header_label)
         header_row.addStretch(1)
