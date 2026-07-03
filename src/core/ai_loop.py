@@ -630,15 +630,20 @@ def ai_logic_loop(
 
                 all_boxes, all_confidences = boxes, confidences
                 boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size, config)
+                # NOTE: single_target_mode's reduction to one box used to happen
+                # here, before process_aiming() ever saw the candidate list. That
+                # meant sticky lock's IOU search — which needs the FULL list to
+                # decide whether the previously-locked target is still visible —
+                # only ever got a list of 0-or-1 boxes, so it could never actually
+                # prefer the old target over whatever won this frame's plain
+                # priority scoring. single_target_mode silently defeated sticky
+                # lock. The full list is now always passed to process_aiming();
+                # the single-target reduction for auto-fire/preview/ESP purposes
+                # is derived below from what process_aiming() actually selected
+                # (post sticky-lock), not from a separate lock-blind pre-filter.
 
-                if config.single_target_mode:
-                    boxes, confidences = find_closest_target(
-                        boxes, confidences, crosshair_x, crosshair_y,
-                        priority_mode=getattr(config, 'target_priority_mode', 'distance'),
-                        confidence_weight=getattr(config, 'target_priority_confidence_weight', 0.5),
-                    )
-
-                # Runtime cache for UVC preview overlay rendering
+                # Runtime cache for UVC preview overlay rendering — full list by
+                # default; narrowed further below when single_target_mode is on.
                 config.latest_boxes = boxes
                 config.latest_confidences = confidences
                 # Unreduced set — same list the in-game overlay draws from, used
@@ -691,13 +696,33 @@ def ai_logic_loop(
                         if ai_aiming._kalman is not None:
                             ai_aiming._kalman.reset()
 
+                if config.single_target_mode:
+                    if boxes and state.locked_box is not None:
+                        # Reflects process_aiming()'s actual post-sticky-lock pick
+                        # for this frame, not a separate lock-blind selection.
+                        config.latest_boxes = [list(state.locked_box)]
+                        config.latest_confidences = [state.locked_confidence]
+                    elif boxes:
+                        # Detecting without actively aiming this frame (e.g. idle
+                        # detect) — process_aiming() didn't run, so there's no lock
+                        # decision to read back. Sticky lock never applies to idle
+                        # detection anyway, so a plain priority pick is fine here.
+                        config.latest_boxes, config.latest_confidences = find_closest_target(
+                            boxes, confidences, crosshair_x, crosshair_y,
+                            priority_mode=getattr(config, 'target_priority_mode', 'distance'),
+                            confidence_weight=getattr(config, 'target_priority_confidence_weight', 0.5),
+                        )
+                    else:
+                        config.latest_boxes = []
+                        config.latest_confidences = []
+
                 update_queues(
                     overlay_boxes_queue,
                     overlay_confidences_queue,
                     all_boxes,
                     all_confidences,
                     auto_fire_queue=auto_fire_boxes_queue,
-                    auto_fire_boxes=boxes,
+                    auto_fire_boxes=config.latest_boxes,
                 )
 
                 if getattr(config, 'enable_latency_stats', False):

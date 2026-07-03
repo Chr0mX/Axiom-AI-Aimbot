@@ -278,8 +278,13 @@ def process_aiming(
             if best_iou >= iou_thresh and best_item is not None:
                 selected = best_item
         _, _conf, target_x, target_y, selected_box = selected
+        # Always record what got selected — independent of sticky_lock_enabled —
+        # so callers (e.g. single_target_mode's box-list reduction in ai_loop.py)
+        # can see the actual post-lock pick instead of re-deriving a lock-blind
+        # one, which is what let single_target_mode silently defeat sticky lock.
+        state.locked_box = selected_box
+        state.locked_confidence = _conf
         if sticky:
-            state.locked_box = selected_box
             state.no_detection_frames = 0
             config.display_locked_box = list(selected_box)
             config.display_locked_box_is_decaying = False

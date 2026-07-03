@@ -26,7 +26,12 @@ class LoopState:
     smooth_y: float = 0.0
 
     # Sticky target lock — hold the selected target across short detection gaps.
+    # locked_box/locked_confidence are updated on every successful selection
+    # (regardless of sticky_lock_enabled) so callers can read back what aiming
+    # actually picked this frame; only *acting* on a hold across a gap is
+    # gated by sticky_lock_enabled elsewhere.
     locked_box: Optional[List[float]] = field(default=None)
+    locked_confidence: float = 0.0
     no_detection_frames: int = 0
 
     # Box EMA — running average of selected box coords [x1, y1, x2, y2].
