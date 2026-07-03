@@ -174,6 +174,44 @@ def find_closest_target(
     return [], []
 
 
+def reduce_boxes_for_single_target(
+    boxes: List[List[float]],
+    confidences: List[float],
+    locked_box: List[float] | None,
+    locked_confidence: float,
+    aimed_this_frame: bool,
+    crosshair_x: int,
+    crosshair_y: int,
+    priority_mode: str = "distance",
+    confidence_weight: float = 0.5,
+) -> Tuple[List[List[float]], List[float]]:
+    """single_target_mode's box-list reduction — the list auto-fire/preview/ESP
+    (config.latest_boxes) see when only one target should be shown/acted on.
+
+    Extracted from ai_loop.py so this exact selection logic — the fix for
+    sticky lock being silently defeated by single_target_mode — has a home
+    that's independently testable outside the threaded capture/inference loop.
+
+    aimed_this_frame must reflect whether process_aiming() actually ran and
+    updated locked_box/locked_confidence THIS frame (i.e. `is_aiming and
+    boxes` was true) — not just whether boxes is non-empty. A stale
+    locked_box held over from an earlier aiming frame (e.g. sticky lock still
+    decaying a hold during an idle-detect frame where aiming didn't run) must
+    never be reused with no fresh IOU check against the current boxes list;
+    doing so previously let auto-fire/ESP/preview show a position with no
+    current detection backing it. When aimed_this_frame is False, this always
+    falls back to a fresh priority pick (find_closest_target) instead.
+    """
+    if aimed_this_frame and locked_box is not None:
+        return [list(locked_box)], [locked_confidence]
+    if boxes:
+        return find_closest_target(
+            boxes, confidences, crosshair_x, crosshair_y,
+            priority_mode=priority_mode, confidence_weight=confidence_weight,
+        )
+    return [], []
+
+
 def update_queues(
     overlay_boxes_queue: queue.Queue,
     overlay_confidences_queue: queue.Queue,

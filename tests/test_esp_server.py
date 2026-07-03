@@ -66,6 +66,34 @@ def test_snapshot_serializes_to_json():
     assert decoded["active"] is True
 
 
+def test_snapshot_boxes_unaffected_by_single_target_mode_reduction():
+    """Regression guard for the Web ESP / single_target_mode fix.
+
+    single_target_mode narrows config.latest_boxes down to just the locked
+    target (for auto-fire/preview), but the Web ESP feed must keep showing
+    every detection — the same set the in-game overlay draws — by reading
+    config.latest_all_boxes/latest_all_confidences instead. The existing
+    _FakeConfig fixture happens to set latest_boxes and latest_all_boxes to
+    identical values, which can't actually distinguish "reads the all-boxes
+    field" from "reads the reduced field" — this test deliberately makes
+    them different (simulating single_target_mode being on) so a regression
+    that reverts esp_server.py to reading latest_boxes would fail here.
+    """
+    class SingleTargetConfig(_FakeConfig):
+        latest_boxes = [[100, 200, 150, 320]]  # single_target_mode-reduced
+        latest_confidences = [0.91]
+        latest_all_boxes = [
+            [100, 200, 150, 320], [10.0, 20.0, 30.0, 40.0], [500.0, 500.0, 550.0, 600.0],
+        ]
+        latest_all_confidences = [0.91, 0.4, 0.7]
+
+    esp_server._config = SingleTargetConfig()
+    snap = esp_server._build_snapshot()
+    assert len(snap["boxes"]) == 3
+    assert snap["boxes"] == [[100, 200, 150, 320], [10, 20, 30, 40], [500, 500, 550, 600]]
+    assert snap["confidences"] == [0.91, 0.4, 0.7]
+
+
 def test_snapshot_handles_empty_and_missing():
     class Empty:
         pass

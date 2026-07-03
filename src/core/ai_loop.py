@@ -26,8 +26,8 @@ from .ai_loop_utils import (
     calculate_detection_region,
     clear_queues,
     filter_boxes_by_fov,
-    find_closest_target,
     get_capture_dimensions,
+    reduce_boxes_for_single_target,
     update_crosshair_position,
     update_queues,
 )
@@ -698,30 +698,13 @@ def ai_logic_loop(
                             ai_aiming._kalman.reset()
 
                 if config.single_target_mode:
-                    if aimed_this_frame and state.locked_box is not None:
-                        # Reflects process_aiming()'s actual post-sticky-lock pick
-                        # for this frame, not a separate lock-blind selection.
-                        # Gated on aimed_this_frame (not just "boxes truthy") so a
-                        # stale lock held over from an earlier aiming frame is
-                        # never reused on a frame where process_aiming() didn't
-                        # run — e.g. idle-detect frames while sticky lock is still
-                        # decaying a hold from before. Falls through to the
-                        # lock-blind pick below instead.
-                        config.latest_boxes = [list(state.locked_box)]
-                        config.latest_confidences = [state.locked_confidence]
-                    elif boxes:
-                        # Detecting without actively aiming this frame (e.g. idle
-                        # detect) — process_aiming() didn't run, so there's no lock
-                        # decision to read back. Sticky lock never applies to idle
-                        # detection anyway, so a plain priority pick is fine here.
-                        config.latest_boxes, config.latest_confidences = find_closest_target(
-                            boxes, confidences, crosshair_x, crosshair_y,
-                            priority_mode=getattr(config, 'target_priority_mode', 'distance'),
-                            confidence_weight=getattr(config, 'target_priority_confidence_weight', 0.5),
-                        )
-                    else:
-                        config.latest_boxes = []
-                        config.latest_confidences = []
+                    config.latest_boxes, config.latest_confidences = reduce_boxes_for_single_target(
+                        boxes, confidences,
+                        state.locked_box, state.locked_confidence, aimed_this_frame,
+                        crosshair_x, crosshair_y,
+                        priority_mode=getattr(config, 'target_priority_mode', 'distance'),
+                        confidence_weight=getattr(config, 'target_priority_confidence_weight', 0.5),
+                    )
 
                 update_queues(
                     overlay_boxes_queue,
