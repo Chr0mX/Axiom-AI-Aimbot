@@ -43,6 +43,7 @@
     "config_not_found": "설정 파일을 찾을 수 없습니다. 기본값 사용",
     "config_save_failed": "설정을 저장하지 못했습니다",
     "config_saved": "설정이 저장되었습니다",
+    "config_deleted": "설정이 삭제되었습니다",
     "config_success": "성공",
     "config_warning": "경고",
     "confirm_delete": "삭제 확인",

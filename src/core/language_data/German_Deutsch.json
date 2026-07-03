@@ -43,6 +43,7 @@
     "config_not_found": "Konfigurationsdatei nicht gefunden, Standardwerte werden verwendet",
     "config_save_failed": "Konfiguration konnte nicht gespeichert werden",
     "config_saved": "Konfiguration gespeichert",
+    "config_deleted": "Konfiguration gelöscht",
     "config_success": "Erfolg",
     "config_warning": "Warnung",
     "confirm_delete": "Löschen bestätigen",

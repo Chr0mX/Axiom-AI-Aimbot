@@ -43,6 +43,7 @@
     "config_not_found": "找不到設定檔，使用參數值",
     "config_save_failed": "設定儲存失敗",
     "config_saved": "設定已儲存",
+    "config_deleted": "配置已刪除",
     "config_success": "成功",
     "config_warning": "警告",
     "confirm_delete": "確認刪除",

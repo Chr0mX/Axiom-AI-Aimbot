@@ -43,6 +43,7 @@
     "config_not_found": "設定ファイルが見つかりません。既定値を使用します",
     "config_save_failed": "設定の保存に失敗しました",
     "config_saved": "設定を保存しました",
+    "config_deleted": "設定を削除しました",
     "config_success": "成功",
     "config_warning": "警告",
     "confirm_delete": "削除を確認",

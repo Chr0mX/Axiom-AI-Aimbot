@@ -43,6 +43,7 @@
     "config_not_found": "Configuration file not found, using defaults",
     "config_save_failed": "Failed to save configuration",
     "config_saved": "Configuration Saved",
+    "config_deleted": "Config deleted",
     "config_success": "Success",
     "config_warning": "Warning",
     "confirm_delete": "Confirm Delete",
