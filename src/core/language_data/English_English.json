@@ -54,7 +54,7 @@
     "auto_match_fps_label": "Sync Inference & Capture Interval",
     "tab_model": "Model",
     "tab_capture": "Capture",
-    "tab_hardware_output": "Keys & Device",
+    "tab_hardware_output": "Keys & HW",
     "model_info": "Model Info",
     "model_inspecting": "Inspecting…",
     "tab_inference": "Inference",
