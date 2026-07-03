@@ -91,6 +91,9 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
         self.setWindowTitle("Axiom – Capture Preview")
         self.resize(640, 360)
 
+        self._always_on_top = bool(getattr(config, 'uvc_always_on_top', True))
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, self._always_on_top)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
@@ -113,6 +116,12 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
         self._timer.start(_capture_interval_ms(config))
 
     def _refresh(self):
+        wanted_on_top = bool(getattr(self._config, 'uvc_always_on_top', True))
+        if wanted_on_top != self._always_on_top:
+            self._always_on_top = wanted_on_top
+            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, wanted_on_top)
+            self.show()  # re-apply native window flags — required after setWindowFlag()
+
         from core.screen_capture import get_preview_frame
         frame = get_preview_frame()
         if frame is None:
