@@ -1,7 +1,7 @@
 {
     "about": "概要",
-    "about_subtitle": "私が適当に作った普通のAIオートエイムです。質問や提案、モデルや設定の共有などは、ぜひDiscordサーバーに参加してください。",
-    "about_title": "Axiom V6 について",
+    "about_subtitle": "オリジナルの Axiom AI Aimbot プロジェクトをコミュニティが引き継いだ継続版です。質問や提案、モデルや設定の共有などは、ぜひ Discord サーバーに参加してください。",
+    "about_title": "Axiom について",
     "arduino_com_port": "COMポート:",
     "connected": "接続済み",
     "disconnected": "未接続",
@@ -144,6 +144,8 @@
     "theme_toggle": "テーマ切替",
     "discord": "Discord",
     "github": "Github",
+    "discord_original": "Discord（オリジナル）",
+    "github_original": "Github（オリジナル）",
     "update_available_title": "新しいバージョンが利用可能です",
     "update_available_content": "新しいバージョン {new_version} が検出されました。ダウンロードしますか？\n\n現在のバージョン: v{current_version}",
     "update_yes": "今すぐダウンロード",

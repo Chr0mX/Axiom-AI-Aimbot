@@ -140,8 +140,8 @@ class InferencePage(BasePage):
         self.secondInferSegment.addItem("v2_onnx", "V2 ONNX")
         self.secondInferCard = SettingCard(
             FluentIcon.DOCUMENT,
-            "2nd Inference",
-            "Off / V1 OCR (PaddleOCR) / V2 ONNX (HUD weapon detector)",
+            t("weapon_detection_method", "Weapon Detection Method"),
+            t("weapon_detection_method_desc", "Off / OCR (PaddleOCR) / ONNX (HUD weapon detector)"),
             self.generalGroup,
         )
         self.secondInferCard.hBoxLayout.addWidget(self.secondInferSegment, 0, Qt.AlignmentFlag.AlignRight)
@@ -149,11 +149,11 @@ class InferencePage(BasePage):
 
         self.hudConfidenceCard = SliderDoubleSpinCard(
             FluentIcon.FILTER,
-            "V2 Confidence Threshold",
+            t("weapon_detection_threshold", "Weapon Detection Threshold"),
             0.01, 1.0,
             decimals=2,
             step=0.05,
-            description="Minimum confidence for V2 ONNX detections",
+            description=t("weapon_detection_threshold_desc", "Minimum confidence for ONNX weapon detections"),
             parent=self.generalGroup,
         )
 
@@ -192,12 +192,12 @@ class InferencePage(BasePage):
         )
 
         # === Box Smoothing ===
-        self.boxSmoothGroup = SettingCardGroup("Box Smoothing", self.scrollWidget)
+        self.boxSmoothGroup = SettingCardGroup(t("box_smoothing", "Box Smoothing"), self.scrollWidget)
 
         self.boxEmaEnableCard = SwitchSettingCard(
             FluentIcon.FILTER,
-            "Box Smoothing",
-            "EMA on raw detection box to suppress size-jitter wobble",
+            t("box_smoothing", "Box Smoothing"),
+            t("box_smoothing_desc", "Apply EMA smoothing to raw detection boxes to suppress size jitter and reduce bounding box wobble"),
             parent=self.boxSmoothGroup
         )
 
@@ -324,6 +324,7 @@ class InferencePage(BasePage):
             mode = getattr(self._config, 'second_inference_mode', 'off')
             self.secondInferSegment.setCurrentItem(mode if mode in ("off", "v1_ocr", "v2_onnx") else "off")
             self.hudConfidenceCard.setValue(float(getattr(self._config, 'hud_confidence', 0.25)))
+            self._updateHudConfidenceVisibility(mode)
 
             # Apply initial screenshot-method effect on fov_follow visibility
             method = getattr(self._config, 'screenshot_method', 'mss')
@@ -458,6 +459,12 @@ class InferencePage(BasePage):
     def _onSecondInferChanged(self, key: str):
         if self._config:
             self._config.second_inference_mode = key
+        self._updateHudConfidenceVisibility(key)
+
+    def _updateHudConfidenceVisibility(self, mode: str):
+        # OCR mode has no numeric detection threshold to tune — only the
+        # ONNX HUD weapon detector uses hud_confidence.
+        self.hudConfidenceCard.setVisible(mode != "v1_ocr")
 
     def _onHudConfidenceChanged(self, value: float):
         if self._config:
@@ -476,27 +483,35 @@ class InferencePage(BasePage):
 
         self.fovCard.titleLabel.setText(t("fov_size"))
         self.fovFollowCard.titleLabel.setText(t("fov_follow_mouse"))
+        self.fovCircleCard.titleLabel.setText(t("fov_circle_filter", "Circular FOV Filter"))
+        self.fovCircleCard.contentLabel.setText(t("fov_circle_filter_desc", "Only track targets inside the FOV circle, not the full square region"))
         self.detectRangeCard.titleLabel.setText(t("detect_range_size"))
         self.detectRangeCard.contentLabel.setText(t("detect_range_note"))
 
         self.detectIntervalCard.titleLabel.setText(t("detect_interval"))
         self.confidenceCard.titleLabel.setText(t("min_confidence"))
         self.semanticFilterCard.titleLabel.setText(t("semantic_filter_enabled", "Semantic FP Filter"))
+        self.semanticFilterCard.contentLabel.setText(t("semantic_filter_desc", "Discard trees, vehicles, and HUD elements by class name and geometry"))
         self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
-        self.secondInferCard.titleLabel.setText("2nd Inference")
-        self.secondInferCard.contentLabel.setText("Off / V1 OCR (PaddleOCR) / V2 ONNX (HUD weapon detector)")
-        self.hudConfidenceCard.titleLabel.setText("V2 Confidence Threshold")
+        self.secondInferCard.titleLabel.setText(t("weapon_detection_method", "Weapon Detection Method"))
+        self.secondInferCard.contentLabel.setText(t("weapon_detection_method_desc", "Off / OCR (PaddleOCR) / ONNX (HUD weapon detector)"))
+        self.hudConfidenceCard.titleLabel.setText(t("weapon_detection_threshold", "Weapon Detection Threshold"))
+        self.hudConfidenceCard.contentLabel.setText(t("weapon_detection_threshold_desc", "Minimum confidence for ONNX weapon detections"))
 
         self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
         self.skipLetterboxCard.contentLabel.setText(t("skip_letterbox_desc"))
+        self.cudaIoBindingCard.titleLabel.setText(t("cuda_io_binding", "CUDA IO Binding"))
+        self.cudaIoBindingCard.contentLabel.setText(t("cuda_io_binding_desc", "Zero-copy GPU inference. Effective only with CUDA or TensorRT backend."))
         self.frameSkipCard.titleLabel.setText(t("frame_skip_enabled", "Frame Skip Gate"))
         self.frameSkipCard.contentLabel.setText(t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."))
         self.frameSkipThresholdCard.titleLabel.setText(t("frame_skip_threshold", "Skip Threshold"))
+        self.frameSkipThresholdCard.contentLabel.setText(t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"))
 
-        self.boxSmoothGroup.titleLabel.setText("Box Smoothing")
-        self.boxEmaEnableCard.titleLabel.setText("Box Smoothing")
+        self.boxSmoothGroup.titleLabel.setText(t("box_smoothing", "Box Smoothing"))
+        self.boxEmaEnableCard.titleLabel.setText(t("box_smoothing", "Box Smoothing"))
+        self.boxEmaEnableCard.contentLabel.setText(t("box_smoothing_desc", "Apply EMA smoothing to raw detection boxes to suppress size jitter and reduce bounding box wobble"))
         self.boxEmaAlphaXCard.titleLabel.setText("X Smoothing")
         self.boxEmaAlphaYCard.titleLabel.setText("Y Smoothing")

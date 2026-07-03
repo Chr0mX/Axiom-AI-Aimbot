@@ -887,6 +887,7 @@ class KeysPage(BasePage):
 
         # MAKCU Connection cards
         self.makcuComPortCard.titleLabel.setText(t("makcu_com_port", "COM Port:"))
+        self.makcuComRefreshBtn.setText(t("refresh", "Refresh"))
         self.makcuBaudCard.titleLabel.setText(t("arduino_baud_rate", "Baud Rate"))
         self.makcuConnectionCard.titleLabel.setText(t("connected", "Connected") + " / " + t("disconnected", "Disconnected"))
         self.makcuConnectBtnCard.titleLabel.setText(t("makcu_connect", "Connect MAKCU"))
@@ -913,6 +914,19 @@ class KeysPage(BasePage):
         self.makcuTriggerCard.contentLabel.setText(t("makcu_auto_aim_key_desc", "Mouse button that activates Auto Aim"))
         self.makcuAimModeCard.titleLabel.setText(t("makcu_aim_mode", "Aim Mode"))
         self.makcuAimModeCard.contentLabel.setText(t("makcu_aim_mode_desc", "Hold: aim while button held  |  Toggle: click to toggle aim on/off"))
+        self.makcuDisengageDelayCard.titleLabel.setText(t("makcu_disengage_delay", "Disengage Delay"))
+        self.makcuDisengageDelayCard.contentLabel.setText(t("makcu_disengage_delay_desc", "Keep aiming after releasing the aim button (0 = off)"))
+
+        # Rebuild Aim Mode combo options with fresh translations, preserving selection
+        current_aim_mode_idx = self.makcuAimModeCombo.currentIndex()
+        self._AIM_MODE_OPTIONS = [
+            (t("aim_mode_hold", "Hold"), "hold"),
+            (t("aim_mode_toggle", "Toggle"), "toggle"),
+        ]
+        self.makcuAimModeCombo.clear()
+        for label, _ in self._AIM_MODE_OPTIONS:
+            self.makcuAimModeCombo.addItem(label)
+        self.makcuAimModeCombo.setCurrentIndex(current_aim_mode_idx)
 
         # 刷新按鍵綁定按鈕文字
         self.aimKey1Btn.refreshText()

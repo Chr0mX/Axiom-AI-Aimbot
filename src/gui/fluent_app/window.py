@@ -39,6 +39,7 @@ class AxiomWindow(FluentWindow):
         self._configManager = None
         self._isApplyingAcrylic = False
         self._pendingAcrylicApply = False
+        self._transparencyEnsured = False
 
         # Get language manager
         self.langManager = getLanguageManager()
@@ -254,6 +255,41 @@ class AxiomWindow(FluentWindow):
         except Exception:
             pass  # Win10 不支援，忽略
 
+    def _ensureSystemTransparencyEnabled(self):
+        """Turn on Windows' "Transparency effects" setting if it's off.
+
+        DWM's ACCENT_ENABLE_ACRYLICBLURBEHIND composites as a flat, unblurred
+        fill (not an error) when this system-wide toggle is disabled — same
+        registry key Settings > Personalization > Colors > Transparency
+        effects writes. Broadcasting WM_SETTINGCHANGE mirrors what the
+        Settings app does so Explorer/DWM notice immediately.
+        """
+        if sys.platform != 'win32':
+            return
+        try:
+            import winreg
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ | winreg.KEY_WRITE) as key:
+                try:
+                    value, _ = winreg.QueryValueEx(key, "EnableTransparency")
+                except FileNotFoundError:
+                    value = 0
+                if value:
+                    return
+                winreg.SetValueEx(key, "EnableTransparency", 0, winreg.REG_DWORD, 1)
+
+            user32 = WinDLL("user32")
+            HWND_BROADCAST = 0xFFFF
+            WM_SETTINGCHANGE = 0x001A
+            SMTO_ABORTIFHUNG = 0x0002
+            result = DWORD()
+            user32.SendMessageTimeoutW(
+                HWND_BROADCAST, WM_SETTINGCHANGE, 0, "ImmersiveColorSet",
+                SMTO_ABORTIFHUNG, 1000, byref(result)
+            )
+        except Exception as e:
+            print(f"[Acrylic] Failed to enable system Transparency effects: {e}")
+
     def _applyAcrylicEffect(self):
         """應用 Windows Acrylic 半透明毛玻璃效果"""
         if sys.platform != 'win32':
@@ -274,6 +310,10 @@ class AxiomWindow(FluentWindow):
                 bg_dark = QColor("#1A1A1A")
                 self.setCustomBackgroundColor(bg_light, bg_dark)
                 return
+
+            if not self._transparencyEnsured:
+                self._transparencyEnsured = True
+                self._ensureSystemTransparencyEnabled()
 
             # 啟用時務必設為透明
             self.setCustomBackgroundColor(QColor(0, 0, 0, 0), QColor(0, 0, 0, 0))
@@ -433,7 +473,7 @@ class AxiomWindow(FluentWindow):
         
         self.nav_trigger = self.addSubInterface(self.triggerInterface, QIcon(os.path.join(self.base_path, "assets", "trigger.svg")), t("tab_auto_features", "Auto-Fire"))
 
-        self.nav_keys = self.addSubInterface(self.keysInterface, QIcon(os.path.join(self.base_path, "assets", "mouse.svg")), t("tab_hardware_output", "Keys & Device"))
+        self.nav_keys = self.addSubInterface(self.keysInterface, QIcon(os.path.join(self.base_path, "assets", "mouse.svg")), t("tab_hardware_output", "Keys & HW"))
         
         self.nav_display = self.addSubInterface(self.displayInterface, QIcon(os.path.join(self.base_path, "assets", "eye.svg")), t("tab_display"))
 
@@ -468,16 +508,16 @@ class AxiomWindow(FluentWindow):
             routeKey="discord",
             icon=QIcon(os.path.join(self.base_path, "assets", "discord.svg")),
             text=t("discord"),
-            onClick=lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")),
+            onClick=lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/DpcqaQEj5b")),
             position=NavigationItemPosition.BOTTOM
         )
-        
+
         # Github
         self.githubButton = self.navigationInterface.addItem(
             routeKey="github",
             icon=FluentIcon.GITHUB,
             text=t("github"),
-            onClick=lambda: QDesktopServices.openUrl(QUrl("https://github.com/iisHong0w0/Axiom-AI-Aimbot")),
+            onClick=lambda: QDesktopServices.openUrl(QUrl("https://github.com/Chr0mX/Axiom-AI-Aimbot")),
             position=NavigationItemPosition.BOTTOM
         )
         
@@ -793,7 +833,7 @@ class AxiomWindow(FluentWindow):
         if hasattr(self, 'nav_inference'): self.nav_inference.setText(t("tab_inference"))
         if hasattr(self, 'nav_aim'): self.nav_aim.setText(t("tab_aim_control"))
         if hasattr(self, 'nav_trigger'): self.nav_trigger.setText(t("tab_auto_features", "Auto-Fire"))
-        if hasattr(self, 'nav_keys'): self.nav_keys.setText(t("tab_hardware_output", "Keys & Device"))
+        if hasattr(self, 'nav_keys'): self.nav_keys.setText(t("tab_hardware_output", "Keys & HW"))
         if hasattr(self, 'nav_config'): self.nav_config.setText(t("tab_config_management"))
         if hasattr(self, 'nav_convert'): self.nav_convert.setText(t("tab_convert"))
         if hasattr(self, 'nav_other'): self.nav_other.setText(t("tab_program_control"))

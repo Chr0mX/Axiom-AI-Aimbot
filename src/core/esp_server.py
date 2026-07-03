@@ -139,8 +139,10 @@ def _build_snapshot() -> dict:
             "aim_custom_y_pct": float(getattr(c, "aim_custom_y_pct", 30.0)),
             "min_confidence": float(getattr(c, "min_confidence", 0.5)),
         },
-        "boxes": _boxes(getattr(c, "latest_boxes", [])),
-        "confidences": [float(x) for x in (getattr(c, "latest_confidences", []) or [])],
+        # Unreduced by single_target_mode — matches what the in-game overlay draws,
+        # so Web ESP always shows every detection regardless of aiming mode.
+        "boxes": _boxes(getattr(c, "latest_all_boxes", [])),
+        "confidences": [float(x) for x in (getattr(c, "latest_all_confidences", []) or [])],
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
         "active": bool(getattr(c, "AimToggle", False)),
@@ -271,11 +273,17 @@ def _accept_loop(port: int):
                 logger.error("[WebESP] WS listener failed after 10 attempts: %s", exc)
                 return
     while not _stop.is_set():
+        listener = _ws_listener
+        if listener is None:
+            break
         try:
-            conn, _addr = _ws_listener.accept()
+            conn, _addr = listener.accept()
         except socket.timeout:
             continue
         except OSError:
+            break
+        except (AttributeError, TypeError):
+            # _ws_listener was concurrently set to None by stop() mid-iteration.
             break
         try:
             if _ws_handshake(conn):

@@ -706,6 +706,7 @@ class NDICapture:
             elif not self.source_name:
                 self._assign_first_available_source()
         except Exception as exc:
+            self._teardown_receiver_and_finder()
             raise RuntimeError(f'Failed to initialize cyndilib NDI receiver: {exc}') from exc
 
         logger.info('[Capture][NDI] Waiting for receiver to connect and deliver first video frame (up to 6s)...')
@@ -720,6 +721,7 @@ class NDICapture:
         )
 
         if not connected:
+            self._teardown_receiver_and_finder()
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
         logger.info('[Capture][NDI] Receiver connected and video stream is ready.')
         self._last_frame_time: float = time.perf_counter()
@@ -948,7 +950,11 @@ class NDICapture:
             if recv_fourcc == 'uyvy':
                 return cv2.cvtColor(arr, cv2.COLOR_YUV2BGRA_UYVY)
             if recv_fourcc == 'bgra':
-                return arr
+                # raw is a zero-copy np.frombuffer() view into cyndilib's own
+                # frame buffer, which gets overwritten in place on the next
+                # capture_video()/receive() call — copy so callers can safely
+                # hold/read this across threads without a torn-frame race.
+                return arr.copy()
             return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
 
         if self.show_window:
@@ -988,7 +994,7 @@ class NDICapture:
                     frame = self._bgra_bufs[idx]
                     self._bgra_idx = 1 - idx
                 elif recv_fourcc == 'bgra':
-                    frame = raw[top:bottom, left:right]
+                    frame = raw[top:bottom, left:right].copy()
                 else:
                     crop_raw = raw[top:bottom, left:right]
                     expected_shape = (bottom - top, right - left, 4)
@@ -1013,14 +1019,23 @@ class NDICapture:
     def _draw_overlay(self, frame_bgra: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
         return _draw_detection_overlay(frame_bgra, region, self.config, has_alpha=True)
 
-    def close(self) -> None:
-        for method_name in ('disconnect', 'close', 'release', 'stop', 'shutdown'):
-            method = getattr(self._receiver, method_name, None)
-            if callable(method):
-                try:
-                    method()
-                except Exception:
-                    pass
+    def _teardown_receiver_and_finder(self) -> None:
+        """Best-effort teardown of the receiver/finder.
+
+        Shared by close() (normal teardown of a fully constructed instance)
+        and by __init__'s failure paths (a partially constructed instance
+        whose __init__ is about to raise, so no caller will ever get a
+        handle to call close() with).
+        """
+        receiver = getattr(self, '_receiver', None)
+        if receiver is not None:
+            for method_name in ('disconnect', 'close', 'release', 'stop', 'shutdown'):
+                method = getattr(receiver, method_name, None)
+                if callable(method):
+                    try:
+                        method()
+                    except Exception:
+                        pass
 
         finder = getattr(self, '_finder', None)
         if finder is not None:
@@ -1031,6 +1046,9 @@ class NDICapture:
                         method()
                     except Exception:
                         pass
+
+    def close(self) -> None:
+        self._teardown_receiver_and_finder()
         # Stop the preview thread; it destroys the window on exit
         if getattr(self, '_ndi_stop', None) is not None:
             self._ndi_stop.set()

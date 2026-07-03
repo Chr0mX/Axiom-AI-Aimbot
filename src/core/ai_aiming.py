@@ -278,8 +278,13 @@ def process_aiming(
             if best_iou >= iou_thresh and best_item is not None:
                 selected = best_item
         _, _conf, target_x, target_y, selected_box = selected
+        # Always record what got selected — independent of sticky_lock_enabled —
+        # so callers (e.g. single_target_mode's box-list reduction in ai_loop.py)
+        # can see the actual post-lock pick instead of re-deriving a lock-blind
+        # one, which is what let single_target_mode silently defeat sticky lock.
+        state.locked_box = selected_box
+        state.locked_confidence = _conf
         if sticky:
-            state.locked_box = selected_box
             state.no_detection_frames = 0
             config.display_locked_box = list(selected_box)
             config.display_locked_box_is_decaying = False
@@ -473,27 +478,8 @@ def process_aiming(
 
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)
-    else:
-        sticky = getattr(config, 'sticky_lock_enabled', False)
-        if sticky and state.locked_box is not None:
-            decay = int(getattr(config, 'lock_decay_frames', 15))
-            state.no_detection_frames += 1
-            config.display_locked_box_is_decaying = True
-            if state.no_detection_frames < decay:
-                # Hold aim — PID keeps last error; no mouse move this frame
-                return
-            # Decay expired — clear lock and reset
-            state.locked_box = None
-            state.no_detection_frames = 0
-            state.smoothed_box = None
-            config.display_locked_box = None
-            config.display_locked_box_is_decaying = False
-        state.smoothed_box = None
-        state.aim_carry_x = 0.0
-        state.aim_carry_y = 0.0
-        pid_x.reset()
-        pid_y.reset()
-        state.aim_y_last_target_y = 0.0
-        state.aim_y_last_target_t = 0.0
-        if _kalman is not None:
-            _kalman.reset()
+    # NOTE: process_aiming() is only ever called from ai_loop.py under
+    # `if is_aiming and boxes:`, so `boxes` is never empty here and
+    # `valid_targets` is therefore always non-empty. The no-detection /
+    # sticky-lock-decay handling lives in ai_loop.py's `else` branch
+    # (the zero-boxes case) instead.

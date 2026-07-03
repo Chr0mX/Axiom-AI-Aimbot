@@ -1,7 +1,7 @@
 {
     "about": "Acerca de",
-    "about_subtitle": "Un autoapuntado de IA simple que hice casualmente. Si tienes preguntas, sugerencias o quieres compartir modelos y configs, únete a nuestro Discord.",
-    "about_title": "Acerca de Axiom V6",
+    "about_subtitle": "Una continuación mantenida por la comunidad del proyecto original Axiom AI Aimbot. Si tienes preguntas, sugerencias o quieres compartir modelos y configs, únete a nuestro Discord.",
+    "about_title": "Acerca de Axiom",
     "arduino_com_port": "Puerto COM:",
     "connected": "Conectado",
     "disconnected": "Desconectado",
@@ -135,6 +135,8 @@
     "theme_toggle": "Cambiar tema",
     "discord": "Discord",
     "github": "Github",
+    "discord_original": "Discord (Original)",
+    "github_original": "Github (Original)",
     "update_available_title": "Nueva versión disponible",
     "update_available_content": "Se ha detectado una nueva versión {new_version}. ¿Desea descargarla?\n\nVersión actual: v{current_version}",
     "update_yes": "Descargar ahora",

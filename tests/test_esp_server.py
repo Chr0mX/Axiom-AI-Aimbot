@@ -42,6 +42,8 @@ class _FakeConfig:
     min_confidence = 0.5
     latest_boxes = [[100, 200, 150, 320], [10.0, 20.0, 30.0, 40.0]]
     latest_confidences = [0.91, 0.4]
+    latest_all_boxes = [[100, 200, 150, 320], [10.0, 20.0, 30.0, 40.0]]
+    latest_all_confidences = [0.91, 0.4]
     display_locked_box = [100, 200, 150, 320]
     display_locked_box_is_decaying = False
     AimToggle = True

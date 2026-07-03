@@ -1,7 +1,7 @@
 {
     "about": "परिचय",
-    "about_subtitle": "एक साधारण AI ऑटो-एयम जिसे मैंने यूं ही बनाया। सवालों, सुझावों, या मॉडल और कॉन्फ़िग साझा करने के लिए हमारे Discord से जुड़ें।",
-    "about_title": "Axiom V6 के बारे में",
+    "about_subtitle": "मूल Axiom AI Aimbot प्रोजेक्ट का एक कम्युनिटी-निर्मित निरंतरता संस्करण। सवालों, सुझावों, या मॉडल और कॉन्फ़िग साझा करने के लिए हमारे Discord से जुड़ें।",
+    "about_title": "Axiom के बारे में",
     "arduino_com_port": "COM पोर्ट:",
     "connected": "कनेक्टेड",
     "disconnected": "डिस्कनेक्टेड",
@@ -135,6 +135,8 @@
     "theme_toggle": "थीम बदलें",
     "discord": "Discord",
     "github": "Github",
+    "discord_original": "Discord (मूल)",
+    "github_original": "Github (मूल)",
     "update_available_title": "नया संस्करण उपलब्ध है",
     "update_available_content": "नया संस्करण {new_version} पाया गया है। क्या आप इसे डाउनलोड करना चाहेंगे?\n\nवर्तमान संस्करण: v{current_version}",
     "update_yes": "अभी डाउनलोड करें",
