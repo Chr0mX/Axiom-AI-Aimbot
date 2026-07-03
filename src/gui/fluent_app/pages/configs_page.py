@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QInputDialog, QMessageBox, QSplitter, QFrame
 )
 from qfluentwidgets import (
-    SettingCardGroup, FluentIcon, PrimaryPushButton, PushButton,
+    FluentIcon, PrimaryPushButton, PushButton,
     ListWidget, TitleLabel, InfoBar, InfoBarPosition, isDarkTheme,
     qconfig
 )

@@ -59,7 +59,6 @@ class DDXoftMouse:
             # Try loading ddxoft DLL (common locations)
             dll_paths = [
                 "ddxoft.dll",  # Current directory
-                "./ddxoft.dll",  # Relative path
                 "src/ddxoft.dll",  # src directory
                 "lib/ddxoft.dll",  # lib directory
             ]

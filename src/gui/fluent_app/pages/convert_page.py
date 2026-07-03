@@ -6,7 +6,7 @@ import os
 import sys
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFileDialog
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFileDialog
 from qfluentwidgets import (
     SettingCardGroup, SettingCard, SwitchSettingCard, ComboBox,
     FluentIcon, PrimaryPushButton, PushButton, BodyLabel, CaptionLabel,

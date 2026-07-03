@@ -10,21 +10,20 @@ import os
 import platform
 import re
 import subprocess
-import types
 
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
-    QAbstractSlider, QDialog, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSlider,
+    QDialog, QFrame, QHBoxLayout,
+    QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
 try:
     from qfluentwidgets import (
-        BodyLabel, CaptionLabel, ComboBox,
+        ComboBox,
         PrimaryPushButton, PushButton, Slider,
-        StrongBodyLabel, SwitchButton, TitleLabel,
+        SwitchButton,
         setTheme, Theme, qconfig,
     )
     _HAS_FLUENT = True

@@ -10,8 +10,8 @@ import time
 import ctypes
 from ctypes import POINTER, pointer, sizeof, byref, WinDLL, c_int
 from ctypes.wintypes import DWORD, ULONG
-from PyQt6.QtWidgets import (QWidget, QApplication, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QFrame, QGraphicsDropShadowEffect, QSpacerItem, QSizePolicy)
+from PyQt6.QtWidgets import (QWidget, QApplication, QVBoxLayout, QHBoxLayout,
+                             QLabel, QFrame, QGraphicsDropShadowEffect)
 from PyQt6.QtGui import (QPainter, QColor, QFont, QPixmap, QLinearGradient, 
                          QBrush, QPainterPath, QPen)
 from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal

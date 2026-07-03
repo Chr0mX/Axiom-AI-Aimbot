@@ -376,6 +376,7 @@ def start(config) -> bool:
 def stop():
     """Stop the server and close all client connections."""
     global _http_server, _ws_listener, _actual_ws_port
+    global _http_thread, _ws_accept_thread, _broadcast_thread
     global _capture_fps, _inference_fps, _prev_capture_count, _prev_inference_count, _fps_last_t
     _actual_ws_port = 0
     _capture_fps = _inference_fps = 0.0
@@ -401,4 +402,8 @@ def stop():
             except Exception:
                 pass
         _clients.clear()
+    for thread in (_http_thread, _ws_accept_thread, _broadcast_thread):
+        if thread is not None:
+            thread.join(timeout=2.0)
+    _http_thread = _ws_accept_thread = _broadcast_thread = None
     logger.info("[WebESP] stopped")

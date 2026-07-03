@@ -252,9 +252,6 @@ class Config:
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
         
-        # Full screen detection
-        self.capture_width: int = self.width
-        self.capture_height: int = self.height
         self.screenshot_method: str = "dxcam"  # 螢幕截圖方式
         self.uvc_device_index: int = 0
         self.uvc_width: int = self.width
