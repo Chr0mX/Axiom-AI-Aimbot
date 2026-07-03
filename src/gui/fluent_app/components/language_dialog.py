@@ -6,6 +6,7 @@ from qfluentwidgets import (MaskDialogBase, PrimaryPushButton, PushButton,
                             RadioButton, ScrollArea, BodyLabel,
                             SubtitleLabel, isDarkTheme)
 from ..theme_colors import ThemeColors
+from ..language_manager import t
 
 
 # Get flags directory
@@ -130,7 +131,7 @@ class LanguageDialog(MaskDialogBase):
         self.mainLayout.setSpacing(16)
         
         # Title
-        self.titleLabel = SubtitleLabel("Select Language", self.widget)
+        self.titleLabel = SubtitleLabel(t("language_dialog_title", "Select Language"), self.widget)
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         titleFont = self.titleLabel.font()
         titleFont.setPixelSize(20)
@@ -165,11 +166,11 @@ class LanguageDialog(MaskDialogBase):
         self.buttonLayout = QHBoxLayout()
         self.buttonLayout.setSpacing(12)
         
-        self.cancelButton = PushButton("Cancel", self.widget)
+        self.cancelButton = PushButton(t("cancel", "Cancel"), self.widget)
         self.cancelButton.setFixedWidth(100)
         self.cancelButton.clicked.connect(self.reject)
         
-        self.confirmButton = PrimaryPushButton("Confirm", self.widget)
+        self.confirmButton = PrimaryPushButton(t("confirm", "Confirm"), self.widget)
         self.confirmButton.setFixedWidth(100)
         self.confirmButton.clicked.connect(self._onConfirm)
         

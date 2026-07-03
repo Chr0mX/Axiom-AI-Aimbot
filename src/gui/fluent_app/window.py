@@ -854,6 +854,9 @@ class AxiomWindow(FluentWindow):
             if hasattr(page, 'retranslateUi'):
                 page.retranslateUi()
 
+        if hasattr(self, 'previewPanel'):
+            self.previewPanel.retranslateUi()
+
     def closeEvent(self, event):
         """視窗關閉時自動保存配置"""
         if self._config is not None:

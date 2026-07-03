@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from ..language_manager import t
+
 
 def _frame_to_pixmap(frame, max_w: int, max_h: int) -> "QPixmap | None":
     """Convert a BGRA/BGR numpy frame to a scaled QPixmap. Returns None on error."""
@@ -78,7 +80,7 @@ class _FpsMixin:
     def _fps_reset(self) -> None:
         self._fps_count   = 0
         self._fps_last_ts = _time.perf_counter()
-        self._fps_label.setText("-- fps")
+        self._fps_label.setText(t("preview_fps_placeholder", "-- fps"))
 
 
 class PreviewPopOutWindow(_FpsMixin, QDialog):
@@ -88,7 +90,7 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
         super().__init__(parent)
         self._config = config
         self._on_close = on_close
-        self.setWindowTitle("Axiom – Capture Preview")
+        self.setWindowTitle(t("preview_popout_title", "Axiom – Capture Preview"))
         self.resize(640, 360)
 
         self._always_on_top = bool(getattr(config, 'uvc_always_on_top', True))
@@ -98,7 +100,7 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(2)
 
-        fps_label = QLabel("-- fps")
+        fps_label = QLabel(t("preview_fps_placeholder", "-- fps"))
         fps_label.setStyleSheet("font-size: 9px; color: #888;")
         fps_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(fps_label)
@@ -106,7 +108,7 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
         self._label = QLabel()
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setStyleSheet("background: #111;")
-        self._label.setText("No signal")
+        self._label.setText(t("preview_no_signal", "No signal"))
         layout.addWidget(self._label, stretch=1)
 
         self._fps_init(fps_label)
@@ -125,7 +127,7 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
         from core.screen_capture import get_preview_frame
         frame = get_preview_frame()
         if frame is None:
-            self._label.setText("No signal")
+            self._label.setText(t("preview_no_signal", "No signal"))
             return
         try:
             frame = _apply_crop(frame, self._config)
@@ -137,7 +139,7 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
             self._label.setPixmap(pixmap)
             self._fps_tick()
         else:
-            self._label.setText("No signal")
+            self._label.setText(t("preview_no_signal", "No signal"))
 
     def closeEvent(self, event):
         self._timer.stop()
@@ -167,12 +169,12 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
         # Header row: "Preview" label + FPS counter
         header_row = QHBoxLayout()
         header_row.setContentsMargins(0, 0, 0, 0)
-        header = QLabel("Preview")
-        header.setStyleSheet("font-weight: bold; font-size: 11px;")
-        fps_label = QLabel("-- fps")
+        self._header_label = QLabel(t("preview_header", "Preview"))
+        self._header_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        fps_label = QLabel(t("preview_fps_placeholder", "-- fps"))
         fps_label.setStyleSheet("font-size: 9px; color: #888;")
         fps_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        header_row.addWidget(header)
+        header_row.addWidget(self._header_label)
         header_row.addStretch(1)
         header_row.addWidget(fps_label)
         layout.addLayout(header_row)
@@ -186,10 +188,10 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
         self._frame_label.setStyleSheet(
             "background: #111; border: 1px solid #333; border-radius: 4px;"
         )
-        self._frame_label.setText("No signal")
+        self._frame_label.setText(t("preview_no_signal", "No signal"))
         layout.addWidget(self._frame_label, stretch=1)
 
-        self._popout_btn = QPushButton("Pop out")
+        self._popout_btn = QPushButton(t("preview_popout_btn", "Pop out"))
         self._popout_btn.setFixedHeight(28)
         self._popout_btn.clicked.connect(self._onPopOut)
         layout.addWidget(self._popout_btn)
@@ -202,6 +204,17 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
     def setConfig(self, config) -> None:
         self._config = config
 
+    def retranslateUi(self) -> None:
+        """Re-apply static labels after a language switch.
+
+        The frame/FPS labels don't need this — they're refreshed continuously
+        by the capture timer, which already reads the current language on
+        every tick — but the header and pop-out button are set once and
+        never touched again otherwise.
+        """
+        self._header_label.setText(t("preview_header", "Preview"))
+        self._popout_btn.setText(t("preview_popout_btn", "Pop out"))
+
     def start(self) -> None:
         if not self._popout:
             self._fps_reset()
@@ -211,7 +224,7 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
     def stop(self) -> None:
         self._timer.stop()
         self._frame_label.clear()
-        self._frame_label.setText("No signal")
+        self._frame_label.setText(t("preview_no_signal", "No signal"))
         self._fps_reset()
 
     def applyFpsCap(self) -> None:
@@ -224,7 +237,7 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
         from core.screen_capture import get_preview_frame
         frame = get_preview_frame()
         if frame is None:
-            self._frame_label.setText("No signal")
+            self._frame_label.setText(t("preview_no_signal", "No signal"))
             return
         try:
             if self._config is not None:
@@ -238,7 +251,7 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
             self._frame_label.setPixmap(pixmap)
             self._fps_tick()
         else:
-            self._frame_label.setText("No signal")
+            self._frame_label.setText(t("preview_no_signal", "No signal"))
 
     def _onPopOut(self) -> None:
         if self._popout and self._popout.isVisible():
@@ -255,7 +268,7 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
 
     def _onPopOutClosed(self) -> None:
         self._popout = None
-        self._frame_label.setText("No signal")
+        self._frame_label.setText(t("preview_no_signal", "No signal"))
         self._fps_reset()
         ms = _capture_interval_ms(self._config)
         self._timer.start(ms)

@@ -316,5 +316,14 @@ class ConvertPage(BasePage):
         self.workspaceCard.contentLabel.setText(t("trt_workspace_desc", "GPU memory budget for the build. Increase for larger models."))
         self.outputCard.titleLabel.setText(t("trt_output", "Output Cache Directory"))
         self.logLabel.setText(t("trt_build_log", "Build Log"))
+        self.logView.setPlaceholderText(
+            t("trt_log_placeholder",
+              "Conversion output will appear here. First build can take 1–5 minutes.")
+        )
+        self.hintLabel.setText(
+            t("trt_convert_hint",
+              "The engine is cached in trt_cache/. On the next app launch, TensorRT "
+              "loads it in under a second instead of rebuilding.")
+        )
         if not (self._worker and self._worker.isRunning()):
             self.convertBtn.setText(t("trt_convert", "Convert"))

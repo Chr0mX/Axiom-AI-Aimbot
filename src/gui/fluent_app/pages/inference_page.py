@@ -135,9 +135,9 @@ class InferencePage(BasePage):
         )
 
         self.secondInferSegment = SegmentedWidget()
-        self.secondInferSegment.addItem("off",     "Off")
-        self.secondInferSegment.addItem("v1_ocr",  "V1 OCR")
-        self.secondInferSegment.addItem("v2_onnx", "V2 ONNX")
+        self.secondInferSegment.addItem("off",     t("weapon_detect_off", "Off"))
+        self.secondInferSegment.addItem("v1_ocr",  t("weapon_detect_v1_ocr", "V1 OCR"))
+        self.secondInferSegment.addItem("v2_onnx", t("weapon_detect_v2_onnx", "V2 ONNX"))
         self.secondInferCard = SettingCard(
             FluentIcon.DOCUMENT,
             t("weapon_detection_method", "Weapon Detection Method"),
@@ -203,21 +203,21 @@ class InferencePage(BasePage):
 
         self.boxEmaAlphaXCard = SliderDoubleSpinCard(
             FluentIcon.MOVE,
-            "X Smoothing",
+            t("box_smoothing_x", "X Smoothing"),
             0.05, 1.0,
             decimals=2,
             step=0.05,
-            description="1.0 = no smoothing  ·  0.5 = balanced",
+            description=t("box_smoothing_alpha_desc", "1.0 = no smoothing  ·  0.5 = balanced"),
             parent=self.boxSmoothGroup
         )
 
         self.boxEmaAlphaYCard = SliderDoubleSpinCard(
             FluentIcon.ALIGNMENT,
-            "Y Smoothing",
+            t("box_smoothing_y", "Y Smoothing"),
             0.05, 1.0,
             decimals=2,
             step=0.05,
-            description="1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)",
+            description=t("box_smoothing_alpha_y_desc", "1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)"),
             parent=self.boxSmoothGroup
         )
 
@@ -498,6 +498,9 @@ class InferencePage(BasePage):
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
         self.secondInferCard.titleLabel.setText(t("weapon_detection_method", "Weapon Detection Method"))
         self.secondInferCard.contentLabel.setText(t("weapon_detection_method_desc", "Off / OCR (PaddleOCR) / ONNX (HUD weapon detector)"))
+        self.secondInferSegment.setItemText("off", t("weapon_detect_off", "Off"))
+        self.secondInferSegment.setItemText("v1_ocr", t("weapon_detect_v1_ocr", "V1 OCR"))
+        self.secondInferSegment.setItemText("v2_onnx", t("weapon_detect_v2_onnx", "V2 ONNX"))
         self.hudConfidenceCard.titleLabel.setText(t("weapon_detection_threshold", "Weapon Detection Threshold"))
         self.hudConfidenceCard.contentLabel.setText(t("weapon_detection_threshold_desc", "Minimum confidence for ONNX weapon detections"))
 
@@ -513,5 +516,7 @@ class InferencePage(BasePage):
         self.boxSmoothGroup.titleLabel.setText(t("box_smoothing", "Box Smoothing"))
         self.boxEmaEnableCard.titleLabel.setText(t("box_smoothing", "Box Smoothing"))
         self.boxEmaEnableCard.contentLabel.setText(t("box_smoothing_desc", "Apply EMA smoothing to raw detection boxes to suppress size jitter and reduce bounding box wobble"))
-        self.boxEmaAlphaXCard.titleLabel.setText("X Smoothing")
-        self.boxEmaAlphaYCard.titleLabel.setText("Y Smoothing")
+        self.boxEmaAlphaXCard.titleLabel.setText(t("box_smoothing_x", "X Smoothing"))
+        self.boxEmaAlphaXCard.contentLabel.setText(t("box_smoothing_alpha_desc", "1.0 = no smoothing  ·  0.5 = balanced"))
+        self.boxEmaAlphaYCard.titleLabel.setText(t("box_smoothing_y", "Y Smoothing"))
+        self.boxEmaAlphaYCard.contentLabel.setText(t("box_smoothing_alpha_y_desc", "1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)"))

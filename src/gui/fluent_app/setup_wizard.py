@@ -607,13 +607,18 @@ class SetupWizard(QDialog):
         self._detected_gpu = _detect_gpu_name()
         cpu_name = platform.processor() or platform.machine()
 
+        self._cpu_name = cpu_name
+
         hw_row = QHBoxLayout()
         hw_row.setSpacing(12)
-        hw_row.addWidget(_lbl("Hardware", 11, bold=True))
+        self._lbl_hw_title = _lbl("Hardware", 11, bold=True)
+        hw_row.addWidget(self._lbl_hw_title)
         hw_row.addStretch()
-        hw_row.addWidget(_lbl(f"GPU: {self._detected_gpu or 'Not detected'}", 10))
+        self._lbl_gpu = _lbl(f"GPU: {self._detected_gpu or 'Not detected'}", 10)
+        hw_row.addWidget(self._lbl_gpu)
         hw_row.addSpacing(12)
-        hw_row.addWidget(_lbl(f"CPU: {cpu_name or 'Unknown'}", 10))
+        self._lbl_cpu = _lbl(f"CPU: {cpu_name or 'Unknown'}", 10)
+        hw_row.addWidget(self._lbl_cpu)
         ly.addLayout(hw_row)
 
         ly.addSpacing(8)
@@ -894,6 +899,14 @@ class SetupWizard(QDialog):
         self._lbl_perf_sub.setText(
             lm.get("wizard_perf_subtitle",
                    "Configure inference and tracking options. These can be changed later in the Aim tab."))
+        self._lbl_hw_title.setText(lm.get("wizard_perf_hardware", "Hardware"))
+        self._lbl_gpu.setText(
+            f"{lm.get('wizard_perf_gpu_label', 'GPU')}: "
+            f"{self._detected_gpu or lm.get('wizard_perf_not_detected', 'Not detected')}")
+        self._lbl_cpu.setText(
+            f"{lm.get('wizard_perf_cpu_label', 'CPU')}: "
+            f"{self._cpu_name or lm.get('wizard_perf_unknown', 'Unknown')}")
+        self._lbl_perf_backend.setText(lm.get("wizard_perf_backend", "Inference Backend"))
         self._lbl_perf_model.setText(
             lm.get("wizard_perf_model_path", "Model"))
 
