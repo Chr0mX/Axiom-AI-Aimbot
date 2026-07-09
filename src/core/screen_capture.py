@@ -1527,6 +1527,17 @@ class UdpCapture:
                 if w != self.preview_width or h != self.preview_height:
                     self.preview_width = w
                     self.preview_height = h
+                    # Published so get_capture_dimensions() can size the
+                    # detection region against the real, current stream
+                    # resolution — the sender (e.g. an OBS udp_stream_filter
+                    # crop) can change this at any time, so it can't be a
+                    # fixed/user-configured value like uvc_width/uvc_height.
+                    # Without this, a region computed against config.width/
+                    # height (full desktop res) can fall entirely outside a
+                    # smaller cropped stream, making grab() return None every
+                    # frame and inference FPS drop to 0.
+                    self.config.udp_width = w
+                    self.config.udp_height = h
 
             _fps_count += 1
             _now = time.perf_counter()

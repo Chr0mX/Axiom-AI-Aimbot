@@ -282,6 +282,13 @@ class Config:
         self.udp_recv_buffer_size: int = 65536
         self.udp_frame_timeout: float = 1.0
         self.udp_force_restart: bool = False
+        # Actual live stream resolution, updated continuously by
+        # UdpCapture._reader_worker from the real decoded frame size — not a
+        # user-configured value, since the sender can crop/resize at any
+        # time. 0 = not yet probed (no frame received); get_capture_dimensions()
+        # falls back to config.width/height in that case.
+        self.udp_width: int = 0
+        self.udp_height: int = 0
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
 

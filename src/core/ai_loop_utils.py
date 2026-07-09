@@ -24,6 +24,19 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
         cap_h = int(getattr(config, 'ndi_height', 0) or 0)
         if cap_w > 0 and cap_h > 0:
             return cap_w, cap_h
+    elif screenshot_method == 'udp':
+        # Unlike uvc_width/ndi_width (user-configured), udp_width/udp_height
+        # track the actual live stream resolution — the sender (e.g. an OBS
+        # udp_stream_filter crop) can change it at any time. Falling back to
+        # the full desktop resolution here (as if unconditionally reached)
+        # would size the detection region against a canvas the stream no
+        # longer matches, e.g. a stream cropped to 640x640: the region would
+        # land outside the actual frame, UdpCapture.grab() would return None
+        # every frame, and inference FPS would drop to 0.
+        cap_w = int(getattr(config, 'udp_width', 0) or 0)
+        cap_h = int(getattr(config, 'udp_height', 0) or 0)
+        if cap_w > 0 and cap_h > 0:
+            return cap_w, cap_h
     return int(config.width), int(config.height)
 
 
