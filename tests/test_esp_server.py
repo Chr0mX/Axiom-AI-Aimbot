@@ -94,6 +94,46 @@ def test_snapshot_boxes_unaffected_by_single_target_mode_reduction():
     assert snap["confidences"] == [0.91, 0.4, 0.7]
 
 
+def test_snapshot_screen_dims_match_udp_stream_not_desktop():
+    """Regression guard: for the 'udp' capture backend, latest_all_boxes'
+    coordinates are expressed in the actual live stream resolution
+    (config.udp_width/udp_height), not the full desktop (config.width/
+    height). If the snapshot's "screen" field doesn't match, the browser
+    client scales boxes by the wrong ratio (canvas.width / screen.w) and
+    every box renders at the wrong scale/position — most visibly wrong for
+    a stream cropped much smaller than the desktop, e.g. 320x320 on a
+    1920x1080 desktop, which shrinks boxes to roughly 1/6th scale and
+    mispositions them.
+    """
+    class UdpStreamConfig(_FakeConfig):
+        screenshot_method = "udp"
+        udp_width = 320
+        udp_height = 320
+        # Box coordinates in the small stream's own 0-320 coordinate space,
+        # not desktop (0-1920) space.
+        latest_all_boxes = [[50, 60, 90, 140]]
+        latest_all_confidences = [0.8]
+
+    esp_server._config = UdpStreamConfig()
+    snap = esp_server._build_snapshot()
+    assert snap["screen"] == {"w": 320, "h": 320}
+    assert snap["boxes"] == [[50, 60, 90, 140]]
+
+
+def test_snapshot_screen_dims_fall_back_to_desktop_before_first_udp_frame():
+    """Before any UDP frame has arrived, udp_width/udp_height are 0 (unset)
+    — the snapshot must fall back to the desktop resolution rather than
+    reporting a bogus 0x0 screen size."""
+    class UdpStreamNoFrameYetConfig(_FakeConfig):
+        screenshot_method = "udp"
+        udp_width = 0
+        udp_height = 0
+
+    esp_server._config = UdpStreamNoFrameYetConfig()
+    snap = esp_server._build_snapshot()
+    assert snap["screen"] == {"w": 1920, "h": 1080}
+
+
 def test_snapshot_handles_empty_and_missing():
     class Empty:
         pass

@@ -41,14 +41,19 @@ class TestFindClosestTarget:
         assert picked_confs == [0.95]
 
     def test_composite_mode_blends_distance_and_confidence(self, ai_loop_utils):
-        # Near box has low confidence; far box has near-perfect confidence.
-        # With a strong confidence_weight the far box should win.
-        boxes = [[0, 0, 10, 10], [400, 400, 410, 410]]
-        confs = [0.10, 0.99]
+        # Near box has low confidence; far box has much higher confidence,
+        # but only moderately farther (score = distance_sq * (1 - conf *
+        # weight) — distance_sq dominates quadratically, so the near box
+        # must NOT sit exactly on the crosshair (distance_sq=0 can never be
+        # outweighted by any confidence factor) and the far box can't be
+        # too many multiples farther or distance_sq swamps the confidence
+        # term regardless of weight.
+        boxes = [[5, 5, 15, 15], [25, 25, 35, 35]]  # centers (10,10), (30,30)
+        confs = [0.05, 0.99]
         picked_boxes, _ = ai_loop_utils.find_closest_target(
-            boxes, confs, crosshair_x=5, crosshair_y=5,
+            boxes, confs, crosshair_x=0, crosshair_y=0,
             priority_mode="composite", confidence_weight=0.95)
-        assert picked_boxes == [[400, 400, 410, 410]]
+        assert picked_boxes == [[25, 25, 35, 35]]
 
     def test_missing_confidence_defaults_to_half(self, ai_loop_utils):
         # confidences shorter than boxes — index-out-of-range entries default to 0.5.

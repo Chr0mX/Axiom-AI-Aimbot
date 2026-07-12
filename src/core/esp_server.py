@@ -27,6 +27,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import List, Optional, Set
 from urllib.parse import urlparse
 
+from .ai_loop_utils import get_capture_dimensions
+
 logger = logging.getLogger(__name__)
 
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -110,9 +112,19 @@ def _build_snapshot() -> dict:
     except (TypeError, ValueError, IndexError):
         locked = None
 
+    # Same dimension logic ai_loop.py uses to size the detection region —
+    # for 'uvc'/'ndi'/'udp' backends this is the actual live capture
+    # resolution, not necessarily the full desktop. latest_all_boxes'
+    # coordinates are expressed in whatever space this returns, so the
+    # client's box-scaling (canvas.width / screen.w) has to agree with it
+    # or boxes render at the wrong scale/position — this was previously
+    # always c.width/c.height (full desktop), which badly mis-scaled boxes
+    # for e.g. a UDP stream cropped down to 320x320.
+    cap_w, cap_h = get_capture_dimensions(c)
+
     return {
         "t": int(time.monotonic() * 1000),
-        "screen": {"w": int(getattr(c, "width", 1920)), "h": int(getattr(c, "height", 1080))},
+        "screen": {"w": cap_w, "h": cap_h},
         "center": {"x": int(getattr(c, "crosshairX", 0)), "y": int(getattr(c, "crosshairY", 0))},
         "settings": {
             "fov_size": int(getattr(c, "fov_size", 200)),

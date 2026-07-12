@@ -3,8 +3,6 @@ from __future__ import annotations
 import queue
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
-import win32api
-
 if TYPE_CHECKING:
     from .config import Config
 
@@ -37,7 +35,11 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
         cap_h = int(getattr(config, 'udp_height', 0) or 0)
         if cap_w > 0 and cap_h > 0:
             return cap_w, cap_h
-    return int(config.width), int(config.height)
+    # getattr (not direct attribute access) so this stays safe against
+    # partial/stub config objects — e.g. esp_server.py's test suite
+    # deliberately calls this against a bare `class Empty: pass` to prove
+    # the snapshot builder never crashes on a missing/incomplete config.
+    return int(getattr(config, 'width', 1920)), int(getattr(config, 'height', 1080))
 
 
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:
@@ -45,6 +47,7 @@ def update_crosshair_position(config: Config, half_width: int, half_height: int)
 
     if config.fov_follow_mouse:
         try:
+            import win32api
             x, y = win32api.GetCursorPos()
             config.crosshairX, config.crosshairY = x, y
         except (OSError, RuntimeError):
