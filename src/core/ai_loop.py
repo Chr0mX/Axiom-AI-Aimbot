@@ -325,7 +325,16 @@ def ai_logic_loop(
         try:
             while config.Running and not capture_stop_event.is_set():
                 screenshot_interval = max(0.001, float(getattr(config, 'screenshot_interval', config.detect_interval)))
-                should_use_high_res_timer = screenshot_interval <= 0.002
+                detect_interval = float(getattr(config, 'detect_interval', screenshot_interval))
+                # Windows' default Sleep()/time.sleep() granularity is ~15.6ms;
+                # any throttle interval tighter than that needs the high-res
+                # multimedia timer below or the configured interval is
+                # silently ignored — both screenshot_interval and
+                # detect_interval gate a _sleep_precise() call (this loop and
+                # the main inference loop respectively), and this timer
+                # resolution request is process-wide, so either interval
+                # needing it is enough to request it.
+                should_use_high_res_timer = min(screenshot_interval, detect_interval) < 0.015
 
                 if should_use_high_res_timer and not high_res_timer_enabled:
                     high_res_timer_enabled = _set_windows_timer_resolution_1ms(True)
