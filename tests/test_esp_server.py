@@ -94,44 +94,79 @@ def test_snapshot_boxes_unaffected_by_single_target_mode_reduction():
     assert snap["confidences"] == [0.91, 0.4, 0.7]
 
 
-def test_snapshot_screen_dims_match_udp_stream_not_desktop():
-    """Regression guard: for the 'udp' capture backend, latest_all_boxes'
-    coordinates are expressed in the actual live stream resolution
-    (config.udp_width/udp_height), not the full desktop (config.width/
-    height). If the snapshot's "screen" field doesn't match, the browser
-    client scales boxes by the wrong ratio (canvas.width / screen.w) and
-    every box renders at the wrong scale/position — most visibly wrong for
-    a stream cropped much smaller than the desktop, e.g. 320x320 on a
-    1920x1080 desktop, which shrinks boxes to roughly 1/6th scale and
-    mispositions them.
+def test_snapshot_udp_boxes_shifted_to_desktop_coordinates():
+    """Regression guard for the UDP spatial-crop offset fix.
+
+    A UDP stream is fed by an OBS filter that spatially crops a small
+    sub-region out of the user's real desktop — latest_all_boxes'
+    coordinates are expressed in that small crop's own 0-udp_width /
+    0-udp_height space, not desktop space. Since there's no way to learn
+    the crop's real position on the desktop from the stream itself, the
+    snapshot assumes the crop is centered on the desktop (matching the
+    aim logic's own implicit assumption — see ai_loop.py/ai_loop_utils.py)
+    and shifts box/center coordinates by that centered offset, while
+    "screen" reports the real desktop resolution. This is what lets the
+    Web ESP overlay align with the user's actual full-screen game view
+    instead of being stretched/misaligned relative to it.
     """
     class UdpStreamConfig(_FakeConfig):
         screenshot_method = "udp"
         udp_width = 320
         udp_height = 320
-        # Box coordinates in the small stream's own 0-320 coordinate space,
-        # not desktop (0-1920) space.
+        crosshairX = 160  # centered within the 320x320 crop
+        crosshairY = 160
+        # Box coordinates in the small crop's own 0-320 coordinate space.
         latest_all_boxes = [[50, 60, 90, 140]]
         latest_all_confidences = [0.8]
+        display_locked_box = [50, 60, 90, 140]
 
     esp_server._config = UdpStreamConfig()
     snap = esp_server._build_snapshot()
-    assert snap["screen"] == {"w": 320, "h": 320}
-    assert snap["boxes"] == [[50, 60, 90, 140]]
+    # offset = ((1920-320)/2, (1080-320)/2) = (800, 380)
+    assert snap["screen"] == {"w": 1920, "h": 1080}
+    assert snap["center"] == {"x": 960, "y": 540}
+    assert snap["boxes"] == [[850, 440, 890, 520]]
+    assert snap["locked_box"] == [850, 440, 890, 520]
 
 
-def test_snapshot_screen_dims_fall_back_to_desktop_before_first_udp_frame():
-    """Before any UDP frame has arrived, udp_width/udp_height are 0 (unset)
-    — the snapshot must fall back to the desktop resolution rather than
-    reporting a bogus 0x0 screen size."""
+def test_snapshot_udp_no_offset_before_first_frame():
+    """Before any UDP frame has arrived, udp_width/udp_height are 0
+    (unset) — get_capture_dimensions() falls back to the desktop
+    resolution itself, so the computed offset is exactly 0 (no shift)
+    and "screen" is the desktop resolution, not a bogus 0x0 or a
+    stale/wrong offset applied to boxes that don't exist yet anyway."""
     class UdpStreamNoFrameYetConfig(_FakeConfig):
         screenshot_method = "udp"
         udp_width = 0
         udp_height = 0
+        crosshairX = 960
+        crosshairY = 540
 
     esp_server._config = UdpStreamNoFrameYetConfig()
     snap = esp_server._build_snapshot()
     assert snap["screen"] == {"w": 1920, "h": 1080}
+    assert snap["center"] == {"x": 960, "y": 540}
+
+
+def test_snapshot_non_udp_backends_get_no_offset():
+    """uvc/ndi/mss/dxcam backends have no separate 'real desktop the crop
+    was taken from' concept — the captured frame IS what's being viewed —
+    so they must never get an offset applied, even if their own capture
+    resolution differs from the desktop."""
+    class UvcConfig(_FakeConfig):
+        screenshot_method = "uvc"
+        uvc_width = 1280
+        uvc_height = 720
+        crosshairX = 640
+        crosshairY = 360
+        latest_all_boxes = [[10, 10, 20, 20]]
+        latest_all_confidences = [0.5]
+
+    esp_server._config = UvcConfig()
+    snap = esp_server._build_snapshot()
+    assert snap["screen"] == {"w": 1280, "h": 720}
+    assert snap["center"] == {"x": 640, "y": 360}
+    assert snap["boxes"] == [[10, 10, 20, 20]]
 
 
 def test_snapshot_handles_empty_and_missing():

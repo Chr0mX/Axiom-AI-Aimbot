@@ -97,35 +97,65 @@ def is_running() -> bool:
 def _build_snapshot() -> dict:
     c = _config
 
+    # Same dimension logic ai_loop.py uses to size the detection region —
+    # for 'uvc'/'ndi'/'udp' backends this is the actual live capture
+    # resolution, not necessarily the full desktop.
+    cap_w, cap_h = get_capture_dimensions(c)
+
+    # The 'udp' backend is special: unlike uvc/ndi (where the capture
+    # device's own frame IS the thing being viewed), a UDP stream is fed by
+    # an OBS filter that spatially CROPS a sub-region out of the user's real
+    # desktop — cap_w/cap_h is only that small crop's own resolution, not
+    # the screen the user is actually looking at and wants the overlay
+    # aligned against. There is no way to learn the crop's position within
+    # the desktop from the stream itself, so this assumes the crop is
+    # centered on the desktop — the same assumption ai_loop.py's aim/
+    # detection-region logic already implicitly relies on (the crosshair is
+    # centered within the small UDP frame; that only produces correct
+    # real-screen aiming if the frame is actually centered on the real
+    # crosshair), and the only sane way to crop around your crosshair for
+    # an aim tool in the first place. Boxes/center are shifted by that
+    # offset so they land at real desktop coordinates, matching how the
+    # in-game overlay is meant to be viewed: covering the full screen.
+    screenshot_method = str(getattr(c, "screenshot_method", "")).lower()
+    offset_x = offset_y = 0
+    if screenshot_method == "udp":
+        screen_w = int(getattr(c, "width", cap_w or 1920))
+        screen_h = int(getattr(c, "height", cap_h or 1080))
+        if cap_w > 0 and cap_h > 0:
+            offset_x = (screen_w - cap_w) // 2
+            offset_y = (screen_h - cap_h) // 2
+    else:
+        screen_w, screen_h = cap_w, cap_h
+
     def _boxes(raw) -> List[List[int]]:
         out = []
         for b in (raw or []):
             try:
-                out.append([int(b[0]), int(b[1]), int(b[2]), int(b[3])])
+                out.append([
+                    int(b[0]) + offset_x, int(b[1]) + offset_y,
+                    int(b[2]) + offset_x, int(b[3]) + offset_y,
+                ])
             except (TypeError, ValueError, IndexError):
                 continue
         return out
 
     locked = getattr(c, "display_locked_box", None)
     try:
-        locked = [int(locked[0]), int(locked[1]), int(locked[2]), int(locked[3])] if locked else None
+        locked = [
+            int(locked[0]) + offset_x, int(locked[1]) + offset_y,
+            int(locked[2]) + offset_x, int(locked[3]) + offset_y,
+        ] if locked else None
     except (TypeError, ValueError, IndexError):
         locked = None
 
-    # Same dimension logic ai_loop.py uses to size the detection region —
-    # for 'uvc'/'ndi'/'udp' backends this is the actual live capture
-    # resolution, not necessarily the full desktop. latest_all_boxes'
-    # coordinates are expressed in whatever space this returns, so the
-    # client's box-scaling (canvas.width / screen.w) has to agree with it
-    # or boxes render at the wrong scale/position — this was previously
-    # always c.width/c.height (full desktop), which badly mis-scaled boxes
-    # for e.g. a UDP stream cropped down to 320x320.
-    cap_w, cap_h = get_capture_dimensions(c)
-
     return {
         "t": int(time.monotonic() * 1000),
-        "screen": {"w": cap_w, "h": cap_h},
-        "center": {"x": int(getattr(c, "crosshairX", 0)), "y": int(getattr(c, "crosshairY", 0))},
+        "screen": {"w": screen_w, "h": screen_h},
+        "center": {
+            "x": int(getattr(c, "crosshairX", 0)) + offset_x,
+            "y": int(getattr(c, "crosshairY", 0)) + offset_y,
+        },
         "settings": {
             "fov_size": int(getattr(c, "fov_size", 200)),
             "detect_range_size": int(getattr(c, "detect_range_size", 320)),
