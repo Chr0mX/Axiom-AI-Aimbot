@@ -160,9 +160,10 @@
     ctx.stroke();
   }
 
-  function fovCorners(cx, cy, fov, color) {
-    const half = fov / 2, len = Math.max(8, fov * 0.15);
-    const x1 = cx - half, y1 = cy - half, x2 = cx + half, y2 = cy + half;
+  function fovCorners(cx, cy, fovX, fovY, color) {
+    const halfX = fovX / 2, halfY = fovY / 2;
+    const len = Math.max(8, Math.min(halfX, halfY) * 0.3);
+    const x1 = cx - halfX, y1 = cy - halfY, x2 = cx + halfX, y2 = cy + halfY;
     ctx.strokeStyle = rgba(color);
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -223,27 +224,29 @@
       const X = (v) => v * sx, Y = (v) => v * sy;
       const cx = X(state.center.x), cy = Y(state.center.y);
 
-      // Detect range
+      // Detect range — sx/sy scaled independently, since screen.w/h (e.g. a
+      // square UDP stream) rarely matches the canvas's own aspect ratio
+      // (the browser viewport); a single scalar stretches this into an oval.
       if (st.show_detect_range) {
-        const rs = st.detect_range_size * sx;
+        const rsx = st.detect_range_size * sx, rsy = st.detect_range_size * sy;
         ctx.strokeStyle = "rgba(120,120,120,0.7)";
         ctx.lineWidth = 1;
         if (st.fov_circle_filter_enabled) {
-          ctx.beginPath(); ctx.arc(cx, cy, rs / 2, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.ellipse(cx, cy, rsx / 2, rsy / 2, 0, 0, Math.PI * 2); ctx.stroke();
         } else {
-          ctx.strokeRect(cx - rs / 2, cy - rs / 2, rs, rs);
+          ctx.strokeRect(cx - rsx / 2, cy - rsy / 2, rsx, rsy);
         }
       }
 
-      // FOV
+      // FOV — same per-axis scaling as detect range, for the same reason.
       if (st.show_fov) {
-        const fov = st.fov_size * sx;
+        const fovx = st.fov_size * sx, fovy = st.fov_size * sy;
         const fovColor = [255, 255, 255, 180];
         if (st.fov_circle_filter_enabled) {
           ctx.strokeStyle = rgba(fovColor); ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.arc(cx, cy, fov / 2, 0, Math.PI * 2); ctx.stroke();
+          ctx.beginPath(); ctx.ellipse(cx, cy, fovx / 2, fovy / 2, 0, 0, Math.PI * 2); ctx.stroke();
         } else {
-          fovCorners(cx, cy, fov, fovColor);
+          fovCorners(cx, cy, fovx, fovy, fovColor);
         }
       }
 
@@ -307,19 +310,23 @@
         ctx.strokeRect(X(lb[0]), Y(lb[1]), X(lb[2]) - X(lb[0]), Y(lb[3]) - Y(lb[1]));
       }
 
-      // Crosshair
+      // Crosshair — scaled per axis like everything else above; previously
+      // drawn at the raw crosshair_size with no scaling at all.
       if (st.show_crosshair) {
-        const cc = st.crosshair_color, s = st.crosshair_size;
+        const cc = st.crosshair_color;
+        const sxr = st.crosshair_size * sx, syr = st.crosshair_size * sy;
         ctx.strokeStyle = `rgb(${cc[0]},${cc[1]},${cc[2]})`;
         ctx.fillStyle   = `rgb(${cc[0]},${cc[1]},${cc[2]})`;
         ctx.lineWidth = 1;
         if (st.crosshair_style === "cross") {
           ctx.beginPath();
-          ctx.moveTo(cx - s, cy); ctx.lineTo(cx + s, cy);
-          ctx.moveTo(cx, cy - s); ctx.lineTo(cx, cy + s);
+          ctx.moveTo(cx - sxr, cy); ctx.lineTo(cx + sxr, cy);
+          ctx.moveTo(cx, cy - syr); ctx.lineTo(cx, cy + syr);
           ctx.stroke();
         } else {
-          ctx.beginPath(); ctx.arc(cx, cy, Math.max(1, s / 2), 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, Math.max(1, sxr / 2), Math.max(1, syr / 2), 0, 0, Math.PI * 2);
+          ctx.fill();
         }
       }
 
