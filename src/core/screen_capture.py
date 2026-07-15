@@ -1324,10 +1324,24 @@ class UVCCapture:
             actual_str = ''.join(
                 chr((actual_fourcc_int >> i) & 0xFF) for i in [0, 8, 16, 24]
             ).strip('\x00') or 'unknown'
+            # "Switch to msmf" is useless advice when msmf is already active —
+            # this used to always say it regardless of capture_method. If
+            # msmf itself can't negotiate MJPEG with this device, that's a
+            # different, more likely hardware/driver-specific problem: try
+            # the other Windows capture API instead, and flag that this may
+            # simply be unsupported by this device rather than a settings fix.
+            if capture_method == 'msmf':
+                suggestion = (
+                    "Already using 'msmf' — this device/driver may not support "
+                    "MJPEG through Media Foundation. Try 'dshow' instead, or this "
+                    "may be a hardware limitation of this capture device."
+                )
+            else:
+                suggestion = "Switch capture method to 'msmf'."
             logging.getLogger(__name__).warning(
-                "[UVC] FOURCC MJPG not accepted by driver (got '%s'). "
-                "At 1080p this limits FPS to <30. Switch backend to 'msmf'.",
-                actual_str,
+                "[UVC] FOURCC MJPG not accepted by driver (got '%s', capture_method='%s'). "
+                "At 1080p this limits FPS to <30. %s",
+                actual_str, capture_method, suggestion,
             )
 
         # --- Non-blocking reader thread ---
