@@ -1282,7 +1282,8 @@ class UVCCapture:
         if not self.cap.isOpened():
             raise RuntimeError(f'UVC device open failed: index={device_index}')
 
-        # FOURCC must be set before resolution/FPS so the driver switches codec first.
+        # FOURCC must be set before resolution/FPS so the driver switches codec
+        # first — true for most UVC drivers, but not universal.
         try:
             self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         except Exception:
@@ -1293,6 +1294,15 @@ class UVCCapture:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         if fps > 0:
             self.cap.set(cv2.CAP_PROP_FPS, fps)
+
+        # If that didn't take, some drivers need the opposite order — codec
+        # negotiated only after resolution/FPS are already locked in — so
+        # retry once with FOURCC set last before giving up on MJPEG.
+        if int(self.cap.get(cv2.CAP_PROP_FOURCC)) != cv2.VideoWriter_fourcc(*'MJPG'):
+            try:
+                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            except Exception:
+                pass
         # Keep the driver queue shallow so grab() always returns the newest frame.
         try:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
