@@ -1306,6 +1306,13 @@ class UVCCapture:
         # reader worker overwrites this every second with the actual received rate.
         config.source_nominal_fps = float(self.preview_fps)
 
+        # Publish the actual negotiated resolution/FPS from this already-open
+        # handle so the GUI ("Query Device") can read it instead of opening a
+        # second competing cv2.VideoCapture to the same device index.
+        config.uvc_actual_width = self.preview_width
+        config.uvc_actual_height = self.preview_height
+        config.uvc_actual_fps = float(self.preview_fps)
+
         # Verify FOURCC was actually accepted by the driver.  Without MJPEG,
         # 1080p raw (YUY2) requires ~237 MB/s — beyond USB 2.0 bandwidth — so
         # the driver silently throttles to 5–15 fps with no error raised.

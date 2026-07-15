@@ -289,6 +289,17 @@ class Config:
         # falls back to config.width/height in that case.
         self.udp_width: int = 0
         self.udp_height: int = 0
+        # Actual negotiated resolution/FPS of the live UVC device, published
+        # by UVCCapture.__init__ from its own already-open handle. Lets the
+        # GUI show hardware info (capture_page.py's "Query Device") without
+        # opening a second competing cv2.VideoCapture to the same device
+        # index — most UVC/webcam drivers don't handle two simultaneous open
+        # handles gracefully, and a second handle opened while the first is
+        # actively streaming (feeding the AI loop) can stall/corrupt frames
+        # on the live handle. 0 = UVC not yet initialized as the live backend.
+        self.uvc_actual_width: int = 0
+        self.uvc_actual_height: int = 0
+        self.uvc_actual_fps: float = 0.0
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
 
