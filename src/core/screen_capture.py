@@ -1259,6 +1259,7 @@ class UVCCapture:
         width = int(getattr(config, 'uvc_width', 1920))
         height = int(getattr(config, 'uvc_height', 1080))
         fps = int(getattr(config, 'uvc_fps', 60))
+        self._target_fps = fps  # requested rate, for _reader_worker's shortfall check
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
         self.window_name = _UVC_WINDOW_NAME
         self.config_signature = _uvc_signature(config)
@@ -1367,6 +1368,7 @@ class UVCCapture:
     def _reader_worker(self) -> None:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
+        _measurement_windows = 0
         while not self._reader_stop.is_set():
             ok, frame = self.cap.read()
             if ok and frame is not None:
@@ -1380,6 +1382,30 @@ class UVCCapture:
                     self.config.source_nominal_fps = _fps_count / _elapsed
                     _fps_count = 0
                     _fps_t0 = _now
+
+                    # Same class of problem as the FOURCC check in __init__:
+                    # cap.set(CAP_PROP_FPS, ...) can be silently accepted by
+                    # the driver as a *setting* without the hardware actually
+                    # sustaining it — the requested value just gets echoed
+                    # back on cap.get(), never validated. The only way to
+                    # know the real rate is to measure actual frame arrivals,
+                    # which is exactly what source_nominal_fps tracks. Check
+                    # once, skipping the first window (startup ramp-up can be
+                    # artificially low) and not repeating (avoid log spam for
+                    # a persistent, already-reported condition).
+                    _measurement_windows += 1
+                    if _measurement_windows == 2 and self._target_fps > 0:
+                        shortfall_ratio = self.config.source_nominal_fps / self._target_fps
+                        if shortfall_ratio < 0.8:
+                            logging.getLogger(__name__).warning(
+                                "[UVC] Measured capture rate %.1f fps is well below the "
+                                "configured %d fps. If MJPEG isn't actually active (see any "
+                                "'FOURCC MJPG not accepted' warning above), raw video "
+                                "bandwidth at this resolution may not fit your USB link — "
+                                "try 'msmf' capture method, a lower resolution, or a "
+                                "different USB port/cable.",
+                                self.config.source_nominal_fps, self._target_fps,
+                            )
             else:
                 time.sleep(0.005)
 

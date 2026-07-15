@@ -544,16 +544,16 @@ class CapturePage(BasePage):
                 f"x{getattr(self._config, 'uvc_height', self._config.height)}")
             if screenshot_method == 'uvc':
                 # Seed synchronously with the configured value so the combo
-                # shows something immediately; _startUvcProbe() enriches it
-                # with the full supported list in the background and
-                # preserves this selection (via currentText()) once it
-                # arrives — probing is no longer synchronous here (see
-                # _startUvcProbe()'s docstring for why).
+                # shows something immediately; _startUvcProbeDelayed()
+                # enriches it with the full supported list in the background
+                # (after giving the live backend's own reinit a head start —
+                # see its docstring) and preserves this selection (via
+                # currentText()) once it arrives.
                 self.uvcResolutionCombo.blockSignals(True)
                 self.uvcResolutionCombo.clear()
                 self.uvcResolutionCombo.addItem(resolution_text)
                 self.uvcResolutionCombo.blockSignals(False)
-                self._startUvcProbe()
+                self._startUvcProbeDelayed()
             else:
                 self.uvcResolutionCombo.blockSignals(True)
                 self.uvcResolutionCombo.clear()
@@ -632,6 +632,28 @@ class CapturePage(BasePage):
                 win.inferenceInterface._applyScreenshotMethodEffect(method)
         except Exception:
             pass
+
+    def _startUvcProbeDelayed(self, delay_ms: int = 1500):
+        """Schedule _startUvcProbe() after a delay instead of firing it immediately.
+
+        Every caller of this (switching TO uvc, loading a config with uvc
+        active, changing device/resolution/capture-method) also changes a
+        field _uvc_signature() watches, which makes the AI loop's
+        _capture_worker (polling every ~0.5s) reinitialize UVCCapture and
+        open ITS OWN handle to the same device around the same moment. Two
+        cv2.VideoCapture opens racing for the same device at the same time
+        is exactly the contention this session's earlier UVC fix was meant
+        to avoid — starting the probe immediately reintroduced it at the
+        single most common trigger (switching to UVC in the first place):
+        observed as a many-second stall before UVCCapture.__init__()
+        completes, the driver failing to negotiate MJPEG (logged as "FOURCC
+        MJPG not accepted"), and even a spurious extra reinit once the
+        contention resolves. Delaying the probe's own competing handle-open
+        past the live backend's ~0.5s reinit window fixes the worst of it;
+        this doesn't apply to the explicit "Refresh" button, which fires on
+        a presumably-already-stable backend.
+        """
+        QTimer.singleShot(delay_ms, self._startUvcProbe)
 
     def _startUvcProbe(self):
         """Kick off a background enumeration of supported UVC resolutions/FPS.
@@ -781,7 +803,7 @@ class CapturePage(BasePage):
         if self._config:
             self._config.screenshot_method = text
         if str(text).strip().lower() == 'uvc' and not self._isLoadingConfig:
-            self._startUvcProbe()
+            self._startUvcProbeDelayed()
         if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "ndi_installer_ran_once", False))
             if not has_ran:
@@ -799,7 +821,7 @@ class CapturePage(BasePage):
     def _onUvcDeviceChanged(self, value):
         if self._config:
             self._config.uvc_device_index = int(value)
-        self._startUvcProbe()
+        self._startUvcProbeDelayed()
         # config.uvc_actual_* only refreshes once the AI loop's live backend
         # hot-swaps to the new device (ai_loop.py's _capture_worker polls for
         # config changes every 0.5s — see reinitialize_if_method_changed()),
@@ -819,7 +841,7 @@ class CapturePage(BasePage):
                 self._config.uvc_height = int(height_str)
             except ValueError:
                 return
-        self._startUvcProbe()
+        self._startUvcProbeDelayed()
         QTimer.singleShot(700, self._queryUvcHwInfo)
 
     def _onUvcFpsChanged(self, value):
@@ -832,7 +854,7 @@ class CapturePage(BasePage):
     def _onUvcCaptureMethodChanged(self, text):
         if self._config:
             self._config.uvc_capture_method = str(text)
-        self._startUvcProbe()
+        self._startUvcProbeDelayed()
         QTimer.singleShot(700, self._queryUvcHwInfo)
 
     def _onUvcPreviewChanged(self, checked):
