@@ -29,16 +29,21 @@ _av_module_cache: dict[str, Any] = {}
 def _import_av() -> Any:
     """Thread-safe, memoized ``import av``.
 
-    PyAV wraps a large Cython/FFmpeg extension whose module init isn't safe
-    to run concurrently — two threads both hitting ``import av`` for the
-    first time around the same moment (e.g. a GUI device-name probe thread
-    racing the AI loop's own capture-init thread right after switching to
-    the pyav capture method) has been observed to raise
-    ``AttributeError: __spec__`` instead of a normal import error, which
-    then gets mistaken for "PyAV isn't installed" by callers. Only the
-    first caller actually imports it, under a lock; every later caller
-    (from any thread) gets the cached module, or the cached failure
-    re-raised, instead of racing a second real import attempt.
+    Two responsibilities:
+    1. Concurrency safety — PyAV wraps a large Cython/FFmpeg extension whose
+       module init isn't necessarily safe to run from two threads at once
+       (e.g. a GUI device-name probe thread racing the AI loop's own
+       capture-init thread). Only the first caller actually imports it,
+       under a lock; every later caller (from any thread) gets the cached
+       module, or the cached failure re-raised, instead of racing a second
+       real import attempt.
+    2. Diagnosability — a bare ``AttributeError: __spec__`` (observed with
+       no other context) is close to undiagnosable from its message alone;
+       log the *full* traceback once, on the actual first failure, so
+       whichever call site (device enumeration, capability query, live
+       pyav capture init) happens to trigger it first still leaves enough
+       detail in the log to locate exactly where inside the import chain
+       it's failing.
     """
     with _av_module_lock:
         if 'av' not in _av_module_cache:
@@ -48,6 +53,7 @@ def _import_av() -> Any:
                 _av_module_cache['av'] = _av
             except Exception as exc:
                 _av_module_cache['av'] = exc
+                logger.error("[UVC] `import av` failed — full traceback:", exc_info=True)
         cached = _av_module_cache['av']
     if isinstance(cached, Exception):
         raise cached
