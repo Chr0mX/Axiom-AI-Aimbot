@@ -592,7 +592,7 @@ class CapturePage(BasePage):
             # selection once it arrives (see _onUvcProbeResult).
             self.uvcDeviceCombo.blockSignals(True)
             self.uvcDeviceCombo.clear()
-            self.uvcDeviceCombo.addItem(_device_name or f"Device {_device_index}", _device_index)
+            self.uvcDeviceCombo.addItem(_device_name or f"Device {_device_index}", userData=_device_index)
             self.uvcDeviceCombo.blockSignals(False)
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
             self.uvcDeviceNameEdit.setText(str(getattr(self._config, 'uvc_device_name', '') or ''))
@@ -751,13 +751,13 @@ class CapturePage(BasePage):
         self.uvcDeviceCombo.clear()
         if device_names:
             for i, name in enumerate(device_names):
-                self.uvcDeviceCombo.addItem(name, i)
+                self.uvcDeviceCombo.addItem(name, userData=i)
         else:
             # No enumeration available (av not installed, or non-dshow
             # platform) — fall back to plain numeric slots so
             # uvc_device_index can still be picked for dshow/msmf/any.
             for i in range(8):
-                self.uvcDeviceCombo.addItem(f"Device {i}", i)
+                self.uvcDeviceCombo.addItem(f"Device {i}", userData=i)
         select_idx = -1
         if configured_name:
             for i in range(self.uvcDeviceCombo.count()):
@@ -770,7 +770,7 @@ class CapturePage(BasePage):
                     select_idx = i
                     break
         if select_idx < 0 and configured_index >= self.uvcDeviceCombo.count():
-            self.uvcDeviceCombo.addItem(f"Device {configured_index}", configured_index)
+            self.uvcDeviceCombo.addItem(f"Device {configured_index}", userData=configured_index)
             select_idx = self.uvcDeviceCombo.count() - 1
         if select_idx >= 0:
             self.uvcDeviceCombo.setCurrentIndex(select_idx)
