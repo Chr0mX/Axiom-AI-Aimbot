@@ -1303,29 +1303,44 @@ def _list_dshow_video_devices() -> list[str]:
 
     names: list[str] = []
     in_video_section = False
+    # PyAV drops all FFmpeg log output by default (av.logging.set_level(None)
+    # installs a no-op callback) — since dshow's device list is only ever
+    # emitted as an AV_LOG_INFO line (never returned as data), Capture()
+    # sees nothing unless the level threshold is raised to admit INFO first.
+    # Restore the previous level afterward so this doesn't globally change
+    # FFmpeg log verbosity for the rest of the process (e.g. the live pyav
+    # capture backend's own logging).
+    previous_level = av.logging.get_level()
     try:
-        with av.logging.Capture(local=True) as logs:
-            try:
-                av.open('dummy', format='dshow', options={'list_devices': 'true'})
-            except Exception:
-                pass
-        for _level, _name, message in logs:
-            text = str(message)
-            if 'video devices' in text.lower():
-                in_video_section = True
-                continue
-            if 'audio devices' in text.lower():
-                in_video_section = False
-                continue
-            if not in_video_section:
-                continue
-            if 'Alternative name' in text:
-                continue
-            match = re.search(r'"([^"]+)"', text)
-            if match:
-                names.append(match.group(1))
-    except Exception:
-        return []
+        try:
+            av.logging.set_level(av.logging.INFO)
+            with av.logging.Capture(local=True) as logs:
+                try:
+                    av.open('dummy', format='dshow', options={'list_devices': 'true'})
+                except Exception:
+                    pass
+            for _level, _name, message in logs:
+                text = str(message)
+                if 'video devices' in text.lower():
+                    in_video_section = True
+                    continue
+                if 'audio devices' in text.lower():
+                    in_video_section = False
+                    continue
+                if not in_video_section:
+                    continue
+                if 'Alternative name' in text:
+                    continue
+                match = re.search(r'"([^"]+)"', text)
+                if match:
+                    names.append(match.group(1))
+        except Exception:
+            return []
+    finally:
+        try:
+            av.logging.set_level(previous_level)
+        except Exception:
+            pass
     return names
 
 
