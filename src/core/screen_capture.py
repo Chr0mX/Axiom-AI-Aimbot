@@ -1235,8 +1235,21 @@ def list_supported_uvc_fps(
         matching = [f for f in formats if f['width'] == width and f['height'] == height] or formats
         fps_values: set[int] = set()
         for f in matching:
-            fps_values.add(int(round(f['min_fps'])))
-            fps_values.add(int(round(f['max_fps'])))
+            min_fps, max_fps = f['min_fps'], f['max_fps']
+            fps_values.add(int(round(min_fps)))
+            fps_values.add(int(round(max_fps)))
+            # DirectShow drivers commonly report FPS as a continuous
+            # MinFrameInterval–MaxFrameInterval range rather than one
+            # discrete capability entry per step — e.g. a single 5–240
+            # entry, with nothing in between. Taking only the two
+            # endpoints would silently drop real, settable values like
+            # 144 that fall inside that range. Fill in from the common
+            # preset list wherever it's actually covered by a reported
+            # range, so the dropdown stays useful without inventing
+            # values the driver never actually advertised.
+            for preset in (30, 60, 120, 144, 165, 240):
+                if min_fps <= preset <= max_fps:
+                    fps_values.add(preset)
         if fps_values:
             return sorted(fps_values)
 
