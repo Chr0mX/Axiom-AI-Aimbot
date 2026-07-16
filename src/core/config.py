@@ -48,6 +48,7 @@ _FIELD_MAP = {
     'uvc_fps':                    'capture.uvc.fps',
     'uvc_capture_method':         'capture.uvc.capture_method',
     'uvc_device_name':            'capture.uvc.device_name',
+    'uvc_video_format':           'capture.uvc.video_format',
     'ndi_source_name':            'capture.ndi.source_name',
     'ndi_bandwidth':              'capture.ndi.bandwidth',
     'udp_bind_ip':                'capture.udp.bind_ip',
@@ -272,6 +273,9 @@ class Config:
         # (e.g. "USB Video Device"). Empty = auto-resolve from
         # uvc_device_index by enumerating DirectShow devices via libavdevice.
         self.uvc_device_name: str = ""
+        # Requested pixel/codec format: 'mjpeg' (compressed, highest FPS
+        # headroom over USB), 'yuy2' or 'nv12' (raw, uncompressed).
+        self.uvc_video_format: str = "mjpeg"
         self.uvc_show_window: bool = True
         self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.uvc_always_on_top: bool = True
@@ -827,6 +831,8 @@ def _validate_screenshot_method(config: Config) -> None:
         config.screenshot_method = 'mss'
     if getattr(config, 'uvc_capture_method', 'dshow') not in ('auto', 'dshow', 'msmf', 'any', 'pyav'):
         config.uvc_capture_method = 'dshow'
+    if getattr(config, 'uvc_video_format', 'mjpeg') not in ('mjpeg', 'yuy2', 'nv12'):
+        config.uvc_video_format = 'mjpeg'
     if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (
         'scale_to_fit', 'scale_to_canvas', 'fit_to_screen'
     ):

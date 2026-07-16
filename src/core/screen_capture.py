@@ -199,7 +199,7 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
 _UVC_WINDOW_NAME = "Axiom UVC Preview"
 
 
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str]:
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, str]:
     return (
         int(getattr(config, 'uvc_device_index', 0)),
         int(getattr(config, 'uvc_width', 0)),
@@ -209,6 +209,7 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
         str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
         str(getattr(config, 'uvc_device_name', '') or ''),
+        str(getattr(config, 'uvc_video_format', 'mjpeg')).lower(),
     )
 
 
@@ -1078,9 +1079,7 @@ def list_supported_uvc_resolutions(
         return []
 
     common_resolutions = [
-        (320, 240), (640, 360), (640, 480), (800, 600), (960, 540),
-        (1024, 576), (1024, 768), (1280, 720), (1280, 960), (1600, 900),
-        (1920, 1080), (2560, 1440), (3840, 2160),
+        (1280, 720), (1920, 1080), (2560, 1440),
     ]
     supported: set[tuple[int, int]] = set()
     try:
@@ -1112,7 +1111,7 @@ def list_supported_uvc_fps(
         return [30, 60]
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    common = [24, 30, 60, 90, 120, 144, 240]
+    common = [30, 60, 120, 144, 165, 240]
     supported: list[int] = []
     try:
         for fps in common:
@@ -1372,10 +1371,18 @@ class UVCCapture:
         if not self.cap.isOpened():
             raise RuntimeError(f'UVC device open failed: index={device_index}')
 
+        video_format = str(getattr(config, 'uvc_video_format', 'mjpeg')).lower()
+        fourcc_map = {
+            'mjpeg': cv2.VideoWriter_fourcc(*'MJPG'),
+            'yuy2': cv2.VideoWriter_fourcc(*'YUY2'),
+            'nv12': cv2.VideoWriter_fourcc(*'NV12'),
+        }
+        target_fourcc = fourcc_map.get(video_format, fourcc_map['mjpeg'])
+
         # FOURCC must be set before resolution/FPS so the driver switches codec
         # first — true for most UVC drivers, but not universal.
         try:
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            self.cap.set(cv2.CAP_PROP_FOURCC, target_fourcc)
         except Exception:
             pass
         if width > 0:
@@ -1387,10 +1394,10 @@ class UVCCapture:
 
         # If that didn't take, some drivers need the opposite order — codec
         # negotiated only after resolution/FPS are already locked in — so
-        # retry once with FOURCC set last before giving up on MJPEG.
-        if int(self.cap.get(cv2.CAP_PROP_FOURCC)) != cv2.VideoWriter_fourcc(*'MJPG'):
+        # retry once with FOURCC set last before giving up on the requested format.
+        if int(self.cap.get(cv2.CAP_PROP_FOURCC)) != target_fourcc:
             try:
-                self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                self.cap.set(cv2.CAP_PROP_FOURCC, target_fourcc)
             except Exception:
                 pass
         # Keep the driver queue shallow so grab() always returns the newest frame.
@@ -1414,34 +1421,36 @@ class UVCCapture:
         config.uvc_actual_height = self.preview_height
         config.uvc_actual_fps = float(self.preview_fps)
 
-        # Verify FOURCC was actually accepted by the driver.  Without MJPEG,
-        # 1080p raw (YUY2) requires ~237 MB/s — beyond USB 2.0 bandwidth — so
-        # the driver silently throttles to 5–15 fps with no error raised.
+        # Verify FOURCC was actually accepted by the driver.  Without MJPEG
+        # (or another compressed format), raw 1080p (e.g. YUY2) requires
+        # ~237 MB/s — beyond USB 2.0 bandwidth — so the driver silently
+        # throttles to 5–15 fps with no error raised.
         actual_fourcc_int = int(self.cap.get(cv2.CAP_PROP_FOURCC))
-        expected_fourcc   = cv2.VideoWriter_fourcc(*'MJPG')
-        self.is_mjpeg = (actual_fourcc_int == expected_fourcc)
-        if not self.is_mjpeg:
+        self.is_mjpeg = (actual_fourcc_int == target_fourcc)  # kept for back-compat; means "requested format accepted"
+        self.is_expected_format = self.is_mjpeg
+        if not self.is_expected_format:
             actual_str = ''.join(
                 chr((actual_fourcc_int >> i) & 0xFF) for i in [0, 8, 16, 24]
             ).strip('\x00') or 'unknown'
             # "Switch to msmf" is useless advice when msmf is already active —
             # this used to always say it regardless of capture_method. If
-            # msmf itself can't negotiate MJPEG with this device, that's a
-            # different, more likely hardware/driver-specific problem: try
-            # the other Windows capture API instead, and flag that this may
-            # simply be unsupported by this device rather than a settings fix.
+            # msmf itself can't negotiate the requested format with this
+            # device, that's a different, more likely hardware/driver-specific
+            # problem: try the other Windows capture API instead, and flag
+            # that this may simply be unsupported by this device rather than
+            # a settings fix.
             if capture_method == 'msmf':
                 suggestion = (
                     "Already using 'msmf' — this device/driver may not support "
-                    "MJPEG through Media Foundation. Try 'dshow' instead, or this "
-                    "may be a hardware limitation of this capture device."
+                    f"{video_format.upper()} through Media Foundation. Try 'dshow' "
+                    "instead, or this may be a hardware limitation of this capture device."
                 )
             else:
                 suggestion = "Switch capture method to 'msmf'."
             logging.getLogger(__name__).warning(
-                "[UVC] FOURCC MJPG not accepted by driver (got '%s', capture_method='%s'). "
-                "At 1080p this limits FPS to <30. %s",
-                actual_str, capture_method, suggestion,
+                "[UVC] Video format %s not accepted by driver (got '%s', capture_method='%s'). "
+                "If this is a raw format at high resolution, it may exceed USB bandwidth. %s",
+                video_format.upper(), actual_str, capture_method, suggestion,
             )
 
         # --- Non-blocking reader thread ---
@@ -1492,7 +1501,14 @@ class UVCCapture:
 
         self.cap = None
         device_name = _resolve_pyav_dshow_device(self.config, device_index)
-        options = {'vcodec': 'mjpeg'}
+        video_format = str(getattr(self.config, 'uvc_video_format', 'mjpeg')).lower()
+        # dshow's 'vcodec' option requests a compressed codec from the
+        # device; raw formats are instead requested via 'pixel_format'.
+        pixel_format_map = {'yuy2': 'yuyv422', 'nv12': 'nv12'}
+        if video_format in pixel_format_map:
+            options = {'pixel_format': pixel_format_map[video_format]}
+        else:
+            options = {'vcodec': 'mjpeg'}
         if width > 0 and height > 0:
             options['video_size'] = f'{width}x{height}'
         if fps > 0:
@@ -1521,11 +1537,12 @@ class UVCCapture:
         self.config.uvc_actual_width = self.preview_width
         self.config.uvc_actual_height = self.preview_height
         self.config.uvc_actual_fps = float(self.preview_fps)
-        self.is_mjpeg = True  # dshow was asked for 'vcodec': 'mjpeg'; not independently re-verified here
+        self.is_expected_format = True  # requested via dshow options; not independently re-verified here
+        self.is_mjpeg = self.is_expected_format  # kept for back-compat
 
         logging.getLogger(__name__).info(
-            "[UVC][PyAV] Opened '%s' via libavdevice dshow at %dx%d @ %.1f fps.",
-            device_name, self.preview_width, self.preview_height, negotiated_fps,
+            "[UVC][PyAV] Opened '%s' via libavdevice dshow at %dx%d @ %.1f fps (format=%s).",
+            device_name, self.preview_width, self.preview_height, negotiated_fps, video_format.upper(),
         )
 
         self._latest_frame_lock = threading.Lock()
@@ -1628,11 +1645,11 @@ class UVCCapture:
                         if shortfall_ratio < 0.8:
                             logging.getLogger(__name__).warning(
                                 "[UVC] Measured capture rate %.1f fps is well below the "
-                                "configured %d fps. If MJPEG isn't actually active (see any "
-                                "'FOURCC MJPG not accepted' warning above), raw video "
-                                "bandwidth at this resolution may not fit your USB link — "
-                                "try 'msmf' capture method, a lower resolution, or a "
-                                "different USB port/cable.",
+                                "configured %d fps. If the requested video format isn't "
+                                "actually active (see any 'Video format ... not accepted' "
+                                "warning above), raw video bandwidth at this resolution may "
+                                "not fit your USB link — try MJPEG, 'msmf' capture method, "
+                                "a lower resolution, or a different USB port/cable.",
                                 self.config.source_nominal_fps, self._target_fps,
                             )
             else:

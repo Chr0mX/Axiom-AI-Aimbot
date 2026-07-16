@@ -142,40 +142,62 @@ class CapturePage(BasePage):
 
 
         # === UVC Camera ===
+        # Field order mirrors OBS's V4L2/DirectShow source properties panel:
+        # capture method, device, resolution, FPS, video format, then a
+        # read-only "active values" readout with its own refresh controls.
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
+
+        self.uvcCaptureMethodCombo = ComboBox()
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "pyav", "auto"])
+        self.uvcCaptureMethodCombo.setMinimumWidth(140)
+        self.uvcCaptureMethodCard = SettingCard(
+            FluentIcon.CAMERA,
+            "UVC Capture Method",
+            "msmf recommended for 1080p60 on Windows 10/11. pyav bypasses "
+            "OpenCV's dshow/msmf negotiation via libavdevice — try it if "
+            "MJPEG negotiation fails with msmf/dshow despite the device "
+            "working fine in other DirectShow apps (e.g. OBS).",
+            self.uvcGroup
+        )
+        self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcCaptureMethodCard.hBoxLayout.addSpacing(16)
 
         self.uvcDeviceCombo = ComboBox()
         self.uvcDeviceCombo.setMinimumWidth(260)
         self.uvcDeviceCard = SettingCard(
             FluentIcon.CAMERA,
-            "UVC Device",
+            "Device",
             "Select the UVC capture device",
             self.uvcGroup
         )
         self.uvcDeviceCard.hBoxLayout.addWidget(self.uvcDeviceCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcDeviceCard.hBoxLayout.addSpacing(16)
 
+        self.uvcDeviceNameEdit = LineEdit()
+        self.uvcDeviceNameEdit.setPlaceholderText("auto (leave blank)")
+        self.uvcDeviceNameEdit.setMinimumWidth(200)
+        self.uvcDeviceNameCard = SettingCard(
+            FluentIcon.TAG,
+            "UVC Device Name (pyav only)",
+            "DirectShow device name override, e.g. \"USB Video Device\". "
+            "Auto-filled from the Device selection above; only used by "
+            "the pyav capture method. Override manually if a device's name "
+            "isn't listed above or enumeration is unavailable.",
+            self.uvcGroup
+        )
+        self.uvcDeviceNameCard.hBoxLayout.addWidget(self.uvcDeviceNameEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcDeviceNameCard.hBoxLayout.addSpacing(16)
+
         self.uvcResolutionCombo = ComboBox()
         self.uvcResolutionCombo.setMinimumWidth(180)
         self.uvcResolutionCard = SettingCard(
             FluentIcon.FULL_SCREEN,
-            "UVC Resolution",
+            "Resolution",
             "Auto-detect supported resolutions",
             self.uvcGroup
         )
         self.uvcResolutionCard.hBoxLayout.addWidget(self.uvcResolutionCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcResolutionCard.hBoxLayout.addSpacing(16)
-
-        self.uvcRefreshResolutionBtn = PushButton(t("refresh"))
-        self.uvcRefreshResolutionBtn.setFixedWidth(80)
-        self.uvcRefreshResolutionCard = SettingCard(
-            FluentIcon.SYNC,
-            "Refresh UVC Resolution List",
-            "",
-            self.uvcGroup
-        )
-        self.uvcRefreshResolutionCard.hBoxLayout.addWidget(self.uvcRefreshResolutionBtn, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcRefreshResolutionCard.hBoxLayout.addSpacing(16)
 
         self.uvcWidthCard = SliderSpinCard(
             FluentIcon.FULL_SCREEN,
@@ -197,51 +219,34 @@ class CapturePage(BasePage):
         self.uvcHeightCard.setVisible(False)
 
         self.uvcFpsCombo = ComboBox()
-        self.uvcFpsCombo.addItems(["24", "30", "60", "90", "120", "144", "240"])
+        self.uvcFpsCombo.addItems(["30", "60", "120", "144", "165", "240"])
         self.uvcFpsCombo.setCurrentText("60")
         self.uvcFpsCombo.setMinimumWidth(120)
         self.uvcFpsCard = SettingCard(
             FluentIcon.SPEED_MEDIUM,
-            "UVC FPS",
+            "FPS",
             "",
             self.uvcGroup
         )
         self.uvcFpsCard.hBoxLayout.addWidget(self.uvcFpsCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcFpsCard.hBoxLayout.addSpacing(16)
 
-        self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto", "any", "pyav"])
-        self.uvcCaptureMethodCombo.setMinimumWidth(140)
-        self.uvcCaptureMethodCard = SettingCard(
-            FluentIcon.CAMERA,
-            "UVC Capture Method",
-            "msmf recommended for 1080p60 on Windows 10/11. pyav bypasses "
-            "OpenCV's dshow/msmf negotiation via libavdevice — try it if "
-            "MJPEG negotiation fails with msmf/dshow despite the device "
-            "working fine in other DirectShow apps (e.g. OBS).",
+        self.uvcVideoFormatCombo = ComboBox()
+        self.uvcVideoFormatCombo.addItems(["MJPEG", "YUY2", "NV12"])
+        self.uvcVideoFormatCombo.setMinimumWidth(120)
+        self.uvcVideoFormatCard = SettingCard(
+            FluentIcon.VIDEO,
+            "Video Format",
+            "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12 are raw "
+            "and need much more USB bandwidth at the same resolution/FPS.",
             self.uvcGroup
         )
-        self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcCaptureMethodCard.hBoxLayout.addSpacing(16)
-
-        self.uvcDeviceNameEdit = LineEdit()
-        self.uvcDeviceNameEdit.setPlaceholderText("auto (leave blank)")
-        self.uvcDeviceNameEdit.setMinimumWidth(200)
-        self.uvcDeviceNameCard = SettingCard(
-            FluentIcon.TAG,
-            "UVC Device Name (pyav only)",
-            "DirectShow device name override, e.g. \"USB Video Device\". "
-            "Auto-filled from the UVC Device selection above; only used by "
-            "the pyav capture method. Override manually if a device's name "
-            "isn't listed above or enumeration is unavailable.",
-            self.uvcGroup
-        )
-        self.uvcDeviceNameCard.hBoxLayout.addWidget(self.uvcDeviceNameEdit, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcDeviceNameCard.hBoxLayout.addSpacing(16)
+        self.uvcVideoFormatCard.hBoxLayout.addWidget(self.uvcVideoFormatCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcVideoFormatCard.hBoxLayout.addSpacing(16)
 
         self.uvcHwInfoLabel = BodyLabel("—")
-        self.uvcQueryBtn = PushButton("Query Device")
-        self.uvcQueryBtn.setFixedWidth(110)
+        self.uvcQueryBtn = PushButton("Query")
+        self.uvcQueryBtn.setFixedWidth(90)
         self.uvcHwInfoCard = SettingCard(
             FluentIcon.INFO,
             "Device Resolution & FPS",
@@ -251,6 +256,17 @@ class CapturePage(BasePage):
         self.uvcHwInfoCard.hBoxLayout.addWidget(self.uvcHwInfoLabel, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcHwInfoCard.hBoxLayout.addWidget(self.uvcQueryBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcHwInfoCard.hBoxLayout.addSpacing(16)
+
+        self.uvcRefreshResolutionBtn = PushButton("Refresh Device")
+        self.uvcRefreshResolutionBtn.setFixedWidth(110)
+        self.uvcRefreshResolutionCard = SettingCard(
+            FluentIcon.SYNC,
+            "Refresh Device",
+            "Re-scan connected UVC devices and their supported resolutions/FPS",
+            self.uvcGroup
+        )
+        self.uvcRefreshResolutionCard.hBoxLayout.addWidget(self.uvcRefreshResolutionBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcRefreshResolutionCard.hBoxLayout.addSpacing(16)
 
         # === NDI ===
         self.ndiGroup = SettingCardGroup("NDI", self.scrollWidget)
@@ -474,15 +490,16 @@ class CapturePage(BasePage):
         self.captureGroup.addSettingCard(self.screenshotIntervalCard)
         self.addContent(self.captureGroup)
 
+        self.uvcGroup.addSettingCard(self.uvcCaptureMethodCard)
         self.uvcGroup.addSettingCard(self.uvcDeviceCard)
+        self.uvcGroup.addSettingCard(self.uvcDeviceNameCard)
         self.uvcGroup.addSettingCard(self.uvcResolutionCard)
-        self.uvcGroup.addSettingCard(self.uvcRefreshResolutionCard)
         self.uvcGroup.addSettingCard(self.uvcWidthCard)
         self.uvcGroup.addSettingCard(self.uvcHeightCard)
         self.uvcGroup.addSettingCard(self.uvcFpsCard)
-        self.uvcGroup.addSettingCard(self.uvcCaptureMethodCard)
-        self.uvcGroup.addSettingCard(self.uvcDeviceNameCard)
+        self.uvcGroup.addSettingCard(self.uvcVideoFormatCard)
         self.uvcGroup.addSettingCard(self.uvcHwInfoCard)
+        self.uvcGroup.addSettingCard(self.uvcRefreshResolutionCard)
         self.addContent(self.uvcGroup)
         self.uvcGroup.setVisible(False)
 
@@ -529,6 +546,7 @@ class CapturePage(BasePage):
         self.uvcFpsCombo.currentTextChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
         self.uvcDeviceNameEdit.editingFinished.connect(self._onUvcDeviceNameChanged)
+        self.uvcVideoFormatCombo.currentTextChanged.connect(self._onUvcVideoFormatChanged)
         self.uvcQueryBtn.clicked.connect(self._queryUvcHwInfo)
         self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
@@ -578,6 +596,7 @@ class CapturePage(BasePage):
             self.uvcDeviceCombo.blockSignals(False)
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
             self.uvcDeviceNameEdit.setText(str(getattr(self._config, 'uvc_device_name', '') or ''))
+            self.uvcVideoFormatCombo.setCurrentText(str(getattr(self._config, 'uvc_video_format', 'mjpeg')).upper())
             resolution_text = (
                 f"{getattr(self._config, 'uvc_width', self._config.width)}"
                 f"x{getattr(self._config, 'uvc_height', self._config.height)}")
@@ -764,15 +783,22 @@ class CapturePage(BasePage):
             for width, height in resolutions:
                 self.uvcResolutionCombo.addItem(f"{width}x{height}")
         else:
+            # Enumeration found nothing (device unreachable, or the driver
+            # didn't accept any of the probed resolutions) — offer the
+            # common presets plus the currently configured value so the
+            # combo isn't left with just one arbitrary entry.
             fallback = f"{int(getattr(self._config, 'uvc_width', 1920))}x{int(getattr(self._config, 'uvc_height', 1080))}"
-            self.uvcResolutionCombo.addItem(fallback)
+            for preset in ("1280x720", "1920x1080", "2560x1440"):
+                self.uvcResolutionCombo.addItem(preset)
+            if self.uvcResolutionCombo.findText(fallback) < 0:
+                self.uvcResolutionCombo.addItem(fallback)
         if current_text:
             idx = self.uvcResolutionCombo.findText(current_text)
             if idx >= 0:
                 self.uvcResolutionCombo.setCurrentIndex(idx)
         self.uvcResolutionCombo.blockSignals(False)
 
-        fps_list = fps_list or [24, 30, 60, 90, 120, 144, 240]
+        fps_list = fps_list or [30, 60, 120, 144, 165, 240]
         current_fps = self.uvcFpsCombo.currentText()
         self.uvcFpsCombo.blockSignals(True)
         self.uvcFpsCombo.clear()
@@ -939,6 +965,12 @@ class CapturePage(BasePage):
     def _onUvcDeviceNameChanged(self):
         if self._config:
             self._config.uvc_device_name = str(self.uvcDeviceNameEdit.text()).strip()
+        self._startUvcProbeDelayed()
+        QTimer.singleShot(700, self._queryUvcHwInfo)
+
+    def _onUvcVideoFormatChanged(self, text):
+        if self._config:
+            self._config.uvc_video_format = str(text).strip().lower()
         self._startUvcProbeDelayed()
         QTimer.singleShot(700, self._queryUvcHwInfo)
 
@@ -1170,15 +1202,6 @@ class CapturePage(BasePage):
         self.screenshotMethodCard.titleLabel.setText(t("screenshot_method"))
         self.screenshotIntervalCard.titleLabel.setText(t("screenshot_interval"))
         self.uvcGroup.titleLabel.setText("UVC Camera")
-        self.uvcDeviceCard.titleLabel.setText("UVC Device")
-        self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
-        self.uvcResolutionCard.titleLabel.setText("UVC Resolution")
-        self.uvcResolutionCard.contentLabel.setText("Auto-detect supported resolutions")
-        self.uvcRefreshResolutionCard.titleLabel.setText("Refresh UVC Resolution List")
-        self.uvcRefreshResolutionBtn.setText(t("refresh"))
-        self.uvcWidthCard.titleLabel.setText("UVC Width")
-        self.uvcHeightCard.titleLabel.setText("UVC Height")
-        self.uvcFpsCard.titleLabel.setText("UVC FPS")  # type: ignore[attr-defined]
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
         self.uvcCaptureMethodCard.contentLabel.setText(
             "msmf recommended for 1080p60 on Windows 10/11. pyav bypasses "
@@ -1186,16 +1209,33 @@ class CapturePage(BasePage):
             "MJPEG negotiation fails with msmf/dshow despite the device "
             "working fine in other DirectShow apps (e.g. OBS)."
         )
+        self.uvcDeviceCard.titleLabel.setText("Device")
+        self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
         self.uvcDeviceNameCard.titleLabel.setText("UVC Device Name (pyav only)")
         self.uvcDeviceNameCard.contentLabel.setText(
             "DirectShow device name override, e.g. \"USB Video Device\". "
-            "Auto-filled from the UVC Device selection above; only used by "
+            "Auto-filled from the Device selection above; only used by "
             "the pyav capture method. Override manually if a device's name "
             "isn't listed above or enumeration is unavailable."
         )
+        self.uvcResolutionCard.titleLabel.setText("Resolution")
+        self.uvcResolutionCard.contentLabel.setText("Auto-detect supported resolutions")
+        self.uvcWidthCard.titleLabel.setText("UVC Width")
+        self.uvcHeightCard.titleLabel.setText("UVC Height")
+        self.uvcFpsCard.titleLabel.setText("FPS")  # type: ignore[attr-defined]
+        self.uvcVideoFormatCard.titleLabel.setText("Video Format")
+        self.uvcVideoFormatCard.contentLabel.setText(
+            "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12 are raw "
+            "and need much more USB bandwidth at the same resolution/FPS."
+        )
         self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
         self.uvcHwInfoCard.contentLabel.setText("Actual values reported by the driver")
-        self.uvcQueryBtn.setText("Query Device")
+        self.uvcQueryBtn.setText("Query")
+        self.uvcRefreshResolutionCard.titleLabel.setText("Refresh Device")
+        self.uvcRefreshResolutionCard.contentLabel.setText(
+            "Re-scan connected UVC devices and their supported resolutions/FPS"
+        )
+        self.uvcRefreshResolutionBtn.setText("Refresh Device")
         self.ndiGroup.titleLabel.setText("NDI")
         self.ndiSourceCard.titleLabel.setText("NDI Stream")
         self.ndiSourceCard.contentLabel.setText("Select the NDI source to capture")
