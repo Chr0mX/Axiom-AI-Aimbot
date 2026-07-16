@@ -56,7 +56,7 @@ class _UvcProbeWorker(QThread):
     the same device index.
     """
 
-    resultReady = pyqtSignal(int, list, list)  # (generation, resolutions, fps_list)
+    resultReady = pyqtSignal(int, list, list, list)  # (generation, resolutions, fps_list, device_names)
 
     def __init__(self, generation, device, method, width, height, parent=None):
         super().__init__(parent)
@@ -67,13 +67,19 @@ class _UvcProbeWorker(QThread):
         self._height = height
 
     def run(self):
-        from core.screen_capture import list_supported_uvc_resolutions, list_supported_uvc_fps
+        from core.screen_capture import (
+            list_supported_uvc_resolutions, list_supported_uvc_fps, list_uvc_device_names,
+        )
         resolutions = list_supported_uvc_resolutions(self._device, self._method)
         # FPS is probed at the caller's configured resolution (matching the
         # original _refreshUvcFps behavior), not whatever the resolution
         # enumeration happened to find first.
         fps_list = list_supported_uvc_fps(self._device, self._width, self._height, self._method)
-        self.resultReady.emit(self._generation, resolutions, fps_list)
+        try:
+            device_names = list_uvc_device_names()
+        except Exception:
+            device_names = []
+        self.resultReady.emit(self._generation, resolutions, fps_list, device_names)
 
 
 class CapturePage(BasePage):
@@ -138,14 +144,16 @@ class CapturePage(BasePage):
         # === UVC Camera ===
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
 
-        self.uvcDeviceCard = SliderSpinCard(
+        self.uvcDeviceCombo = ComboBox()
+        self.uvcDeviceCombo.setMinimumWidth(260)
+        self.uvcDeviceCard = SettingCard(
             FluentIcon.CAMERA,
-            "UVC Device Index",
-            0, 16,
-            suffix="",
-            description="",
-            parent=self.uvcGroup
+            "UVC Device",
+            "Select the UVC capture device",
+            self.uvcGroup
         )
+        self.uvcDeviceCard.hBoxLayout.addWidget(self.uvcDeviceCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcDeviceCard.hBoxLayout.addSpacing(16)
 
         self.uvcResolutionCombo = ComboBox()
         self.uvcResolutionCombo.setMinimumWidth(180)
@@ -223,8 +231,9 @@ class CapturePage(BasePage):
             FluentIcon.TAG,
             "UVC Device Name (pyav only)",
             "DirectShow device name override, e.g. \"USB Video Device\". "
-            "Only used by the pyav capture method; leave blank to "
-            "auto-resolve from the device index above.",
+            "Auto-filled from the UVC Device selection above; only used by "
+            "the pyav capture method. Override manually if a device's name "
+            "isn't listed above or enumeration is unavailable.",
             self.uvcGroup
         )
         self.uvcDeviceNameCard.hBoxLayout.addWidget(self.uvcDeviceNameEdit, 0, Qt.AlignmentFlag.AlignRight)
@@ -514,7 +523,7 @@ class CapturePage(BasePage):
     def _connectSignals(self):
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)
         self.screenshotIntervalCard.valueChanged.connect(self._onScreenshotIntervalChanged)
-        self.uvcDeviceCard.valueChanged.connect(self._onUvcDeviceChanged)
+        self.uvcDeviceCombo.currentTextChanged.connect(self._onUvcDeviceChanged)
         self.uvcResolutionCombo.currentTextChanged.connect(self._onUvcResolutionChanged)
         self.uvcRefreshResolutionBtn.clicked.connect(self._startUvcProbe)
         self.uvcFpsCombo.currentTextChanged.connect(self._onUvcFpsChanged)
@@ -556,7 +565,17 @@ class CapturePage(BasePage):
             )
             self.screenshotIntervalCard.setValue(screenshot_interval_ms)
 
-            self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
+            _device_index = int(getattr(self._config, 'uvc_device_index', 0))
+            _device_name = str(getattr(self._config, 'uvc_device_name', '') or '')
+            # Seed synchronously with the configured value so the combo
+            # shows something immediately; _startUvcProbeDelayed() (below,
+            # for screenshot_method == 'uvc') enriches it with the full
+            # enumerated device list in the background and preserves this
+            # selection once it arrives (see _onUvcProbeResult).
+            self.uvcDeviceCombo.blockSignals(True)
+            self.uvcDeviceCombo.clear()
+            self.uvcDeviceCombo.addItem(_device_name or f"Device {_device_index}", _device_index)
+            self.uvcDeviceCombo.blockSignals(False)
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
             self.uvcDeviceNameEdit.setText(str(getattr(self._config, 'uvc_device_name', '') or ''))
             resolution_text = (
@@ -700,11 +719,43 @@ class CapturePage(BasePage):
         self._uvc_probe_worker.resultReady.connect(self._onUvcProbeResult)
         self._uvc_probe_worker.start()
 
-    def _onUvcProbeResult(self, generation, resolutions, fps_list):
+    def _onUvcProbeResult(self, generation, resolutions, fps_list, device_names=None):
         if generation != self._uvc_probe_generation:
             return  # superseded by a newer probe (device/resolution changed again)
         print(f"[Capture][UVC] Found {len(resolutions)} supported resolution(s): {resolutions}")
         print(f"[Capture][UVC] Supported FPS: {fps_list}")
+
+        device_names = device_names or []
+        configured_index = int(getattr(self._config, 'uvc_device_index', 0)) if self._config else 0
+        configured_name = str(getattr(self._config, 'uvc_device_name', '') or '') if self._config else ''
+        self.uvcDeviceCombo.blockSignals(True)
+        self.uvcDeviceCombo.clear()
+        if device_names:
+            for i, name in enumerate(device_names):
+                self.uvcDeviceCombo.addItem(name, i)
+        else:
+            # No enumeration available (av not installed, or non-dshow
+            # platform) — fall back to plain numeric slots so
+            # uvc_device_index can still be picked for dshow/msmf/any.
+            for i in range(8):
+                self.uvcDeviceCombo.addItem(f"Device {i}", i)
+        select_idx = -1
+        if configured_name:
+            for i in range(self.uvcDeviceCombo.count()):
+                if self.uvcDeviceCombo.itemText(i) == configured_name:
+                    select_idx = i
+                    break
+        if select_idx < 0:
+            for i in range(self.uvcDeviceCombo.count()):
+                if self.uvcDeviceCombo.itemData(i) == configured_index:
+                    select_idx = i
+                    break
+        if select_idx < 0 and configured_index >= self.uvcDeviceCombo.count():
+            self.uvcDeviceCombo.addItem(f"Device {configured_index}", configured_index)
+            select_idx = self.uvcDeviceCombo.count() - 1
+        if select_idx >= 0:
+            self.uvcDeviceCombo.setCurrentIndex(select_idx)
+        self.uvcDeviceCombo.blockSignals(False)
 
         current_text = self.uvcResolutionCombo.currentText().strip()
         self.uvcResolutionCombo.blockSignals(True)
@@ -838,9 +889,17 @@ class CapturePage(BasePage):
         if self._config:
             self._config.screenshot_interval = value / 1000.0
 
-    def _onUvcDeviceChanged(self, value):
+    def _onUvcDeviceChanged(self, text):
         if self._config:
-            self._config.uvc_device_index = int(value)
+            data = self.uvcDeviceCombo.currentData()
+            self._config.uvc_device_index = int(data) if data is not None else 0
+            # A real enumerated device name (not a "Device N" placeholder)
+            # doubles as the pyav device-name override, so picking a device
+            # here keeps both capture paths in sync without extra steps.
+            name = str(text).strip()
+            if name and not (name.startswith('Device ') and name[7:].isdigit()):
+                self._config.uvc_device_name = name
+                self.uvcDeviceNameEdit.setText(name)
         self._startUvcProbeDelayed()
         # config.uvc_actual_* only refreshes once the AI loop's live backend
         # hot-swaps to the new device (ai_loop.py's _capture_worker polls for
@@ -1111,7 +1170,8 @@ class CapturePage(BasePage):
         self.screenshotMethodCard.titleLabel.setText(t("screenshot_method"))
         self.screenshotIntervalCard.titleLabel.setText(t("screenshot_interval"))
         self.uvcGroup.titleLabel.setText("UVC Camera")
-        self.uvcDeviceCard.titleLabel.setText("UVC Device Index")
+        self.uvcDeviceCard.titleLabel.setText("UVC Device")
+        self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
         self.uvcResolutionCard.titleLabel.setText("UVC Resolution")
         self.uvcResolutionCard.contentLabel.setText("Auto-detect supported resolutions")
         self.uvcRefreshResolutionCard.titleLabel.setText("Refresh UVC Resolution List")
@@ -1129,8 +1189,9 @@ class CapturePage(BasePage):
         self.uvcDeviceNameCard.titleLabel.setText("UVC Device Name (pyav only)")
         self.uvcDeviceNameCard.contentLabel.setText(
             "DirectShow device name override, e.g. \"USB Video Device\". "
-            "Only used by the pyav capture method; leave blank to "
-            "auto-resolve from the device index above."
+            "Auto-filled from the UVC Device selection above; only used by "
+            "the pyav capture method. Override manually if a device's name "
+            "isn't listed above or enumeration is unavailable."
         )
         self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
         self.uvcHwInfoCard.contentLabel.setText("Actual values reported by the driver")

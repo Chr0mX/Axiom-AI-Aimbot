@@ -1292,6 +1292,19 @@ def _list_dshow_video_devices() -> list[str]:
     return names
 
 
+def list_uvc_device_names() -> list[str]:
+    """Enumerate UVC/webcam device names in DirectShow's enumeration order.
+
+    Used by the GUI to populate a device-name combo box instead of a bare
+    numeric index. The returned order also backs ``uvc_device_index`` for
+    the cv2 dshow/msmf/any capture methods, since DirectShow's own
+    enumeration order is the closest available approximation of how those
+    backends number devices (OpenCV doesn't expose device names itself).
+    """
+
+    return _list_dshow_video_devices()
+
+
 def _resolve_pyav_dshow_device(config: Config, device_index: int) -> str:
     """Resolve a DirectShow device *name* string for PyAV from config.
 
