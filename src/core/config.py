@@ -151,7 +151,6 @@ _FIELD_MAP = {
     'performance_mode':           'performance.performance_mode',
     'max_queue_size':             'performance.max_queue_size',
     'cuda_io_binding_enabled':    'performance.cuda_io_binding_enabled',
-    'skip_letterbox':             'performance.skip_letterbox',
     'detect_interval':            'performance.timing.detect_interval',
     'screenshot_interval':        'performance.timing.capture_interval',
     'idle_detect_interval':       'performance.timing.idle_interval',
@@ -470,8 +469,6 @@ class Config:
 
         # CUDA IO Binding 零拷貝推理（僅 CUDA provider 有效）
         self.cuda_io_binding_enabled: bool = False
-
-        self.skip_letterbox: bool = False         # 直接縮放取代 letterbox（略快，正方形擷取無失真）
 
         # Kalman filter aim-point smoother (mutually exclusive with EMA in UI)
         self.kalman_enabled: bool = False

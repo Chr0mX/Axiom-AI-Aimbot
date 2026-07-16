@@ -278,8 +278,6 @@
     "smart_jitter_level_low": "Low (±1px)",
     "smart_jitter_level_med": "Medium (±3px)",
     "smart_jitter_level_high": "High (±6px)",
-    "skip_letterbox_label": "Skip Letterbox Padding",
-    "skip_letterbox_desc": "Directly scale the capture region instead of padding to square. Slightly faster for square captures.",
     "makcu_keys_group": "MAKCU Keys",
     "makcu_key_inference": "Inference",
     "makcu_key_inference_desc": "Hold this mouse button to activate inference",
