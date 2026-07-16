@@ -268,9 +268,11 @@ class Config:
         self.uvc_height: int = self.height
         self.uvc_fps: int = 60
         self.uvc_capture_method: str = "msmf"
-        # DirectShow device name override for the 'pyav' capture method
-        # (e.g. "USB Video Device"). Empty = auto-resolve from
-        # uvc_device_index by enumerating DirectShow devices via libavdevice.
+        # DirectShow device name used by the 'pyav' capture method (e.g.
+        # "USB Video Device"). Auto-populated from the Capture page's Device
+        # dropdown selection; empty = auto-resolve from uvc_device_index by
+        # enumerating DirectShow devices (pygrabber, falling back to
+        # libavdevice) at capture-init time.
         self.uvc_device_name: str = ""
         # Requested pixel/codec format: 'mjpeg' (compressed, highest FPS
         # headroom over USB), 'yuy2' or 'nv12' (raw, uncompressed).

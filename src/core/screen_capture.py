@@ -1605,8 +1605,7 @@ def _list_dshow_video_devices() -> list[str]:
                     '[UVC] PyAV device enumeration ran but found no DirectShow '
                     'video devices in the log output — this driver/device may not '
                     'report itself the way libavdevice expects. Falling back to '
-                    'numeric device slots; set "UVC Device Name" manually if you '
-                    'know the exact DirectShow device name.',
+                    'numeric device slots.',
                 )
         except Exception as exc:
             _warn_once('pyav_device_list_failed', f'[UVC] PyAV device enumeration failed: {exc}')
@@ -1646,9 +1645,11 @@ def _resolve_pyav_dshow_device(config: Config, device_index: int) -> str:
     """Resolve a DirectShow device *name* string for PyAV from config.
 
     PyAV/libavdevice's dshow input needs ``video=<device name>``, unlike
-    OpenCV's integer device index. ``uvc_device_name`` lets the user pin an
-    exact name; otherwise names are enumerated and indexed the same way the
-    existing ``uvc_device_index`` selects among OpenCV-enumerated devices.
+    OpenCV's integer device index. ``uvc_device_name`` is auto-populated
+    from the Capture page's Device dropdown when a real (non-placeholder)
+    name is selected; otherwise names are enumerated fresh here and indexed
+    the same way the existing ``uvc_device_index`` selects among
+    OpenCV-enumerated devices.
     """
 
     override = str(getattr(config, 'uvc_device_name', '') or '').strip()
@@ -1659,14 +1660,16 @@ def _resolve_pyav_dshow_device(config: Config, device_index: int) -> str:
     if not devices:
         raise RuntimeError(
             'No DirectShow video devices found via pygrabber/libavdevice '
-            'enumeration. Set "UVC Device Name" explicitly in the Capture '
-            'page to bypass auto-detection.'
+            'enumeration. The pyav capture method requires device '
+            'enumeration to succeed — try the msmf/dshow capture method '
+            'instead, or confirm the device is visible to DirectShow in a '
+            'tool like GraphStudioNext.'
         )
     if device_index < 0 or device_index >= len(devices):
         raise RuntimeError(
             f'uvc_device_index={device_index} out of range for {len(devices)} '
-            f'enumerated DirectShow device(s): {devices}. Set "UVC Device Name" '
-            f'explicitly in the Capture page to bypass auto-detection.'
+            f'enumerated DirectShow device(s): {devices}. Pick a valid device '
+            f'from the Capture page\'s Device dropdown.'
         )
     return devices[device_index]
 

@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QSizePolic
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, FluentIcon,
     ComboBox, PushButton, SettingCard, BodyLabel, SegmentedWidget,
-    CaptionLabel, SwitchButton, LineEdit,
+    CaptionLabel, SwitchButton,
 )
 from ..components.slider_spin_card import SliderSpinCard
 from ..base_page import BasePage
@@ -183,21 +183,6 @@ class CapturePage(BasePage):
         )
         self.uvcDeviceCard.hBoxLayout.addWidget(self.uvcDeviceCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcDeviceCard.hBoxLayout.addSpacing(16)
-
-        self.uvcDeviceNameEdit = LineEdit()
-        self.uvcDeviceNameEdit.setPlaceholderText("auto (leave blank)")
-        self.uvcDeviceNameEdit.setMinimumWidth(200)
-        self.uvcDeviceNameCard = SettingCard(
-            FluentIcon.TAG,
-            "UVC Device Name (pyav only)",
-            "DirectShow device name override, e.g. \"USB Video Device\". "
-            "Auto-filled from the Device selection above; only used by "
-            "the pyav capture method. Override manually if a device's name "
-            "isn't listed above or enumeration is unavailable.",
-            self.uvcGroup
-        )
-        self.uvcDeviceNameCard.hBoxLayout.addWidget(self.uvcDeviceNameEdit, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcDeviceNameCard.hBoxLayout.addSpacing(16)
 
         self.uvcResolutionCombo = ComboBox()
         self.uvcResolutionCombo.setMinimumWidth(180)
@@ -503,7 +488,6 @@ class CapturePage(BasePage):
 
         self.uvcGroup.addSettingCard(self.uvcCaptureMethodCard)
         self.uvcGroup.addSettingCard(self.uvcDeviceCard)
-        self.uvcGroup.addSettingCard(self.uvcDeviceNameCard)
         self.uvcGroup.addSettingCard(self.uvcResolutionCard)
         self.uvcGroup.addSettingCard(self.uvcWidthCard)
         self.uvcGroup.addSettingCard(self.uvcHeightCard)
@@ -556,7 +540,6 @@ class CapturePage(BasePage):
         self.uvcRefreshResolutionBtn.clicked.connect(self._startUvcProbe)
         self.uvcFpsCombo.currentTextChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
-        self.uvcDeviceNameEdit.editingFinished.connect(self._onUvcDeviceNameChanged)
         self.uvcVideoFormatCombo.currentTextChanged.connect(self._onUvcVideoFormatChanged)
         self.uvcQueryBtn.clicked.connect(self._queryUvcHwInfo)
         self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
@@ -606,7 +589,6 @@ class CapturePage(BasePage):
             self.uvcDeviceCombo.addItem(_device_name or f"Device {_device_index}", userData=_device_index)
             self.uvcDeviceCombo.blockSignals(False)
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
-            self.uvcDeviceNameEdit.setText(str(getattr(self._config, 'uvc_device_name', '') or ''))
             self.uvcVideoFormatCombo.setCurrentText(str(getattr(self._config, 'uvc_video_format', 'mjpeg')).upper())
             resolution_text = (
                 f"{getattr(self._config, 'uvc_width', self._config.width)}"
@@ -977,12 +959,11 @@ class CapturePage(BasePage):
             data = self.uvcDeviceCombo.currentData()
             self._config.uvc_device_index = int(data) if data is not None else 0
             # A real enumerated device name (not a "Device N" placeholder)
-            # doubles as the pyav device-name override, so picking a device
-            # here keeps both capture paths in sync without extra steps.
+            # is what the pyav capture method resolves to internally, so
+            # picking a device here keeps both capture paths in sync.
             name = str(text).strip()
             if name and not (name.startswith('Device ') and name[7:].isdigit()):
                 self._config.uvc_device_name = name
-                self.uvcDeviceNameEdit.setText(name)
         self._startUvcProbeDelayed()
         # config.uvc_actual_* only refreshes once the AI loop's live backend
         # hot-swaps to the new device (ai_loop.py's _capture_worker polls for
@@ -1016,12 +997,6 @@ class CapturePage(BasePage):
     def _onUvcCaptureMethodChanged(self, text):
         if self._config:
             self._config.uvc_capture_method = str(text)
-        self._startUvcProbeDelayed()
-        QTimer.singleShot(700, self._queryUvcHwInfo)
-
-    def _onUvcDeviceNameChanged(self):
-        if self._config:
-            self._config.uvc_device_name = str(self.uvcDeviceNameEdit.text()).strip()
         self._startUvcProbeDelayed()
         QTimer.singleShot(700, self._queryUvcHwInfo)
 
@@ -1268,13 +1243,6 @@ class CapturePage(BasePage):
         )
         self.uvcDeviceCard.titleLabel.setText("Device")
         self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
-        self.uvcDeviceNameCard.titleLabel.setText("UVC Device Name (pyav only)")
-        self.uvcDeviceNameCard.contentLabel.setText(
-            "DirectShow device name override, e.g. \"USB Video Device\". "
-            "Auto-filled from the Device selection above; only used by "
-            "the pyav capture method. Override manually if a device's name "
-            "isn't listed above or enumeration is unavailable."
-        )
         self.uvcResolutionCard.titleLabel.setText("Resolution")
         self.uvcResolutionCard.contentLabel.setText("Auto-detect supported resolutions")
         self.uvcWidthCard.titleLabel.setText("UVC Width")
