@@ -1060,11 +1060,90 @@ class NDICapture:
             pt.join(timeout=1.0)
 
 
+def _resolve_device_name_for_query(device_index: int) -> str:
+    """Best-effort DirectShow device name lookup for the libavdevice-based
+    capability query below. Returns '' if PyAV/enumeration is unavailable —
+    callers fall back to the cv2 guess-and-check probe in that case."""
+    try:
+        names = _list_dshow_video_devices()
+    except Exception:
+        return ''
+    index = int(device_index)
+    if 0 <= index < len(names):
+        return names[index]
+    return ''
+
+
+_DSHOW_OPTION_LINE_RE = re.compile(
+    r'(?:vcodec|pixel_format)=(\S+)\s+min\s+s=(\d+)x(\d+)\s+fps=([\d.]+)\s+'
+    r'max\s+s=(\d+)x(\d+)\s+fps=([\d.]+)'
+)
+
+
+def _list_dshow_device_options(device_name: str) -> list[dict]:
+    """Query a DirectShow device's real supported (format, resolution, fps)
+    capabilities via libavdevice's dshow ``list_options`` — this is the
+    actual DirectShow IAMStreamConfig capability list the driver reports,
+    not a guessed candidate set. Like ``_list_dshow_video_devices()``, the
+    result is only ever emitted as a log line, never returned as data.
+    """
+
+    import av  # local import: only needed when PyAV is available
+    import av.logging
+
+    options: list[dict] = []
+    previous_level = av.logging.get_level()
+    try:
+        try:
+            av.logging.set_level(av.logging.INFO)
+            with av.logging.Capture(local=True) as logs:
+                try:
+                    av.open(f'video={device_name}', format='dshow', options={'list_options': 'true'})
+                except Exception:
+                    pass
+            for _level, _name, message in logs:
+                match = _DSHOW_OPTION_LINE_RE.search(str(message))
+                if not match:
+                    continue
+                fmt, min_w, min_h, min_fps, max_w, max_h, max_fps = match.groups()
+                options.append({
+                    'format': fmt,
+                    'min_size': (int(min_w), int(min_h)),
+                    'max_size': (int(max_w), int(max_h)),
+                    'min_fps': float(min_fps),
+                    'max_fps': float(max_fps),
+                })
+        except Exception:
+            return []
+    finally:
+        try:
+            av.logging.set_level(previous_level)
+        except Exception:
+            pass
+    return options
+
+
 def list_supported_uvc_resolutions(
     device_index: int,
     capture_method: str = 'dshow',
 ) -> list[tuple[int, int]]:
-    """Probe common UVC resolutions and return distinct supported entries."""
+    """Return the device's actual supported resolutions.
+
+    Queries the driver directly via libavdevice's dshow ``list_options``
+    (real DirectShow capability data), falling back to a guess-and-check
+    cv2 probe against a small candidate set only when that query is
+    unavailable (e.g. PyAV not installed, or the device can't be resolved
+    to a DirectShow name).
+    """
+    device_name = _resolve_device_name_for_query(device_index)
+    if device_name:
+        try:
+            options = _list_dshow_device_options(device_name)
+        except Exception:
+            options = []
+        sizes = {opt['min_size'] for opt in options} | {opt['max_size'] for opt in options}
+        if sizes:
+            return sorted(sizes, key=lambda item: (item[0] * item[1], item[0]))
 
     backend_map = {
         'dshow': cv2.CAP_DSHOW,
@@ -1118,7 +1197,31 @@ def list_supported_uvc_fps(
     height: int,
     capture_method: str = 'dshow',
 ) -> list[int]:
-    """Probe common FPS values at the given resolution and return supported ones."""
+    """Return the device's actual supported FPS values at a given resolution.
+
+    Queries the driver directly via libavdevice's dshow ``list_options``
+    (real DirectShow capability data), falling back to a guess-and-check
+    cv2 probe against a small candidate set only when that query is
+    unavailable.
+    """
+    device_name = _resolve_device_name_for_query(device_index)
+    if device_name:
+        try:
+            options = _list_dshow_device_options(device_name)
+        except Exception:
+            options = []
+        matching = [
+            opt for opt in options
+            if width in (opt['min_size'][0], opt['max_size'][0])
+            and height in (opt['min_size'][1], opt['max_size'][1])
+        ] or options
+        fps_values: set[int] = set()
+        for opt in matching:
+            fps_values.add(int(round(opt['min_fps'])))
+            fps_values.add(int(round(opt['max_fps'])))
+        if fps_values:
+            return sorted(fps_values)
+
     backend_map = {'dshow': cv2.CAP_DSHOW, 'msmf': cv2.CAP_MSMF, 'any': cv2.CAP_ANY}
     backend = backend_map.get(str(capture_method).lower(), cv2.CAP_DSHOW)
     try:
@@ -1668,8 +1771,27 @@ class UVCCapture:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
         _measurement_windows = 0
+        _warned_broken_read = False
         while not self._reader_stop.is_set():
-            ok, frame = self.cap.read()
+            try:
+                ok, frame = self.cap.read()
+            except Exception as exc:
+                # cap.isOpened() can lie (seen on some DirectShow driver
+                # stacks that fall through to OpenCV's internal obsensor
+                # backend) — cap.read() can then raise a raw C++ exception
+                # instead of just returning ok=False. Treat it the same as
+                # a failed read rather than letting it kill this thread
+                # (which would silently stop all UVC capture).
+                if not _warned_broken_read:
+                    _warned_broken_read = True
+                    logging.getLogger(__name__).error(
+                        "[UVC] cap.read() raised %s — the driver/backend may not "
+                        "actually support this device by index. Try a different "
+                        "capture method (msmf/dshow/pyav) or USB port. Retrying...",
+                        exc,
+                    )
+                ok, frame = False, None
+                time.sleep(0.05)
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
