@@ -22,43 +22,6 @@ if TYPE_CHECKING:
 _WARNED_MESSAGES: set[str] = set()
 _CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
 
-_av_module_lock = threading.Lock()
-_av_module_cache: dict[str, Any] = {}
-
-
-def _import_av() -> Any:
-    """Thread-safe, memoized ``import av``.
-
-    Two responsibilities:
-    1. Concurrency safety — PyAV wraps a large Cython/FFmpeg extension whose
-       module init isn't necessarily safe to run from two threads at once
-       (e.g. a GUI device-name probe thread racing the AI loop's own
-       capture-init thread). Only the first caller actually imports it,
-       under a lock; every later caller (from any thread) gets the cached
-       module, or the cached failure re-raised, instead of racing a second
-       real import attempt.
-    2. Diagnosability — a bare ``AttributeError: __spec__`` (observed with
-       no other context) is close to undiagnosable from its message alone;
-       log the *full* traceback once, on the actual first failure, so
-       whichever call site (device enumeration, capability query, live
-       pyav capture init) happens to trigger it first still leaves enough
-       detail in the log to locate exactly where inside the import chain
-       it's failing.
-    """
-    with _av_module_lock:
-        if 'av' not in _av_module_cache:
-            try:
-                import av as _av
-                import av.logging  # noqa: F401 - ensures av.logging is bound as an attribute
-                _av_module_cache['av'] = _av
-            except Exception as exc:
-                _av_module_cache['av'] = exc
-                logger.error("[UVC] `import av` failed — full traceback:", exc_info=True)
-        cached = _av_module_cache['av']
-    if isinstance(cached, Exception):
-        raise cached
-    return cached
-
 _JPEG_SOF_MARKERS = frozenset({
     0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
     0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
@@ -236,7 +199,7 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
 _UVC_WINDOW_NAME = "Axiom UVC Preview"
 
 
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, str]:
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str]:
     return (
         int(getattr(config, 'uvc_device_index', 0)),
         int(getattr(config, 'uvc_width', 0)),
@@ -245,7 +208,6 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
         bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
-        str(getattr(config, 'uvc_device_name', '') or ''),
         str(getattr(config, 'uvc_video_format', 'mjpeg')).lower(),
     )
 
@@ -1192,71 +1154,6 @@ def _list_pygrabber_device_formats(device_index: int) -> list[dict]:
                 pass
 
 
-def _resolve_device_name_for_query(device_index: int) -> str:
-    """Best-effort DirectShow device name lookup for the libavdevice-based
-    capability query below. Returns '' if PyAV/enumeration is unavailable —
-    callers fall back to the cv2 guess-and-check probe in that case."""
-    try:
-        names = _list_dshow_video_devices()
-    except Exception:
-        return ''
-    index = int(device_index)
-    if 0 <= index < len(names):
-        return names[index]
-    return ''
-
-
-_DSHOW_OPTION_LINE_RE = re.compile(
-    r'(?:vcodec|pixel_format)=(\S+)\s+min\s+s=(\d+)x(\d+)\s+fps=([\d.]+)\s+'
-    r'max\s+s=(\d+)x(\d+)\s+fps=([\d.]+)'
-)
-
-
-def _list_dshow_device_options(device_name: str) -> list[dict]:
-    """Query a DirectShow device's real supported (format, resolution, fps)
-    capabilities via libavdevice's dshow ``list_options`` — this is the
-    actual DirectShow IAMStreamConfig capability list the driver reports,
-    not a guessed candidate set. Like ``_list_dshow_video_devices()``, the
-    result is only ever emitted as a log line, never returned as data.
-    """
-
-    try:
-        av = _import_av()
-    except Exception:
-        return []
-
-    options: list[dict] = []
-    previous_level = av.logging.get_level()
-    try:
-        try:
-            av.logging.set_level(av.logging.INFO)
-            with av.logging.Capture(local=True) as logs:
-                try:
-                    av.open(f'video={device_name}', format='dshow', options={'list_options': 'true'})
-                except Exception:
-                    pass
-            for _level, _name, message in logs:
-                match = _DSHOW_OPTION_LINE_RE.search(str(message))
-                if not match:
-                    continue
-                fmt, min_w, min_h, min_fps, max_w, max_h, max_fps = match.groups()
-                options.append({
-                    'format': fmt,
-                    'min_size': (int(min_w), int(min_h)),
-                    'max_size': (int(max_w), int(max_h)),
-                    'min_fps': float(min_fps),
-                    'max_fps': float(max_fps),
-                })
-        except Exception:
-            return []
-    finally:
-        try:
-            av.logging.set_level(previous_level)
-        except Exception:
-            pass
-    return options
-
-
 def list_supported_uvc_resolutions(
     device_index: int,
     capture_method: str = 'dshow',
@@ -1265,23 +1162,12 @@ def list_supported_uvc_resolutions(
 
     Queries the driver directly via DirectShow's native IAMStreamConfig
     capability list through pygrabber (the same COM API OBS/browsers use),
-    falling back to libavdevice's dshow ``list_options`` (PyAV) and then a
-    guess-and-check cv2 probe against a small candidate set, in that order,
-    only when the previous method is unavailable.
+    falling back to a guess-and-check cv2 probe against a small candidate
+    set only when pygrabber is unavailable.
     """
     formats = _list_pygrabber_device_formats(device_index)
     if formats:
         sizes = {(f['width'], f['height']) for f in formats}
-        if sizes:
-            return sorted(sizes, key=lambda item: (item[0] * item[1], item[0]))
-
-    device_name = _resolve_device_name_for_query(device_index)
-    if device_name:
-        try:
-            options = _list_dshow_device_options(device_name)
-        except Exception:
-            options = []
-        sizes = {opt['min_size'] for opt in options} | {opt['max_size'] for opt in options}
         if sizes:
             return sorted(sizes, key=lambda item: (item[0] * item[1], item[0]))
 
@@ -1341,9 +1227,8 @@ def list_supported_uvc_fps(
 
     Queries the driver directly via DirectShow's native IAMStreamConfig
     capability list through pygrabber (the same COM API OBS/browsers use),
-    falling back to libavdevice's dshow ``list_options`` (PyAV) and then a
-    guess-and-check cv2 probe against a small candidate set, in that order,
-    only when the previous method is unavailable.
+    falling back to a guess-and-check cv2 probe against a small candidate
+    set only when pygrabber is unavailable.
     """
     formats = _list_pygrabber_device_formats(device_index)
     if formats:
@@ -1352,24 +1237,6 @@ def list_supported_uvc_fps(
         for f in matching:
             fps_values.add(int(round(f['min_fps'])))
             fps_values.add(int(round(f['max_fps'])))
-        if fps_values:
-            return sorted(fps_values)
-
-    device_name = _resolve_device_name_for_query(device_index)
-    if device_name:
-        try:
-            options = _list_dshow_device_options(device_name)
-        except Exception:
-            options = []
-        matching = [
-            opt for opt in options
-            if width in (opt['min_size'][0], opt['max_size'][0])
-            and height in (opt['min_size'][1], opt['max_size'][1])
-        ] or options
-        fps_values: set[int] = set()
-        for opt in matching:
-            fps_values.add(int(round(opt['min_fps'])))
-            fps_values.add(int(round(opt['max_fps'])))
         if fps_values:
             return sorted(fps_values)
 
@@ -1543,81 +1410,6 @@ class _UVCPreviewThread(threading.Thread):
                 pass
 
 
-def _list_dshow_video_devices() -> list[str]:
-    """Enumerate DirectShow video device names via libavdevice (PyAV).
-
-    ``ffmpeg -f dshow -list_devices true -i dummy`` always "fails" (it's a
-    listing request, not a real open) and prints the device names to its log
-    output rather than returning them as data — so device names are captured
-    from the log stream instead of a return value.
-    """
-
-    try:
-        av = _import_av()
-    except Exception as exc:
-        # Silently returning [] here (the old behavior) left users staring
-        # at "Device 0"/"Device 1"/... placeholders with zero indication of
-        # why — surface the actual import failure once per process instead.
-        _warn_once(
-            'pyav_import_failed',
-            f'[UVC] PyAV import failed ("{exc}") — device name enumeration and '
-            f'the pyav capture method are unavailable. Falling back to numeric '
-            f'device slots.',
-        )
-        return []
-
-    names: list[str] = []
-    in_video_section = False
-    # PyAV drops all FFmpeg log output by default (av.logging.set_level(None)
-    # installs a no-op callback) — since dshow's device list is only ever
-    # emitted as an AV_LOG_INFO line (never returned as data), Capture()
-    # sees nothing unless the level threshold is raised to admit INFO first.
-    # Restore the previous level afterward so this doesn't globally change
-    # FFmpeg log verbosity for the rest of the process (e.g. the live pyav
-    # capture backend's own logging).
-    previous_level = av.logging.get_level()
-    try:
-        try:
-            av.logging.set_level(av.logging.INFO)
-            with av.logging.Capture(local=True) as logs:
-                try:
-                    av.open('dummy', format='dshow', options={'list_devices': 'true'})
-                except Exception:
-                    pass
-            for _level, _name, message in logs:
-                text = str(message)
-                if 'video devices' in text.lower():
-                    in_video_section = True
-                    continue
-                if 'audio devices' in text.lower():
-                    in_video_section = False
-                    continue
-                if not in_video_section:
-                    continue
-                if 'Alternative name' in text:
-                    continue
-                match = re.search(r'"([^"]+)"', text)
-                if match:
-                    names.append(match.group(1))
-            if not names:
-                _warn_once(
-                    'pyav_device_list_empty',
-                    '[UVC] PyAV device enumeration ran but found no DirectShow '
-                    'video devices in the log output — this driver/device may not '
-                    'report itself the way libavdevice expects. Falling back to '
-                    'numeric device slots.',
-                )
-        except Exception as exc:
-            _warn_once('pyav_device_list_failed', f'[UVC] PyAV device enumeration failed: {exc}')
-            return []
-    finally:
-        try:
-            av.logging.set_level(previous_level)
-        except Exception:
-            pass
-    return names
-
-
 def list_uvc_device_names() -> list[str]:
     """Enumerate UVC/webcam device names in DirectShow's enumeration order.
 
@@ -1627,51 +1419,12 @@ def list_uvc_device_names() -> list[str]:
     enumeration order is the closest available approximation of how those
     backends number devices (OpenCV doesn't expose device names itself).
 
-    Tries pygrabber's native COM enumeration first (the same
-    ICreateDevEnum/IEnumMoniker API OBS and browsers use), falling back to
-    PyAV/libavdevice's log-scraping approach only if pygrabber is
-    unavailable or finds nothing — pygrabber doesn't depend on PyAV
-    importing cleanly, which has proven to be a source of unrelated
-    packaging fragility on some machines.
+    Uses pygrabber's native COM enumeration (the same
+    ICreateDevEnum/IEnumMoniker API OBS and browsers use) — returns an
+    empty list if pygrabber/comtypes are unavailable.
     """
 
-    names = _list_pygrabber_device_names()
-    if names:
-        return names
-    return _list_dshow_video_devices()
-
-
-def _resolve_pyav_dshow_device(config: Config, device_index: int) -> str:
-    """Resolve a DirectShow device *name* string for PyAV from config.
-
-    PyAV/libavdevice's dshow input needs ``video=<device name>``, unlike
-    OpenCV's integer device index. ``uvc_device_name`` is auto-populated
-    from the Capture page's Device dropdown when a real (non-placeholder)
-    name is selected; otherwise names are enumerated fresh here and indexed
-    the same way the existing ``uvc_device_index`` selects among
-    OpenCV-enumerated devices.
-    """
-
-    override = str(getattr(config, 'uvc_device_name', '') or '').strip()
-    if override:
-        return override
-
-    devices = list_uvc_device_names()
-    if not devices:
-        raise RuntimeError(
-            'No DirectShow video devices found via pygrabber/libavdevice '
-            'enumeration. The pyav capture method requires device '
-            'enumeration to succeed — try the msmf/dshow capture method '
-            'instead, or confirm the device is visible to DirectShow in a '
-            'tool like GraphStudioNext.'
-        )
-    if device_index < 0 or device_index >= len(devices):
-        raise RuntimeError(
-            f'uvc_device_index={device_index} out of range for {len(devices)} '
-            f'enumerated DirectShow device(s): {devices}. Pick a valid device '
-            f'from the Capture page\'s Device dropdown.'
-        )
-    return devices[device_index]
+    return _list_pygrabber_device_names()
 
 
 class UVCCapture:
@@ -1690,11 +1443,6 @@ class UVCCapture:
 
         capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
         self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
-        self.is_pyav = (capture_method == 'pyav')
-
-        if self.is_pyav:
-            self._init_pyav(device_index, width, height, fps)
-            return
 
         backend_map = {
             'dshow': cv2.CAP_DSHOW,
@@ -1829,129 +1577,6 @@ class UVCCapture:
             )
             self._preview_thread.start()
 
-    def _init_pyav(self, device_index: int, width: int, height: int, fps: int) -> None:
-        """Open a DirectShow UVC device via PyAV/libavdevice instead of OpenCV.
-
-        Bypasses cv2's DirectShow/Media Foundation negotiation layer, which is
-        known to silently fail MJPEG negotiation on some UVC capture cards
-        even when the same device negotiates MJPEG fine for other DirectShow
-        consumers (e.g. OBS). PyAV talks to ffmpeg's dshow input directly.
-        """
-
-        av = _import_av()
-
-        self.cap = None
-        device_name = _resolve_pyav_dshow_device(self.config, device_index)
-        video_format = str(getattr(self.config, 'uvc_video_format', 'mjpeg')).lower()
-        # dshow's 'vcodec' option requests a compressed codec from the
-        # device; raw formats are instead requested via 'pixel_format'.
-        pixel_format_map = {'yuy2': 'yuyv422', 'nv12': 'nv12'}
-        if video_format in pixel_format_map:
-            options = {'pixel_format': pixel_format_map[video_format]}
-        else:
-            options = {'vcodec': 'mjpeg'}
-        if width > 0 and height > 0:
-            options['video_size'] = f'{width}x{height}'
-        if fps > 0:
-            options['framerate'] = str(fps)
-
-        try:
-            container = av.open(f'video={device_name}', format='dshow', options=options)
-        except Exception as exc:
-            raise RuntimeError(
-                f'PyAV UVC device open failed for "{device_name}": {exc}'
-            ) from exc
-
-        stream = container.streams.video[0] if container.streams.video else None
-        if stream is None:
-            container.close()
-            raise RuntimeError(f'PyAV opened "{device_name}" but it has no video stream.')
-        stream.thread_type = 'AUTO'
-
-        self._av_container = container
-        self._av_stream = stream
-        self.preview_width = max(1, int(stream.width or width or 1))
-        self.preview_height = max(1, int(stream.height or height or 1))
-        negotiated_fps = float(stream.average_rate) if stream.average_rate else float(fps or 30)
-        self.preview_fps = max(1, int(round(negotiated_fps)))
-        self.config.source_nominal_fps = float(self.preview_fps)
-        self.config.uvc_actual_width = self.preview_width
-        self.config.uvc_actual_height = self.preview_height
-        self.config.uvc_actual_fps = float(self.preview_fps)
-        self.is_expected_format = True  # requested via dshow options; not independently re-verified here
-        self.is_mjpeg = self.is_expected_format  # kept for back-compat
-
-        logging.getLogger(__name__).info(
-            "[UVC][PyAV] Opened '%s' via libavdevice dshow at %dx%d @ %.1f fps (format=%s).",
-            device_name, self.preview_width, self.preview_height, negotiated_fps, video_format.upper(),
-        )
-
-        self._latest_frame_lock = threading.Lock()
-        self._latest_frame_ref: list = [None]
-        self._region_ref: list = [None]
-        self._reader_stop = threading.Event()
-        self._reader_thread = threading.Thread(
-            target=self._reader_worker_pyav, name='UVCReaderPyAV', daemon=True
-        )
-        self._reader_thread.start()
-
-        self._preview_thread: _UVCPreviewThread | None = None
-        if self.show_window:
-            self._preview_thread = _UVCPreviewThread(
-                window_name=self.window_name,
-                scale_mode=self.preview_scale_mode,
-                frame_lock=self._latest_frame_lock,
-                frame_ref=self._latest_frame_ref,
-                stop_event=self._reader_stop,
-                draw_overlay_fn=self._draw_overlay,
-                region_ref=self._region_ref,
-                target_fps=self.preview_fps,
-                preview_width=self.preview_width,
-                preview_height=self.preview_height,
-                config=self.config,
-                show_cv2_window=False,
-            )
-            self._preview_thread.start()
-
-    def _reader_worker_pyav(self) -> None:
-        _fps_count = 0
-        _fps_t0 = time.perf_counter()
-        _measurement_windows = 0
-        try:
-            for frame in self._av_container.decode(self._av_stream):
-                if self._reader_stop.is_set():
-                    break
-                try:
-                    frame_bgr = frame.to_ndarray(format='bgr24')
-                except Exception:
-                    continue
-                with self._latest_frame_lock:
-                    self._latest_frame_ref[0] = frame_bgr
-
-                _fps_count += 1
-                _now = time.perf_counter()
-                _elapsed = _now - _fps_t0
-                if _elapsed >= 1.0:
-                    self.config.source_nominal_fps = _fps_count / _elapsed
-                    _fps_count = 0
-                    _fps_t0 = _now
-
-                    _measurement_windows += 1
-                    if _measurement_windows == 2 and self._target_fps > 0:
-                        shortfall_ratio = self.config.source_nominal_fps / self._target_fps
-                        if shortfall_ratio < 0.8:
-                            logging.getLogger(__name__).warning(
-                                "[UVC][PyAV] Measured capture rate %.1f fps is well below the "
-                                "configured %d fps. Try a lower resolution/fps or a different "
-                                "USB port/cable.",
-                                self.config.source_nominal_fps, self._target_fps,
-                            )
-        except Exception as exc:
-            if not self._reader_stop.is_set():
-                logging.getLogger(__name__).error(
-                    "[UVC][PyAV] Reader loop terminated unexpectedly: %s", exc,
-                )
-
     def _reader_worker(self) -> None:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
@@ -1972,7 +1597,7 @@ class UVCCapture:
                     logging.getLogger(__name__).error(
                         "[UVC] cap.read() raised %s — the driver/backend may not "
                         "actually support this device by index. Try a different "
-                        "capture method (msmf/dshow/pyav) or USB port. Retrying...",
+                        "capture method (msmf/dshow) or USB port. Retrying...",
                         exc,
                     )
                 ok, frame = False, None
@@ -2058,14 +1683,7 @@ class UVCCapture:
             self._preview_thread.join(timeout=1.0)
         if self._reader_thread.is_alive():
             self._reader_thread.join(timeout=1.0)
-        if getattr(self, 'is_pyav', False):
-            container = getattr(self, '_av_container', None)
-            if container is not None:
-                try:
-                    container.close()
-                except Exception:
-                    pass
-        elif self.cap is not None:
+        if self.cap is not None:
             try:
                 self.cap.release()
             except Exception:

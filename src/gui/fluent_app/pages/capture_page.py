@@ -159,15 +159,14 @@ class CapturePage(BasePage):
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
 
         self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "pyav", "auto"])
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto"])
         self.uvcCaptureMethodCombo.setMinimumWidth(140)
         self.uvcCaptureMethodCard = SettingCard(
             FluentIcon.CAMERA,
             "UVC Capture Method",
-            "msmf recommended for 1080p60 on Windows 10/11. pyav bypasses "
-            "OpenCV's dshow/msmf negotiation via libavdevice — try it if "
-            "MJPEG negotiation fails with msmf/dshow despite the device "
-            "working fine in other DirectShow apps (e.g. OBS).",
+            "msmf recommended for 1080p60 on Windows 10/11. If MJPEG "
+            "negotiation fails despite the device working fine in other "
+            "DirectShow apps (e.g. OBS), try 'dshow' instead.",
             self.uvcGroup
         )
         self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
@@ -578,7 +577,6 @@ class CapturePage(BasePage):
             self.screenshotIntervalCard.setValue(screenshot_interval_ms)
 
             _device_index = int(getattr(self._config, 'uvc_device_index', 0))
-            _device_name = str(getattr(self._config, 'uvc_device_name', '') or '')
             # Seed synchronously with the configured value so the combo
             # shows something immediately; _startUvcProbeDelayed() (below,
             # for screenshot_method == 'uvc') enriches it with the full
@@ -586,7 +584,7 @@ class CapturePage(BasePage):
             # selection once it arrives (see _onUvcProbeResult).
             self.uvcDeviceCombo.blockSignals(True)
             self.uvcDeviceCombo.clear()
-            self.uvcDeviceCombo.addItem(_device_name or f"Device {_device_index}", userData=_device_index)
+            self.uvcDeviceCombo.addItem(f"Device {_device_index}", userData=_device_index)
             self.uvcDeviceCombo.blockSignals(False)
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
             self.uvcVideoFormatCombo.setCurrentText(str(getattr(self._config, 'uvc_video_format', 'mjpeg')).upper())
@@ -759,29 +757,22 @@ class CapturePage(BasePage):
 
         device_names = device_names or []
         configured_index = int(getattr(self._config, 'uvc_device_index', 0)) if self._config else 0
-        configured_name = str(getattr(self._config, 'uvc_device_name', '') or '') if self._config else ''
         self.uvcDeviceCombo.blockSignals(True)
         self.uvcDeviceCombo.clear()
         if device_names:
             for i, name in enumerate(device_names):
                 self.uvcDeviceCombo.addItem(name, userData=i)
         else:
-            # No enumeration available (av not installed, or non-dshow
-            # platform) — fall back to plain numeric slots so
-            # uvc_device_index can still be picked for dshow/msmf/any.
+            # No enumeration available (pygrabber/comtypes not installed) —
+            # fall back to plain numeric slots so uvc_device_index can still
+            # be picked for dshow/msmf/any.
             for i in range(8):
                 self.uvcDeviceCombo.addItem(f"Device {i}", userData=i)
         select_idx = -1
-        if configured_name:
-            for i in range(self.uvcDeviceCombo.count()):
-                if self.uvcDeviceCombo.itemText(i) == configured_name:
-                    select_idx = i
-                    break
-        if select_idx < 0:
-            for i in range(self.uvcDeviceCombo.count()):
-                if self.uvcDeviceCombo.itemData(i) == configured_index:
-                    select_idx = i
-                    break
+        for i in range(self.uvcDeviceCombo.count()):
+            if self.uvcDeviceCombo.itemData(i) == configured_index:
+                select_idx = i
+                break
         if select_idx < 0 and configured_index >= self.uvcDeviceCombo.count():
             self.uvcDeviceCombo.addItem(f"Device {configured_index}", userData=configured_index)
             select_idx = self.uvcDeviceCombo.count() - 1
@@ -958,12 +949,6 @@ class CapturePage(BasePage):
         if self._config:
             data = self.uvcDeviceCombo.currentData()
             self._config.uvc_device_index = int(data) if data is not None else 0
-            # A real enumerated device name (not a "Device N" placeholder)
-            # is what the pyav capture method resolves to internally, so
-            # picking a device here keeps both capture paths in sync.
-            name = str(text).strip()
-            if name and not (name.startswith('Device ') and name[7:].isdigit()):
-                self._config.uvc_device_name = name
         self._startUvcProbeDelayed()
         # config.uvc_actual_* only refreshes once the AI loop's live backend
         # hot-swaps to the new device (ai_loop.py's _capture_worker polls for
@@ -1236,10 +1221,9 @@ class CapturePage(BasePage):
         self.uvcGroup.titleLabel.setText("UVC Camera")
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
         self.uvcCaptureMethodCard.contentLabel.setText(
-            "msmf recommended for 1080p60 on Windows 10/11. pyav bypasses "
-            "OpenCV's dshow/msmf negotiation via libavdevice — try it if "
-            "MJPEG negotiation fails with msmf/dshow despite the device "
-            "working fine in other DirectShow apps (e.g. OBS)."
+            "msmf recommended for 1080p60 on Windows 10/11. If MJPEG "
+            "negotiation fails despite the device working fine in other "
+            "DirectShow apps (e.g. OBS), try 'dshow' instead."
         )
         self.uvcDeviceCard.titleLabel.setText("Device")
         self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
