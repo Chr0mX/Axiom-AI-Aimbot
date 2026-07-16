@@ -22,6 +22,37 @@ if TYPE_CHECKING:
 _WARNED_MESSAGES: set[str] = set()
 _CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
 
+_av_module_lock = threading.Lock()
+_av_module_cache: dict[str, Any] = {}
+
+
+def _import_av() -> Any:
+    """Thread-safe, memoized ``import av``.
+
+    PyAV wraps a large Cython/FFmpeg extension whose module init isn't safe
+    to run concurrently — two threads both hitting ``import av`` for the
+    first time around the same moment (e.g. a GUI device-name probe thread
+    racing the AI loop's own capture-init thread right after switching to
+    the pyav capture method) has been observed to raise
+    ``AttributeError: __spec__`` instead of a normal import error, which
+    then gets mistaken for "PyAV isn't installed" by callers. Only the
+    first caller actually imports it, under a lock; every later caller
+    (from any thread) gets the cached module, or the cached failure
+    re-raised, instead of racing a second real import attempt.
+    """
+    with _av_module_lock:
+        if 'av' not in _av_module_cache:
+            try:
+                import av as _av
+                import av.logging  # noqa: F401 - ensures av.logging is bound as an attribute
+                _av_module_cache['av'] = _av
+            except Exception as exc:
+                _av_module_cache['av'] = exc
+        cached = _av_module_cache['av']
+    if isinstance(cached, Exception):
+        raise cached
+    return cached
+
 _JPEG_SOF_MARKERS = frozenset({
     0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
     0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF,
@@ -1088,8 +1119,10 @@ def _list_dshow_device_options(device_name: str) -> list[dict]:
     result is only ever emitted as a log line, never returned as data.
     """
 
-    import av  # local import: only needed when PyAV is available
-    import av.logging
+    try:
+        av = _import_av()
+    except Exception:
+        return []
 
     options: list[dict] = []
     previous_level = av.logging.get_level()
@@ -1402,8 +1435,7 @@ def _list_dshow_video_devices() -> list[str]:
     """
 
     try:
-        import av  # local import: only needed for the 'pyav' capture method
-        import av.logging
+        av = _import_av()
     except Exception as exc:
         # Silently returning [] here (the old behavior) left users staring
         # at "Device 0"/"Device 1"/... placeholders with zero indication of
@@ -1675,7 +1707,7 @@ class UVCCapture:
         consumers (e.g. OBS). PyAV talks to ffmpeg's dshow input directly.
         """
 
-        import av  # local import: only needed for the 'pyav' capture method
+        av = _import_av()
 
         self.cap = None
         device_name = _resolve_pyav_dshow_device(self.config, device_index)
