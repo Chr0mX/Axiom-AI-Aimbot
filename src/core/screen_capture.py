@@ -1401,8 +1401,20 @@ def _list_dshow_video_devices() -> list[str]:
     from the log stream instead of a return value.
     """
 
-    import av  # local import: only needed for the 'pyav' capture method
-    import av.logging
+    try:
+        import av  # local import: only needed for the 'pyav' capture method
+        import av.logging
+    except Exception as exc:
+        # Silently returning [] here (the old behavior) left users staring
+        # at "Device 0"/"Device 1"/... placeholders with zero indication of
+        # why — surface the actual import failure once per process instead.
+        _warn_once(
+            'pyav_import_failed',
+            f'[UVC] PyAV import failed ("{exc}") — device name enumeration and '
+            f'the pyav capture method are unavailable. Falling back to numeric '
+            f'device slots.',
+        )
+        return []
 
     names: list[str] = []
     in_video_section = False
@@ -1437,7 +1449,17 @@ def _list_dshow_video_devices() -> list[str]:
                 match = re.search(r'"([^"]+)"', text)
                 if match:
                     names.append(match.group(1))
-        except Exception:
+            if not names:
+                _warn_once(
+                    'pyav_device_list_empty',
+                    '[UVC] PyAV device enumeration ran but found no DirectShow '
+                    'video devices in the log output — this driver/device may not '
+                    'report itself the way libavdevice expects. Falling back to '
+                    'numeric device slots; set "UVC Device Name" manually if you '
+                    'know the exact DirectShow device name.',
+                )
+        except Exception as exc:
+            _warn_once('pyav_device_list_failed', f'[UVC] PyAV device enumeration failed: {exc}')
             return []
     finally:
         try:
