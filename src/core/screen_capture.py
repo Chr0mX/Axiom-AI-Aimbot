@@ -1709,6 +1709,31 @@ class UVCCapture:
             else:
                 time.sleep(0.005)
 
+    def _confirm_raw_nv12(self, frame: np.ndarray) -> bool:
+        """Verify a captured frame is actually a raw single-plane NV12
+        buffer, not ordinary (H, W, 3) BGR.
+
+        The CAP_PROP_CONVERT_RGB readback check in __init__ isn't
+        sufficient on its own — some DirectShow driver stacks echo back
+        whatever value was set without it having any real effect (the
+        same class of lie already seen from this backend for isOpened()
+        and FOURCC). A raw NV12 buffer is 2-D (single channel); if a
+        frame claiming to be raw NV12 is actually 3-D, self-heal by
+        permanently disabling the optimization instead of letting
+        cv2.cvtColor crash on the channel-count mismatch.
+        """
+        if frame.ndim == 2:
+            return True
+        self.is_raw_nv12 = False
+        logging.getLogger(__name__).warning(
+            "[UVC] Driver claimed CAP_PROP_CONVERT_RGB was disabled but frames "
+            "are still %s-channel, not raw NV12 — disabling the crop-before-"
+            "convert optimization and falling back to standard full-frame "
+            "conversion.",
+            frame.shape[2] if frame.ndim == 3 else frame.ndim,
+        )
+        return False
+
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
 
@@ -1726,7 +1751,7 @@ class UVCCapture:
         # overlay stays in sync without requiring an extra lock or callback.
         self._region_ref[0] = region
 
-        if self.is_raw_nv12:
+        if self.is_raw_nv12 and self._confirm_raw_nv12(frame_bgr):
             # Crop the raw NV12 buffer BEFORE converting to BGR, so the
             # (comparatively expensive) colorspace conversion only ever
             # runs over the small detection-region crop instead of the
@@ -1760,7 +1785,7 @@ class UVCCapture:
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
 
     def _draw_overlay(self, frame_bgr: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
-        if self.is_raw_nv12:
+        if self.is_raw_nv12 and self._confirm_raw_nv12(frame_bgr):
             # The preview thread reads the same raw NV12 buffer grab() does
             # (shared via _latest_frame_ref) — it needs a real BGR frame to
             # draw overlays on, so convert the full frame here. Unlike
