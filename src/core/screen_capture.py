@@ -1440,6 +1440,34 @@ def list_uvc_device_names() -> list[str]:
     return _list_pygrabber_device_names()
 
 
+def _crop_nv12(buffer: np.ndarray, luma_height: int, left: int, top: int, width: int, height: int) -> np.ndarray | None:
+    """Crop a raw NV12 buffer (as returned by cv2 when CAP_PROP_CONVERT_RGB
+    is disabled) to the given region, without decoding pixels outside it.
+
+    NV12 packs two planes into one array: rows [0:luma_height] are the
+    full-resolution Y (luma) plane, and rows [luma_height:luma_height*3//2]
+    are a half-height plane of interleaved U/V (chroma) bytes — 2:1
+    subsampling in both directions. Cropping correctly means slicing both
+    planes with matching coordinates, and since the UV plane only has half
+    the resolution, every input coordinate must land on an even boundary
+    (rounded down here — at most 1px of slop, irrelevant for aim/detection
+    purposes but would misalign chroma sampling if left unaligned).
+    """
+
+    left &= ~1
+    top &= ~1
+    width &= ~1
+    height &= ~1
+    if width <= 0 or height <= 0:
+        return None
+    if left + width > buffer.shape[1] or top + height > luma_height:
+        return None
+    y_plane = buffer[top:top + height, left:left + width]
+    uv_top = luma_height + top // 2
+    uv_plane = buffer[uv_top:uv_top + height // 2, left:left + width]
+    return np.vstack((y_plane, uv_plane))
+
+
 class UVCCapture:
     """OpenCV VideoCapture backend for UVC capture cards/cameras."""
 
@@ -1554,6 +1582,34 @@ class UVCCapture:
                 "If this is a raw format at high resolution, it may exceed USB bandwidth. %s",
                 video_format.upper(), actual_str, capture_method, suggestion,
             )
+
+        # --- Raw NV12 crop-before-convert ---
+        # By default cv2.VideoCapture converts every captured frame to BGR
+        # internally (at the *full* negotiated resolution) before read()
+        # ever returns it — even though only a small detect_range_size
+        # crop of it is actually used downstream. Disabling that lets
+        # read() hand back the raw NV12 buffer instead, so the (relatively
+        # expensive, full-resolution) YUV->BGR colorspace conversion can
+        # happen *after* cropping — over ~320x320 pixels instead of
+        # ~2 million — cutting real per-frame CPU cost on the capture
+        # path. Only attempted when NV12 was actually negotiated
+        # (is_expected_format); gated behind a readback check since some
+        # backends silently ignore CAP_PROP_CONVERT_RGB, which would
+        # otherwise make grab()'s raw-buffer crop math run against an
+        # already-BGR frame and produce garbage.
+        self.is_raw_nv12 = False
+        if video_format == 'nv12' and self.is_expected_format:
+            try:
+                self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+                self.is_raw_nv12 = (self.cap.get(cv2.CAP_PROP_CONVERT_RGB) == 0)
+            except Exception:
+                self.is_raw_nv12 = False
+            if not self.is_raw_nv12:
+                logging.getLogger(__name__).info(
+                    "[UVC] Driver doesn't support disabling auto BGR conversion "
+                    "(CAP_PROP_CONVERT_RGB) — NV12 crop-before-convert optimization "
+                    "unavailable, falling back to full-frame conversion."
+                )
 
         # --- Non-blocking reader thread ---
         # cap.read() blocks up to one frame period (e.g. 16 ms at 60 fps).
@@ -1670,6 +1726,25 @@ class UVCCapture:
         # overlay stays in sync without requiring an extra lock or callback.
         self._region_ref[0] = region
 
+        if self.is_raw_nv12:
+            # Crop the raw NV12 buffer BEFORE converting to BGR, so the
+            # (comparatively expensive) colorspace conversion only ever
+            # runs over the small detection-region crop instead of the
+            # full negotiated resolution — see the CAP_PROP_CONVERT_RGB
+            # setup in __init__ for why this buffer isn't BGR already.
+            if region is None:
+                return cv2.cvtColor(frame_bgr, cv2.COLOR_YUV2BGRA_NV12)
+            left = max(0, int(region.get('left', 0)))
+            top = max(0, int(region.get('top', 0)))
+            width = max(0, int(region.get('width', self.preview_width)))
+            height = max(0, int(region.get('height', self.preview_height)))
+            width = min(width, self.preview_width - left)
+            height = min(height, self.preview_height - top)
+            cropped = _crop_nv12(frame_bgr, self.preview_height, left, top, width, height)
+            if cropped is None:
+                return None
+            return cv2.cvtColor(cropped, cv2.COLOR_YUV2BGRA_NV12)
+
         if region is not None:
             frame_h, frame_w = frame_bgr.shape[:2]
             left = max(0, int(region.get('left', 0)))
@@ -1685,6 +1760,14 @@ class UVCCapture:
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
 
     def _draw_overlay(self, frame_bgr: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
+        if self.is_raw_nv12:
+            # The preview thread reads the same raw NV12 buffer grab() does
+            # (shared via _latest_frame_ref) — it needs a real BGR frame to
+            # draw overlays on, so convert the full frame here. Unlike
+            # grab()'s crop-then-convert path, this always pays the
+            # full-resolution conversion cost, but only while the preview
+            # panel/window is actually enabled (self.show_window).
+            frame_bgr = cv2.cvtColor(frame_bgr, cv2.COLOR_YUV2BGR_NV12)
         return _draw_detection_overlay(frame_bgr, region, self.config, has_alpha=False)
 
     def _render_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
