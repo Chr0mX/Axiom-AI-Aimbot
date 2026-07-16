@@ -70,11 +70,22 @@ class _UvcProbeWorker(QThread):
         from core.screen_capture import (
             list_supported_uvc_resolutions, list_supported_uvc_fps, list_uvc_device_names,
         )
-        resolutions = list_supported_uvc_resolutions(self._device, self._method)
-        # FPS is probed at the caller's configured resolution (matching the
-        # original _refreshUvcFps behavior), not whatever the resolution
-        # enumeration happened to find first.
-        fps_list = list_supported_uvc_fps(self._device, self._width, self._height, self._method)
+        # Belt-and-suspenders: screen_capture.py's probe helpers already
+        # guard their own cv2 calls, but an unhandled exception escaping a
+        # QThread.run() can still take the whole app down (observed on some
+        # driver stacks where cv2.VideoCapture.isOpened() reports True on a
+        # handle that's actually broken). Never let this thread die loudly.
+        try:
+            resolutions = list_supported_uvc_resolutions(self._device, self._method)
+        except Exception:
+            resolutions = []
+        try:
+            # FPS is probed at the caller's configured resolution (matching
+            # the original _refreshUvcFps behavior), not whatever the
+            # resolution enumeration happened to find first.
+            fps_list = list_supported_uvc_fps(self._device, self._width, self._height, self._method)
+        except Exception:
+            fps_list = []
         try:
             device_names = list_uvc_device_names()
         except Exception:

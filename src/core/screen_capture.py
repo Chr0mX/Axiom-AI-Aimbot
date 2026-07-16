@@ -1072,9 +1072,15 @@ def list_supported_uvc_resolutions(
         'any': cv2.CAP_ANY,
     }
     backend = backend_map.get(str(capture_method).lower(), cv2.CAP_DSHOW)
-    cap = cv2.VideoCapture(int(device_index), backend)
-    if not cap.isOpened():
-        cap = cv2.VideoCapture(int(device_index))
+    try:
+        cap = cv2.VideoCapture(int(device_index), backend)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(int(device_index))
+    except Exception:
+        # Some DirectShow driver stacks make cv2.VideoCapture() itself raise
+        # instead of just failing to open (seen falling through to OpenCV's
+        # internal obsensor backend on certain devices/indices).
+        return []
     if not cap.isOpened():
         return []
 
@@ -1084,14 +1090,25 @@ def list_supported_uvc_resolutions(
     supported: set[tuple[int, int]] = set()
     try:
         for width, height in common_resolutions:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            try:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+                actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            except Exception:
+                # cap.isOpened() can lie — some broken/half-open handles
+                # only reveal it when set()/get() raises a raw C++
+                # exception. Skip this candidate rather than letting an
+                # unguarded native exception crash the probe thread (and,
+                # left unhandled, the whole app).
+                continue
             if actual_w > 0 and actual_h > 0 and abs(actual_w - width) <= 8 and abs(actual_h - height) <= 8:
                 supported.add((actual_w, actual_h))
     finally:
-        cap.release()
+        try:
+            cap.release()
+        except Exception:
+            pass
     return sorted(supported, key=lambda item: (item[0] * item[1], item[0]))
 
 
@@ -1104,23 +1121,44 @@ def list_supported_uvc_fps(
     """Probe common FPS values at the given resolution and return supported ones."""
     backend_map = {'dshow': cv2.CAP_DSHOW, 'msmf': cv2.CAP_MSMF, 'any': cv2.CAP_ANY}
     backend = backend_map.get(str(capture_method).lower(), cv2.CAP_DSHOW)
-    cap = cv2.VideoCapture(int(device_index), backend)
-    if not cap.isOpened():
-        cap = cv2.VideoCapture(int(device_index))
+    try:
+        cap = cv2.VideoCapture(int(device_index), backend)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(int(device_index))
+    except Exception:
+        # Some DirectShow driver stacks make cv2.VideoCapture() itself raise
+        # instead of just failing to open (seen falling through to OpenCV's
+        # internal obsensor backend on certain devices/indices).
+        return [30, 60]
     if not cap.isOpened():
         return [30, 60]
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    try:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    except Exception:
+        # cap.isOpened() can lie — some broken/half-open handles only
+        # reveal it when set() raises a raw C++ exception.
+        try:
+            cap.release()
+        except Exception:
+            pass
+        return [30, 60]
     common = [30, 60, 120, 144, 165, 240]
     supported: list[int] = []
     try:
         for fps in common:
-            cap.set(cv2.CAP_PROP_FPS, fps)
-            actual = cap.get(cv2.CAP_PROP_FPS)
+            try:
+                cap.set(cv2.CAP_PROP_FPS, fps)
+                actual = cap.get(cv2.CAP_PROP_FPS)
+            except Exception:
+                continue
             if actual > 0 and abs(actual - fps) <= 2:
                 supported.append(fps)
     finally:
-        cap.release()
+        try:
+            cap.release()
+        except Exception:
+            pass
     return supported or [30, 60]
 
 
