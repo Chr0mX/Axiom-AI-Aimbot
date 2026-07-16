@@ -738,6 +738,26 @@ class CapturePage(BasePage):
         """
         if not self._config:
             return
+        # A probe scheduled via _startUvcProbeDelayed() can still fire after
+        # the user has since switched away from 'uvc' (e.g. to 'udp') — the
+        # QTimer doesn't know the method changed in the meantime. Check the
+        # CURRENT config here (not at schedule time) so a stale timer is a
+        # no-op instead of opening a competing device handle for a backend
+        # that isn't even active anymore.
+        if str(getattr(self._config, 'screenshot_method', '')).lower() != 'uvc':
+            return
+        # Never let two probes race the same device concurrently. This isn't
+        # just about wasted work — cv2.VideoCapture(DSHOW) isn't safe to open
+        # from two threads at once (DirectShow/COM apartment-threading), and
+        # on some driver stacks concurrent opens have caused a native access
+        # violation that crashes the whole process, bypassing every Python
+        # try/except in the probe path. Reassigning self._uvc_probe_worker
+        # here does NOT stop an in-flight worker's run() — so skip starting
+        # a new one outright rather than relying on the generation counter
+        # (which only discards a stale *result*, not a stale *in-flight
+        # open*).
+        if self._uvc_probe_worker is not None and self._uvc_probe_worker.isRunning():
+            return
         self._uvc_probe_generation += 1
         generation = self._uvc_probe_generation
         device = int(getattr(self._config, 'uvc_device_index', 0))
