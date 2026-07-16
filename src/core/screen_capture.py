@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import colorsys
 import logging
+import re
 import threading
 import time
 
@@ -198,7 +199,7 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
 _UVC_WINDOW_NAME = "Axiom UVC Preview"
 
 
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str]:
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str]:
     return (
         int(getattr(config, 'uvc_device_index', 0)),
         int(getattr(config, 'uvc_width', 0)),
@@ -207,6 +208,7 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str]:
         bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
+        str(getattr(config, 'uvc_device_name', '') or ''),
     )
 
 
@@ -1250,6 +1252,75 @@ class _UVCPreviewThread(threading.Thread):
                 pass
 
 
+def _list_dshow_video_devices() -> list[str]:
+    """Enumerate DirectShow video device names via libavdevice (PyAV).
+
+    ``ffmpeg -f dshow -list_devices true -i dummy`` always "fails" (it's a
+    listing request, not a real open) and prints the device names to its log
+    output rather than returning them as data — so device names are captured
+    from the log stream instead of a return value.
+    """
+
+    import av  # local import: only needed for the 'pyav' capture method
+    import av.logging
+
+    names: list[str] = []
+    in_video_section = False
+    try:
+        with av.logging.Capture(local=True) as logs:
+            try:
+                av.open('dummy', format='dshow', options={'list_devices': 'true'})
+            except Exception:
+                pass
+        for _level, _name, message in logs:
+            text = str(message)
+            if 'video devices' in text.lower():
+                in_video_section = True
+                continue
+            if 'audio devices' in text.lower():
+                in_video_section = False
+                continue
+            if not in_video_section:
+                continue
+            if 'Alternative name' in text:
+                continue
+            match = re.search(r'"([^"]+)"', text)
+            if match:
+                names.append(match.group(1))
+    except Exception:
+        return []
+    return names
+
+
+def _resolve_pyav_dshow_device(config: Config, device_index: int) -> str:
+    """Resolve a DirectShow device *name* string for PyAV from config.
+
+    PyAV/libavdevice's dshow input needs ``video=<device name>``, unlike
+    OpenCV's integer device index. ``uvc_device_name`` lets the user pin an
+    exact name; otherwise names are enumerated and indexed the same way the
+    existing ``uvc_device_index`` selects among OpenCV-enumerated devices.
+    """
+
+    override = str(getattr(config, 'uvc_device_name', '') or '').strip()
+    if override:
+        return override
+
+    devices = _list_dshow_video_devices()
+    if not devices:
+        raise RuntimeError(
+            'No DirectShow video devices found via libavdevice enumeration. '
+            'Set "UVC Device Name" explicitly in the Capture page to bypass '
+            'auto-detection.'
+        )
+    if device_index < 0 or device_index >= len(devices):
+        raise RuntimeError(
+            f'uvc_device_index={device_index} out of range for {len(devices)} '
+            f'enumerated DirectShow device(s): {devices}. Set "UVC Device Name" '
+            f'explicitly in the Capture page to bypass auto-detection.'
+        )
+    return devices[device_index]
+
+
 class UVCCapture:
     """OpenCV VideoCapture backend for UVC capture cards/cameras."""
 
@@ -1265,6 +1336,13 @@ class UVCCapture:
         self.config_signature = _uvc_signature(config)
 
         capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
+        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
+        self.is_pyav = (capture_method == 'pyav')
+
+        if self.is_pyav:
+            self._init_pyav(device_index, width, height, fps)
+            return
+
         backend_map = {
             'dshow': cv2.CAP_DSHOW,
             'msmf': cv2.CAP_MSMF,
@@ -1272,7 +1350,6 @@ class UVCCapture:
             'auto': cv2.CAP_ANY,
         }
         backend = backend_map.get(capture_method, cv2.CAP_DSHOW)
-        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
 
         self.cap = cv2.VideoCapture(device_index, backend)
         if not self.cap.isOpened():
@@ -1389,6 +1466,121 @@ class UVCCapture:
             )
             self._preview_thread.start()
 
+    def _init_pyav(self, device_index: int, width: int, height: int, fps: int) -> None:
+        """Open a DirectShow UVC device via PyAV/libavdevice instead of OpenCV.
+
+        Bypasses cv2's DirectShow/Media Foundation negotiation layer, which is
+        known to silently fail MJPEG negotiation on some UVC capture cards
+        even when the same device negotiates MJPEG fine for other DirectShow
+        consumers (e.g. OBS). PyAV talks to ffmpeg's dshow input directly.
+        """
+
+        import av  # local import: only needed for the 'pyav' capture method
+
+        self.cap = None
+        device_name = _resolve_pyav_dshow_device(self.config, device_index)
+        options = {'vcodec': 'mjpeg'}
+        if width > 0 and height > 0:
+            options['video_size'] = f'{width}x{height}'
+        if fps > 0:
+            options['framerate'] = str(fps)
+
+        try:
+            container = av.open(f'video={device_name}', format='dshow', options=options)
+        except Exception as exc:
+            raise RuntimeError(
+                f'PyAV UVC device open failed for "{device_name}": {exc}'
+            ) from exc
+
+        stream = container.streams.video[0] if container.streams.video else None
+        if stream is None:
+            container.close()
+            raise RuntimeError(f'PyAV opened "{device_name}" but it has no video stream.')
+        stream.thread_type = 'AUTO'
+
+        self._av_container = container
+        self._av_stream = stream
+        self.preview_width = max(1, int(stream.width or width or 1))
+        self.preview_height = max(1, int(stream.height or height or 1))
+        negotiated_fps = float(stream.average_rate) if stream.average_rate else float(fps or 30)
+        self.preview_fps = max(1, int(round(negotiated_fps)))
+        self.config.source_nominal_fps = float(self.preview_fps)
+        self.config.uvc_actual_width = self.preview_width
+        self.config.uvc_actual_height = self.preview_height
+        self.config.uvc_actual_fps = float(self.preview_fps)
+        self.is_mjpeg = True  # dshow was asked for 'vcodec': 'mjpeg'; not independently re-verified here
+
+        logging.getLogger(__name__).info(
+            "[UVC][PyAV] Opened '%s' via libavdevice dshow at %dx%d @ %.1f fps.",
+            device_name, self.preview_width, self.preview_height, negotiated_fps,
+        )
+
+        self._latest_frame_lock = threading.Lock()
+        self._latest_frame_ref: list = [None]
+        self._region_ref: list = [None]
+        self._reader_stop = threading.Event()
+        self._reader_thread = threading.Thread(
+            target=self._reader_worker_pyav, name='UVCReaderPyAV', daemon=True
+        )
+        self._reader_thread.start()
+
+        self._preview_thread: _UVCPreviewThread | None = None
+        if self.show_window:
+            self._preview_thread = _UVCPreviewThread(
+                window_name=self.window_name,
+                scale_mode=self.preview_scale_mode,
+                frame_lock=self._latest_frame_lock,
+                frame_ref=self._latest_frame_ref,
+                stop_event=self._reader_stop,
+                draw_overlay_fn=self._draw_overlay,
+                region_ref=self._region_ref,
+                target_fps=self.preview_fps,
+                preview_width=self.preview_width,
+                preview_height=self.preview_height,
+                config=self.config,
+                show_cv2_window=False,
+            )
+            self._preview_thread.start()
+
+    def _reader_worker_pyav(self) -> None:
+        _fps_count = 0
+        _fps_t0 = time.perf_counter()
+        _measurement_windows = 0
+        try:
+            for frame in self._av_container.decode(self._av_stream):
+                if self._reader_stop.is_set():
+                    break
+                try:
+                    frame_bgr = frame.to_ndarray(format='bgr24')
+                except Exception:
+                    continue
+                with self._latest_frame_lock:
+                    self._latest_frame_ref[0] = frame_bgr
+
+                _fps_count += 1
+                _now = time.perf_counter()
+                _elapsed = _now - _fps_t0
+                if _elapsed >= 1.0:
+                    self.config.source_nominal_fps = _fps_count / _elapsed
+                    _fps_count = 0
+                    _fps_t0 = _now
+
+                    _measurement_windows += 1
+                    if _measurement_windows == 2 and self._target_fps > 0:
+                        shortfall_ratio = self.config.source_nominal_fps / self._target_fps
+                        if shortfall_ratio < 0.8:
+                            logging.getLogger(__name__).warning(
+                                "[UVC][PyAV] Measured capture rate %.1f fps is well below the "
+                                "configured %d fps. Try a lower resolution/fps or a different "
+                                "USB port/cable.",
+                                self.config.source_nominal_fps, self._target_fps,
+                            )
+        except Exception as exc:
+            if not self._reader_stop.is_set():
+                logging.getLogger(__name__).error(
+                    "[UVC][PyAV] Reader loop terminated unexpectedly: %s", exc,
+                )
+
     def _reader_worker(self) -> None:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
@@ -1476,7 +1668,14 @@ class UVCCapture:
             self._preview_thread.join(timeout=1.0)
         if self._reader_thread.is_alive():
             self._reader_thread.join(timeout=1.0)
-        if self.cap is not None:
+        if getattr(self, 'is_pyav', False):
+            container = getattr(self, '_av_container', None)
+            if container is not None:
+                try:
+                    container.close()
+                except Exception:
+                    pass
+        elif self.cap is not None:
             try:
                 self.cap.release()
             except Exception:

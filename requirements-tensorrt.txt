@@ -53,6 +53,7 @@ numpy
 opencv-python
 mss
 dxcam; platform_system == "Windows"
+av; platform_system == "Windows"
 
 # ── UI ───────────────────────────────────────────────────────────────────────
 PyQt6
