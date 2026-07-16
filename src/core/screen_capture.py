@@ -1097,6 +1097,101 @@ class NDICapture:
             pt.join(timeout=1.0)
 
 
+def _list_pygrabber_device_names() -> list[str]:
+    """Enumerate UVC device names via DirectShow's native COM device
+    enumeration (ICreateDevEnum/IEnumMoniker) through pygrabber — the same
+    API OBS and browsers use to list capture devices, instead of scraping
+    ffmpeg's log output (which depends on PyAV importing cleanly; PyAV can
+    fail to import in ways unrelated to whether a real UVC device is even
+    reachable, e.g. a Cython/typelib packaging conflict with another
+    vendored dependency). Uses SystemDeviceEnum directly rather than the
+    full FilterGraph class, since name enumeration doesn't need a filter
+    graph, capture-graph builder, or Windows Media profile manager — less
+    COM object construction, less that can fail for this simpler query.
+    """
+    try:
+        import comtypes
+        from pygrabber.dshow_graph import SystemDeviceEnum
+        from pygrabber.dshow_ids import DeviceCategories
+    except Exception as exc:
+        _warn_once('pygrabber_import_failed', f'[UVC] pygrabber/comtypes import failed: {exc}')
+        return []
+
+    initialized_here = False
+    try:
+        try:
+            comtypes.CoInitialize()
+            initialized_here = True
+        except Exception:
+            pass  # COM already initialized on this thread — fine
+        try:
+            return list(SystemDeviceEnum().get_available_filters(DeviceCategories.VideoInputDevice))
+        except Exception as exc:
+            _warn_once('pygrabber_enum_failed', f'[UVC] pygrabber device enumeration failed: {exc}')
+            return []
+    finally:
+        if initialized_here:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
+
+
+def _list_pygrabber_device_formats(device_index: int) -> list[dict]:
+    """Query a device's real supported (resolution, fps range) capabilities
+    via DirectShow's IAMStreamConfig::GetStreamCaps through pygrabber — the
+    same native capability query OBS uses to populate its own resolution/FPS
+    lists, keyed by the same device index cv2's CAP_DSHOW backend uses (both
+    ultimately enumerate the same ICreateDevEnum video-input-device category
+    in the same order).
+    """
+    try:
+        import comtypes
+        from pygrabber.dshow_graph import FilterGraph
+    except Exception as exc:
+        _warn_once('pygrabber_import_failed', f'[UVC] pygrabber/comtypes import failed: {exc}')
+        return []
+
+    initialized_here = False
+    graph = None
+    try:
+        try:
+            comtypes.CoInitialize()
+            initialized_here = True
+        except Exception:
+            pass
+        try:
+            graph = FilterGraph()
+            graph.add_video_input_device(device_index)
+            raw_formats = graph.get_input_device().get_formats()
+        except Exception as exc:
+            _warn_once('pygrabber_formats_failed', f'[UVC] pygrabber format query failed: {exc}')
+            return []
+        results: list[dict] = []
+        for fmt in raw_formats:
+            try:
+                results.append({
+                    'width': int(fmt['width']),
+                    'height': int(fmt['height']),
+                    'min_fps': float(fmt['min_framerate']),
+                    'max_fps': float(fmt['max_framerate']),
+                })
+            except Exception:
+                continue
+        return results
+    finally:
+        if graph is not None:
+            try:
+                graph.remove_filters()
+            except Exception:
+                pass
+        if initialized_here:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
+
+
 def _resolve_device_name_for_query(device_index: int) -> str:
     """Best-effort DirectShow device name lookup for the libavdevice-based
     capability query below. Returns '' if PyAV/enumeration is unavailable —
@@ -1168,12 +1263,18 @@ def list_supported_uvc_resolutions(
 ) -> list[tuple[int, int]]:
     """Return the device's actual supported resolutions.
 
-    Queries the driver directly via libavdevice's dshow ``list_options``
-    (real DirectShow capability data), falling back to a guess-and-check
-    cv2 probe against a small candidate set only when that query is
-    unavailable (e.g. PyAV not installed, or the device can't be resolved
-    to a DirectShow name).
+    Queries the driver directly via DirectShow's native IAMStreamConfig
+    capability list through pygrabber (the same COM API OBS/browsers use),
+    falling back to libavdevice's dshow ``list_options`` (PyAV) and then a
+    guess-and-check cv2 probe against a small candidate set, in that order,
+    only when the previous method is unavailable.
     """
+    formats = _list_pygrabber_device_formats(device_index)
+    if formats:
+        sizes = {(f['width'], f['height']) for f in formats}
+        if sizes:
+            return sorted(sizes, key=lambda item: (item[0] * item[1], item[0]))
+
     device_name = _resolve_device_name_for_query(device_index)
     if device_name:
         try:
@@ -1238,11 +1339,22 @@ def list_supported_uvc_fps(
 ) -> list[int]:
     """Return the device's actual supported FPS values at a given resolution.
 
-    Queries the driver directly via libavdevice's dshow ``list_options``
-    (real DirectShow capability data), falling back to a guess-and-check
-    cv2 probe against a small candidate set only when that query is
-    unavailable.
+    Queries the driver directly via DirectShow's native IAMStreamConfig
+    capability list through pygrabber (the same COM API OBS/browsers use),
+    falling back to libavdevice's dshow ``list_options`` (PyAV) and then a
+    guess-and-check cv2 probe against a small candidate set, in that order,
+    only when the previous method is unavailable.
     """
+    formats = _list_pygrabber_device_formats(device_index)
+    if formats:
+        matching = [f for f in formats if f['width'] == width and f['height'] == height] or formats
+        fps_values: set[int] = set()
+        for f in matching:
+            fps_values.add(int(round(f['min_fps'])))
+            fps_values.add(int(round(f['max_fps'])))
+        if fps_values:
+            return sorted(fps_values)
+
     device_name = _resolve_device_name_for_query(device_index)
     if device_name:
         try:
@@ -1515,8 +1627,18 @@ def list_uvc_device_names() -> list[str]:
     the cv2 dshow/msmf/any capture methods, since DirectShow's own
     enumeration order is the closest available approximation of how those
     backends number devices (OpenCV doesn't expose device names itself).
+
+    Tries pygrabber's native COM enumeration first (the same
+    ICreateDevEnum/IEnumMoniker API OBS and browsers use), falling back to
+    PyAV/libavdevice's log-scraping approach only if pygrabber is
+    unavailable or finds nothing — pygrabber doesn't depend on PyAV
+    importing cleanly, which has proven to be a source of unrelated
+    packaging fragility on some machines.
     """
 
+    names = _list_pygrabber_device_names()
+    if names:
+        return names
     return _list_dshow_video_devices()
 
 
@@ -1533,12 +1655,12 @@ def _resolve_pyav_dshow_device(config: Config, device_index: int) -> str:
     if override:
         return override
 
-    devices = _list_dshow_video_devices()
+    devices = list_uvc_device_names()
     if not devices:
         raise RuntimeError(
-            'No DirectShow video devices found via libavdevice enumeration. '
-            'Set "UVC Device Name" explicitly in the Capture page to bypass '
-            'auto-detection.'
+            'No DirectShow video devices found via pygrabber/libavdevice '
+            'enumeration. Set "UVC Device Name" explicitly in the Capture '
+            'page to bypass auto-detection.'
         )
     if device_index < 0 or device_index >= len(devices):
         raise RuntimeError(

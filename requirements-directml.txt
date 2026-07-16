@@ -5,6 +5,7 @@ onnxruntime-directml
 mss
 dxcam; platform_system == "Windows"
 av; platform_system == "Windows"
+pygrabber; platform_system == "Windows"
 
 # UI
 PyQt6
