@@ -823,14 +823,40 @@ class CapturePage(BasePage):
                 self.uvcResolutionCombo.addItem(preset)
             if self.uvcResolutionCombo.findText(fallback) < 0:
                 self.uvcResolutionCombo.addItem(fallback)
+        # Whatever the probe/fallback found, it's still a guess (driver
+        # capability enumeration can be unreliable — e.g. virtual cameras
+        # like "OBS Virtual Camera" accept any requested cv2.set() value
+        # without validating it, so the cv2 fallback path can report
+        # candidates that were never real). The live backend's own already-
+        # negotiated resolution (uvc_actual_width/height, published by
+        # UVCCapture.__init__ from its actual open handle) is ground truth —
+        # always make sure it's a selectable option, even if the probe
+        # missed it entirely.
+        actual_w = int(getattr(self._config, 'uvc_actual_width', 0) or 0)
+        actual_h = int(getattr(self._config, 'uvc_actual_height', 0) or 0)
+        if actual_w > 0 and actual_h > 0:
+            actual_text = f"{actual_w}x{actual_h}"
+            if self.uvcResolutionCombo.findText(actual_text) < 0:
+                self.uvcResolutionCombo.addItem(actual_text)
+            if not current_text:
+                current_text = actual_text
         if current_text:
             idx = self.uvcResolutionCombo.findText(current_text)
             if idx >= 0:
                 self.uvcResolutionCombo.setCurrentIndex(idx)
         self.uvcResolutionCombo.blockSignals(False)
 
-        fps_list = fps_list or [30, 60, 120, 144, 165, 240]
+        fps_list = list(fps_list) if fps_list else [30, 60, 120, 144, 165, 240]
+        # Same reasoning as the resolution list above — always include the
+        # live backend's actually-negotiated FPS (uvc_actual_fps) so the
+        # combo can't miss the one value we already know for certain works.
+        actual_fps = int(round(float(getattr(self._config, 'uvc_actual_fps', 0) or 0)))
+        if actual_fps > 0 and actual_fps not in fps_list:
+            fps_list.append(actual_fps)
+            fps_list.sort()
         current_fps = self.uvcFpsCombo.currentText()
+        if not current_fps and actual_fps > 0:
+            current_fps = str(actual_fps)
         self.uvcFpsCombo.blockSignals(True)
         self.uvcFpsCombo.clear()
         for fps in fps_list:
