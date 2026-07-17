@@ -54,3 +54,9 @@ Model/*.engine
 crash_reports/
 *.dmp
 *.json
+src/python/Lib/site-packages/comtypes/gen/_00020430_0000_0000_C000_000000000046_0_2_0.py
+src/python/Lib/site-packages/comtypes/gen/_56A868B0_0AD4_11CE_B03A_0020AF0BA770_0_1_0.py
+src/python/Lib/site-packages/comtypes/gen/_78530B68_61F9_11D2_8CAD_00A024580902_0_1_0.py
+src/python/Lib/site-packages/comtypes/gen/DexterLib.py
+src/python/Lib/site-packages/comtypes/gen/QuartzTypeLib.py
+src/python/Lib/site-packages/comtypes/gen/stdole.py
