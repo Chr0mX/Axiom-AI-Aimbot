@@ -823,7 +823,7 @@ def _validate_screenshot_method(config: Config) -> None:
         config.screenshot_method = 'mss'
     if getattr(config, 'uvc_capture_method', 'dshow') not in ('auto', 'dshow', 'msmf', 'any'):
         config.uvc_capture_method = 'dshow'
-    if getattr(config, 'uvc_video_format', 'mjpeg') not in ('mjpeg', 'yuy2', 'nv12'):
+    if getattr(config, 'uvc_video_format', 'mjpeg') not in ('mjpeg', 'yuy2', 'nv12', 'yuv420p'):
         config.uvc_video_format = 'mjpeg'
     if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (
         'scale_to_fit', 'scale_to_canvas', 'fit_to_screen'

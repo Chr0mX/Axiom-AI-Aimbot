@@ -1506,6 +1506,7 @@ class UVCCapture:
             'mjpeg': cv2.VideoWriter_fourcc(*'MJPG'),
             'yuy2': cv2.VideoWriter_fourcc(*'YUY2'),
             'nv12': cv2.VideoWriter_fourcc(*'NV12'),
+            'yuv420p': cv2.VideoWriter_fourcc(*'I420'),  # planar 4:2:0, matches ffmpeg's "yuv420p" naming
         }
         target_fourcc = fourcc_map.get(video_format, fourcc_map['mjpeg'])
 

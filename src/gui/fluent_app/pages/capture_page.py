@@ -227,13 +227,14 @@ class CapturePage(BasePage):
         self.uvcFpsCard.hBoxLayout.addSpacing(16)
 
         self.uvcVideoFormatCombo = ComboBox()
-        self.uvcVideoFormatCombo.addItems(["MJPEG", "YUY2", "NV12"])
+        self.uvcVideoFormatCombo.addItems(["MJPEG", "YUY2", "NV12", "YUV420P"])
         self.uvcVideoFormatCombo.setMinimumWidth(120)
         self.uvcVideoFormatCard = SettingCard(
             FluentIcon.VIDEO,
             "Video Format",
-            "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12 are raw "
-            "and need much more USB bandwidth at the same resolution/FPS.",
+            "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12/YUV420P "
+            "are raw and need much more USB bandwidth at the same "
+            "resolution/FPS.",
             self.uvcGroup
         )
         self.uvcVideoFormatCard.hBoxLayout.addWidget(self.uvcVideoFormatCombo, 0, Qt.AlignmentFlag.AlignRight)
@@ -1234,8 +1235,9 @@ class CapturePage(BasePage):
         self.uvcFpsCard.titleLabel.setText("FPS")  # type: ignore[attr-defined]
         self.uvcVideoFormatCard.titleLabel.setText("Video Format")
         self.uvcVideoFormatCard.contentLabel.setText(
-            "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12 are raw "
-            "and need much more USB bandwidth at the same resolution/FPS."
+            "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12/YUV420P "
+            "are raw and need much more USB bandwidth at the same "
+            "resolution/FPS."
         )
         self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
         self.uvcHwInfoCard.contentLabel.setText("Actual values reported by the driver")
