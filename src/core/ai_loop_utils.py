@@ -3,8 +3,6 @@ from __future__ import annotations
 import queue
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
-import win32api
-
 if TYPE_CHECKING:
     from .config import Config
 
@@ -24,7 +22,24 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
         cap_h = int(getattr(config, 'ndi_height', 0) or 0)
         if cap_w > 0 and cap_h > 0:
             return cap_w, cap_h
-    return int(config.width), int(config.height)
+    elif screenshot_method == 'udp':
+        # Unlike uvc_width/ndi_width (user-configured), udp_width/udp_height
+        # track the actual live stream resolution — the sender (e.g. an OBS
+        # udp_stream_filter crop) can change it at any time. Falling back to
+        # the full desktop resolution here (as if unconditionally reached)
+        # would size the detection region against a canvas the stream no
+        # longer matches, e.g. a stream cropped to 640x640: the region would
+        # land outside the actual frame, UdpCapture.grab() would return None
+        # every frame, and inference FPS would drop to 0.
+        cap_w = int(getattr(config, 'udp_width', 0) or 0)
+        cap_h = int(getattr(config, 'udp_height', 0) or 0)
+        if cap_w > 0 and cap_h > 0:
+            return cap_w, cap_h
+    # getattr (not direct attribute access) so this stays safe against
+    # partial/stub config objects — e.g. esp_server.py's test suite
+    # deliberately calls this against a bare `class Empty: pass` to prove
+    # the snapshot builder never crashes on a missing/incomplete config.
+    return int(getattr(config, 'width', 1920)), int(getattr(config, 'height', 1080))
 
 
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:
@@ -32,6 +47,7 @@ def update_crosshair_position(config: Config, half_width: int, half_height: int)
 
     if config.fov_follow_mouse:
         try:
+            import win32api
             x, y = win32api.GetCursorPos()
             config.crosshairX, config.crosshairY = x, y
         except (OSError, RuntimeError):
@@ -171,6 +187,44 @@ def find_closest_target(
 
     if best_box:
         return [best_box], [best_conf]
+    return [], []
+
+
+def reduce_boxes_for_single_target(
+    boxes: List[List[float]],
+    confidences: List[float],
+    locked_box: List[float] | None,
+    locked_confidence: float,
+    aimed_this_frame: bool,
+    crosshair_x: int,
+    crosshair_y: int,
+    priority_mode: str = "distance",
+    confidence_weight: float = 0.5,
+) -> Tuple[List[List[float]], List[float]]:
+    """single_target_mode's box-list reduction — the list auto-fire/preview/ESP
+    (config.latest_boxes) see when only one target should be shown/acted on.
+
+    Extracted from ai_loop.py so this exact selection logic — the fix for
+    sticky lock being silently defeated by single_target_mode — has a home
+    that's independently testable outside the threaded capture/inference loop.
+
+    aimed_this_frame must reflect whether process_aiming() actually ran and
+    updated locked_box/locked_confidence THIS frame (i.e. `is_aiming and
+    boxes` was true) — not just whether boxes is non-empty. A stale
+    locked_box held over from an earlier aiming frame (e.g. sticky lock still
+    decaying a hold during an idle-detect frame where aiming didn't run) must
+    never be reused with no fresh IOU check against the current boxes list;
+    doing so previously let auto-fire/ESP/preview show a position with no
+    current detection backing it. When aimed_this_frame is False, this always
+    falls back to a fresh priority pick (find_closest_target) instead.
+    """
+    if aimed_this_frame and locked_box is not None:
+        return [list(locked_box)], [locked_confidence]
+    if boxes:
+        return find_closest_target(
+            boxes, confidences, crosshair_x, crosshair_y,
+            priority_mode=priority_mode, confidence_weight=confidence_weight,
+        )
     return [], []
 
 

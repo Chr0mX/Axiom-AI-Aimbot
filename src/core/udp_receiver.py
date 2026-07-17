@@ -167,9 +167,16 @@ class UdpJpegReceiver:
             entry["chunks"][chunk_index] = payload
 
             if len(entry["chunks"]) == entry["total_chunks"]:
-                jpeg_bytes = b"".join(
-                    entry["chunks"][i] for i in range(entry["total_chunks"])
-                )
+                try:
+                    jpeg_bytes = b"".join(
+                        entry["chunks"][i] for i in range(entry["total_chunks"])
+                    )
+                except KeyError:
+                    # Duplicate/out-of-range chunk indices satisfied the count
+                    # while leaving a hole in the sequence (corrupt/malformed
+                    # packet) — drop this frame instead of crashing the thread.
+                    del self._partial_frames[frame_id]
+                    continue
                 with self._lock:
                     self._latest_frame = jpeg_bytes
                     self._latest_frame_id = frame_id

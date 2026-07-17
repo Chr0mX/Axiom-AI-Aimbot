@@ -135,9 +135,9 @@ class InferencePage(BasePage):
         )
 
         self.secondInferSegment = SegmentedWidget()
-        self.secondInferSegment.addItem("off",     "Off")
-        self.secondInferSegment.addItem("v1_ocr",  "V1 OCR")
-        self.secondInferSegment.addItem("v2_onnx", "V2 ONNX")
+        self.secondInferSegment.addItem("off",     t("weapon_detect_off", "Off"))
+        self.secondInferSegment.addItem("v1_ocr",  t("weapon_detect_v1_ocr", "V1 OCR"))
+        self.secondInferSegment.addItem("v2_onnx", t("weapon_detect_v2_onnx", "V2 ONNX"))
         self.secondInferCard = SettingCard(
             FluentIcon.DOCUMENT,
             t("weapon_detection_method", "Weapon Detection Method"),
@@ -159,13 +159,6 @@ class InferencePage(BasePage):
 
         # === Inference Performance ===
         self.inferPerfGroup = SettingCardGroup(t("inference_performance", "Inference Performance"), self.scrollWidget)
-
-        self.skipLetterboxCard = SwitchSettingCard(
-            FluentIcon.SPEED_HIGH,
-            t("skip_letterbox_label"),
-            t("skip_letterbox_desc"),
-            parent=self.inferPerfGroup
-        )
 
         self.cudaIoBindingCard = SwitchSettingCard(
             FluentIcon.COPY,
@@ -203,21 +196,21 @@ class InferencePage(BasePage):
 
         self.boxEmaAlphaXCard = SliderDoubleSpinCard(
             FluentIcon.MOVE,
-            "X Smoothing",
+            t("box_smoothing_x", "X Smoothing"),
             0.05, 1.0,
             decimals=2,
             step=0.05,
-            description="1.0 = no smoothing  ·  0.5 = balanced",
+            description=t("box_smoothing_alpha_desc", "1.0 = no smoothing  ·  0.5 = balanced"),
             parent=self.boxSmoothGroup
         )
 
         self.boxEmaAlphaYCard = SliderDoubleSpinCard(
             FluentIcon.ALIGNMENT,
-            "Y Smoothing",
+            t("box_smoothing_y", "Y Smoothing"),
             0.05, 1.0,
             decimals=2,
             step=0.05,
-            description="1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)",
+            description=t("box_smoothing_alpha_y_desc", "1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)"),
             parent=self.boxSmoothGroup
         )
 
@@ -243,7 +236,6 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.hudConfidenceCard)
         self.addContent(self.generalGroup)
 
-        self.inferPerfGroup.addSettingCard(self.skipLetterboxCard)
         self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
         self.inferPerfGroup.addSettingCard(self.frameSkipCard)
         self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
@@ -274,7 +266,6 @@ class InferencePage(BasePage):
         self.idleDetectIntervalCard.valueChanged.connect(self._onIdleDetectIntervalChanged)
         self.singleTargetCard.checkedChanged.connect(self._onSingleTargetChanged)
 
-        self.skipLetterboxCard.checkedChanged.connect(self._onSkipLetterboxChanged)
         self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
         self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
         self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
@@ -312,7 +303,6 @@ class InferencePage(BasePage):
             self.idleDetectIntervalCard.setValue(max(5, min(500, idle_ms)))
             self.singleTargetCard.setChecked(getattr(self._config, 'single_target_mode', False))
 
-            self.skipLetterboxCard.setChecked(bool(getattr(self._config, 'skip_letterbox', False)))
             self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
             self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
             self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
@@ -332,7 +322,6 @@ class InferencePage(BasePage):
         finally:
             self._isLoadingConfig = False
 
-        self._updateFovCircleVisibility()
         self._updateProviderDependentWidgets()
 
     # ──────────────────────────────────────────────
@@ -346,14 +335,6 @@ class InferencePage(BasePage):
         if is_external and self._config:
             self._config.fov_follow_mouse = False
             self.fovFollowCard.setChecked(False)
-
-    def _updateFovCircleVisibility(self):
-        """Hide Skip Letterbox Padding when Circular FOV is active (they conflict)."""
-        circle_on = bool(self.fovCircleCard.isChecked())
-        self.skipLetterboxCard.setVisible(not circle_on)
-        if circle_on and self._config:
-            self._config.skip_letterbox = False
-            self.skipLetterboxCard.setChecked(False)
 
     def _updateProviderDependentWidgets(self):
         """Show/hide and auto-configure CUDA IO Binding based on the active ORT provider."""
@@ -393,7 +374,6 @@ class InferencePage(BasePage):
     def _onFovCircleChanged(self, checked):
         if self._config:
             self._config.fov_circle_filter_enabled = bool(checked)
-        self._updateFovCircleVisibility()
 
     def _onDetectRangeChanged(self, value):
         if self._config:
@@ -427,10 +407,6 @@ class InferencePage(BasePage):
     def _onSingleTargetChanged(self, checked):
         if self._config:
             self._config.single_target_mode = checked
-
-    def _onSkipLetterboxChanged(self, checked):
-        if self._config:
-            self._config.skip_letterbox = bool(checked)
 
     def _onCudaIoBindingChanged(self, checked):
         if self._config:
@@ -498,11 +474,12 @@ class InferencePage(BasePage):
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
         self.secondInferCard.titleLabel.setText(t("weapon_detection_method", "Weapon Detection Method"))
         self.secondInferCard.contentLabel.setText(t("weapon_detection_method_desc", "Off / OCR (PaddleOCR) / ONNX (HUD weapon detector)"))
+        self.secondInferSegment.setItemText("off", t("weapon_detect_off", "Off"))
+        self.secondInferSegment.setItemText("v1_ocr", t("weapon_detect_v1_ocr", "V1 OCR"))
+        self.secondInferSegment.setItemText("v2_onnx", t("weapon_detect_v2_onnx", "V2 ONNX"))
         self.hudConfidenceCard.titleLabel.setText(t("weapon_detection_threshold", "Weapon Detection Threshold"))
         self.hudConfidenceCard.contentLabel.setText(t("weapon_detection_threshold_desc", "Minimum confidence for ONNX weapon detections"))
 
-        self.skipLetterboxCard.titleLabel.setText(t("skip_letterbox_label"))
-        self.skipLetterboxCard.contentLabel.setText(t("skip_letterbox_desc"))
         self.cudaIoBindingCard.titleLabel.setText(t("cuda_io_binding", "CUDA IO Binding"))
         self.cudaIoBindingCard.contentLabel.setText(t("cuda_io_binding_desc", "Zero-copy GPU inference. Effective only with CUDA or TensorRT backend."))
         self.frameSkipCard.titleLabel.setText(t("frame_skip_enabled", "Frame Skip Gate"))
@@ -513,5 +490,7 @@ class InferencePage(BasePage):
         self.boxSmoothGroup.titleLabel.setText(t("box_smoothing", "Box Smoothing"))
         self.boxEmaEnableCard.titleLabel.setText(t("box_smoothing", "Box Smoothing"))
         self.boxEmaEnableCard.contentLabel.setText(t("box_smoothing_desc", "Apply EMA smoothing to raw detection boxes to suppress size jitter and reduce bounding box wobble"))
-        self.boxEmaAlphaXCard.titleLabel.setText("X Smoothing")
-        self.boxEmaAlphaYCard.titleLabel.setText("Y Smoothing")
+        self.boxEmaAlphaXCard.titleLabel.setText(t("box_smoothing_x", "X Smoothing"))
+        self.boxEmaAlphaXCard.contentLabel.setText(t("box_smoothing_alpha_desc", "1.0 = no smoothing  ·  0.5 = balanced"))
+        self.boxEmaAlphaYCard.titleLabel.setText(t("box_smoothing_y", "Y Smoothing"))
+        self.boxEmaAlphaYCard.contentLabel.setText(t("box_smoothing_alpha_y_desc", "1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)"))

@@ -6,7 +6,7 @@ import socket
 import sys
 import subprocess
 import time
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout
 from qfluentwidgets import (
@@ -45,6 +45,54 @@ def _get_local_ips() -> list[str]:
     return ips
 
 
+class _UvcProbeWorker(QThread):
+    """Enumerates supported UVC resolutions/FPS off the Qt main thread.
+
+    list_supported_uvc_resolutions()/list_supported_uvc_fps() (screen_capture.py)
+    open a cv2.VideoCapture and cycle many set()/get() calls — each a real
+    driver round-trip. Running that synchronously on the GUI thread (the old
+    behavior) freezes the UI for the duration. A combined worker (not two
+    separate ones) also avoids two near-simultaneous competing opens against
+    the same device index.
+    """
+
+    resultReady = pyqtSignal(int, list, list, list)  # (generation, resolutions, fps_list, device_names)
+
+    def __init__(self, generation, device, method, width, height, parent=None):
+        super().__init__(parent)
+        self._generation = generation
+        self._device = device
+        self._method = method
+        self._width = width
+        self._height = height
+
+    def run(self):
+        from core.screen_capture import (
+            list_supported_uvc_resolutions, list_supported_uvc_fps, list_uvc_device_names,
+        )
+        # Belt-and-suspenders: screen_capture.py's probe helpers already
+        # guard their own cv2 calls, but an unhandled exception escaping a
+        # QThread.run() can still take the whole app down (observed on some
+        # driver stacks where cv2.VideoCapture.isOpened() reports True on a
+        # handle that's actually broken). Never let this thread die loudly.
+        try:
+            resolutions = list_supported_uvc_resolutions(self._device, self._method)
+        except Exception:
+            resolutions = []
+        try:
+            # FPS is probed at the caller's configured resolution (matching
+            # the original _refreshUvcFps behavior), not whatever the
+            # resolution enumeration happened to find first.
+            fps_list = list_supported_uvc_fps(self._device, self._width, self._height, self._method)
+        except Exception:
+            fps_list = []
+        try:
+            device_names = list_uvc_device_names()
+        except Exception:
+            device_names = []
+        self.resultReady.emit(self._generation, resolutions, fps_list, device_names)
+
+
 class CapturePage(BasePage):
     """Capture Settings Page — Screenshot Method, UVC, NDI, Preview"""
 
@@ -52,8 +100,9 @@ class CapturePage(BasePage):
         super().__init__("tab_capture", parent)
         self._config = None
         self._isLoadingConfig = False
-        self._last_probe_time: float = 0.0
         self._scan_started: float = 0.0
+        self._uvc_probe_generation = 0
+        self._uvc_probe_worker = None
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -64,12 +113,14 @@ class CapturePage(BasePage):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if (self._config
-                and str(getattr(self._config, 'screenshot_method', '')).lower() == 'uvc'
-                and (time.time() - self._last_probe_time) > 8):
-            self._refreshUvcResolutions()
-            self._refreshUvcFps()
-            self._last_probe_time = time.time()
+        if self._config and str(getattr(self._config, 'screenshot_method', '')).lower() == 'uvc':
+            # Cheap config read after the uvc_actual_* fix below — no device
+            # I/O, so no throttle needed. Resolution/FPS support lists don't
+            # change for a stable device+driver, so unlike the hw-info
+            # readout, those aren't worth re-enumerating just from switching
+            # back to this tab; _loadFromConfig() and the explicit change
+            # handlers already cover the cases where they'd actually differ.
+            self._queryUvcHwInfo()
 
     # ──────────────────────────────────────────────
     # Widget initialisation
@@ -102,38 +153,46 @@ class CapturePage(BasePage):
 
 
         # === UVC Camera ===
+        # Field order mirrors OBS's V4L2/DirectShow source properties panel:
+        # capture method, device, resolution, FPS, video format, then a
+        # read-only "active values" readout with its own refresh controls.
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
 
-        self.uvcDeviceCard = SliderSpinCard(
+        self.uvcCaptureMethodCombo = ComboBox()
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto"])
+        self.uvcCaptureMethodCombo.setMinimumWidth(140)
+        self.uvcCaptureMethodCard = SettingCard(
             FluentIcon.CAMERA,
-            "UVC Device Index",
-            0, 16,
-            suffix="",
-            description="",
-            parent=self.uvcGroup
+            "UVC Capture Method",
+            "msmf recommended for 1080p60 on Windows 10/11. If MJPEG "
+            "negotiation fails despite the device working fine in other "
+            "DirectShow apps (e.g. OBS), try 'dshow' instead.",
+            self.uvcGroup
         )
+        self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcCaptureMethodCard.hBoxLayout.addSpacing(16)
+
+        self.uvcDeviceCombo = ComboBox()
+        self.uvcDeviceCombo.setMinimumWidth(260)
+        self.uvcDeviceCard = SettingCard(
+            FluentIcon.CAMERA,
+            "Device",
+            "Select the UVC capture device",
+            self.uvcGroup
+        )
+        self.uvcDeviceCard.hBoxLayout.addWidget(self.uvcDeviceCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcDeviceCard.hBoxLayout.addSpacing(16)
 
         self.uvcResolutionCombo = ComboBox()
         self.uvcResolutionCombo.setMinimumWidth(180)
         self.uvcResolutionCard = SettingCard(
             FluentIcon.FULL_SCREEN,
-            "UVC Resolution",
+            "Resolution",
             "Auto-detect supported resolutions",
             self.uvcGroup
         )
         self.uvcResolutionCard.hBoxLayout.addWidget(self.uvcResolutionCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcResolutionCard.hBoxLayout.addSpacing(16)
-
-        self.uvcRefreshResolutionBtn = PushButton(t("refresh"))
-        self.uvcRefreshResolutionBtn.setFixedWidth(80)
-        self.uvcRefreshResolutionCard = SettingCard(
-            FluentIcon.SYNC,
-            "Refresh UVC Resolution List",
-            "",
-            self.uvcGroup
-        )
-        self.uvcRefreshResolutionCard.hBoxLayout.addWidget(self.uvcRefreshResolutionBtn, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcRefreshResolutionCard.hBoxLayout.addSpacing(16)
 
         self.uvcWidthCard = SliderSpinCard(
             FluentIcon.FULL_SCREEN,
@@ -155,33 +214,35 @@ class CapturePage(BasePage):
         self.uvcHeightCard.setVisible(False)
 
         self.uvcFpsCombo = ComboBox()
-        self.uvcFpsCombo.addItems(["24", "30", "60", "90", "120", "144", "240"])
+        self.uvcFpsCombo.addItems(["30", "60", "120", "144", "165", "240"])
         self.uvcFpsCombo.setCurrentText("60")
         self.uvcFpsCombo.setMinimumWidth(120)
         self.uvcFpsCard = SettingCard(
             FluentIcon.SPEED_MEDIUM,
-            "UVC FPS",
+            "FPS",
             "",
             self.uvcGroup
         )
         self.uvcFpsCard.hBoxLayout.addWidget(self.uvcFpsCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcFpsCard.hBoxLayout.addSpacing(16)
 
-        self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto", "any"])
-        self.uvcCaptureMethodCombo.setMinimumWidth(140)
-        self.uvcCaptureMethodCard = SettingCard(
-            FluentIcon.CAMERA,
-            "UVC Capture Method",
-            "msmf recommended for 1080p60 on Windows 10/11",
+        self.uvcVideoFormatCombo = ComboBox()
+        self.uvcVideoFormatCombo.addItems(["MJPEG", "YUY2", "NV12", "YUV420P"])
+        self.uvcVideoFormatCombo.setMinimumWidth(120)
+        self.uvcVideoFormatCard = SettingCard(
+            FluentIcon.VIDEO,
+            "Video Format",
+            "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12/YUV420P "
+            "are raw and need much more USB bandwidth at the same "
+            "resolution/FPS.",
             self.uvcGroup
         )
-        self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcCaptureMethodCard.hBoxLayout.addSpacing(16)
+        self.uvcVideoFormatCard.hBoxLayout.addWidget(self.uvcVideoFormatCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcVideoFormatCard.hBoxLayout.addSpacing(16)
 
         self.uvcHwInfoLabel = BodyLabel("—")
-        self.uvcQueryBtn = PushButton("Query Device")
-        self.uvcQueryBtn.setFixedWidth(110)
+        self.uvcQueryBtn = PushButton("Query")
+        self.uvcQueryBtn.setFixedWidth(90)
         self.uvcHwInfoCard = SettingCard(
             FluentIcon.INFO,
             "Device Resolution & FPS",
@@ -191,6 +252,17 @@ class CapturePage(BasePage):
         self.uvcHwInfoCard.hBoxLayout.addWidget(self.uvcHwInfoLabel, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcHwInfoCard.hBoxLayout.addWidget(self.uvcQueryBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcHwInfoCard.hBoxLayout.addSpacing(16)
+
+        self.uvcRefreshResolutionBtn = PushButton("Refresh Device")
+        self.uvcRefreshResolutionBtn.setFixedWidth(110)
+        self.uvcRefreshResolutionCard = SettingCard(
+            FluentIcon.SYNC,
+            "Refresh Device",
+            "Re-scan connected UVC devices and their supported resolutions/FPS",
+            self.uvcGroup
+        )
+        self.uvcRefreshResolutionCard.hBoxLayout.addWidget(self.uvcRefreshResolutionBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcRefreshResolutionCard.hBoxLayout.addSpacing(16)
 
         # === NDI ===
         self.ndiGroup = SettingCardGroup("NDI", self.scrollWidget)
@@ -414,14 +486,15 @@ class CapturePage(BasePage):
         self.captureGroup.addSettingCard(self.screenshotIntervalCard)
         self.addContent(self.captureGroup)
 
+        self.uvcGroup.addSettingCard(self.uvcCaptureMethodCard)
         self.uvcGroup.addSettingCard(self.uvcDeviceCard)
         self.uvcGroup.addSettingCard(self.uvcResolutionCard)
-        self.uvcGroup.addSettingCard(self.uvcRefreshResolutionCard)
         self.uvcGroup.addSettingCard(self.uvcWidthCard)
         self.uvcGroup.addSettingCard(self.uvcHeightCard)
         self.uvcGroup.addSettingCard(self.uvcFpsCard)
-        self.uvcGroup.addSettingCard(self.uvcCaptureMethodCard)
+        self.uvcGroup.addSettingCard(self.uvcVideoFormatCard)
         self.uvcGroup.addSettingCard(self.uvcHwInfoCard)
+        self.uvcGroup.addSettingCard(self.uvcRefreshResolutionCard)
         self.addContent(self.uvcGroup)
         self.uvcGroup.setVisible(False)
 
@@ -462,11 +535,12 @@ class CapturePage(BasePage):
     def _connectSignals(self):
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)
         self.screenshotIntervalCard.valueChanged.connect(self._onScreenshotIntervalChanged)
-        self.uvcDeviceCard.valueChanged.connect(self._onUvcDeviceChanged)
+        self.uvcDeviceCombo.currentTextChanged.connect(self._onUvcDeviceChanged)
         self.uvcResolutionCombo.currentTextChanged.connect(self._onUvcResolutionChanged)
-        self.uvcRefreshResolutionBtn.clicked.connect(self._refreshUvcResolutions)
+        self.uvcRefreshResolutionBtn.clicked.connect(self._startUvcProbe)
         self.uvcFpsCombo.currentTextChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
+        self.uvcVideoFormatCombo.currentTextChanged.connect(self._onUvcVideoFormatChanged)
         self.uvcQueryBtn.clicked.connect(self._queryUvcHwInfo)
         self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
@@ -503,19 +577,33 @@ class CapturePage(BasePage):
             )
             self.screenshotIntervalCard.setValue(screenshot_interval_ms)
 
-            self.uvcDeviceCard.setValue(int(getattr(self._config, 'uvc_device_index', 0)))
+            _device_index = int(getattr(self._config, 'uvc_device_index', 0))
+            # Seed synchronously with the configured value so the combo
+            # shows something immediately; _startUvcProbeDelayed() (below,
+            # for screenshot_method == 'uvc') enriches it with the full
+            # enumerated device list in the background and preserves this
+            # selection once it arrives (see _onUvcProbeResult).
+            self.uvcDeviceCombo.blockSignals(True)
+            self.uvcDeviceCombo.clear()
+            self.uvcDeviceCombo.addItem(f"Device {_device_index}", userData=_device_index)
+            self.uvcDeviceCombo.blockSignals(False)
             self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
+            self.uvcVideoFormatCombo.setCurrentText(str(getattr(self._config, 'uvc_video_format', 'mjpeg')).upper())
             resolution_text = (
                 f"{getattr(self._config, 'uvc_width', self._config.width)}"
                 f"x{getattr(self._config, 'uvc_height', self._config.height)}")
             if screenshot_method == 'uvc':
-                self._refreshUvcResolutions()
-                idx = self.uvcResolutionCombo.findText(resolution_text)
-                if idx < 0:
-                    self.uvcResolutionCombo.addItem(resolution_text)
-                    idx = self.uvcResolutionCombo.findText(resolution_text)
-                if idx >= 0:
-                    self.uvcResolutionCombo.setCurrentIndex(idx)
+                # Seed synchronously with the configured value so the combo
+                # shows something immediately; _startUvcProbeDelayed()
+                # enriches it with the full supported list in the background
+                # (after giving the live backend's own reinit a head start —
+                # see its docstring) and preserves this selection (via
+                # currentText()) once it arrives.
+                self.uvcResolutionCombo.blockSignals(True)
+                self.uvcResolutionCombo.clear()
+                self.uvcResolutionCombo.addItem(resolution_text)
+                self.uvcResolutionCombo.blockSignals(False)
+                self._startUvcProbeDelayed()
             else:
                 self.uvcResolutionCombo.blockSignals(True)
                 self.uvcResolutionCombo.clear()
@@ -595,19 +683,104 @@ class CapturePage(BasePage):
         except Exception:
             pass
 
-    def _refreshUvcResolutions(self):
+    def _startUvcProbeDelayed(self, delay_ms: int = 1500):
+        """Schedule _startUvcProbe() after a delay instead of firing it immediately.
+
+        Every caller of this (switching TO uvc, loading a config with uvc
+        active, changing device/resolution/capture-method) also changes a
+        field _uvc_signature() watches, which makes the AI loop's
+        _capture_worker (polling every ~0.5s) reinitialize UVCCapture and
+        open ITS OWN handle to the same device around the same moment. Two
+        cv2.VideoCapture opens racing for the same device at the same time
+        is exactly the contention this session's earlier UVC fix was meant
+        to avoid — starting the probe immediately reintroduced it at the
+        single most common trigger (switching to UVC in the first place):
+        observed as a many-second stall before UVCCapture.__init__()
+        completes, the driver failing to negotiate MJPEG (logged as "FOURCC
+        MJPG not accepted"), and even a spurious extra reinit once the
+        contention resolves. Delaying the probe's own competing handle-open
+        past the live backend's ~0.5s reinit window fixes the worst of it;
+        this doesn't apply to the explicit "Refresh" button, which fires on
+        a presumably-already-stable backend.
+        """
+        QTimer.singleShot(delay_ms, self._startUvcProbe)
+
+    def _startUvcProbe(self):
+        """Kick off a background enumeration of supported UVC resolutions/FPS.
+
+        Replaces the old synchronous _refreshUvcResolutions()/_refreshUvcFps()
+        pair — both opened a competing cv2.VideoCapture to the live device on
+        the Qt main thread, freezing the UI and risking driver-level
+        contention with the AI loop's live capture handle. This still opens
+        a second handle (unavoidable — enumeration must try many
+        resolutions/FPS values, not just read the current one), but now off
+        the GUI thread, and superseded results are discarded via the
+        generation counter rather than racing to update the combos.
+        """
         if not self._config:
             return
+        # A probe scheduled via _startUvcProbeDelayed() can still fire after
+        # the user has since switched away from 'uvc' (e.g. to 'udp') — the
+        # QTimer doesn't know the method changed in the meantime. Check the
+        # CURRENT config here (not at schedule time) so a stale timer is a
+        # no-op instead of opening a competing device handle for a backend
+        # that isn't even active anymore.
+        if str(getattr(self._config, 'screenshot_method', '')).lower() != 'uvc':
+            return
+        # Never let two probes race the same device concurrently. This isn't
+        # just about wasted work — cv2.VideoCapture(DSHOW) isn't safe to open
+        # from two threads at once (DirectShow/COM apartment-threading), and
+        # on some driver stacks concurrent opens have caused a native access
+        # violation that crashes the whole process, bypassing every Python
+        # try/except in the probe path. Reassigning self._uvc_probe_worker
+        # here does NOT stop an in-flight worker's run() — so skip starting
+        # a new one outright rather than relying on the generation counter
+        # (which only discards a stale *result*, not a stale *in-flight
+        # open*).
+        if self._uvc_probe_worker is not None and self._uvc_probe_worker.isRunning():
+            return
+        self._uvc_probe_generation += 1
+        generation = self._uvc_probe_generation
         device = int(getattr(self._config, 'uvc_device_index', 0))
         method = str(getattr(self._config, 'uvc_capture_method', 'msmf'))
-        print(f"[Capture][UVC] Refreshing supported resolutions (device={device}, method={method})...")
-        try:
-            from core.screen_capture import list_supported_uvc_resolutions
-            resolutions = list_supported_uvc_resolutions(device, method)
-        except Exception as exc:
-            print(f"[Capture][UVC] Resolution probe failed: {exc}")
-            resolutions = []
+        width = int(getattr(self._config, 'uvc_width', 1920))
+        height = int(getattr(self._config, 'uvc_height', 1080))
+        print(f"[Capture][UVC] Probing supported resolutions/FPS (device={device}, method={method})...")
+        self._uvc_probe_worker = _UvcProbeWorker(generation, device, method, width, height, parent=self)
+        self._uvc_probe_worker.resultReady.connect(self._onUvcProbeResult)
+        self._uvc_probe_worker.start()
+
+    def _onUvcProbeResult(self, generation, resolutions, fps_list, device_names=None):
+        if generation != self._uvc_probe_generation:
+            return  # superseded by a newer probe (device/resolution changed again)
         print(f"[Capture][UVC] Found {len(resolutions)} supported resolution(s): {resolutions}")
+        print(f"[Capture][UVC] Supported FPS: {fps_list}")
+
+        device_names = device_names or []
+        configured_index = int(getattr(self._config, 'uvc_device_index', 0)) if self._config else 0
+        self.uvcDeviceCombo.blockSignals(True)
+        self.uvcDeviceCombo.clear()
+        if device_names:
+            for i, name in enumerate(device_names):
+                self.uvcDeviceCombo.addItem(name, userData=i)
+        else:
+            # No enumeration available (pygrabber/comtypes not installed) —
+            # fall back to plain numeric slots so uvc_device_index can still
+            # be picked for dshow/msmf/any.
+            for i in range(8):
+                self.uvcDeviceCombo.addItem(f"Device {i}", userData=i)
+        select_idx = -1
+        for i in range(self.uvcDeviceCombo.count()):
+            if self.uvcDeviceCombo.itemData(i) == configured_index:
+                select_idx = i
+                break
+        if select_idx < 0 and configured_index >= self.uvcDeviceCombo.count():
+            self.uvcDeviceCombo.addItem(f"Device {configured_index}", userData=configured_index)
+            select_idx = self.uvcDeviceCombo.count() - 1
+        if select_idx >= 0:
+            self.uvcDeviceCombo.setCurrentIndex(select_idx)
+        self.uvcDeviceCombo.blockSignals(False)
+
         current_text = self.uvcResolutionCombo.currentText().strip()
         self.uvcResolutionCombo.blockSignals(True)
         self.uvcResolutionCombo.clear()
@@ -615,30 +788,49 @@ class CapturePage(BasePage):
             for width, height in resolutions:
                 self.uvcResolutionCombo.addItem(f"{width}x{height}")
         else:
+            # Enumeration found nothing (device unreachable, or the driver
+            # didn't accept any of the probed resolutions) — offer the
+            # common presets plus the currently configured value so the
+            # combo isn't left with just one arbitrary entry.
             fallback = f"{int(getattr(self._config, 'uvc_width', 1920))}x{int(getattr(self._config, 'uvc_height', 1080))}"
-            self.uvcResolutionCombo.addItem(fallback)
+            for preset in ("1280x720", "1920x1080", "2560x1440"):
+                self.uvcResolutionCombo.addItem(preset)
+            if self.uvcResolutionCombo.findText(fallback) < 0:
+                self.uvcResolutionCombo.addItem(fallback)
+        # Whatever the probe/fallback found, it's still a guess (driver
+        # capability enumeration can be unreliable — e.g. virtual cameras
+        # like "OBS Virtual Camera" accept any requested cv2.set() value
+        # without validating it, so the cv2 fallback path can report
+        # candidates that were never real). The live backend's own already-
+        # negotiated resolution (uvc_actual_width/height, published by
+        # UVCCapture.__init__ from its actual open handle) is ground truth —
+        # always make sure it's a selectable option, even if the probe
+        # missed it entirely.
+        actual_w = int(getattr(self._config, 'uvc_actual_width', 0) or 0)
+        actual_h = int(getattr(self._config, 'uvc_actual_height', 0) or 0)
+        if actual_w > 0 and actual_h > 0:
+            actual_text = f"{actual_w}x{actual_h}"
+            if self.uvcResolutionCombo.findText(actual_text) < 0:
+                self.uvcResolutionCombo.addItem(actual_text)
+            if not current_text:
+                current_text = actual_text
         if current_text:
             idx = self.uvcResolutionCombo.findText(current_text)
             if idx >= 0:
                 self.uvcResolutionCombo.setCurrentIndex(idx)
         self.uvcResolutionCombo.blockSignals(False)
 
-    def _refreshUvcFps(self):
-        if not self._config:
-            return
-        w = int(getattr(self._config, 'uvc_width', 1920))
-        h = int(getattr(self._config, 'uvc_height', 1080))
-        device = int(getattr(self._config, 'uvc_device_index', 0))
-        method = str(getattr(self._config, 'uvc_capture_method', 'msmf'))
-        print(f"[Capture][UVC] Refreshing supported FPS (device={device}, {w}x{h}, method={method})...")
-        try:
-            from core.screen_capture import list_supported_uvc_fps
-            fps_list = list_supported_uvc_fps(device, w, h, method)
-        except Exception as exc:
-            print(f"[Capture][UVC] FPS probe failed: {exc}")
-            fps_list = [24, 30, 60, 90, 120, 144, 240]
-        print(f"[Capture][UVC] Supported FPS: {fps_list}")
+        fps_list = list(fps_list) if fps_list else [30, 60, 120, 144, 165, 240]
+        # Same reasoning as the resolution list above — always include the
+        # live backend's actually-negotiated FPS (uvc_actual_fps) so the
+        # combo can't miss the one value we already know for certain works.
+        actual_fps = int(round(float(getattr(self._config, 'uvc_actual_fps', 0) or 0)))
+        if actual_fps > 0 and actual_fps not in fps_list:
+            fps_list.append(actual_fps)
+            fps_list.sort()
         current_fps = self.uvcFpsCombo.currentText()
+        if not current_fps and actual_fps > 0:
+            current_fps = str(actual_fps)
         self.uvcFpsCombo.blockSignals(True)
         self.uvcFpsCombo.clear()
         for fps in fps_list:
@@ -739,7 +931,7 @@ class CapturePage(BasePage):
         if self._config:
             self._config.screenshot_method = text
         if str(text).strip().lower() == 'uvc' and not self._isLoadingConfig:
-            self._refreshUvcResolutions()
+            self._startUvcProbeDelayed()
         if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "ndi_installer_ran_once", False))
             if not has_ran:
@@ -754,12 +946,18 @@ class CapturePage(BasePage):
         if self._config:
             self._config.screenshot_interval = value / 1000.0
 
-    def _onUvcDeviceChanged(self, value):
+    def _onUvcDeviceChanged(self, text):
         if self._config:
-            self._config.uvc_device_index = int(value)
-        self._refreshUvcResolutions()
-        self._refreshUvcFps()
-        QTimer.singleShot(400, self._queryUvcHwInfo)
+            data = self.uvcDeviceCombo.currentData()
+            self._config.uvc_device_index = int(data) if data is not None else 0
+        self._startUvcProbeDelayed()
+        # config.uvc_actual_* only refreshes once the AI loop's live backend
+        # hot-swaps to the new device (ai_loop.py's _capture_worker polls for
+        # config changes every 0.5s — see reinitialize_if_method_changed()),
+        # so give that a moment before reading it; this delay is now purely
+        # about staleness, not blocking, since _queryUvcHwInfo() no longer
+        # does any device I/O of its own.
+        QTimer.singleShot(700, self._queryUvcHwInfo)
 
     def _onUvcResolutionChanged(self, value):
         if self._config:
@@ -772,8 +970,8 @@ class CapturePage(BasePage):
                 self._config.uvc_height = int(height_str)
             except ValueError:
                 return
-        self._refreshUvcFps()
-        QTimer.singleShot(400, self._queryUvcHwInfo)
+        self._startUvcProbeDelayed()
+        QTimer.singleShot(700, self._queryUvcHwInfo)
 
     def _onUvcFpsChanged(self, value):
         if self._config:
@@ -785,8 +983,14 @@ class CapturePage(BasePage):
     def _onUvcCaptureMethodChanged(self, text):
         if self._config:
             self._config.uvc_capture_method = str(text)
-        self._refreshUvcResolutions()
-        QTimer.singleShot(400, self._queryUvcHwInfo)
+        self._startUvcProbeDelayed()
+        QTimer.singleShot(700, self._queryUvcHwInfo)
+
+    def _onUvcVideoFormatChanged(self, text):
+        if self._config:
+            self._config.uvc_video_format = str(text).strip().lower()
+        self._startUvcProbeDelayed()
+        QTimer.singleShot(700, self._queryUvcHwInfo)
 
     def _onUvcPreviewChanged(self, checked):
         if self._config:
@@ -842,35 +1046,27 @@ class CapturePage(BasePage):
             print(f"[Capture][NDI] Source changed to '{source_name}' — reconnecting...")
 
     def _queryUvcHwInfo(self):
-        """Open a temporary VideoCapture to read the driver's actual resolution and FPS."""
+        """Read the live UVC device's actual resolution/FPS.
+
+        Reads config.uvc_actual_* (published by UVCCapture.__init__ from its
+        own already-open handle) instead of opening a second competing
+        cv2.VideoCapture to the same device index — most UVC/webcam drivers
+        don't handle two simultaneous open handles gracefully, and a second
+        handle opened while the AI loop's live capture is actively streaming
+        can stall/corrupt frames on that live handle (this was the root
+        cause of erratic aim while adjusting UVC settings).
+        """
         if not self._config:
             self.uvcHwInfoLabel.setText("—")
             return
-        try:
-            import cv2
-            idx = int(getattr(self._config, 'uvc_device_index', 0))
-            method_str = str(getattr(self._config, 'uvc_capture_method', 'msmf')).lower()
-            backend_map = {'msmf': cv2.CAP_MSMF, 'dshow': cv2.CAP_DSHOW}
-            backend = backend_map.get(method_str, cv2.CAP_ANY)
-            # Apply requested settings so the driver reports accurate values
-            w_req = int(getattr(self._config, 'uvc_width', 1920))
-            h_req = int(getattr(self._config, 'uvc_height', 1080))
-            fps_req = int(getattr(self._config, 'uvc_fps', 60))
-            cap = cv2.VideoCapture(idx, backend)
-            if not cap.isOpened():
-                self.uvcHwInfoLabel.setText("—  (device not available)")
-                return
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, w_req)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h_req)
-            cap.set(cv2.CAP_PROP_FPS, fps_req)
-            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            cap.release()
-            fps_str = f"{fps:.1f}" if fps > 0 else "?"
-            self.uvcHwInfoLabel.setText(f"{w} × {h} @ {fps_str} fps")
-        except Exception as exc:
-            self.uvcHwInfoLabel.setText(f"—  ({exc})")
+        w = int(getattr(self._config, 'uvc_actual_width', 0) or 0)
+        h = int(getattr(self._config, 'uvc_actual_height', 0) or 0)
+        fps = float(getattr(self._config, 'uvc_actual_fps', 0.0) or 0.0)
+        if w <= 0 or h <= 0:
+            self.uvcHwInfoLabel.setText("—  (device not available)")
+            return
+        fps_str = f"{fps:.1f}" if fps > 0 else "?"
+        self.uvcHwInfoLabel.setText(f"{w} × {h} @ {fps_str} fps")
 
     def _refreshNdiHwInfo(self):
         """Read NDI stream resolution/FPS from config fields written by NDICapture."""
@@ -1023,20 +1219,56 @@ class CapturePage(BasePage):
         self.captureGroup.titleLabel.setText(t("capture_method_group", "Capture"))
         self.screenshotMethodCard.titleLabel.setText(t("screenshot_method"))
         self.screenshotIntervalCard.titleLabel.setText(t("screenshot_interval"))
-        self.uvcDeviceCard.titleLabel.setText("UVC Device Index")
-        self.uvcResolutionCard.titleLabel.setText("UVC Resolution")
-        self.uvcRefreshResolutionCard.titleLabel.setText("Refresh UVC Resolution List")
-        self.uvcRefreshResolutionBtn.setText(t("refresh"))
-        self.uvcFpsCard.titleLabel.setText("UVC FPS")  # type: ignore[attr-defined]
+        self.uvcGroup.titleLabel.setText("UVC Camera")
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
+        self.uvcCaptureMethodCard.contentLabel.setText(
+            "msmf recommended for 1080p60 on Windows 10/11. If MJPEG "
+            "negotiation fails despite the device working fine in other "
+            "DirectShow apps (e.g. OBS), try 'dshow' instead."
+        )
+        self.uvcDeviceCard.titleLabel.setText("Device")
+        self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
+        self.uvcResolutionCard.titleLabel.setText("Resolution")
+        self.uvcResolutionCard.contentLabel.setText("Auto-detect supported resolutions")
+        self.uvcWidthCard.titleLabel.setText("UVC Width")
+        self.uvcHeightCard.titleLabel.setText("UVC Height")
+        self.uvcFpsCard.titleLabel.setText("FPS")  # type: ignore[attr-defined]
+        self.uvcVideoFormatCard.titleLabel.setText("Video Format")
+        self.uvcVideoFormatCard.contentLabel.setText(
+            "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12/YUV420P "
+            "are raw and need much more USB bandwidth at the same "
+            "resolution/FPS."
+        )
         self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
-        self.uvcQueryBtn.setText("Query Device")
+        self.uvcHwInfoCard.contentLabel.setText("Actual values reported by the driver")
+        self.uvcQueryBtn.setText("Query")
+        self.uvcRefreshResolutionCard.titleLabel.setText("Refresh Device")
+        self.uvcRefreshResolutionCard.contentLabel.setText(
+            "Re-scan connected UVC devices and their supported resolutions/FPS"
+        )
+        self.uvcRefreshResolutionBtn.setText("Refresh Device")
+        self.ndiGroup.titleLabel.setText("NDI")
         self.ndiSourceCard.titleLabel.setText("NDI Stream")
+        self.ndiSourceCard.contentLabel.setText("Select the NDI source to capture")
         self.ndiRefreshCard.titleLabel.setText("Refresh NDI Streams")
         self.ndiRefreshBtn.setText(t("refresh"))
         self.ndiBandwidthCard.titleLabel.setText("NDI Bandwidth")
+        self.ndiBandwidthCard.contentLabel.setText("Receive bandwidth for the NDI stream")
         self.ndiHwInfoCard.titleLabel.setText("Stream Resolution & FPS")
+        self.ndiHwInfoCard.contentLabel.setText("Actual values from the active NDI source")
         self.ndiRefreshInfoBtn.setText("Refresh Info")
+        self.udpGroup.titleLabel.setText("UDP Stream")
+        self.udpSystemIpCard.titleLabel.setText("System IP Address")
+        _local_ips = _get_local_ips()
+        self.udpSystemIpCard.contentLabel.setText(
+            f"Stream to: {', '.join(_local_ips) if _local_ips else '—'}"
+        )
+        self.udpBindIpCard.titleLabel.setText("Bind IP")
+        self.udpBindIpCard.contentLabel.setText("Listen on a specific interface, or 0.0.0.0 for all")
+        self.udpPortCard.titleLabel.setText("UDP Port")
+        self.udpRefreshCard.titleLabel.setText("Restart Receiver")
+        self.udpRefreshCard.contentLabel.setText("Stop and re-bind the UDP socket")
+        self.udpRefreshBtn.setText(t("refresh"))
         self.previewGroup.titleLabel.setText(t("preview_group", "Preview"))
         self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
         self.previewCropCard.titleLabel.setText(t("preview_crop_label"))
@@ -1050,7 +1282,8 @@ class CapturePage(BasePage):
             f"border: 1px solid {ThemeColors.CARD_BORDER.get()}; "
             f"border-radius: 8px;"
         )
-        self.ocrFpsCard.titleLabel.setText("2nd Inference FPS")
+        self.ocrFpsCard.titleLabel.setText("OCR Capture FPS")
         self.ocrScanCard.titleLabel.setText("Scan ROI")
+        self.ocrScanCard.contentLabel.setText("Run OCR on the fixed region once and update the preview below")
         self.ocrScanBtn.setText("Scan ROI")
         self.ocrResultCard.titleLabel.setText(t("ocr_result_title", "Detected"))

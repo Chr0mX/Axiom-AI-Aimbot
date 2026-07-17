@@ -2,11 +2,10 @@ import os
 import sys
 from ctypes import byref, c_int, WinDLL
 from ctypes.wintypes import DWORD
-from PyQt6.QtCore import QUrl, QSize, QTimer
+from PyQt6.QtCore import QUrl, QTimer
 from PyQt6.QtGui import QIcon, QDesktopServices, QColor
-from PyQt6.QtWidgets import QApplication
 from qfluentwidgets import (FluentWindow, NavigationItemPosition, FluentIcon,
-                            Theme, setTheme, setThemeColor, qconfig)
+                            Theme, setTheme, qconfig)
 from qfluentwidgets.common.style_sheet import setCustomStyleSheet
 from qfluentwidgets.components.settings.setting_card import SettingCard
 
@@ -23,8 +22,6 @@ from .pages.other_page import OtherPage
 from .pages.convert_page import ConvertPage
 from .components.language_dialog import LanguageDialog
 from .language_manager import getLanguageManager, t
-from .theme_colors import ThemeColors
-from .theme_manager import get_theme_manager, apply_theme_to_app
 from core.updater import UpdateChecker, open_update_url
 from version import __version__
 
@@ -856,6 +853,9 @@ class AxiomWindow(FluentWindow):
         for page in pages:
             if hasattr(page, 'retranslateUi'):
                 page.retranslateUi()
+
+        if hasattr(self, 'previewPanel'):
+            self.previewPanel.retranslateUi()
 
     def closeEvent(self, event):
         """視窗關閉時自動保存配置"""

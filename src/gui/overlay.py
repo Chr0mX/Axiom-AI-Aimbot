@@ -57,7 +57,16 @@ class OverlayColors:
     @staticmethod
     def get_tracer_color() -> QColor:
         """Tracer line color (screen center → target)"""
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_TRACER.qcolor()
         return QColor(255, 255, 255, 200)
+
+    @staticmethod
+    def get_aim_marker_color() -> QColor:
+        """Aim-point X marker color"""
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_AIM_MARKER.qcolor()
+        return QColor(255, 80, 80, 220)
 
 
 # Predefined box color themes (name → RGBA tuple)
@@ -300,7 +309,7 @@ class PyQtOverlay(QWidget):
 
             aim_part        = str(getattr(self.config, 'aim_part', 'head'))
             head_h_ratio    = float(getattr(self.config, 'head_height_ratio', 0.26))
-            aim_x_color     = QColor(255, 80, 80, 220)   # soft red X marker
+            aim_x_color     = OverlayColors.get_aim_marker_color()
             pen_aim_x       = QPen(aim_x_color, 1)
 
             for i, box in enumerate(self.boxes):

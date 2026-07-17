@@ -23,6 +23,7 @@ from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
+from ..theme_colors import ThemeColors
 
 
 class _AimPointPreview(QWidget):
@@ -179,12 +180,12 @@ class _JitterLiveWindow(QDialog):
 
         self._info = QLabel("Starting…")
         self._info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._info.setStyleSheet("color: #888; font-size: 10px;")
+        self._info.setStyleSheet(f"color: {ThemeColors.TEXT_TERTIARY.get()}; font-size: 10px;")
 
         self._hint = QLabel("Click anywhere in this window to finish & save")
         self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._hint.setWordWrap(True)
-        self._hint.setStyleSheet("color: #0c8; font-size: 10px;")
+        self._hint.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-size: 10px;")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -240,7 +241,7 @@ class _JitterPreviewDialog(QDialog):
 
         info = QLabel(f"{len(frames)} frames recorded")
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        info.setStyleSheet("color: #888; font-size: 10px;")
+        info.setStyleSheet(f"color: {ThemeColors.TEXT_TERTIARY.get()}; font-size: 10px;")
 
         save_btn = QPushButton("Save")
         rerecord_btn = QPushButton("Re-record")
@@ -354,7 +355,7 @@ class AimPage(BasePage):
         self.arduinoBaudCard.hBoxLayout.addSpacing(16)
 
         self.connectionLabel = BodyLabel(t("disconnected"))
-        self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.connectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
         self.connectionCard = SettingCard(
             FluentIcon.WIFI,
             t("connected") + " / " + t("disconnected"),
@@ -437,7 +438,7 @@ class AimPage(BasePage):
         )
 
         self.xboxConnectionLabel = BodyLabel(t("disconnected"))
-        self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
         self.xboxConnectionCard = SettingCard(
             FluentIcon.GAME,
             t("connected") + " / " + t("disconnected"),
@@ -1388,16 +1389,16 @@ class AimPage(BasePage):
             if is_arduino_connected():
                 self._isArduinoConnected = True
                 self.connectionLabel.setText(t("connected"))
-                self.connectionLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+                self.connectionLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-weight: bold;")
                 self.arduinoConnectBtn.setText(t("arduino_disconnect"))
             else:
                 self._isArduinoConnected = False
                 self.connectionLabel.setText(t("disconnected"))
-                self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.connectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
                 self.arduinoConnectBtn.setText(t("arduino_connect"))
         except ImportError:
             self.connectionLabel.setText("pyserial N/A")
-            self.connectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.connectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
 
     def _onOpenGuide(self):
         from PyQt6.QtCore import QUrl
@@ -1521,22 +1522,22 @@ class AimPage(BasePage):
             from win_utils import is_xbox_connected, is_xbox_available
             if not is_xbox_available():
                 self.xboxConnectionLabel.setText("vgamepad " + t("disconnected"))
-                self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
                 self.xboxConnectBtn.setText(t("xbox_connect"))
                 return
             if is_xbox_connected():
                 self._isXboxConnected = True
                 self.xboxConnectionLabel.setText(t("connected"))
-                self.xboxConnectionLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+                self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-weight: bold;")
                 self.xboxConnectBtn.setText(t("xbox_disconnect"))
             else:
                 self._isXboxConnected = False
                 self.xboxConnectionLabel.setText(t("disconnected"))
-                self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+                self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
                 self.xboxConnectBtn.setText(t("xbox_connect"))
         except ImportError:
             self.xboxConnectionLabel.setText("vgamepad N/A")
-            self.xboxConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
 
     # === PID Callbacks ===
 
@@ -1869,31 +1870,76 @@ class AimPage(BasePage):
 
         self.antiRecoilGroup.titleLabel.setText(t("anti_recoil", "Anti-Recoil"))
         self.smartJitterEnableCard.titleLabel.setText(t("smart_jitter_label", "Smart Jitter"))
-        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Shooting (LMB)"))
+        self.smartJitterEnableCard.contentLabel.setText(t("smart_jitter_desc", "Add jitter when target box is small (far targets). Fires while shooting."))
+        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Shooting (LMB Held)"))
+        self.smartJitterLmbCard.contentLabel.setText(t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"))
         self.smartJitterLevelCard.titleLabel.setText(t("smart_jitter_level_label", "Jitter Strength"))
+        self.smartJitterLevelCard.contentLabel.setText(t("smart_jitter_level_desc", "Max pixel offset radius applied per frame while jitter fires"))
         self.smartJitterThreshCard.titleLabel.setText(t("smart_jitter_threshold_label", "Box Size Threshold"))
+        self.smartJitterThreshCard.contentLabel.setText(t("smart_jitter_threshold_desc", "Jitter fires when box height < this % of detection range"))
         self.jitterRecordCard.titleLabel.setText(t("jitter_record_label", "Record Jitter"))
+        self.jitterRecordCard.contentLabel.setText(t("jitter_record_desc", "Record your mouse shake to create a custom jitter pattern"))
         self.jitterPatternCard.titleLabel.setText(t("jitter_pattern_label", "Recorded Pattern"))
+        self.jitterPatternCard.contentLabel.setText(t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on)"))
         self.jitterSpeedCard.titleLabel.setText(t("jitter_speed_label", "Playback Speed"))
 
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
         self.targetPriorityModeCard.titleLabel.setText(t("target_priority_mode", "Priority Mode"))
+        self.targetPriorityModeCard.contentLabel.setText(t("target_priority_mode_desc", "How to select the best target"))
         self.targetPriorityWeightCard.titleLabel.setText(t("target_priority_confidence_weight", "Confidence Weight"))
+        self.targetPriorityWeightCard.contentLabel.setText(t("target_priority_weight_desc", "Used in Composite mode only"))
 
         self.trackingGroup.titleLabel.setText(t("target_tracking", "Target Tracking"))
+        self.boxEmaEnableCard.titleLabel.setText(t("box_ema_enabled", "Box EMA"))
+        self.boxEmaEnableCard.contentLabel.setText(t("box_ema_desc", "Smooth raw detection box coordinates before aim calculation. Reduces jitter at high Kp."))
+        self.boxEmaAlphaXCard.titleLabel.setText(t("box_ema_alpha_x", "Box EMA Alpha X"))
+        self.boxEmaAlphaXCard.contentLabel.setText(t("box_ema_alpha_x_desc", "X-axis smoothing. Lower = heavier smooth, less jitter. Higher = more responsive."))
+        self.boxEmaAlphaYCard.titleLabel.setText(t("box_ema_alpha_y", "Box EMA Alpha Y"))
+        self.boxEmaAlphaYCard.contentLabel.setText(t("box_ema_alpha_y_desc", "Y-axis smoothing. Lower = heavier smooth."))
         self.emaEnableCard.titleLabel.setText(t("ema_enabled", "EMA Smoothing"))
+        self.emaEnableCard.contentLabel.setText(t("ema_desc", "Exponential moving average on aim-point coordinates before PID. Reduces jitter."))
         self.emaAlphaCard.titleLabel.setText(t("ema_alpha", "EMA Alpha"))
+        self.emaAlphaCard.contentLabel.setText(t("ema_alpha_desc", "1.0 = raw (no smoothing), 0.30 = heavy smoothing"))
+        self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
+        self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
+        self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))
+        self.predictionMaxVelCard.titleLabel.setText(t("prediction_max_velocity", "Max Velocity Cap"))
+        self.predictionMaxVelCard.contentLabel.setText(t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"))
+        self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "History Frames"))
+        self.stickyLockCard.titleLabel.setText(t("sticky_lock_enabled", "Sticky Target Lock"))
+        self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
+        self.lockDecayCard.titleLabel.setText(t("lock_decay_frames", "Lock Decay Frames"))
+        self.lockDecayCard.contentLabel.setText(t("lock_decay_desc", "Frames to hold aim after target is lost before releasing the lock"))
+        self.lockIouCard.titleLabel.setText(t("lock_iou_threshold", "IoU Match Threshold"))
+        self.lockIouCard.contentLabel.setText(t("lock_iou_desc", "Minimum overlap required to match the same target across frames"))
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
+        self.kalmanEnableCard.contentLabel.setText(t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing. Mutually exclusive with EMA."))
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
+        self.kalmanProcessNoiseCard.contentLabel.setText(t("kalman_noise_desc", "Lower = smoother but slower to react"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
+        self.kalmanMeasNoiseCard.contentLabel.setText(t("kalman_noise_desc", "Lower = reacts faster but noisier"))
+        self.camMotionCompCard.titleLabel.setText(t("cam_motion_comp_enabled", "Camera Motion Compensation"))
+        self.camMotionCompCard.contentLabel.setText(t("cam_motion_comp_desc", "Subtract per-frame global scene shift (phase correlation) from aim error to cancel camera shake."))
+        self.camMotionCompSizeCard.titleLabel.setText(t("cam_motion_comp_size", "Compensation Resolution"))
+        self.camMotionCompSizeCard.contentLabel.setText(t("cam_motion_comp_size_desc", "128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)"))
 
         parts = ["head", "body", "center", "custom"]
         idx = self.aimPartCombo.currentIndex()
         self._updateTargetAreaVisibility(parts[idx] if 0 <= idx < len(parts) else "head")
+        self.customYCard.titleLabel.setText(t("aim_custom_y_pct", "Custom Aim Y Position (%)"))
+        self.customYCard.contentLabel.setText(t("aim_custom_y_desc", "0% = top of box, 100% = bottom. ~20% = head, ~60% = body."))
         self.headWidthCard.titleLabel.setText(t("head_width_ratio"))
         self.headHeightCard.titleLabel.setText(t("head_height_ratio"))
         self.headHeightCard.contentLabel.setText(t("body_height_note"))
         self.bodyWidthCard.titleLabel.setText(t("body_width_ratio"))
+        self.adaptiveRatioCard.titleLabel.setText(t("aim_adaptive_ratio_enabled", "Distance-Adaptive Ratio"))
+        self.adaptiveRatioCard.contentLabel.setText(t("aim_adaptive_ratio_desc", "Scale head ratio inversely with box size — keeps head aim accurate from close to long range."))
+        self.adaptiveRatioRefHCard.titleLabel.setText(t("aim_adaptive_ratio_ref_h", "Reference Box Height"))
+        self.adaptiveRatioRefHCard.contentLabel.setText(t("aim_adaptive_ratio_ref_h_desc", "Box height (px) where head ratio is nominal. Match to your typical close-range target."))
+        self.postureAwareCard.titleLabel.setText(t("aim_posture_aware_enabled", "Posture-Aware Targeting"))
+        self.postureAwareCard.contentLabel.setText(t("aim_posture_aware_desc", "Fall back to center-mass when box is wider than tall (crouch / slide / prone)."))
+        self.crouchAspectCard.titleLabel.setText(t("aim_crouch_aspect_threshold", "Crouch Aspect Threshold"))
+        self.crouchAspectCard.contentLabel.setText(t("aim_crouch_aspect_desc", "box_w / box_h above which player is treated as crouching. Default 1.2×."))
 
         current_aim = self.aimPartCombo.currentIndex()
         self.aimPartCombo.clear()

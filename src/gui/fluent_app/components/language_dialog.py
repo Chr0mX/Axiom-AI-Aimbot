@@ -1,13 +1,12 @@
 import os
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget, QLabel, QFrame
-from PyQt6.QtGui import QFont, QColor, QPixmap, QIcon
-from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtCore import QByteArray
+from PyQt6.QtGui import QColor, QPixmap
 from qfluentwidgets import (MaskDialogBase, PrimaryPushButton, PushButton,
                             RadioButton, ScrollArea, BodyLabel,
                             SubtitleLabel, isDarkTheme)
 from ..theme_colors import ThemeColors
+from ..language_manager import t
 
 
 # Get flags directory
@@ -117,9 +116,12 @@ class LanguageDialog(MaskDialogBase):
         self.currentLanguage = currentLanguage
         self.selectedLanguage = currentLanguage
         self.languageCards = []
-        
-        # Main widget
-        self.widget = QWidget(self)
+
+        # Build directly onto the base class's existing self.widget (a QFrame
+        # already added to MaskDialogBase's centering _hBoxLayout) instead of
+        # replacing it — replacing it left the real centering layout pointing
+        # at an empty orphaned frame while this dialog's actual content sat
+        # in a brand-new QWidget that no layout ever positioned.
         self.widget.setFixedSize(400, 500)
         self._applyWidgetStyles()
         
@@ -129,7 +131,7 @@ class LanguageDialog(MaskDialogBase):
         self.mainLayout.setSpacing(16)
         
         # Title
-        self.titleLabel = SubtitleLabel("Select Language", self.widget)
+        self.titleLabel = SubtitleLabel(t("language_dialog_title", "Select Language"), self.widget)
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         titleFont = self.titleLabel.font()
         titleFont.setPixelSize(20)
@@ -164,11 +166,11 @@ class LanguageDialog(MaskDialogBase):
         self.buttonLayout = QHBoxLayout()
         self.buttonLayout.setSpacing(12)
         
-        self.cancelButton = PushButton("Cancel", self.widget)
+        self.cancelButton = PushButton(t("cancel", "Cancel"), self.widget)
         self.cancelButton.setFixedWidth(100)
         self.cancelButton.clicked.connect(self.reject)
         
-        self.confirmButton = PrimaryPushButton("Confirm", self.widget)
+        self.confirmButton = PrimaryPushButton(t("confirm", "Confirm"), self.widget)
         self.confirmButton.setFixedWidth(100)
         self.confirmButton.clicked.connect(self._onConfirm)
         

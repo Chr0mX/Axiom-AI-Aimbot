@@ -47,6 +47,7 @@ _FIELD_MAP = {
     'uvc_height':                 'capture.uvc.height',
     'uvc_fps':                    'capture.uvc.fps',
     'uvc_capture_method':         'capture.uvc.capture_method',
+    'uvc_video_format':           'capture.uvc.video_format',
     'ndi_source_name':            'capture.ndi.source_name',
     'ndi_bandwidth':              'capture.ndi.bandwidth',
     'udp_bind_ip':                'capture.udp.bind_ip',
@@ -74,6 +75,9 @@ _FIELD_MAP = {
     'fov_circle_filter_enabled':  'aim.fov_circle_filter_enabled',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
     'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
+    'detect_min_bbox_area_px':    'aim.semantic_filter.min_bbox_area_px',
+    'detect_min_bbox_short_side_px': 'aim.semantic_filter.min_bbox_short_side_px',
+    'detect_min_bbox_max_side_frac': 'aim.semantic_filter.min_bbox_max_side_frac',
     'pid_kp_x':                   'aim.pid.x.kp',
     'pid_ki_x':                   'aim.pid.x.ki',
     'pid_kd_x':                   'aim.pid.x.kd',
@@ -146,7 +150,6 @@ _FIELD_MAP = {
     'performance_mode':           'performance.performance_mode',
     'max_queue_size':             'performance.max_queue_size',
     'cuda_io_binding_enabled':    'performance.cuda_io_binding_enabled',
-    'skip_letterbox':             'performance.skip_letterbox',
     'detect_interval':            'performance.timing.detect_interval',
     'screenshot_interval':        'performance.timing.capture_interval',
     'idle_detect_interval':       'performance.timing.idle_interval',
@@ -251,16 +254,22 @@ class Config:
 
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
-        
-        # Full screen detection
+
+        # Not read anywhere in src/ today, but tests/test_config.py asserts
+        # these as part of Config's default contract — keep them until that
+        # test is revisited rather than silently breaking it.
         self.capture_width: int = self.width
         self.capture_height: int = self.height
+
         self.screenshot_method: str = "dxcam"  # 螢幕截圖方式
         self.uvc_device_index: int = 0
         self.uvc_width: int = self.width
         self.uvc_height: int = self.height
         self.uvc_fps: int = 60
         self.uvc_capture_method: str = "msmf"
+        # Requested pixel/codec format: 'mjpeg' (compressed, highest FPS
+        # headroom over USB), 'yuy2' or 'nv12' (raw, uncompressed).
+        self.uvc_video_format: str = "mjpeg"
         self.uvc_show_window: bool = True
         self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.uvc_always_on_top: bool = True
@@ -276,6 +285,24 @@ class Config:
         self.udp_recv_buffer_size: int = 65536
         self.udp_frame_timeout: float = 1.0
         self.udp_force_restart: bool = False
+        # Actual live stream resolution, updated continuously by
+        # UdpCapture._reader_worker from the real decoded frame size — not a
+        # user-configured value, since the sender can crop/resize at any
+        # time. 0 = not yet probed (no frame received); get_capture_dimensions()
+        # falls back to config.width/height in that case.
+        self.udp_width: int = 0
+        self.udp_height: int = 0
+        # Actual negotiated resolution/FPS of the live UVC device, published
+        # by UVCCapture.__init__ from its own already-open handle. Lets the
+        # GUI show hardware info (capture_page.py's "Query Device") without
+        # opening a second competing cv2.VideoCapture to the same device
+        # index — most UVC/webcam drivers don't handle two simultaneous open
+        # handles gracefully, and a second handle opened while the first is
+        # actively streaming (feeding the AI loop) can stall/corrupt frames
+        # on the live handle. 0 = UVC not yet initialized as the live backend.
+        self.uvc_actual_width: int = 0
+        self.uvc_actual_height: int = 0
+        self.uvc_actual_fps: float = 0.0
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
 
@@ -438,8 +465,6 @@ class Config:
         # CUDA IO Binding 零拷貝推理（僅 CUDA provider 有效）
         self.cuda_io_binding_enabled: bool = False
 
-        self.skip_letterbox: bool = False         # 直接縮放取代 letterbox（略快，正方形擷取無失真）
-
         # Kalman filter aim-point smoother (mutually exclusive with EMA in UI)
         self.kalman_enabled: bool = False
         self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
@@ -506,6 +531,12 @@ class Config:
 
         # Semantic false-positive filter (ported from Someone_idea)
         self.detect_semantic_filter_enabled: bool = False
+        # Minimum-geometry layer of the semantic filter (detection_semantics.py).
+        # 0 = disabled (matches pre-existing behavior); not yet exposed in the
+        # GUI, but now a real persisted field instead of an unreachable default.
+        self.detect_min_bbox_area_px: float = 0.0
+        self.detect_min_bbox_short_side_px: float = 0.0
+        self.detect_min_bbox_max_side_frac: float = 0.0
 
         # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
         self.display_locked_box: list | None = None
@@ -792,6 +823,8 @@ def _validate_screenshot_method(config: Config) -> None:
         config.screenshot_method = 'mss'
     if getattr(config, 'uvc_capture_method', 'dshow') not in ('auto', 'dshow', 'msmf', 'any'):
         config.uvc_capture_method = 'dshow'
+    if getattr(config, 'uvc_video_format', 'mjpeg') not in ('mjpeg', 'yuy2', 'nv12', 'yuv420p'):
+        config.uvc_video_format = 'mjpeg'
     if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (
         'scale_to_fit', 'scale_to_canvas', 'fit_to_screen'
     ):

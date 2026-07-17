@@ -43,6 +43,7 @@
     "config_not_found": "कॉन्फ़िगरेशन फ़ाइल नहीं मिली, डिफ़ॉल्ट उपयोग हो रहा है",
     "config_save_failed": "कॉन्फ़िगरेशन सहेजने में विफल",
     "config_saved": "कॉन्फ़िगरेशन सहेजा गया",
+    "config_deleted": "कॉन्फ़िग हटाया गया",
     "config_success": "सफलता",
     "config_warning": "चेतावनी",
     "confirm_delete": "हटाने की पुष्टि करें",

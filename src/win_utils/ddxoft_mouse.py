@@ -27,10 +27,13 @@ class DDXoftMouse:
         last_status: Status of the last operation
     """
     
+    _INIT_RETRY_COOLDOWN_S = 10.0  # don't hammer a failing DLL/driver every frame
+
     def __init__(self):
         self.dll = None
         self.available = False
         self.subsequent_init_failed = False  # 記錄是否初始化失敗過，防止重複嘗試
+        self._last_init_attempt = 0.0        # for the retry cooldown below
         self.success_count = 0      # 成功次數
         self.failure_count = 0      # 失敗次數
         self.last_status = None     # 最後一次操作狀態
@@ -39,27 +42,29 @@ class DDXoftMouse:
         """Lazy-load the ddxoft DLL when needed."""
         if self.available:
             return True
-        # If it failed before, do not try again to avoid repeated error windows or stuttering
+        # If it failed before, don't retry every single frame — but do retry
+        # after a cooldown, since the failure may be transient (driver not
+        # loaded yet, DLL locked by another process, etc.) rather than
+        # permanent.
         if self.subsequent_init_failed:
-            return False
-            
+            if time.time() - self._last_init_attempt < self._INIT_RETRY_COOLDOWN_S:
+                return False
+            self.subsequent_init_failed = False
+
         return self._init_dll()
 
-    
+
     def _init_dll(self):
         """Initialize ddxoft DLL"""
         if self.available:
             return True
-        
-        # If already marked as failed, return directly
-        if self.subsequent_init_failed:
-            return False
-            
+
+        self._last_init_attempt = time.time()
+
         try:
             # Try loading ddxoft DLL (common locations)
             dll_paths = [
                 "ddxoft.dll",  # Current directory
-                "./ddxoft.dll",  # Relative path
                 "src/ddxoft.dll",  # src directory
                 "lib/ddxoft.dll",  # lib directory
             ]

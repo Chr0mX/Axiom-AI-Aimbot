@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import colorsys
 import logging
+import re
 import threading
 import time
 
@@ -198,7 +199,7 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
 _UVC_WINDOW_NAME = "Axiom UVC Preview"
 
 
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str]:
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str]:
     return (
         int(getattr(config, 'uvc_device_index', 0)),
         int(getattr(config, 'uvc_width', 0)),
@@ -207,6 +208,7 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str]:
         bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
+        str(getattr(config, 'uvc_video_format', 'mjpeg')).lower(),
     )
 
 
@@ -1057,11 +1059,117 @@ class NDICapture:
             pt.join(timeout=1.0)
 
 
+def _list_pygrabber_device_names() -> list[str]:
+    """Enumerate UVC device names via DirectShow's native COM device
+    enumeration (ICreateDevEnum/IEnumMoniker) through pygrabber — the same
+    API OBS and browsers use to list capture devices, instead of scraping
+    ffmpeg's log output (which depends on PyAV importing cleanly; PyAV can
+    fail to import in ways unrelated to whether a real UVC device is even
+    reachable, e.g. a Cython/typelib packaging conflict with another
+    vendored dependency). Uses SystemDeviceEnum directly rather than the
+    full FilterGraph class, since name enumeration doesn't need a filter
+    graph, capture-graph builder, or Windows Media profile manager — less
+    COM object construction, less that can fail for this simpler query.
+    """
+    try:
+        import comtypes
+        from pygrabber.dshow_graph import SystemDeviceEnum
+        from pygrabber.dshow_ids import DeviceCategories
+    except Exception as exc:
+        _warn_once('pygrabber_import_failed', f'[UVC] pygrabber/comtypes import failed: {exc}')
+        return []
+
+    initialized_here = False
+    try:
+        try:
+            comtypes.CoInitialize()
+            initialized_here = True
+        except Exception:
+            pass  # COM already initialized on this thread — fine
+        try:
+            return list(SystemDeviceEnum().get_available_filters(DeviceCategories.VideoInputDevice))
+        except Exception as exc:
+            _warn_once('pygrabber_enum_failed', f'[UVC] pygrabber device enumeration failed: {exc}')
+            return []
+    finally:
+        if initialized_here:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
+
+
+def _list_pygrabber_device_formats(device_index: int) -> list[dict]:
+    """Query a device's real supported (resolution, fps range) capabilities
+    via DirectShow's IAMStreamConfig::GetStreamCaps through pygrabber — the
+    same native capability query OBS uses to populate its own resolution/FPS
+    lists, keyed by the same device index cv2's CAP_DSHOW backend uses (both
+    ultimately enumerate the same ICreateDevEnum video-input-device category
+    in the same order).
+    """
+    try:
+        import comtypes
+        from pygrabber.dshow_graph import FilterGraph
+    except Exception as exc:
+        _warn_once('pygrabber_import_failed', f'[UVC] pygrabber/comtypes import failed: {exc}')
+        return []
+
+    initialized_here = False
+    graph = None
+    try:
+        try:
+            comtypes.CoInitialize()
+            initialized_here = True
+        except Exception:
+            pass
+        try:
+            graph = FilterGraph()
+            graph.add_video_input_device(device_index)
+            raw_formats = graph.get_input_device().get_formats()
+        except Exception as exc:
+            _warn_once('pygrabber_formats_failed', f'[UVC] pygrabber format query failed: {exc}')
+            return []
+        results: list[dict] = []
+        for fmt in raw_formats:
+            try:
+                results.append({
+                    'width': int(fmt['width']),
+                    'height': int(fmt['height']),
+                    'min_fps': float(fmt['min_framerate']),
+                    'max_fps': float(fmt['max_framerate']),
+                })
+            except Exception:
+                continue
+        return results
+    finally:
+        if graph is not None:
+            try:
+                graph.remove_filters()
+            except Exception:
+                pass
+        if initialized_here:
+            try:
+                comtypes.CoUninitialize()
+            except Exception:
+                pass
+
+
 def list_supported_uvc_resolutions(
     device_index: int,
     capture_method: str = 'dshow',
 ) -> list[tuple[int, int]]:
-    """Probe common UVC resolutions and return distinct supported entries."""
+    """Return the device's actual supported resolutions.
+
+    Queries the driver directly via DirectShow's native IAMStreamConfig
+    capability list through pygrabber (the same COM API OBS/browsers use),
+    falling back to a guess-and-check cv2 probe against a small candidate
+    set only when pygrabber is unavailable.
+    """
+    formats = _list_pygrabber_device_formats(device_index)
+    if formats:
+        sizes = {(f['width'], f['height']) for f in formats}
+        if sizes:
+            return sorted(sizes, key=lambda item: (item[0] * item[1], item[0]))
 
     backend_map = {
         'dshow': cv2.CAP_DSHOW,
@@ -1069,28 +1177,43 @@ def list_supported_uvc_resolutions(
         'any': cv2.CAP_ANY,
     }
     backend = backend_map.get(str(capture_method).lower(), cv2.CAP_DSHOW)
-    cap = cv2.VideoCapture(int(device_index), backend)
-    if not cap.isOpened():
-        cap = cv2.VideoCapture(int(device_index))
+    try:
+        cap = cv2.VideoCapture(int(device_index), backend)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(int(device_index))
+    except Exception:
+        # Some DirectShow driver stacks make cv2.VideoCapture() itself raise
+        # instead of just failing to open (seen falling through to OpenCV's
+        # internal obsensor backend on certain devices/indices).
+        return []
     if not cap.isOpened():
         return []
 
     common_resolutions = [
-        (320, 240), (640, 360), (640, 480), (800, 600), (960, 540),
-        (1024, 576), (1024, 768), (1280, 720), (1280, 960), (1600, 900),
-        (1920, 1080), (2560, 1440), (3840, 2160),
+        (1280, 720), (1920, 1080), (2560, 1440),
     ]
     supported: set[tuple[int, int]] = set()
     try:
         for width, height in common_resolutions:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
-            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            try:
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+                actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            except Exception:
+                # cap.isOpened() can lie — some broken/half-open handles
+                # only reveal it when set()/get() raises a raw C++
+                # exception. Skip this candidate rather than letting an
+                # unguarded native exception crash the probe thread (and,
+                # left unhandled, the whole app).
+                continue
             if actual_w > 0 and actual_h > 0 and abs(actual_w - width) <= 8 and abs(actual_h - height) <= 8:
                 supported.add((actual_w, actual_h))
     finally:
-        cap.release()
+        try:
+            cap.release()
+        except Exception:
+            pass
     return sorted(supported, key=lambda item: (item[0] * item[1], item[0]))
 
 
@@ -1100,26 +1223,76 @@ def list_supported_uvc_fps(
     height: int,
     capture_method: str = 'dshow',
 ) -> list[int]:
-    """Probe common FPS values at the given resolution and return supported ones."""
+    """Return the device's actual supported FPS values at a given resolution.
+
+    Queries the driver directly via DirectShow's native IAMStreamConfig
+    capability list through pygrabber (the same COM API OBS/browsers use),
+    falling back to a guess-and-check cv2 probe against a small candidate
+    set only when pygrabber is unavailable.
+    """
+    formats = _list_pygrabber_device_formats(device_index)
+    if formats:
+        matching = [f for f in formats if f['width'] == width and f['height'] == height] or formats
+        fps_values: set[int] = set()
+        for f in matching:
+            min_fps, max_fps = f['min_fps'], f['max_fps']
+            fps_values.add(int(round(min_fps)))
+            fps_values.add(int(round(max_fps)))
+            # DirectShow drivers commonly report FPS as a continuous
+            # MinFrameInterval–MaxFrameInterval range rather than one
+            # discrete capability entry per step — e.g. a single 5–240
+            # entry, with nothing in between. Taking only the two
+            # endpoints would silently drop real, settable values like
+            # 144 that fall inside that range. Fill in from the common
+            # preset list wherever it's actually covered by a reported
+            # range, so the dropdown stays useful without inventing
+            # values the driver never actually advertised.
+            for preset in (30, 60, 120, 144, 165, 240):
+                if min_fps <= preset <= max_fps:
+                    fps_values.add(preset)
+        if fps_values:
+            return sorted(fps_values)
+
     backend_map = {'dshow': cv2.CAP_DSHOW, 'msmf': cv2.CAP_MSMF, 'any': cv2.CAP_ANY}
     backend = backend_map.get(str(capture_method).lower(), cv2.CAP_DSHOW)
-    cap = cv2.VideoCapture(int(device_index), backend)
-    if not cap.isOpened():
-        cap = cv2.VideoCapture(int(device_index))
+    try:
+        cap = cv2.VideoCapture(int(device_index), backend)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(int(device_index))
+    except Exception:
+        # Some DirectShow driver stacks make cv2.VideoCapture() itself raise
+        # instead of just failing to open (seen falling through to OpenCV's
+        # internal obsensor backend on certain devices/indices).
+        return [30, 60]
     if not cap.isOpened():
         return [30, 60]
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    common = [24, 30, 60, 90, 120, 144, 240]
+    try:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    except Exception:
+        # cap.isOpened() can lie — some broken/half-open handles only
+        # reveal it when set() raises a raw C++ exception.
+        try:
+            cap.release()
+        except Exception:
+            pass
+        return [30, 60]
+    common = [30, 60, 120, 144, 165, 240]
     supported: list[int] = []
     try:
         for fps in common:
-            cap.set(cv2.CAP_PROP_FPS, fps)
-            actual = cap.get(cv2.CAP_PROP_FPS)
+            try:
+                cap.set(cv2.CAP_PROP_FPS, fps)
+                actual = cap.get(cv2.CAP_PROP_FPS)
+            except Exception:
+                continue
             if actual > 0 and abs(actual - fps) <= 2:
                 supported.append(fps)
     finally:
-        cap.release()
+        try:
+            cap.release()
+        except Exception:
+            pass
     return supported or [30, 60]
 
 
@@ -1250,6 +1423,51 @@ class _UVCPreviewThread(threading.Thread):
                 pass
 
 
+def list_uvc_device_names() -> list[str]:
+    """Enumerate UVC/webcam device names in DirectShow's enumeration order.
+
+    Used by the GUI to populate a device-name combo box instead of a bare
+    numeric index. The returned order also backs ``uvc_device_index`` for
+    the cv2 dshow/msmf/any capture methods, since DirectShow's own
+    enumeration order is the closest available approximation of how those
+    backends number devices (OpenCV doesn't expose device names itself).
+
+    Uses pygrabber's native COM enumeration (the same
+    ICreateDevEnum/IEnumMoniker API OBS and browsers use) — returns an
+    empty list if pygrabber/comtypes are unavailable.
+    """
+
+    return _list_pygrabber_device_names()
+
+
+def _crop_nv12(buffer: np.ndarray, luma_height: int, left: int, top: int, width: int, height: int) -> np.ndarray | None:
+    """Crop a raw NV12 buffer (as returned by cv2 when CAP_PROP_CONVERT_RGB
+    is disabled) to the given region, without decoding pixels outside it.
+
+    NV12 packs two planes into one array: rows [0:luma_height] are the
+    full-resolution Y (luma) plane, and rows [luma_height:luma_height*3//2]
+    are a half-height plane of interleaved U/V (chroma) bytes — 2:1
+    subsampling in both directions. Cropping correctly means slicing both
+    planes with matching coordinates, and since the UV plane only has half
+    the resolution, every input coordinate must land on an even boundary
+    (rounded down here — at most 1px of slop, irrelevant for aim/detection
+    purposes but would misalign chroma sampling if left unaligned).
+    """
+
+    left &= ~1
+    top &= ~1
+    width &= ~1
+    height &= ~1
+    if width <= 0 or height <= 0:
+        return None
+    if left + width > buffer.shape[1] or top + height > luma_height:
+        return None
+    y_plane = buffer[top:top + height, left:left + width]
+    uv_top = luma_height + top // 2
+    uv_plane = buffer[uv_top:uv_top + height // 2, left:left + width]
+    return np.vstack((y_plane, uv_plane))
+
+
 class UVCCapture:
     """OpenCV VideoCapture backend for UVC capture cards/cameras."""
 
@@ -1259,11 +1477,14 @@ class UVCCapture:
         width = int(getattr(config, 'uvc_width', 1920))
         height = int(getattr(config, 'uvc_height', 1080))
         fps = int(getattr(config, 'uvc_fps', 60))
+        self._target_fps = fps  # requested rate, for _reader_worker's shortfall check
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
         self.window_name = _UVC_WINDOW_NAME
         self.config_signature = _uvc_signature(config)
 
         capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
+        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
+
         backend_map = {
             'dshow': cv2.CAP_DSHOW,
             'msmf': cv2.CAP_MSMF,
@@ -1271,7 +1492,6 @@ class UVCCapture:
             'auto': cv2.CAP_ANY,
         }
         backend = backend_map.get(capture_method, cv2.CAP_DSHOW)
-        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
 
         self.cap = cv2.VideoCapture(device_index, backend)
         if not self.cap.isOpened():
@@ -1281,9 +1501,19 @@ class UVCCapture:
         if not self.cap.isOpened():
             raise RuntimeError(f'UVC device open failed: index={device_index}')
 
-        # FOURCC must be set before resolution/FPS so the driver switches codec first.
+        video_format = str(getattr(config, 'uvc_video_format', 'mjpeg')).lower()
+        fourcc_map = {
+            'mjpeg': cv2.VideoWriter_fourcc(*'MJPG'),
+            'yuy2': cv2.VideoWriter_fourcc(*'YUY2'),
+            'nv12': cv2.VideoWriter_fourcc(*'NV12'),
+            'yuv420p': cv2.VideoWriter_fourcc(*'I420'),  # planar 4:2:0, matches ffmpeg's "yuv420p" naming
+        }
+        target_fourcc = fourcc_map.get(video_format, fourcc_map['mjpeg'])
+
+        # FOURCC must be set before resolution/FPS so the driver switches codec
+        # first — true for most UVC drivers, but not universal.
         try:
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            self.cap.set(cv2.CAP_PROP_FOURCC, target_fourcc)
         except Exception:
             pass
         if width > 0:
@@ -1292,6 +1522,15 @@ class UVCCapture:
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         if fps > 0:
             self.cap.set(cv2.CAP_PROP_FPS, fps)
+
+        # If that didn't take, some drivers need the opposite order — codec
+        # negotiated only after resolution/FPS are already locked in — so
+        # retry once with FOURCC set last before giving up on the requested format.
+        if int(self.cap.get(cv2.CAP_PROP_FOURCC)) != target_fourcc:
+            try:
+                self.cap.set(cv2.CAP_PROP_FOURCC, target_fourcc)
+            except Exception:
+                pass
         # Keep the driver queue shallow so grab() always returns the newest frame.
         try:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -1306,21 +1545,72 @@ class UVCCapture:
         # reader worker overwrites this every second with the actual received rate.
         config.source_nominal_fps = float(self.preview_fps)
 
-        # Verify FOURCC was actually accepted by the driver.  Without MJPEG,
-        # 1080p raw (YUY2) requires ~237 MB/s — beyond USB 2.0 bandwidth — so
-        # the driver silently throttles to 5–15 fps with no error raised.
+        # Publish the actual negotiated resolution/FPS from this already-open
+        # handle so the GUI ("Query Device") can read it instead of opening a
+        # second competing cv2.VideoCapture to the same device index.
+        config.uvc_actual_width = self.preview_width
+        config.uvc_actual_height = self.preview_height
+        config.uvc_actual_fps = float(self.preview_fps)
+
+        # Verify FOURCC was actually accepted by the driver.  Without MJPEG
+        # (or another compressed format), raw 1080p (e.g. YUY2) requires
+        # ~237 MB/s — beyond USB 2.0 bandwidth — so the driver silently
+        # throttles to 5–15 fps with no error raised.
         actual_fourcc_int = int(self.cap.get(cv2.CAP_PROP_FOURCC))
-        expected_fourcc   = cv2.VideoWriter_fourcc(*'MJPG')
-        self.is_mjpeg = (actual_fourcc_int == expected_fourcc)
-        if not self.is_mjpeg:
+        self.is_mjpeg = (actual_fourcc_int == target_fourcc)  # kept for back-compat; means "requested format accepted"
+        self.is_expected_format = self.is_mjpeg
+        if not self.is_expected_format:
             actual_str = ''.join(
                 chr((actual_fourcc_int >> i) & 0xFF) for i in [0, 8, 16, 24]
             ).strip('\x00') or 'unknown'
+            # "Switch to msmf" is useless advice when msmf is already active —
+            # this used to always say it regardless of capture_method. If
+            # msmf itself can't negotiate the requested format with this
+            # device, that's a different, more likely hardware/driver-specific
+            # problem: try the other Windows capture API instead, and flag
+            # that this may simply be unsupported by this device rather than
+            # a settings fix.
+            if capture_method == 'msmf':
+                suggestion = (
+                    "Already using 'msmf' — this device/driver may not support "
+                    f"{video_format.upper()} through Media Foundation. Try 'dshow' "
+                    "instead, or this may be a hardware limitation of this capture device."
+                )
+            else:
+                suggestion = "Switch capture method to 'msmf'."
             logging.getLogger(__name__).warning(
-                "[UVC] FOURCC MJPG not accepted by driver (got '%s'). "
-                "At 1080p this limits FPS to <30. Switch backend to 'msmf'.",
-                actual_str,
+                "[UVC] Video format %s not accepted by driver (got '%s', capture_method='%s'). "
+                "If this is a raw format at high resolution, it may exceed USB bandwidth. %s",
+                video_format.upper(), actual_str, capture_method, suggestion,
             )
+
+        # --- Raw NV12 crop-before-convert ---
+        # By default cv2.VideoCapture converts every captured frame to BGR
+        # internally (at the *full* negotiated resolution) before read()
+        # ever returns it — even though only a small detect_range_size
+        # crop of it is actually used downstream. Disabling that lets
+        # read() hand back the raw NV12 buffer instead, so the (relatively
+        # expensive, full-resolution) YUV->BGR colorspace conversion can
+        # happen *after* cropping — over ~320x320 pixels instead of
+        # ~2 million — cutting real per-frame CPU cost on the capture
+        # path. Only attempted when NV12 was actually negotiated
+        # (is_expected_format); gated behind a readback check since some
+        # backends silently ignore CAP_PROP_CONVERT_RGB, which would
+        # otherwise make grab()'s raw-buffer crop math run against an
+        # already-BGR frame and produce garbage.
+        self.is_raw_nv12 = False
+        if video_format == 'nv12' and self.is_expected_format:
+            try:
+                self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+                self.is_raw_nv12 = (self.cap.get(cv2.CAP_PROP_CONVERT_RGB) == 0)
+            except Exception:
+                self.is_raw_nv12 = False
+            if not self.is_raw_nv12:
+                logging.getLogger(__name__).info(
+                    "[UVC] Driver doesn't support disabling auto BGR conversion "
+                    "(CAP_PROP_CONVERT_RGB) — NV12 crop-before-convert optimization "
+                    "unavailable, falling back to full-frame conversion."
+                )
 
         # --- Non-blocking reader thread ---
         # cap.read() blocks up to one frame period (e.g. 16 ms at 60 fps).
@@ -1360,8 +1650,28 @@ class UVCCapture:
     def _reader_worker(self) -> None:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
+        _measurement_windows = 0
+        _warned_broken_read = False
         while not self._reader_stop.is_set():
-            ok, frame = self.cap.read()
+            try:
+                ok, frame = self.cap.read()
+            except Exception as exc:
+                # cap.isOpened() can lie (seen on some DirectShow driver
+                # stacks that fall through to OpenCV's internal obsensor
+                # backend) — cap.read() can then raise a raw C++ exception
+                # instead of just returning ok=False. Treat it the same as
+                # a failed read rather than letting it kill this thread
+                # (which would silently stop all UVC capture).
+                if not _warned_broken_read:
+                    _warned_broken_read = True
+                    logging.getLogger(__name__).error(
+                        "[UVC] cap.read() raised %s — the driver/backend may not "
+                        "actually support this device by index. Try a different "
+                        "capture method (msmf/dshow) or USB port. Retrying...",
+                        exc,
+                    )
+                ok, frame = False, None
+                time.sleep(0.05)
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
@@ -1373,8 +1683,57 @@ class UVCCapture:
                     self.config.source_nominal_fps = _fps_count / _elapsed
                     _fps_count = 0
                     _fps_t0 = _now
+
+                    # Same class of problem as the FOURCC check in __init__:
+                    # cap.set(CAP_PROP_FPS, ...) can be silently accepted by
+                    # the driver as a *setting* without the hardware actually
+                    # sustaining it — the requested value just gets echoed
+                    # back on cap.get(), never validated. The only way to
+                    # know the real rate is to measure actual frame arrivals,
+                    # which is exactly what source_nominal_fps tracks. Check
+                    # once, skipping the first window (startup ramp-up can be
+                    # artificially low) and not repeating (avoid log spam for
+                    # a persistent, already-reported condition).
+                    _measurement_windows += 1
+                    if _measurement_windows == 2 and self._target_fps > 0:
+                        shortfall_ratio = self.config.source_nominal_fps / self._target_fps
+                        if shortfall_ratio < 0.8:
+                            logging.getLogger(__name__).warning(
+                                "[UVC] Measured capture rate %.1f fps is well below the "
+                                "configured %d fps. If the requested video format isn't "
+                                "actually active (see any 'Video format ... not accepted' "
+                                "warning above), raw video bandwidth at this resolution may "
+                                "not fit your USB link — try MJPEG, 'msmf' capture method, "
+                                "a lower resolution, or a different USB port/cable.",
+                                self.config.source_nominal_fps, self._target_fps,
+                            )
             else:
                 time.sleep(0.005)
+
+    def _confirm_raw_nv12(self, frame: np.ndarray) -> bool:
+        """Verify a captured frame is actually a raw single-plane NV12
+        buffer, not ordinary (H, W, 3) BGR.
+
+        The CAP_PROP_CONVERT_RGB readback check in __init__ isn't
+        sufficient on its own — some DirectShow driver stacks echo back
+        whatever value was set without it having any real effect (the
+        same class of lie already seen from this backend for isOpened()
+        and FOURCC). A raw NV12 buffer is 2-D (single channel); if a
+        frame claiming to be raw NV12 is actually 3-D, self-heal by
+        permanently disabling the optimization instead of letting
+        cv2.cvtColor crash on the channel-count mismatch.
+        """
+        if frame.ndim == 2:
+            return True
+        self.is_raw_nv12 = False
+        logging.getLogger(__name__).warning(
+            "[UVC] Driver claimed CAP_PROP_CONVERT_RGB was disabled but frames "
+            "are still %s-channel, not raw NV12 — disabling the crop-before-"
+            "convert optimization and falling back to standard full-frame "
+            "conversion.",
+            frame.shape[2] if frame.ndim == 3 else frame.ndim,
+        )
+        return False
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
         """Return BGRA frame cropped by region when provided.
@@ -1393,6 +1752,25 @@ class UVCCapture:
         # overlay stays in sync without requiring an extra lock or callback.
         self._region_ref[0] = region
 
+        if self.is_raw_nv12 and self._confirm_raw_nv12(frame_bgr):
+            # Crop the raw NV12 buffer BEFORE converting to BGR, so the
+            # (comparatively expensive) colorspace conversion only ever
+            # runs over the small detection-region crop instead of the
+            # full negotiated resolution — see the CAP_PROP_CONVERT_RGB
+            # setup in __init__ for why this buffer isn't BGR already.
+            if region is None:
+                return cv2.cvtColor(frame_bgr, cv2.COLOR_YUV2BGRA_NV12)
+            left = max(0, int(region.get('left', 0)))
+            top = max(0, int(region.get('top', 0)))
+            width = max(0, int(region.get('width', self.preview_width)))
+            height = max(0, int(region.get('height', self.preview_height)))
+            width = min(width, self.preview_width - left)
+            height = min(height, self.preview_height - top)
+            cropped = _crop_nv12(frame_bgr, self.preview_height, left, top, width, height)
+            if cropped is None:
+                return None
+            return cv2.cvtColor(cropped, cv2.COLOR_YUV2BGRA_NV12)
+
         if region is not None:
             frame_h, frame_w = frame_bgr.shape[:2]
             left = max(0, int(region.get('left', 0)))
@@ -1408,6 +1786,14 @@ class UVCCapture:
         return cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
 
     def _draw_overlay(self, frame_bgr: np.ndarray, region: dict[str, int] | None) -> np.ndarray:
+        if self.is_raw_nv12 and self._confirm_raw_nv12(frame_bgr):
+            # The preview thread reads the same raw NV12 buffer grab() does
+            # (shared via _latest_frame_ref) — it needs a real BGR frame to
+            # draw overlays on, so convert the full frame here. Unlike
+            # grab()'s crop-then-convert path, this always pays the
+            # full-resolution conversion cost, but only while the preview
+            # panel/window is actually enabled (self.show_window).
+            frame_bgr = cv2.cvtColor(frame_bgr, cv2.COLOR_YUV2BGR_NV12)
         return _draw_detection_overlay(frame_bgr, region, self.config, has_alpha=False)
 
     def _render_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
@@ -1527,6 +1913,17 @@ class UdpCapture:
                 if w != self.preview_width or h != self.preview_height:
                     self.preview_width = w
                     self.preview_height = h
+                    # Published so get_capture_dimensions() can size the
+                    # detection region against the real, current stream
+                    # resolution — the sender (e.g. an OBS udp_stream_filter
+                    # crop) can change this at any time, so it can't be a
+                    # fixed/user-configured value like uvc_width/uvc_height.
+                    # Without this, a region computed against config.width/
+                    # height (full desktop res) can fall entirely outside a
+                    # smaller cropped stream, making grab() return None every
+                    # frame and inference FPS drop to 0.
+                    self.config.udp_width = w
+                    self.config.udp_height = h
 
             _fps_count += 1
             _now = time.perf_counter()

@@ -334,7 +334,19 @@ class ThemeColors:
         default_light=(0, 100, 200, 80),
         default_dark=(0, 140, 255, 90)
     )
-    
+
+    OVERLAY_TRACER = ColorPairWithAlpha.from_config(
+        "overlay_colors", "tracer",
+        default_light=(255, 255, 255, 200),
+        default_dark=(255, 255, 255, 200)
+    )
+
+    OVERLAY_AIM_MARKER = ColorPairWithAlpha.from_config(
+        "overlay_colors", "aim_marker",
+        default_light=(255, 80, 80, 220),
+        default_dark=(255, 80, 80, 220)
+    )
+
     # ============================================================
     # 狀態面板 (Status Panel) 顏色
     # ============================================================

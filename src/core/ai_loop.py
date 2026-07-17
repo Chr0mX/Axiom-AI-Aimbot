@@ -26,8 +26,8 @@ from .ai_loop_utils import (
     calculate_detection_region,
     clear_queues,
     filter_boxes_by_fov,
-    find_closest_target,
     get_capture_dimensions,
+    reduce_boxes_for_single_target,
     update_crosshair_position,
     update_queues,
 )
@@ -325,7 +325,16 @@ def ai_logic_loop(
         try:
             while config.Running and not capture_stop_event.is_set():
                 screenshot_interval = max(0.001, float(getattr(config, 'screenshot_interval', config.detect_interval)))
-                should_use_high_res_timer = screenshot_interval <= 0.002
+                detect_interval = float(getattr(config, 'detect_interval', screenshot_interval))
+                # Windows' default Sleep()/time.sleep() granularity is ~15.6ms;
+                # any throttle interval tighter than that needs the high-res
+                # multimedia timer below or the configured interval is
+                # silently ignored — both screenshot_interval and
+                # detect_interval gate a _sleep_precise() call (this loop and
+                # the main inference loop respectively), and this timer
+                # resolution request is process-wide, so either interval
+                # needing it is enough to request it.
+                should_use_high_res_timer = min(screenshot_interval, detect_interval) < 0.015
 
                 if should_use_high_res_timer and not high_res_timer_enabled:
                     high_res_timer_enabled = _set_windows_timer_resolution_1ms(True)
@@ -651,7 +660,8 @@ def ai_logic_loop(
                 config.latest_all_boxes = all_boxes
                 config.latest_all_confidences = all_confidences
 
-                if is_aiming and boxes:
+                aimed_this_frame = bool(is_aiming and boxes)
+                if aimed_this_frame:
                     process_aiming(
                         config,
                         boxes,
@@ -697,24 +707,13 @@ def ai_logic_loop(
                             ai_aiming._kalman.reset()
 
                 if config.single_target_mode:
-                    if boxes and state.locked_box is not None:
-                        # Reflects process_aiming()'s actual post-sticky-lock pick
-                        # for this frame, not a separate lock-blind selection.
-                        config.latest_boxes = [list(state.locked_box)]
-                        config.latest_confidences = [state.locked_confidence]
-                    elif boxes:
-                        # Detecting without actively aiming this frame (e.g. idle
-                        # detect) — process_aiming() didn't run, so there's no lock
-                        # decision to read back. Sticky lock never applies to idle
-                        # detection anyway, so a plain priority pick is fine here.
-                        config.latest_boxes, config.latest_confidences = find_closest_target(
-                            boxes, confidences, crosshair_x, crosshair_y,
-                            priority_mode=getattr(config, 'target_priority_mode', 'distance'),
-                            confidence_weight=getattr(config, 'target_priority_confidence_weight', 0.5),
-                        )
-                    else:
-                        config.latest_boxes = []
-                        config.latest_confidences = []
+                    config.latest_boxes, config.latest_confidences = reduce_boxes_for_single_target(
+                        boxes, confidences,
+                        state.locked_box, state.locked_confidence, aimed_this_frame,
+                        crosshair_x, crosshair_y,
+                        priority_mode=getattr(config, 'target_priority_mode', 'distance'),
+                        confidence_weight=getattr(config, 'target_priority_confidence_weight', 0.5),
+                    )
 
                 update_queues(
                     overlay_boxes_queue,

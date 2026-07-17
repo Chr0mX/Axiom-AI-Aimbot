@@ -10,20 +10,9 @@ from .theme_colors import (
     StyleSheetGenerator,
 )
 
-from .theme_manager import (
-    ThemeManager,
-    get_theme_manager,
-    apply_theme_to_app,
-    get_current_stylesheet,
-)
-
 __all__ = [
     'ThemeColors',
     'ColorPair',
     'ColorPairWithAlpha',
     'StyleSheetGenerator',
-    'ThemeManager',
-    'get_theme_manager',
-    'apply_theme_to_app',
-    'get_current_stylesheet',
 ]

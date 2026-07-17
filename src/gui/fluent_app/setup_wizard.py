@@ -10,21 +10,20 @@ import os
 import platform
 import re
 import subprocess
-import types
 
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import (
-    QAbstractSlider, QDialog, QFrame, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QScrollArea, QSizePolicy, QSlider,
+    QDialog, QFrame, QHBoxLayout,
+    QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider,
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
 try:
     from qfluentwidgets import (
-        BodyLabel, CaptionLabel, ComboBox,
+        ComboBox,
         PrimaryPushButton, PushButton, Slider,
-        StrongBodyLabel, SwitchButton, TitleLabel,
+        SwitchButton,
         setTheme, Theme, qconfig,
     )
     _HAS_FLUENT = True
@@ -79,10 +78,20 @@ class _StepDots(QWidget):
         super().__init__(parent)
         self._total = total
         self._current = 0
+        self._is_dark = True  # matches AxiomSetupWizard's own default preview state
         self.setFixedHeight(20)
 
     def setCurrent(self, idx: int):
         self._current = idx
+        self.update()
+
+    def setDark(self, is_dark: bool):
+        """Track the wizard's own in-progress theme preview (self._isDark),
+        not the global qfluentwidgets theme — setTheme() isn't actually
+        called until the wizard closes (see applyChosenTheme()), so
+        isDarkTheme() wouldn't reflect the user's live choice while still
+        on the theme-selection step."""
+        self._is_dark = is_dark
         self.update()
 
     def paintEvent(self, _):
@@ -104,7 +113,7 @@ class _StepDots(QWidget):
                 p.setPen(Qt.PenStyle.NoPen)
                 p.drawEllipse(cx - r, oy - r, 2 * r, 2 * r)
             else:
-                p.setBrush(QColor("#D0D0D0"))
+                p.setBrush(QColor("#5A5A5A" if self._is_dark else "#D0D0D0"))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.drawEllipse(cx - r, oy - r, 2 * r, 2 * r)
 
@@ -608,13 +617,18 @@ class SetupWizard(QDialog):
         self._detected_gpu = _detect_gpu_name()
         cpu_name = platform.processor() or platform.machine()
 
+        self._cpu_name = cpu_name
+
         hw_row = QHBoxLayout()
         hw_row.setSpacing(12)
-        hw_row.addWidget(_lbl("Hardware", 11, bold=True))
+        self._lbl_hw_title = _lbl("Hardware", 11, bold=True)
+        hw_row.addWidget(self._lbl_hw_title)
         hw_row.addStretch()
-        hw_row.addWidget(_lbl(f"GPU: {self._detected_gpu or 'Not detected'}", 10))
+        self._lbl_gpu = _lbl(f"GPU: {self._detected_gpu or 'Not detected'}", 10)
+        hw_row.addWidget(self._lbl_gpu)
         hw_row.addSpacing(12)
-        hw_row.addWidget(_lbl(f"CPU: {cpu_name or 'Unknown'}", 10))
+        self._lbl_cpu = _lbl(f"CPU: {cpu_name or 'Unknown'}", 10)
+        hw_row.addWidget(self._lbl_cpu)
         ly.addLayout(hw_row)
 
         ly.addSpacing(8)
@@ -648,6 +662,13 @@ class SetupWizard(QDialog):
             cur_backend = getattr(self._config, 'inference_backend', 'auto')
             auto_idx = 1 if cur_backend == "directml" else 0
 
+        # Explicitly sync config to the initial selection rather than relying
+        # on currentIndexChanged to fire it: Qt only emits that signal when
+        # the index actually differs from the combo's default of 0, so if
+        # auto_idx == 0 the signal never fires and self._config.inference_backend
+        # would silently keep whatever stale value it had before, while the
+        # combo visually shows "TensorRT (NVIDIA GPU)".
+        self._config.inference_backend = "directml" if auto_idx == 1 else "tensorrt"
         self._combo_backend.setCurrentIndex(auto_idx)
         self._combo_backend.currentIndexChanged.connect(self._onBackendChanged)
         backend_row.addWidget(self._combo_backend)
@@ -799,9 +820,10 @@ class SetupWizard(QDialog):
             except Exception:
                 trt_ready = False
             if not trt_ready:
-                # setup_wizard.py lives at src/gui/fluent_app/ → up 3 = project root
-                project_root = os.path.dirname(os.path.dirname(
-                    os.path.dirname(os.path.abspath(__file__))))
+                # setup_wizard.py lives at src/gui/fluent_app/ → up 4 = project root
+                # (fluent_app→gui→src→project root; matches _refreshModelCombo() above)
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(
+                    os.path.dirname(os.path.abspath(__file__)))))
                 bat = os.path.join(project_root, "Install TensorRT.bat")
                 if os.path.exists(bat):
                     import subprocess
@@ -823,6 +845,7 @@ class SetupWizard(QDialog):
         self._isDark = (mode == "dark")
         self._card_light.setSelected(mode == "light")
         self._card_dark.setSelected(mode == "dark")
+        self._dots.setDark(self._isDark)
         # 即時預覽精靈主題
         if self._isDark:
             self._applyDarkStyle()
@@ -887,6 +910,14 @@ class SetupWizard(QDialog):
         self._lbl_perf_sub.setText(
             lm.get("wizard_perf_subtitle",
                    "Configure inference and tracking options. These can be changed later in the Aim tab."))
+        self._lbl_hw_title.setText(lm.get("wizard_perf_hardware", "Hardware"))
+        self._lbl_gpu.setText(
+            f"{lm.get('wizard_perf_gpu_label', 'GPU')}: "
+            f"{self._detected_gpu or lm.get('wizard_perf_not_detected', 'Not detected')}")
+        self._lbl_cpu.setText(
+            f"{lm.get('wizard_perf_cpu_label', 'CPU')}: "
+            f"{self._cpu_name or lm.get('wizard_perf_unknown', 'Unknown')}")
+        self._lbl_perf_backend.setText(lm.get("wizard_perf_backend", "Inference Backend"))
         self._lbl_perf_model.setText(
             lm.get("wizard_perf_model_path", "Model"))
 
