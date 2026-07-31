@@ -13,6 +13,18 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
     screenshot_method = str(getattr(config, 'screenshot_method', 'mss')).lower()
 
     if screenshot_method == 'uvc':
+        # The ffmpeg capture method's "fixed" crop mode has the ffmpeg
+        # subprocess itself crop a centered detect_range_size square before
+        # Axiom ever sees a frame (far less data over the subprocess pipe).
+        # Report that as the capture size — same trick already used for a
+        # pre-cropped UDP stream — so calculate_detection_region()'s region
+        # math naturally resolves to a full-frame no-op crop against the
+        # already-cropped stream, with no special-casing needed in grab().
+        if (str(getattr(config, 'uvc_capture_method', '')).lower() == 'ffmpeg'
+                and str(getattr(config, 'uvc_ffmpeg_crop_mode', 'dynamic')).lower() == 'fixed'):
+            crop_size = int(getattr(config, 'detect_range_size', 0) or 0) & ~1
+            if crop_size > 0:
+                return crop_size, crop_size
         cap_w = int(getattr(config, 'uvc_width', 0) or 0)
         cap_h = int(getattr(config, 'uvc_height', 0) or 0)
         if cap_w > 0 and cap_h > 0:
