@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QSizePolic
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, FluentIcon,
     ComboBox, PushButton, SettingCard, BodyLabel, SegmentedWidget,
-    CaptionLabel, SwitchButton,
+    CaptionLabel, SwitchButton, LineEdit,
 )
 from ..components.slider_spin_card import SliderSpinCard
 from ..base_page import BasePage
@@ -159,14 +159,16 @@ class CapturePage(BasePage):
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
 
         self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto"])
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto", "ffmpeg"])
         self.uvcCaptureMethodCombo.setMinimumWidth(140)
         self.uvcCaptureMethodCard = SettingCard(
             FluentIcon.CAMERA,
             "UVC Capture Method",
             "msmf recommended for 1080p60 on Windows 10/11. If MJPEG "
             "negotiation fails despite the device working fine in other "
-            "DirectShow apps (e.g. OBS), try 'dshow' instead.",
+            "DirectShow apps (e.g. OBS), try 'dshow' instead. 'ffmpeg' uses "
+            "an external ffmpeg.exe subprocess instead of OpenCV — see the "
+            "FFmpeg options below.",
             self.uvcGroup
         )
         self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
@@ -239,6 +241,39 @@ class CapturePage(BasePage):
         )
         self.uvcVideoFormatCard.hBoxLayout.addWidget(self.uvcVideoFormatCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcVideoFormatCard.hBoxLayout.addSpacing(16)
+
+        # === FFmpeg mode options (only relevant/visible when Capture Method == 'ffmpeg') ===
+        self.uvcFfmpegPathEdit = LineEdit()
+        self.uvcFfmpegPathEdit.setPlaceholderText("auto-detect (bundled ffmpeg/ or system PATH)")
+        self.uvcFfmpegPathEdit.setMinimumWidth(260)
+        self.uvcFfmpegPathCard = SettingCard(
+            FluentIcon.FOLDER,
+            "FFmpeg Path",
+            "Optional override — path to ffmpeg.exe. Leave blank to "
+            "auto-detect (ffmpeg/ffmpeg.exe next to Axiom, then system PATH). "
+            "Get an LGPL build from ffmpeg.org's build list if needed.",
+            self.uvcGroup
+        )
+        self.uvcFfmpegPathCard.hBoxLayout.addWidget(self.uvcFfmpegPathEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcFfmpegPathCard.hBoxLayout.addSpacing(16)
+        self.uvcFfmpegPathCard.setVisible(False)
+
+        self.uvcFfmpegCropModeCombo = ComboBox()
+        self.uvcFfmpegCropModeCombo.addItems(["Dynamic", "Fixed (centered)"])
+        self.uvcFfmpegCropModeCombo.setMinimumWidth(160)
+        self.uvcFfmpegCropModeCard = SettingCard(
+            FluentIcon.ZOOM_IN,
+            "FFmpeg Crop Mode",
+            "Dynamic: ffmpeg outputs the full frame, Axiom crops per-frame "
+            "(supports live Detection Range changes). Fixed: ffmpeg itself "
+            "crops a centered Detection-Range-sized square before sending it "
+            "— far less data over the pipe, but requires restarting capture "
+            "to follow a Detection Range change.",
+            self.uvcGroup
+        )
+        self.uvcFfmpegCropModeCard.hBoxLayout.addWidget(self.uvcFfmpegCropModeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcFfmpegCropModeCard.hBoxLayout.addSpacing(16)
+        self.uvcFfmpegCropModeCard.setVisible(False)
 
         self.uvcHwInfoLabel = BodyLabel("—")
         self.uvcQueryBtn = PushButton("Query")
@@ -493,6 +528,8 @@ class CapturePage(BasePage):
         self.uvcGroup.addSettingCard(self.uvcHeightCard)
         self.uvcGroup.addSettingCard(self.uvcFpsCard)
         self.uvcGroup.addSettingCard(self.uvcVideoFormatCard)
+        self.uvcGroup.addSettingCard(self.uvcFfmpegPathCard)
+        self.uvcGroup.addSettingCard(self.uvcFfmpegCropModeCard)
         self.uvcGroup.addSettingCard(self.uvcHwInfoCard)
         self.uvcGroup.addSettingCard(self.uvcRefreshResolutionCard)
         self.addContent(self.uvcGroup)
@@ -541,6 +578,8 @@ class CapturePage(BasePage):
         self.uvcFpsCombo.currentTextChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
         self.uvcVideoFormatCombo.currentTextChanged.connect(self._onUvcVideoFormatChanged)
+        self.uvcFfmpegPathEdit.editingFinished.connect(self._onUvcFfmpegPathChanged)
+        self.uvcFfmpegCropModeCombo.currentTextChanged.connect(self._onUvcFfmpegCropModeChanged)
         self.uvcQueryBtn.clicked.connect(self._queryUvcHwInfo)
         self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
@@ -587,8 +626,15 @@ class CapturePage(BasePage):
             self.uvcDeviceCombo.clear()
             self.uvcDeviceCombo.addItem(f"Device {_device_index}", userData=_device_index)
             self.uvcDeviceCombo.blockSignals(False)
-            self.uvcCaptureMethodCombo.setCurrentText(str(getattr(self._config, 'uvc_capture_method', 'msmf')))
+            _capture_method = str(getattr(self._config, 'uvc_capture_method', 'msmf'))
+            self.uvcCaptureMethodCombo.setCurrentText(_capture_method)
             self.uvcVideoFormatCombo.setCurrentText(str(getattr(self._config, 'uvc_video_format', 'mjpeg')).upper())
+            self.uvcFfmpegPathEdit.setText(str(getattr(self._config, 'uvc_ffmpeg_path', '') or ''))
+            self.uvcFfmpegCropModeCombo.setCurrentText(
+                'Fixed (centered)' if str(getattr(self._config, 'uvc_ffmpeg_crop_mode', 'dynamic')).lower() == 'fixed'
+                else 'Dynamic'
+            )
+            self._updateFfmpegControlsVisibility(_capture_method)
             resolution_text = (
                 f"{getattr(self._config, 'uvc_width', self._config.width)}"
                 f"x{getattr(self._config, 'uvc_height', self._config.height)}")
@@ -983,6 +1029,7 @@ class CapturePage(BasePage):
     def _onUvcCaptureMethodChanged(self, text):
         if self._config:
             self._config.uvc_capture_method = str(text)
+        self._updateFfmpegControlsVisibility(text)
         self._startUvcProbeDelayed()
         QTimer.singleShot(700, self._queryUvcHwInfo)
 
@@ -991,6 +1038,19 @@ class CapturePage(BasePage):
             self._config.uvc_video_format = str(text).strip().lower()
         self._startUvcProbeDelayed()
         QTimer.singleShot(700, self._queryUvcHwInfo)
+
+    def _onUvcFfmpegPathChanged(self):
+        if self._config:
+            self._config.uvc_ffmpeg_path = str(self.uvcFfmpegPathEdit.text()).strip()
+
+    def _onUvcFfmpegCropModeChanged(self, text):
+        if self._config:
+            self._config.uvc_ffmpeg_crop_mode = 'fixed' if text.strip().lower().startswith('fixed') else 'dynamic'
+
+    def _updateFfmpegControlsVisibility(self, capture_method_text: str):
+        is_ffmpeg = str(capture_method_text).strip().lower() == 'ffmpeg'
+        self.uvcFfmpegPathCard.setVisible(is_ffmpeg)
+        self.uvcFfmpegCropModeCard.setVisible(is_ffmpeg)
 
     def _onUvcPreviewChanged(self, checked):
         if self._config:
@@ -1224,7 +1284,9 @@ class CapturePage(BasePage):
         self.uvcCaptureMethodCard.contentLabel.setText(
             "msmf recommended for 1080p60 on Windows 10/11. If MJPEG "
             "negotiation fails despite the device working fine in other "
-            "DirectShow apps (e.g. OBS), try 'dshow' instead."
+            "DirectShow apps (e.g. OBS), try 'dshow' instead. 'ffmpeg' uses "
+            "an external ffmpeg.exe subprocess instead of OpenCV — see the "
+            "FFmpeg options below."
         )
         self.uvcDeviceCard.titleLabel.setText("Device")
         self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
@@ -1238,6 +1300,20 @@ class CapturePage(BasePage):
             "MJPEG (compressed) recommended for 1080p60+; YUY2/NV12/YUV420P "
             "are raw and need much more USB bandwidth at the same "
             "resolution/FPS."
+        )
+        self.uvcFfmpegPathCard.titleLabel.setText("FFmpeg Path")
+        self.uvcFfmpegPathCard.contentLabel.setText(
+            "Optional override — path to ffmpeg.exe. Leave blank to "
+            "auto-detect (ffmpeg/ffmpeg.exe next to Axiom, then system PATH). "
+            "Get an LGPL build from ffmpeg.org's build list if needed."
+        )
+        self.uvcFfmpegCropModeCard.titleLabel.setText("FFmpeg Crop Mode")
+        self.uvcFfmpegCropModeCard.contentLabel.setText(
+            "Dynamic: ffmpeg outputs the full frame, Axiom crops per-frame "
+            "(supports live Detection Range changes). Fixed: ffmpeg itself "
+            "crops a centered Detection-Range-sized square before sending it "
+            "— far less data over the pipe, but requires restarting capture "
+            "to follow a Detection Range change."
         )
         self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
         self.uvcHwInfoCard.contentLabel.setText("Actual values reported by the driver")

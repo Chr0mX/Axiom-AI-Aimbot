@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import colorsys
 import logging
+import os
 import re
+import shutil
+import subprocess
 import threading
 import time
 
@@ -199,7 +202,8 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
 _UVC_WINDOW_NAME = "Axiom UVC Preview"
 
 
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str]:
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, str, str, int]:
+    ffmpeg_crop_mode = str(getattr(config, 'uvc_ffmpeg_crop_mode', 'dynamic')).lower()
     return (
         int(getattr(config, 'uvc_device_index', 0)),
         int(getattr(config, 'uvc_width', 0)),
@@ -209,6 +213,14 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
         str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
         str(getattr(config, 'uvc_video_format', 'mjpeg')).lower(),
+        str(getattr(config, 'uvc_ffmpeg_path', '') or ''),
+        ffmpeg_crop_mode,
+        # Only fixed-crop mode bakes detect_range_size into the running
+        # ffmpeg subprocess (as its crop size) — include it in the signature
+        # only then, so a live Detection Range change while in fixed mode
+        # triggers the same hot-swap reinit as any other UVC setting change.
+        # 0 in dynamic mode keeps this a constant (no spurious reinits).
+        int(getattr(config, 'detect_range_size', 0) or 0) if ffmpeg_crop_mode == 'fixed' else 0,
     )
 
 
@@ -1440,6 +1452,83 @@ def list_uvc_device_names() -> list[str]:
     return _list_pygrabber_device_names()
 
 
+def _resolve_dshow_device_name(config: Config, device_index: int) -> str:
+    """Resolve a DirectShow device *name* string from config.
+
+    ffmpeg's dshow demuxer needs ``video=<device name>``, unlike OpenCV's
+    integer device index — names are enumerated via pygrabber (same as the
+    Device combo box) and indexed the same way ``uvc_device_index`` selects
+    among them elsewhere.
+    """
+
+    devices = list_uvc_device_names()
+    if not devices:
+        raise RuntimeError(
+            'No DirectShow video devices found via pygrabber enumeration. '
+            'The ffmpeg capture method needs a resolvable device name — '
+            'pick a device from the Capture page\'s Device dropdown.'
+        )
+    index = int(device_index)
+    if index < 0 or index >= len(devices):
+        raise RuntimeError(
+            f'uvc_device_index={index} out of range for {len(devices)} '
+            f'enumerated device(s): {devices}.'
+        )
+    return devices[index]
+
+
+def _resolve_ffmpeg_path(config: Config) -> str:
+    """Locate an ffmpeg executable for the 'ffmpeg' capture method.
+
+    Checked in order: an explicit ``uvc_ffmpeg_path`` override, a bundled
+    copy at ``<project root>/ffmpeg/ffmpeg.exe`` (drop a build there,
+    e.g. from https://www.gyan.dev/ffmpeg/builds/ — an LGPL build, not GPL,
+    to avoid extra licensing obligations), then the system PATH.
+    """
+
+    override = str(getattr(config, 'uvc_ffmpeg_path', '') or '').strip()
+    if override:
+        return override
+
+    # screen_capture.py lives at <project root>/src/core/screen_capture.py
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    bundled = os.path.join(project_root, 'ffmpeg', 'ffmpeg.exe')
+    if os.path.isfile(bundled):
+        return bundled
+
+    found = shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
+    if found:
+        return found
+
+    raise RuntimeError(
+        'ffmpeg executable not found. Set "FFmpeg Path" in the Capture page, '
+        f'place ffmpeg.exe at "{bundled}", or add it to your system PATH. '
+        'An LGPL build (e.g. from https://www.gyan.dev/ffmpeg/builds/) is '
+        'sufficient — no bundled codecs required for raw capture.'
+    )
+
+
+def _read_exact(stream: Any, n: int) -> bytes | None:
+    """Read exactly *n* bytes from a subprocess pipe, or None on EOF/error.
+
+    A plain ``stream.read(n)`` on a pipe is not guaranteed to return all *n*
+    bytes in one call — short reads are normal, not an error — so this loops
+    until the full amount has been collected. Returns None as soon as a
+    read returns empty (the writing end closed/the process died), rather
+    than returning a truncated frame that would desync every frame after it.
+    """
+
+    chunks: list[bytes] = []
+    remaining = n
+    while remaining > 0:
+        chunk = stream.read(remaining)
+        if not chunk:
+            return None
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b''.join(chunks)
+
+
 def _crop_nv12(buffer: np.ndarray, luma_height: int, left: int, top: int, width: int, height: int) -> np.ndarray | None:
     """Crop a raw NV12 buffer (as returned by cv2 when CAP_PROP_CONVERT_RGB
     is disabled) to the given region, without decoding pixels outside it.
@@ -1484,6 +1573,11 @@ class UVCCapture:
 
         capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
         self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
+        self.is_ffmpeg = (capture_method == 'ffmpeg')
+
+        if self.is_ffmpeg:
+            self._init_ffmpeg(device_index, width, height, fps)
+            return
 
         backend_map = {
             'dshow': cv2.CAP_DSHOW,
@@ -1647,6 +1741,207 @@ class UVCCapture:
             )
             self._preview_thread.start()
 
+    def _init_ffmpeg(self, device_index: int, width: int, height: int, fps: int) -> None:
+        """Open a UVC device via an external ffmpeg.exe subprocess instead of
+        cv2.VideoCapture, piping raw frames back over stdout.
+
+        This driver has repeatedly been shown to lie about negotiated state
+        through OpenCV's videoio layer (isOpened(), FOURCC acceptance,
+        CAP_PROP_CONVERT_RGB) — ffmpeg's own dshow demuxer negotiates
+        directly and, unlike cv2, fails loudly (non-zero exit, stderr
+        message) rather than silently substituting something else when a
+        requested (resolution, format, fps) combination isn't actually
+        supported. No PyAV/Cython involved — this is a plain OS process
+        with a pipe, sidestepping the exact packaging conflict that made
+        the earlier PyAV capture method unreliable.
+        """
+
+        if width <= 0 or height <= 0:
+            raise RuntimeError(
+                'ffmpeg capture method requires an explicit UVC resolution '
+                '(uvc_width/uvc_height) — it cannot auto-negotiate a size the '
+                'way cv2.VideoCapture sometimes does.'
+            )
+
+        ffmpeg_path = _resolve_ffmpeg_path(self.config)
+        device_name = _resolve_dshow_device_name(self.config, device_index)
+        video_format = str(getattr(self.config, 'uvc_video_format', 'mjpeg')).lower()
+        crop_mode = str(getattr(self.config, 'uvc_ffmpeg_crop_mode', 'dynamic')).lower()
+
+        input_args: list[str] = []
+        if video_format == 'mjpeg':
+            input_args += ['-vcodec', 'mjpeg']
+        else:
+            pixel_format_map = {'nv12': 'nv12', 'yuy2': 'yuyv422', 'yuv420p': 'yuv420p'}
+            input_args += ['-pixel_format', pixel_format_map.get(video_format, 'nv12')]
+        input_args += ['-video_size', f'{width}x{height}']
+        if fps > 0:
+            input_args += ['-framerate', str(fps)]
+
+        # Fixed-crop mode: ffmpeg itself crops a centered detect_range_size
+        # square and only that much data ever crosses the subprocess pipe.
+        # Only sensible centered — matches fov_follow_mouse already being
+        # forced off whenever screenshot_method == 'uvc' (capture_page.py's
+        # _applyScreenshotMethodEffect), so the crosshair is always the
+        # frame center already. get_capture_dimensions() (ai_loop_utils.py)
+        # is taught to report (crop_size, crop_size) as the "capture size"
+        # in this mode, so calculate_detection_region()'s own region math
+        # naturally resolves to a full-frame no-op crop against the
+        # already-cropped stream — no special-casing needed in grab().
+        crop_size = 0
+        if crop_mode == 'fixed':
+            crop_size = int(getattr(self.config, 'detect_range_size', 0) or 0)
+            if crop_size <= 0 or crop_size > min(width, height):
+                raise RuntimeError(
+                    f'ffmpeg fixed-crop mode needs a valid Detection Range '
+                    f'(got {crop_size}) no larger than the capture resolution '
+                    f'({width}x{height}).'
+                )
+            crop_size &= ~1  # even alignment, consistent with the rest of this codebase's crop math
+            out_width, out_height = crop_size, crop_size
+            vf = f'crop={crop_size}:{crop_size}:(iw-{crop_size})/2:(ih-{crop_size})/2,format=bgr24'
+        else:
+            out_width, out_height = width, height
+            vf = 'format=bgr24'
+
+        cmd = [
+            ffmpeg_path, '-hide_banner', '-loglevel', 'warning',
+            '-f', 'dshow', *input_args, '-i', f'video={device_name}',
+            '-vf', vf,
+            '-f', 'rawvideo', '-pix_fmt', 'bgr24', '-an', 'pipe:1',
+        ]
+
+        self.cap = None
+        creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        try:
+            self._ffmpeg_proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                creationflags=creationflags,
+            )
+        except Exception as exc:
+            raise RuntimeError(f'Failed to launch ffmpeg ("{ffmpeg_path}"): {exc}') from exc
+
+        # Give the process a moment to fail fast on a bad device name/format
+        # combination — ffmpeg's dshow demuxer errors out (rather than
+        # silently misnegotiating) when the exact requested combination
+        # isn't one the driver actually advertises, unlike cv2.
+        time.sleep(1.0)
+        if self._ffmpeg_proc.poll() is not None:
+            stderr_output = ''
+            try:
+                stderr_output = self._ffmpeg_proc.stderr.read().decode('utf-8', errors='replace')
+            except Exception:
+                pass
+            raise RuntimeError(
+                f'ffmpeg exited immediately (code {self._ffmpeg_proc.returncode}) — '
+                f'the requested device/format/resolution/fps combination was '
+                f'likely rejected. stderr:\n{stderr_output.strip()}'
+            )
+
+        self.preview_width = out_width
+        self.preview_height = out_height
+        self.preview_fps = max(1, fps)
+        self.config.source_nominal_fps = float(self.preview_fps)
+        self.config.uvc_actual_width = self.preview_width
+        self.config.uvc_actual_height = self.preview_height
+        self.config.uvc_actual_fps = float(self.preview_fps)
+        self.is_expected_format = True  # ffmpeg fails loudly rather than silently misnegotiating
+        self.is_mjpeg = self.is_expected_format  # kept for back-compat
+        self.is_raw_nv12 = False  # ffmpeg always outputs plain bgr24, not raw NV12
+
+        logging.getLogger(__name__).info(
+            "[UVC][FFmpeg] Opened '%s' via ffmpeg subprocess at %dx%d @ %d fps "
+            "(format=%s, crop_mode=%s).",
+            device_name, out_width, out_height, self.preview_fps, video_format.upper(), crop_mode,
+        )
+
+        self._latest_frame_lock = threading.Lock()
+        self._latest_frame_ref: list = [None]
+        self._region_ref: list = [None]
+        self._reader_stop = threading.Event()
+        self._reader_thread = threading.Thread(
+            target=self._reader_worker_ffmpeg, name='UVCReaderFFmpeg', daemon=True
+        )
+        self._reader_thread.start()
+        self._stderr_thread = threading.Thread(
+            target=self._stderr_drain_worker_ffmpeg, name='UVCFFmpegStderr', daemon=True
+        )
+        self._stderr_thread.start()
+
+        self._preview_thread: _UVCPreviewThread | None = None
+        if self.show_window:
+            self._preview_thread = _UVCPreviewThread(
+                window_name=self.window_name,
+                scale_mode=self.preview_scale_mode,
+                frame_lock=self._latest_frame_lock,
+                frame_ref=self._latest_frame_ref,
+                stop_event=self._reader_stop,
+                draw_overlay_fn=self._draw_overlay,
+                region_ref=self._region_ref,
+                target_fps=self.preview_fps,
+                preview_width=self.preview_width,
+                preview_height=self.preview_height,
+                config=self.config,
+                show_cv2_window=False,
+            )
+            self._preview_thread.start()
+
+    def _reader_worker_ffmpeg(self) -> None:
+        frame_size = self.preview_width * self.preview_height * 3
+        _fps_count = 0
+        _fps_t0 = time.perf_counter()
+        _measurement_windows = 0
+        _warned_broken_pipe = False
+        while not self._reader_stop.is_set():
+            raw = _read_exact(self._ffmpeg_proc.stdout, frame_size)
+            if raw is None:
+                if not self._reader_stop.is_set() and not _warned_broken_pipe:
+                    _warned_broken_pipe = True
+                    logging.getLogger(__name__).error(
+                        "[UVC][FFmpeg] subprocess stdout closed unexpectedly — "
+                        "the ffmpeg process likely crashed or the device was "
+                        "disconnected. No more frames will arrive until UVC "
+                        "reinitializes."
+                    )
+                time.sleep(0.05)
+                continue
+            frame = np.frombuffer(raw, dtype=np.uint8).reshape((self.preview_height, self.preview_width, 3))
+            with self._latest_frame_lock:
+                self._latest_frame_ref[0] = frame
+
+            _fps_count += 1
+            _now = time.perf_counter()
+            _elapsed = _now - _fps_t0
+            if _elapsed >= 1.0:
+                self.config.source_nominal_fps = _fps_count / _elapsed
+                _fps_count = 0
+                _fps_t0 = _now
+
+                _measurement_windows += 1
+                if _measurement_windows == 2 and self._target_fps > 0:
+                    shortfall_ratio = self.config.source_nominal_fps / self._target_fps
+                    if shortfall_ratio < 0.8:
+                        logging.getLogger(__name__).warning(
+                            "[UVC][FFmpeg] Measured capture rate %.1f fps is well "
+                            "below the configured %d fps. Try a lower resolution/fps, "
+                            "a different USB port/cable, or the dynamic (not fixed) "
+                            "crop mode.",
+                            self.config.source_nominal_fps, self._target_fps,
+                        )
+
+    def _stderr_drain_worker_ffmpeg(self) -> None:
+        # Must be continuously drained or the OS pipe buffer fills and blocks
+        # ffmpeg's own writes, stalling the whole subprocess.
+        try:
+            for line in iter(self._ffmpeg_proc.stderr.readline, b''):
+                if self._reader_stop.is_set():
+                    break
+                text = line.decode('utf-8', errors='replace').strip()
+                if text:
+                    logging.getLogger(__name__).debug("[UVC][FFmpeg] %s", text)
+        except Exception:
+            pass
+
     def _reader_worker(self) -> None:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
@@ -1805,7 +2100,28 @@ class UVCCapture:
             self._preview_thread.join(timeout=1.0)
         if self._reader_thread.is_alive():
             self._reader_thread.join(timeout=1.0)
-        if self.cap is not None:
+        if getattr(self, 'is_ffmpeg', False):
+            proc = getattr(self, '_ffmpeg_proc', None)
+            if proc is not None:
+                try:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2.0)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=2.0)
+                except Exception:
+                    pass
+                for pipe in (proc.stdout, proc.stderr):
+                    try:
+                        if pipe is not None:
+                            pipe.close()
+                    except Exception:
+                        pass
+            stderr_thread = getattr(self, '_stderr_thread', None)
+            if stderr_thread is not None and stderr_thread.is_alive():
+                stderr_thread.join(timeout=1.0)
+        elif self.cap is not None:
             try:
                 self.cap.release()
             except Exception:
