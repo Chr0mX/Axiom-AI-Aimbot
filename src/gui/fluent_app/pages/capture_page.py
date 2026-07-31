@@ -250,7 +250,7 @@ class CapturePage(BasePage):
             FluentIcon.FOLDER,
             "FFmpeg Path",
             "Optional override — path to ffmpeg.exe. Leave blank to "
-            "auto-detect (ffmpeg/ffmpeg.exe next to Axiom, then system PATH). "
+            "auto-detect (src/ffmpeg/ffmpeg.exe, then system PATH). "
             "Get an LGPL build from ffmpeg.org's build list if needed.",
             self.uvcGroup
         )
@@ -1304,7 +1304,7 @@ class CapturePage(BasePage):
         self.uvcFfmpegPathCard.titleLabel.setText("FFmpeg Path")
         self.uvcFfmpegPathCard.contentLabel.setText(
             "Optional override — path to ffmpeg.exe. Leave blank to "
-            "auto-detect (ffmpeg/ffmpeg.exe next to Axiom, then system PATH). "
+            "auto-detect (src/ffmpeg/ffmpeg.exe, then system PATH). "
             "Get an LGPL build from ffmpeg.org's build list if needed."
         )
         self.uvcFfmpegCropModeCard.titleLabel.setText("FFmpeg Crop Mode")
