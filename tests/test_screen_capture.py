@@ -183,6 +183,194 @@ def test_reinitialize_if_method_changed_uses_detected_active_method(monkeypatch)
     assert active == 'ndi'
 
 
+def test_capture_backend_is_stale_true_after_timeout():
+    from core import screen_capture as sc
+    import time
+
+    backend = SimpleNamespace(_last_frame_perf_time=time.perf_counter() - (sc._CAPTURE_STALE_TIMEOUT_SECONDS + 1.0))
+    assert sc._capture_backend_is_stale(backend) is True
+
+
+def test_capture_backend_is_stale_false_when_recent():
+    from core import screen_capture as sc
+    import time
+
+    backend = SimpleNamespace(_last_frame_perf_time=time.perf_counter())
+    assert sc._capture_backend_is_stale(backend) is False
+
+
+def test_capture_backend_is_stale_false_when_untracked():
+    from core import screen_capture as sc
+
+    # mss/dxcam and anything else without the attribute is never "stale" —
+    # only uvc/udp reader threads publish _last_frame_perf_time.
+    assert sc._capture_backend_is_stale(SimpleNamespace()) is False
+
+
+def _uvc_test_config(**overrides):
+    base = dict(
+        screenshot_method='uvc', uvc_device_index=0, uvc_width=1920, uvc_height=1080,
+        uvc_fps=60, uvc_show_window=False, uvc_capture_method='dshow',
+        uvc_preview_scale_mode='scale_to_fit', uvc_video_format='mjpeg',
+        uvc_ffmpeg_path='', uvc_crop_mode='dynamic', detect_range_size=320,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_reinitialize_if_method_changed_recovers_stalled_uvc_backend(monkeypatch):
+    """A UVC backend that opened fine but has gone silent at runtime (device
+    unplugged, driver hiccup) must be torn down and recreated automatically —
+    this is the fix for 'switching to uvc/udp after it fails falls back and
+    never tries to reconnect, requiring a relaunch'."""
+    from core import screen_capture as sc
+    import time
+
+    config = _uvc_test_config()
+    stale_backend = object.__new__(sc.UVCCapture)
+    stale_backend.config_signature = sc._uvc_signature(config)
+    stale_backend._last_frame_perf_time = time.perf_counter() - (sc._CAPTURE_STALE_TIMEOUT_SECONDS + 1.0)
+
+    fresh_backend = object()
+    calls = {'count': 0}
+
+    def fake_initialize(cfg):
+        calls['count'] += 1
+        return fresh_backend
+
+    monkeypatch.setattr(sc, 'initialize_screen_capture', fake_initialize)
+    monkeypatch.setattr(sc, '_cleanup_capture', lambda backend: None)
+
+    backend, active = sc.reinitialize_if_method_changed(config, stale_backend, 'uvc')
+
+    assert calls['count'] == 1
+    assert backend is fresh_backend
+    assert active == 'uvc'
+
+
+def test_reinitialize_if_method_changed_leaves_healthy_uvc_backend_alone(monkeypatch):
+    from core import screen_capture as sc
+    import time
+
+    config = _uvc_test_config()
+    healthy_backend = object.__new__(sc.UVCCapture)
+    healthy_backend.config_signature = sc._uvc_signature(config)
+    healthy_backend._last_frame_perf_time = time.perf_counter()
+
+    calls = {'count': 0}
+    monkeypatch.setattr(sc, 'initialize_screen_capture', lambda cfg: calls.__setitem__('count', calls['count'] + 1) or object())
+
+    backend, active = sc.reinitialize_if_method_changed(config, healthy_backend, 'uvc')
+
+    assert calls['count'] == 0
+    assert backend is healthy_backend
+    assert active == 'uvc'
+
+
+def test_reinitialize_if_method_changed_throttles_repeated_stale_recovery(monkeypatch):
+    """Even if the recreated backend goes stale again immediately (device
+    still gone), reinit attempts must respect the retry interval instead of
+    hammering the driver every 0.5s capture-worker tick."""
+    from core import screen_capture as sc
+    import time
+
+    config = _uvc_test_config()
+    stale_backend = object.__new__(sc.UVCCapture)
+    stale_backend.config_signature = sc._uvc_signature(config)
+    stale_backend._last_frame_perf_time = time.perf_counter() - (sc._CAPTURE_STALE_TIMEOUT_SECONDS + 1.0)
+
+    calls = {'count': 0}
+
+    def fake_initialize(cfg):
+        calls['count'] += 1
+        return object()
+
+    monkeypatch.setattr(sc, 'initialize_screen_capture', fake_initialize)
+    monkeypatch.setattr(sc, '_cleanup_capture', lambda backend: None)
+
+    sc.reinitialize_if_method_changed(config, stale_backend, 'uvc')
+    # Immediately call again with the same (still-stale) backend reference —
+    # must be throttled, not re-attempted.
+    sc.reinitialize_if_method_changed(config, stale_backend, 'uvc')
+
+    assert calls['count'] == 1
+
+
+def test_reinitialize_if_method_changed_recovers_stalled_udp_backend(monkeypatch):
+    from core import screen_capture as sc
+    import time
+
+    config = SimpleNamespace(
+        screenshot_method='udp', udp_bind_ip='0.0.0.0', udp_bind_port=5600,
+        udp_recv_buffer_size=65536, udp_frame_timeout=1.0, udp_force_restart=False,
+    )
+    stale_backend = object.__new__(sc.UdpCapture)
+    stale_backend.config_signature = sc._udp_signature(config)
+    stale_backend._last_frame_perf_time = time.perf_counter() - (sc._CAPTURE_STALE_TIMEOUT_SECONDS + 1.0)
+
+    fresh_backend = object()
+    calls = {'count': 0}
+
+    def fake_initialize(cfg):
+        calls['count'] += 1
+        return fresh_backend
+
+    monkeypatch.setattr(sc, 'initialize_screen_capture', fake_initialize)
+    monkeypatch.setattr(sc, '_cleanup_capture', lambda backend: None)
+
+    backend, active = sc.reinitialize_if_method_changed(config, stale_backend, 'udp')
+
+    assert calls['count'] == 1
+    assert backend is fresh_backend
+    assert active == 'udp'
+
+
+def test_uvc_grab_fixed_crop_mode_ignores_live_region():
+    """Fixed crop mode (uvc_crop_mode='fixed', dshow/msmf path) must use the
+    rect frozen at capture-start, not whatever region grab() is called
+    with each frame — mirrors ffmpeg mode's frozen -vf crop, generalized to
+    the in-process cv2 capture path."""
+    from core import screen_capture as sc
+    import threading
+
+    capture = object.__new__(sc.UVCCapture)
+    capture._latest_frame_lock = threading.Lock()
+    capture._latest_frame_ref = [np.zeros((100, 100, 3), dtype=np.uint8)]
+    capture._region_ref = [None]
+    capture.is_raw_nv12 = False
+    capture.preview_width = 100
+    capture.preview_height = 100
+    capture._fixed_region = {'left': 20, 'top': 20, 'width': 40, 'height': 40}
+
+    live_region = {'left': 0, 'top': 0, 'width': 10, 'height': 10}
+    result = capture.grab(region=live_region)
+
+    assert result.shape == (40, 40, 4)
+    # The preview overlay must be told the rect actually used (the frozen
+    # one), not the live one it was called with.
+    assert capture._region_ref[0] == capture._fixed_region
+
+
+def test_uvc_grab_dynamic_mode_uses_live_region():
+    from core import screen_capture as sc
+    import threading
+
+    capture = object.__new__(sc.UVCCapture)
+    capture._latest_frame_lock = threading.Lock()
+    capture._latest_frame_ref = [np.zeros((100, 100, 3), dtype=np.uint8)]
+    capture._region_ref = [None]
+    capture.is_raw_nv12 = False
+    capture.preview_width = 100
+    capture.preview_height = 100
+    capture._fixed_region = None  # dynamic mode
+
+    live_region = {'left': 0, 'top': 0, 'width': 10, 'height': 10}
+    result = capture.grab(region=live_region)
+
+    assert result.shape == (10, 10, 4)
+    assert capture._region_ref[0] == live_region
+
+
 def test_wait_for_receiver_connection_succeeds_after_connect(monkeypatch):
     from core import screen_capture as sc
 
