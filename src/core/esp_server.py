@@ -328,6 +328,15 @@ def _accept_loop(port: int):
             # _ws_listener was concurrently set to None by stop() mid-iteration.
             break
         try:
+            # Every broadcast frame is a small, latency-sensitive write —
+            # Nagle's algorithm (on by default) can hold each one back up to
+            # ~40ms waiting to coalesce with more data or an ACK. That's
+            # invisible to the client's own draw-loop FPS counter but reads
+            # as overlay lag, so disable it for this connection.
+            conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+        try:
             if _ws_handshake(conn):
                 with _clients_lock:
                     _clients.add(conn)
