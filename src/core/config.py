@@ -49,7 +49,7 @@ _FIELD_MAP = {
     'uvc_capture_method':         'capture.uvc.capture_method',
     'uvc_video_format':           'capture.uvc.video_format',
     'uvc_ffmpeg_path':            'capture.uvc.ffmpeg_path',
-    'uvc_ffmpeg_crop_mode':       'capture.uvc.ffmpeg_crop_mode',
+    'uvc_crop_mode':              'capture.uvc.crop_mode',
     'ndi_source_name':            'capture.ndi.source_name',
     'ndi_bandwidth':              'capture.ndi.bandwidth',
     'udp_bind_ip':                'capture.udp.bind_ip',
@@ -272,20 +272,25 @@ class Config:
         # Requested pixel/codec format: 'mjpeg' (compressed, highest FPS
         # headroom over USB), 'yuy2' or 'nv12' (raw, uncompressed).
         self.uvc_video_format: str = "mjpeg"
-        # 'ffmpeg' capture method (external ffmpeg.exe subprocess, piping raw
-        # frames back over stdout — bypasses cv2/DirectShow's videoio layer
-        # entirely) settings:
-        #   uvc_ffmpeg_path: explicit path to ffmpeg.exe. Empty = auto-detect
-        #     (bundled location, then system PATH).
-        #   uvc_ffmpeg_crop_mode: 'dynamic' = ffmpeg outputs the full negotiated
-        #     frame, Axiom crops per-frame in Python (same as every other
-        #     backend — supports live Detection Range changes). 'fixed' =
-        #     ffmpeg itself crops+outputs a centered detect_range_size square
-        #     (far less data over the subprocess pipe, but the crop can't move
-        #     without restarting the subprocess, and only makes sense centered
-        #     — matches FOV-follow-mouse already being forced off for UVC).
+        # uvc_crop_mode applies to every uvc_capture_method:
+        #   'dynamic' = the full negotiated frame is captured, Axiom crops
+        #     per-frame to the live Detection Range (supports live Detection
+        #     Range changes without restarting capture).
+        #   'fixed' = the crop rectangle is computed once, centered, at
+        #     capture-start (only makes sense centered — matches
+        #     FOV-follow-mouse already being forced off for UVC) and reused
+        #     every frame; a live Detection Range change needs a capture
+        #     restart to take effect. For 'ffmpeg', the crop itself also
+        #     happens inside the ffmpeg subprocess before the frame is piped
+        #     back — far less data crosses the subprocess pipe. For 'dshow'/
+        #     'msmf' (in-process cv2 capture, no pipe), this only freezes
+        #     which region grab() slices — no measurable throughput/CPU
+        #     difference from 'dynamic', since the crop already happens
+        #     in-process either way.
+        # uvc_ffmpeg_path: explicit path to ffmpeg.exe (ffmpeg method only).
+        #   Empty = auto-detect (bundled location, then system PATH).
         self.uvc_ffmpeg_path: str = ""
-        self.uvc_ffmpeg_crop_mode: str = "dynamic"
+        self.uvc_crop_mode: str = "dynamic"
         self.uvc_show_window: bool = True
         self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.uvc_always_on_top: bool = True
@@ -837,12 +842,12 @@ def _validate_screenshot_method(config: Config) -> None:
     valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi', 'udp')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
-    if getattr(config, 'uvc_capture_method', 'dshow') not in ('auto', 'dshow', 'msmf', 'any', 'ffmpeg'):
+    if getattr(config, 'uvc_capture_method', 'dshow') not in ('dshow', 'msmf', 'any', 'ffmpeg'):
         config.uvc_capture_method = 'dshow'
     if getattr(config, 'uvc_video_format', 'mjpeg') not in ('mjpeg', 'yuy2', 'nv12', 'yuv420p'):
         config.uvc_video_format = 'mjpeg'
-    if getattr(config, 'uvc_ffmpeg_crop_mode', 'dynamic') not in ('dynamic', 'fixed'):
-        config.uvc_ffmpeg_crop_mode = 'dynamic'
+    if getattr(config, 'uvc_crop_mode', 'dynamic') not in ('dynamic', 'fixed'):
+        config.uvc_crop_mode = 'dynamic'
     if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (
         'scale_to_fit', 'scale_to_canvas', 'fit_to_screen'
     ):
