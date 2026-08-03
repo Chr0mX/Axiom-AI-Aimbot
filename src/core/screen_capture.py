@@ -1480,11 +1480,10 @@ def _resolve_dshow_device_name(config: Config, device_index: int) -> str:
 def _resolve_ffmpeg_path(config: Config) -> str:
     """Locate an ffmpeg executable for the 'ffmpeg' capture method.
 
-    Checked in order: an explicit ``uvc_ffmpeg_path`` override, then two
-    bundled locations (``src/ffmpeg/ffmpeg.exe`` — the convention actually
-    used for the vendored copy in this repo — and ``<project root>/ffmpeg/
-    ffmpeg.exe`` as a fallback for anyone dropping their own build at the
-    project root instead), then the system PATH.
+    Checked in order: an explicit ``uvc_ffmpeg_path`` override, a bundled
+    copy at ``<project root>/ffmpeg/ffmpeg.exe`` (drop a build there,
+    e.g. from https://www.gyan.dev/ffmpeg/builds/ — an LGPL build, not GPL,
+    to avoid extra licensing obligations), then the system PATH.
     """
 
     override = str(getattr(config, 'uvc_ffmpeg_path', '') or '').strip()
@@ -1492,15 +1491,10 @@ def _resolve_ffmpeg_path(config: Config) -> str:
         return override
 
     # screen_capture.py lives at <project root>/src/core/screen_capture.py
-    src_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    project_root = os.path.dirname(src_dir)
-    candidates = [
-        os.path.join(src_dir, 'ffmpeg', 'ffmpeg.exe'),
-        os.path.join(project_root, 'ffmpeg', 'ffmpeg.exe'),
-    ]
-    for candidate in candidates:
-        if os.path.isfile(candidate):
-            return candidate
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    bundled = os.path.join(project_root, 'ffmpeg', 'ffmpeg.exe')
+    if os.path.isfile(bundled):
+        return bundled
 
     found = shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
     if found:
@@ -1508,7 +1502,7 @@ def _resolve_ffmpeg_path(config: Config) -> str:
 
     raise RuntimeError(
         'ffmpeg executable not found. Set "FFmpeg Path" in the Capture page, '
-        f'place ffmpeg.exe at "{candidates[0]}", or add it to your system PATH. '
+        f'place ffmpeg.exe at "{bundled}", or add it to your system PATH. '
         'An LGPL build (e.g. from https://www.gyan.dev/ffmpeg/builds/) is '
         'sufficient — no bundled codecs required for raw capture.'
     )
