@@ -1052,6 +1052,11 @@ class CapturePage(BasePage):
     def _onUvcCropModeChanged(self, text):
         if self._config:
             self._config.uvc_crop_mode = 'fixed' if text.strip().lower().startswith('fixed') else 'dynamic'
+        # Crop mode is part of _uvc_signature, so this triggers a UVC
+        # backend reinit on the capture worker thread (within ~0.5s) that
+        # republishes uvc_actual_*. Delay the readout refresh past that so
+        # it doesn't just re-show the stale pre-change value.
+        QTimer.singleShot(700, self._queryUvcHwInfo)
 
     def _updateFfmpegControlsVisibility(self, capture_method_text: str):
         # uvcCropModeCard applies to every capture method and stays visible;
@@ -1133,6 +1138,23 @@ class CapturePage(BasePage):
             self.uvcHwInfoLabel.setText("—  (device not available)")
             return
         fps_str = f"{fps:.1f}" if fps > 0 else "?"
+
+        # uvc_actual_width/height is always the raw negotiated capture
+        # resolution — in Fixed crop mode the AI pipeline actually only
+        # ever sees a smaller, centered square of it (see UVCCapture's
+        # _fixed_region / get_capture_dimensions()). The preview keeps
+        # showing the full frame too, so without this there was no visible
+        # confirmation anywhere that Fixed mode was doing anything.
+        crop_mode = str(getattr(self._config, 'uvc_crop_mode', 'dynamic')).lower()
+        if crop_mode == 'fixed':
+            crop_size = int(getattr(self._config, 'detect_range_size', 0) or 0) & ~1
+            crop_size = max(0, min(crop_size, w, h))
+            if crop_size > 0:
+                self.uvcHwInfoLabel.setText(
+                    f"{w} × {h} @ {fps_str} fps  →  {crop_size} × {crop_size} (fixed crop)"
+                )
+                return
+
         self.uvcHwInfoLabel.setText(f"{w} × {h} @ {fps_str} fps")
 
     def _refreshNdiHwInfo(self):
