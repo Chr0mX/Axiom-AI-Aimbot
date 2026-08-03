@@ -24,6 +24,13 @@ if TYPE_CHECKING:
 
 _WARNED_MESSAGES: set[str] = set()
 _CAPTURE_RETRY_INTERVAL_SECONDS = 5.0
+# uvc/udp reader threads run in the background and can go silent at runtime
+# (device unplugged, ffmpeg subprocess died, stream stopped) without the
+# backend object itself ever raising. _detect_active_capture_method() only
+# does an isinstance() check, so it keeps reporting the configured method as
+# "active" forever in that case — this timeout is how reinitialize_if_method_
+# changed() notices the backend is alive-but-dead and forces a fresh one.
+_CAPTURE_STALE_TIMEOUT_SECONDS = 3.0
 
 _JPEG_SOF_MARKERS = frozenset({
     0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7,
@@ -203,7 +210,7 @@ _UVC_WINDOW_NAME = "Axiom UVC Preview"
 
 
 def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, str, str, int]:
-    ffmpeg_crop_mode = str(getattr(config, 'uvc_ffmpeg_crop_mode', 'dynamic')).lower()
+    crop_mode = str(getattr(config, 'uvc_crop_mode', 'dynamic')).lower()
     return (
         int(getattr(config, 'uvc_device_index', 0)),
         int(getattr(config, 'uvc_width', 0)),
@@ -214,13 +221,14 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
         str(getattr(config, 'uvc_video_format', 'mjpeg')).lower(),
         str(getattr(config, 'uvc_ffmpeg_path', '') or ''),
-        ffmpeg_crop_mode,
-        # Only fixed-crop mode bakes detect_range_size into the running
-        # ffmpeg subprocess (as its crop size) — include it in the signature
-        # only then, so a live Detection Range change while in fixed mode
-        # triggers the same hot-swap reinit as any other UVC setting change.
-        # 0 in dynamic mode keeps this a constant (no spurious reinits).
-        int(getattr(config, 'detect_range_size', 0) or 0) if ffmpeg_crop_mode == 'fixed' else 0,
+        crop_mode,
+        # Only fixed-crop mode bakes detect_range_size into the frozen crop
+        # rect (ffmpeg subprocess arg, or UVCCapture's cached region) —
+        # include it in the signature only then, so a live Detection Range
+        # change while in fixed mode triggers the same hot-swap reinit as
+        # any other UVC setting change. 0 in dynamic mode keeps this a
+        # constant (no spurious reinits).
+        int(getattr(config, 'detect_range_size', 0) or 0) if crop_mode == 'fixed' else 0,
     )
 
 
@@ -1580,6 +1588,11 @@ class UVCCapture:
         capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
         self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
         self.is_ffmpeg = (capture_method == 'ffmpeg')
+        # Only the cv2 (dshow/msmf) path below ever sets this — ffmpeg mode
+        # does its own crop via -vf before Axiom ever sees a frame, so grab()
+        # just uses whatever region get_capture_dimensions()'s fixed-mode
+        # reporting already resolves to a no-op crop.
+        self._fixed_region: dict[str, int] | None = None
 
         if self.is_ffmpeg:
             self._init_ffmpeg(device_index, width, height, fps)
@@ -1589,7 +1602,6 @@ class UVCCapture:
             'dshow': cv2.CAP_DSHOW,
             'msmf': cv2.CAP_MSMF,
             'any': cv2.CAP_ANY,
-            'auto': cv2.CAP_ANY,
         }
         backend = backend_map.get(capture_method, cv2.CAP_DSHOW)
 
@@ -1640,6 +1652,26 @@ class UVCCapture:
         self.preview_width = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH) or width or 1))
         self.preview_height = max(1, int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or height or 1))
         self.preview_fps = max(1, int(self.cap.get(cv2.CAP_PROP_FPS) or fps or 1))
+
+        # --- Fixed (centered) crop mode ---
+        # Unlike ffmpeg mode, cv2's dshow/msmf capture is already in-process
+        # with no subprocess pipe, and grab() already crops before any
+        # colorspace conversion — so freezing the crop rect here doesn't
+        # change per-frame cost. The only real effect: a live Detection
+        # Range change no longer moves the crop until capture restarts,
+        # exactly like ffmpeg's fixed mode (see uvc_crop_mode's docstring
+        # in config.py). Preview still renders the full frame either way —
+        # only grab()'s AI-pipeline output is restricted to the fixed square.
+        if str(getattr(config, 'uvc_crop_mode', 'dynamic')).lower() == 'fixed':
+            crop_size = int(getattr(config, 'detect_range_size', 0) or 0) & ~1
+            crop_size = max(0, min(crop_size, self.preview_width, self.preview_height))
+            if crop_size > 0:
+                self._fixed_region = {
+                    'left': (self.preview_width - crop_size) // 2,
+                    'top': (self.preview_height - crop_size) // 2,
+                    'width': crop_size,
+                    'height': crop_size,
+                }
         # Seed with the driver-probed capability so the status panel shows
         # something before the first live measurement below completes; the
         # reader worker overwrites this every second with the actual received rate.
@@ -1720,6 +1752,11 @@ class UVCCapture:
         self._latest_frame_ref: list = [None]   # list[np.ndarray | None]
         self._region_ref: list = [None]         # list[dict | None]
         self._reader_stop = threading.Event()
+        # Seeded to "now" (not None) so a device that opens but never delivers
+        # a single frame within the stale timeout is caught by the same check
+        # as one that goes silent after initially working — see
+        # reinitialize_if_method_changed's staleness check.
+        self._last_frame_perf_time = time.perf_counter()
         self._reader_thread = threading.Thread(
             target=self._reader_worker, name='UVCReader', daemon=True
         )
@@ -1772,7 +1809,7 @@ class UVCCapture:
         ffmpeg_path = _resolve_ffmpeg_path(self.config)
         device_name = _resolve_dshow_device_name(self.config, device_index)
         video_format = str(getattr(self.config, 'uvc_video_format', 'mjpeg')).lower()
-        crop_mode = str(getattr(self.config, 'uvc_ffmpeg_crop_mode', 'dynamic')).lower()
+        crop_mode = str(getattr(self.config, 'uvc_crop_mode', 'dynamic')).lower()
 
         input_args: list[str] = []
         if video_format == 'mjpeg':
@@ -1865,6 +1902,9 @@ class UVCCapture:
         self._latest_frame_ref: list = [None]
         self._region_ref: list = [None]
         self._reader_stop = threading.Event()
+        # See the cv2 reader thread's identical field for why this is seeded
+        # to "now" rather than None.
+        self._last_frame_perf_time = time.perf_counter()
         self._reader_thread = threading.Thread(
             target=self._reader_worker_ffmpeg, name='UVCReaderFFmpeg', daemon=True
         )
@@ -1914,6 +1954,7 @@ class UVCCapture:
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((self.preview_height, self.preview_width, 3))
             with self._latest_frame_lock:
                 self._latest_frame_ref[0] = frame
+            self._last_frame_perf_time = time.perf_counter()
 
             _fps_count += 1
             _now = time.perf_counter()
@@ -1976,6 +2017,7 @@ class UVCCapture:
             if ok and frame is not None:
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
+                self._last_frame_perf_time = time.perf_counter()
 
                 _fps_count += 1
                 _now = time.perf_counter()
@@ -2049,9 +2091,13 @@ class UVCCapture:
         if frame_bgr is None:
             return None
 
+        # Fixed crop mode ignores the live (Detection-Range-derived) region
+        # in favor of the rect frozen at capture-start — see __init__.
+        effective_region = self._fixed_region if self._fixed_region is not None else region
+
         # Let the preview thread know the current detection region so its
         # overlay stays in sync without requiring an extra lock or callback.
-        self._region_ref[0] = region
+        self._region_ref[0] = effective_region
 
         if self.is_raw_nv12 and self._confirm_raw_nv12(frame_bgr):
             # Crop the raw NV12 buffer BEFORE converting to BGR, so the
@@ -2059,12 +2105,12 @@ class UVCCapture:
             # runs over the small detection-region crop instead of the
             # full negotiated resolution — see the CAP_PROP_CONVERT_RGB
             # setup in __init__ for why this buffer isn't BGR already.
-            if region is None:
+            if effective_region is None:
                 return cv2.cvtColor(frame_bgr, cv2.COLOR_YUV2BGRA_NV12)
-            left = max(0, int(region.get('left', 0)))
-            top = max(0, int(region.get('top', 0)))
-            width = max(0, int(region.get('width', self.preview_width)))
-            height = max(0, int(region.get('height', self.preview_height)))
+            left = max(0, int(effective_region.get('left', 0)))
+            top = max(0, int(effective_region.get('top', 0)))
+            width = max(0, int(effective_region.get('width', self.preview_width)))
+            height = max(0, int(effective_region.get('height', self.preview_height)))
             width = min(width, self.preview_width - left)
             height = min(height, self.preview_height - top)
             cropped = _crop_nv12(frame_bgr, self.preview_height, left, top, width, height)
@@ -2072,12 +2118,12 @@ class UVCCapture:
                 return None
             return cv2.cvtColor(cropped, cv2.COLOR_YUV2BGRA_NV12)
 
-        if region is not None:
+        if effective_region is not None:
             frame_h, frame_w = frame_bgr.shape[:2]
-            left = max(0, int(region.get('left', 0)))
-            top = max(0, int(region.get('top', 0)))
-            width = max(0, int(region.get('width', frame_w)))
-            height = max(0, int(region.get('height', frame_h)))
+            left = max(0, int(effective_region.get('left', 0)))
+            top = max(0, int(effective_region.get('top', 0)))
+            width = max(0, int(effective_region.get('width', frame_w)))
+            height = max(0, int(effective_region.get('height', frame_h)))
             right = min(frame_w, left + width)
             bottom = min(frame_h, top + height)
             if right <= left or bottom <= top:
@@ -2164,6 +2210,11 @@ class UdpCapture:
         self._latest_frame_ref: list = [None]   # list[np.ndarray | None]  BGR
         self._region_ref: list = [None]
         self._stop = threading.Event()
+        # Seeded to "now" (not None) so a stream that never sends a single
+        # frame within the stale timeout is caught the same way as one that
+        # goes silent after initially working — see
+        # reinitialize_if_method_changed's staleness check.
+        self._last_frame_perf_time = time.perf_counter()
 
         self._reader_thread = threading.Thread(
             target=self._reader_worker, name='UDPReader', daemon=True
@@ -2230,6 +2281,7 @@ class UdpCapture:
                 continue
 
             h, w = frame_bgr.shape[:2]
+            self._last_frame_perf_time = time.perf_counter()
             with self._latest_frame_lock:
                 self._latest_frame_ref[0] = frame_bgr
                 if w != self.preview_width or h != self.preview_height:
@@ -2438,13 +2490,29 @@ def initialize_screen_capture(config: Config) -> Any:
     return mss_capture
 
 
+def _capture_backend_is_stale(
+    capture_backend: Any, timeout: float = _CAPTURE_STALE_TIMEOUT_SECONDS,
+) -> bool:
+    """True when *capture_backend* is a live object whose reader thread has
+    delivered no frames for over *timeout* seconds.
+
+    Only uvc/udp backends set ``_last_frame_perf_time``; anything else (mss,
+    dxcam, an object missing the attribute) is reported as not stale — those
+    backends either aren't threaded readers or have their own recovery path.
+    """
+    last_frame_time = getattr(capture_backend, '_last_frame_perf_time', None)
+    if last_frame_time is None:
+        return False
+    return (time.perf_counter() - last_frame_time) > timeout
+
+
 def reinitialize_if_method_changed(
     config: Config,
     current_capture: Any,
     active_method: str,
 ) -> tuple[Any, str]:
-    """Check whether *config.screenshot_method* has changed and, if so,
-    reinitialize the capture backend.
+    """Check whether *config.screenshot_method* has changed, or whether the
+    currently active backend has silently gone dead, and reinitialize if so.
 
     Returns ``(capture_backend, active_method_name)``.  When there is no
     change the original objects are returned untouched.
@@ -2453,35 +2521,50 @@ def reinitialize_if_method_changed(
     desired = getattr(config, 'screenshot_method', 'mss')
     current_active = _detect_active_capture_method(current_capture, active_method)
 
-    # If the user still wants a non-mss backend but we're currently running on
-    # mss (due to fallback), periodically retry reinitialization.
+    reinit_log_fn = logger.info
+    reinit_log_msg = None
+    reinit_log_args: tuple = ()
+
     if desired != current_active:
-        now = time.perf_counter()
-        last_attempt = float(getattr(config, '_last_capture_reinit_attempt', 0.0) or 0.0)
-        if now - last_attempt < _CAPTURE_RETRY_INTERVAL_SECONDS:
-            return current_capture, current_active
-        setattr(config, '_last_capture_reinit_attempt', now)
+        reinit_log_msg = '[Capture] Screenshot method transition: %s -> %s. Reinitializing backend...'
+        reinit_log_args = (current_active, desired)
+    elif desired == 'uvc' and hasattr(current_capture, 'config_signature'):
+        if getattr(current_capture, 'config_signature', None) != _uvc_signature(config):
+            reinit_log_msg = '[Capture] UVC configuration changed. Reinitializing UVC backend...'
+        elif _capture_backend_is_stale(current_capture):
+            reinit_log_fn = logger.warning
+            reinit_log_msg = (
+                '[Capture] UVC backend has produced no frames for over %.0fs '
+                '— treating it as dead and reinitializing...'
+            )
+            reinit_log_args = (_CAPTURE_STALE_TIMEOUT_SECONDS,)
+    elif desired == 'ndi' and hasattr(current_capture, 'config_signature'):
+        if getattr(current_capture, 'config_signature', None) != _ndi_signature(config):
+            reinit_log_msg = '[Capture][NDI] NDI configuration changed. Reinitializing NDI backend...'
+    elif desired == 'udp' and hasattr(current_capture, 'config_signature'):
+        if getattr(current_capture, 'config_signature', None) != _udp_signature(config):
+            reinit_log_msg = '[Capture][UDP] UDP configuration changed. Reinitializing UDP backend...'
+        elif _capture_backend_is_stale(current_capture):
+            reinit_log_fn = logger.warning
+            reinit_log_msg = (
+                '[Capture][UDP] UDP backend has produced no frames for over %.0fs '
+                '— treating it as dead and reinitializing...'
+            )
+            reinit_log_args = (_CAPTURE_STALE_TIMEOUT_SECONDS,)
 
-    if desired == current_active:
-        if desired == 'uvc' and hasattr(current_capture, 'config_signature'):
-            if getattr(current_capture, 'config_signature', None) != _uvc_signature(config):
-                logger.info('[Capture] UVC configuration changed. Reinitializing UVC backend...')
-            else:
-                return current_capture, current_active
-        elif desired == 'ndi' and hasattr(current_capture, 'config_signature'):
-            if getattr(current_capture, 'config_signature', None) != _ndi_signature(config):
-                logger.info('[Capture][NDI] NDI configuration changed. Reinitializing NDI backend...')
-            else:
-                return current_capture, current_active
-        elif desired == 'udp' and hasattr(current_capture, 'config_signature'):
-            if getattr(current_capture, 'config_signature', None) != _udp_signature(config):
-                logger.info('[Capture][UDP] UDP configuration changed. Reinitializing UDP backend...')
-            else:
-                return current_capture, current_active
-        else:
-            return current_capture, current_active
+    if reinit_log_msg is None:
+        return current_capture, current_active
 
-    logger.info('[Capture] Screenshot method transition: %s -> %s. Reinitializing backend...', current_active, desired)
+    # Throttle every reinit trigger (method change, config change, or a
+    # stalled backend) the same way, so a persistently-dead device retries
+    # periodically instead of hammering the driver every 0.5s.
+    now = time.perf_counter()
+    last_attempt = float(getattr(config, '_last_capture_reinit_attempt', 0.0) or 0.0)
+    if now - last_attempt < _CAPTURE_RETRY_INTERVAL_SECONDS:
+        return current_capture, current_active
+    setattr(config, '_last_capture_reinit_attempt', now)
+
+    reinit_log_fn(reinit_log_msg, *reinit_log_args)
 
     # Release the old backend first
     _cleanup_capture(current_capture)

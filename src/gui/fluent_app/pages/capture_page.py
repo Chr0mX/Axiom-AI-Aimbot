@@ -159,7 +159,7 @@ class CapturePage(BasePage):
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
 
         self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "auto", "ffmpeg"])
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "ffmpeg"])
         self.uvcCaptureMethodCombo.setMinimumWidth(140)
         self.uvcCaptureMethodCard = SettingCard(
             FluentIcon.CAMERA,
@@ -242,6 +242,29 @@ class CapturePage(BasePage):
         self.uvcVideoFormatCard.hBoxLayout.addWidget(self.uvcVideoFormatCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcVideoFormatCard.hBoxLayout.addSpacing(16)
 
+        # Applies to every UVC capture method (not just ffmpeg) — see
+        # uvc_crop_mode's docstring in config.py for the dshow/msmf-specific
+        # caveat (freezes the crop rect only; no throughput/CPU benefit there
+        # since that capture path is already in-process with no pipe).
+        self.uvcCropModeCombo = ComboBox()
+        self.uvcCropModeCombo.addItems(["Dynamic", "Fixed (centered)"])
+        self.uvcCropModeCombo.setMinimumWidth(160)
+        self.uvcCropModeCard = SettingCard(
+            FluentIcon.ZOOM_IN,
+            "Crop Mode",
+            "Dynamic: Axiom crops per-frame to the live Detection Range. "
+            "Fixed: the crop rectangle is frozen (centered) at capture-start "
+            "instead — a Detection Range change then needs a capture restart "
+            "to take effect. With 'ffmpeg' capture method, the crop also "
+            "happens inside ffmpeg itself before the frame is piped back, "
+            "so far less data crosses the subprocess pipe; with 'dshow'/"
+            "'msmf' this only freezes which region is used, no throughput "
+            "difference.",
+            self.uvcGroup
+        )
+        self.uvcCropModeCard.hBoxLayout.addWidget(self.uvcCropModeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcCropModeCard.hBoxLayout.addSpacing(16)
+
         # === FFmpeg mode options (only relevant/visible when Capture Method == 'ffmpeg') ===
         self.uvcFfmpegPathEdit = LineEdit()
         self.uvcFfmpegPathEdit.setPlaceholderText("auto-detect (bundled ffmpeg/ or system PATH)")
@@ -257,23 +280,6 @@ class CapturePage(BasePage):
         self.uvcFfmpegPathCard.hBoxLayout.addWidget(self.uvcFfmpegPathEdit, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcFfmpegPathCard.hBoxLayout.addSpacing(16)
         self.uvcFfmpegPathCard.setVisible(False)
-
-        self.uvcFfmpegCropModeCombo = ComboBox()
-        self.uvcFfmpegCropModeCombo.addItems(["Dynamic", "Fixed (centered)"])
-        self.uvcFfmpegCropModeCombo.setMinimumWidth(160)
-        self.uvcFfmpegCropModeCard = SettingCard(
-            FluentIcon.ZOOM_IN,
-            "FFmpeg Crop Mode",
-            "Dynamic: ffmpeg outputs the full frame, Axiom crops per-frame "
-            "(supports live Detection Range changes). Fixed: ffmpeg itself "
-            "crops a centered Detection-Range-sized square before sending it "
-            "— far less data over the pipe, but requires restarting capture "
-            "to follow a Detection Range change.",
-            self.uvcGroup
-        )
-        self.uvcFfmpegCropModeCard.hBoxLayout.addWidget(self.uvcFfmpegCropModeCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcFfmpegCropModeCard.hBoxLayout.addSpacing(16)
-        self.uvcFfmpegCropModeCard.setVisible(False)
 
         self.uvcHwInfoLabel = BodyLabel("—")
         self.uvcQueryBtn = PushButton("Query")
@@ -528,8 +534,8 @@ class CapturePage(BasePage):
         self.uvcGroup.addSettingCard(self.uvcHeightCard)
         self.uvcGroup.addSettingCard(self.uvcFpsCard)
         self.uvcGroup.addSettingCard(self.uvcVideoFormatCard)
+        self.uvcGroup.addSettingCard(self.uvcCropModeCard)
         self.uvcGroup.addSettingCard(self.uvcFfmpegPathCard)
-        self.uvcGroup.addSettingCard(self.uvcFfmpegCropModeCard)
         self.uvcGroup.addSettingCard(self.uvcHwInfoCard)
         self.uvcGroup.addSettingCard(self.uvcRefreshResolutionCard)
         self.addContent(self.uvcGroup)
@@ -579,7 +585,7 @@ class CapturePage(BasePage):
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
         self.uvcVideoFormatCombo.currentTextChanged.connect(self._onUvcVideoFormatChanged)
         self.uvcFfmpegPathEdit.editingFinished.connect(self._onUvcFfmpegPathChanged)
-        self.uvcFfmpegCropModeCombo.currentTextChanged.connect(self._onUvcFfmpegCropModeChanged)
+        self.uvcCropModeCombo.currentTextChanged.connect(self._onUvcCropModeChanged)
         self.uvcQueryBtn.clicked.connect(self._queryUvcHwInfo)
         self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
@@ -630,8 +636,8 @@ class CapturePage(BasePage):
             self.uvcCaptureMethodCombo.setCurrentText(_capture_method)
             self.uvcVideoFormatCombo.setCurrentText(str(getattr(self._config, 'uvc_video_format', 'mjpeg')).upper())
             self.uvcFfmpegPathEdit.setText(str(getattr(self._config, 'uvc_ffmpeg_path', '') or ''))
-            self.uvcFfmpegCropModeCombo.setCurrentText(
-                'Fixed (centered)' if str(getattr(self._config, 'uvc_ffmpeg_crop_mode', 'dynamic')).lower() == 'fixed'
+            self.uvcCropModeCombo.setCurrentText(
+                'Fixed (centered)' if str(getattr(self._config, 'uvc_crop_mode', 'dynamic')).lower() == 'fixed'
                 else 'Dynamic'
             )
             self._updateFfmpegControlsVisibility(_capture_method)
@@ -1043,14 +1049,15 @@ class CapturePage(BasePage):
         if self._config:
             self._config.uvc_ffmpeg_path = str(self.uvcFfmpegPathEdit.text()).strip()
 
-    def _onUvcFfmpegCropModeChanged(self, text):
+    def _onUvcCropModeChanged(self, text):
         if self._config:
-            self._config.uvc_ffmpeg_crop_mode = 'fixed' if text.strip().lower().startswith('fixed') else 'dynamic'
+            self._config.uvc_crop_mode = 'fixed' if text.strip().lower().startswith('fixed') else 'dynamic'
 
     def _updateFfmpegControlsVisibility(self, capture_method_text: str):
+        # uvcCropModeCard applies to every capture method and stays visible;
+        # only the ffmpeg.exe path override is ffmpeg-specific.
         is_ffmpeg = str(capture_method_text).strip().lower() == 'ffmpeg'
         self.uvcFfmpegPathCard.setVisible(is_ffmpeg)
-        self.uvcFfmpegCropModeCard.setVisible(is_ffmpeg)
 
     def _onUvcPreviewChanged(self, checked):
         if self._config:
@@ -1307,13 +1314,16 @@ class CapturePage(BasePage):
             "auto-detect (src/ffmpeg/ffmpeg.exe, then system PATH). "
             "Get an LGPL build from ffmpeg.org's build list if needed."
         )
-        self.uvcFfmpegCropModeCard.titleLabel.setText("FFmpeg Crop Mode")
-        self.uvcFfmpegCropModeCard.contentLabel.setText(
-            "Dynamic: ffmpeg outputs the full frame, Axiom crops per-frame "
-            "(supports live Detection Range changes). Fixed: ffmpeg itself "
-            "crops a centered Detection-Range-sized square before sending it "
-            "— far less data over the pipe, but requires restarting capture "
-            "to follow a Detection Range change."
+        self.uvcCropModeCard.titleLabel.setText("Crop Mode")
+        self.uvcCropModeCard.contentLabel.setText(
+            "Dynamic: Axiom crops per-frame to the live Detection Range. "
+            "Fixed: the crop rectangle is frozen (centered) at capture-start "
+            "instead — a Detection Range change then needs a capture restart "
+            "to take effect. With 'ffmpeg' capture method, the crop also "
+            "happens inside ffmpeg itself before the frame is piped back, "
+            "so far less data crosses the subprocess pipe; with 'dshow'/"
+            "'msmf' this only freezes which region is used, no throughput "
+            "difference."
         )
         self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
         self.uvcHwInfoCard.contentLabel.setText("Actual values reported by the driver")
