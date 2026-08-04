@@ -218,15 +218,31 @@ class MakcuMouse:
     # ------------------------------------------------------------------
 
     def _start_stream(self):
-        """Enable km.buttons(1) stream and start the reader thread."""
+        """Enable km.buttons(1) stream and start the reader thread.
+
+        _query_info() (called earlier in connect()) reads only whatever's
+        already waiting 0.15s after its km.info() write — a slow/late-
+        arriving tail of that reply can still be sitting in the input
+        buffer here. _stream_reader() trusts byte-aligned "km.<mask>"
+        framing from the very first frame it sees, so any stray leftover
+        bytes at this point desync it before it ever reads a real button
+        frame — with echo off, nothing else will resync it until an
+        unrelated event happens to line the framing back up. Reset the
+        buffer right before enabling the stream so it always starts clean.
+        """
         self._stream_stop.clear()
         self._btn_mask = 0
         try:
             with self._lock:
                 if self._serial and self._serial.is_open:
+                    self._serial.reset_input_buffer()
                     self._serial.write(b'km.buttons(1)\r\n')
                     self._serial.flush()
-        except Exception:
+                else:
+                    logger.warning("[MAKCU] _start_stream: serial not open, button stream not started")
+                    return
+        except Exception as exc:
+            logger.warning("[MAKCU] _start_stream: failed to enable button stream: %s", exc)
             return
         self._stream_thread = threading.Thread(
             target=self._stream_reader, daemon=True, name="makcu-stream")
