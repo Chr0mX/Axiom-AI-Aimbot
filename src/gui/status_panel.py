@@ -215,9 +215,16 @@ class StatusPanel(QWidget):
         self._init_ui()
 
         # --- 定時器 ---
+        # 50ms to match keys_page.py's aim-status poll (both read the same
+        # config.makcu_aim_active field with no push/signal between them —
+        # previously this ran at 500ms, ~10x slower than the main window's
+        # 50ms poll and ~30x slower than the Web HUD's ~16.7ms broadcast
+        # tick, so this panel visibly lagged behind both on every aim-state
+        # change instead of just being one more independent poller of the
+        # same field.
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_display)
-        self.timer.start(500) # 0.5秒刷新一次狀態
+        self.timer.start(50)
 
         self.auto_nudge_timer = QTimer(self)
         self.auto_nudge_timer.timeout.connect(self._auto_nudge_panel)

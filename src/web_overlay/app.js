@@ -1,4 +1,4 @@
-// Axiom Web ESP — apexsky-style renderer.
+// Axiom Web HUD — apexsky-style renderer.
 // The backend only streams state; this client owns all drawing. Network packets
 // update `state`; a separate requestAnimationFrame loop always draws the newest
 // state, so the overlay stays smooth even if packets arrive irregularly.
@@ -143,7 +143,7 @@
 
   function setStatus(ok) {
     statusEl.className  = ok ? "connected" : "disconnected";
-    statusEl.textContent = ok ? "● ESP" : "reconnecting…";
+    statusEl.textContent = ok ? "● HUD" : "reconnecting…";
   }
 
   // ── Drawing primitives ─────────────────────────────────────────
