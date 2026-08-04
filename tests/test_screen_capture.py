@@ -82,6 +82,31 @@ def test_capture_frame_supports_dxcam_region_tuple_and_ndarray():
     assert frame is frame_data
 
 
+def test_capture_frame_detects_dxcam_explicitly_via_module_name():
+    """capture_frame() must detect a dxcam backend up front (by module name,
+    same check _detect_active_capture_method uses) and go straight to the
+    tuple-region call — not rely on catching whatever TypeError dxcam's own
+    region validation happens to raise for a dict. Give the fake capture a
+    grab() that raises on ANY dict argument (even as a kwarg) to prove the
+    dict form is never attempted at all, not just that the fallback works.
+    """
+    from core import screen_capture as sc
+
+    expected_region = (5, 5, 15, 15)
+    frame_data = np.zeros((10, 10, 4), dtype=np.uint8)
+
+    class FakeDxcamCapture:
+        def grab(self, region=None):
+            if isinstance(region, dict):
+                raise AssertionError('capture_frame must not try a dict region against dxcam')
+            assert region == expected_region
+            return frame_data
+
+    FakeDxcamCapture.__module__ = 'dxcam.core'  # matches the real dxcam package's module prefix
+    frame = sc.capture_frame(FakeDxcamCapture(), {'left': 5, 'top': 5, 'width': 10, 'height': 10})
+    assert frame is frame_data
+
+
 def test_initialize_screen_capture_prints_fallback_prompt_once(monkeypatch, capsys):
     from core import screen_capture as sc
 

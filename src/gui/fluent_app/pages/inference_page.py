@@ -330,7 +330,11 @@ class InferencePage(BasePage):
 
     def _applyScreenshotMethodEffect(self, method: str):
         """Called by capture page (and on load) to sync fov_follow visibility."""
-        is_external = method in ('uvc', 'ndi')
+        # udp is the same class of external-source capture as uvc/ndi — the
+        # desktop cursor position is meaningless against any of these feeds,
+        # so fov_follow_mouse must be force-disabled for all three, not just
+        # uvc/ndi.
+        is_external = method in ('uvc', 'ndi', 'udp')
         self.fovFollowCard.setVisible(not is_external)
         if is_external and self._config:
             self._config.fov_follow_mouse = False

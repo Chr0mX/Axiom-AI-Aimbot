@@ -57,7 +57,6 @@ _FIELD_MAP = {
     'udp_recv_buffer_size':       'capture.udp.recv_buffer_size',
     'udp_frame_timeout':          'capture.udp.frame_timeout',
     'uvc_show_window':            'capture.preview.enabled',
-    'uvc_preview_scale_mode':     'capture.preview.scale_mode',
     'uvc_always_on_top':          'capture.preview.always_on_top',
     'preview_crop_to_detection':  'capture.preview.crop_to_detection',
     'preview_fps_cap':            'capture.preview.fps_cap',
@@ -292,7 +291,6 @@ class Config:
         self.uvc_ffmpeg_path: str = ""
         self.uvc_crop_mode: str = "dynamic"
         self.uvc_show_window: bool = True
-        self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.uvc_always_on_top: bool = True
         self.preview_crop_to_detection: bool = False
         self.preview_fps_cap: int = 0
@@ -848,10 +846,6 @@ def _validate_screenshot_method(config: Config) -> None:
         config.uvc_video_format = 'mjpeg'
     if getattr(config, 'uvc_crop_mode', 'dynamic') not in ('dynamic', 'fixed'):
         config.uvc_crop_mode = 'dynamic'
-    if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (
-        'scale_to_fit', 'scale_to_canvas', 'fit_to_screen'
-    ):
-        config.uvc_preview_scale_mode = 'scale_to_fit'
     config.ndi_source_name = str(getattr(config, 'ndi_source_name', '') or '').strip()
 
 

@@ -417,18 +417,6 @@ class CapturePage(BasePage):
             parent=self.previewGroup
         )
 
-        self.uvcPreviewScaleCombo = ComboBox()
-        self.uvcPreviewScaleCombo.addItems(["scale_to_fit", "scale_to_canvas", "fit_to_screen"])
-        self.uvcPreviewScaleCombo.setMinimumWidth(170)
-        self.uvcPreviewScaleCard = SettingCard(
-            FluentIcon.FULL_SCREEN,
-            "Capture Preview Scale Mode",
-            "",
-            self.previewGroup
-        )
-        self.uvcPreviewScaleCard.hBoxLayout.addWidget(self.uvcPreviewScaleCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcPreviewScaleCard.hBoxLayout.addSpacing(16)
-
         self.uvcAlwaysOnTopCard = SwitchSettingCard(
             FluentIcon.PIN,
             "Always On Top",
@@ -557,7 +545,6 @@ class CapturePage(BasePage):
 
         self.previewGroup.addSettingCard(self.uvcPreviewCard)
         self.previewGroup.addSettingCard(self.previewCropCard)
-        self.previewGroup.addSettingCard(self.uvcPreviewScaleCard)
         self.previewGroup.addSettingCard(self.uvcAlwaysOnTopCard)
         self.previewGroup.addSettingCard(self.previewFpsCapCard)
         self.addContent(self.previewGroup)
@@ -590,7 +577,6 @@ class CapturePage(BasePage):
         self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
         self.previewCropCard.checkedChanged.connect(self._onPreviewCropChanged)
-        self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
         self.uvcAlwaysOnTopCard.checkedChanged.connect(self._onAlwaysOnTopChanged)
         self.previewFpsCapSegment.currentItemChanged.connect(self._onPreviewFpsCapChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
@@ -664,7 +650,6 @@ class CapturePage(BasePage):
             self.uvcFpsCombo.setCurrentText(str(int(getattr(self._config, 'uvc_fps', 60))))
             self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
             self.previewCropCard.setChecked(bool(getattr(self._config, 'preview_crop_to_detection', False)))
-            self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
             self.uvcAlwaysOnTopCard.setChecked(bool(getattr(self._config, 'uvc_always_on_top', True)))
             _cap_key = {0: 'uncapped', 30: '30', 60: '60'}.get(
                 getattr(self._config, 'preview_fps_cap', 0), 'uncapped'
@@ -1080,11 +1065,6 @@ class CapturePage(BasePage):
         print(f"[Capture][Preview] Crop-to-detection {'ENABLED' if checked else 'DISABLED'}; "
               f"preview window resizes live.")
 
-    def _onUvcPreviewScaleModeChanged(self, text):
-        if self._config:
-            self._config.uvc_preview_scale_mode = str(text)
-        print(f"[Capture][Preview] Scale mode set to '{text}'.")
-
     def _onAlwaysOnTopChanged(self, checked):
         if self._config:
             self._config.uvc_always_on_top = bool(checked)
@@ -1381,7 +1361,6 @@ class CapturePage(BasePage):
         self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
         self.previewCropCard.titleLabel.setText(t("preview_crop_label"))
         self.previewCropCard.contentLabel.setText(t("preview_crop_desc"))
-        self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")
         self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")
         self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Active Weapon"))
