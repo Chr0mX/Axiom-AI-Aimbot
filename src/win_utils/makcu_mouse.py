@@ -306,15 +306,40 @@ class MakcuMouse:
 
         Frame layout (firmware buttons stream): 0x6B 0x6D 0x2E <maskLO> <maskHI>.
         The mask is little-endian; only bits 0-4 are real buttons (L,R,M,S1,S2).
-        Masking to _BTN_BITS prevents a desynced wheel/data byte — e.g. a scroll
-        delta of +1 (0x01) or -1 (0xFF), both of which carry bit 0 — from being
-        misread as a held left button.
+
+        Scroll-wheel activity has been observed to desync this fixed 5-byte
+        framing — an extra/misplaced byte lands where <maskLO>/<maskHI> is
+        expected, e.g. a scroll delta of +1 (0x01) or -1 (0xFF). Masking to
+        _BTN_BITS alone does NOT catch this: 0x01 & _BTN_BITS still sets bit 0
+        (reads as Left held) and 0xFF & _BTN_BITS sets bits 0-4 (reads as
+        every button held) — both indistinguishable from real presses by
+        value alone, and since the stream only emits on change, a phantom
+        "held" reading from a corrupted frame can persist indefinitely (no
+        further frame ever arrives to clear it) until an unrelated real
+        button event happens to reset it. This is the "MB1 stuck engaged
+        after scrolling" bug.
+
+        Fix: verify framing, not just content. When enough bytes are already
+        buffered to check, confirm the *next* "km." prefix actually starts
+        exactly FRAME_LEN bytes after this one before trusting the frame in
+        between as a real button mask. A mismatch means desynced/extra bytes
+        are present somewhere at or after this candidate frame — it can't be
+        trusted, so it's discarded (not applied to _btn_mask) and parsing
+        resumes from the next "km." prefix that actually appears later in
+        the buffer, rather than blindly advancing by FRAME_LEN and
+        compounding the drift, or wrongly blaming/dropping this candidate's
+        own (valid) prefix bytes. When too few bytes are buffered yet to
+        check (the common case — most frames arrive in isolation, with
+        nothing yet to validate against), fall back to accepting the frame;
+        withholding every isolated single-frame update forever would just
+        trade a false "stuck held" for an equally wrong "stuck released".
 
         km.echo(0) means the device sends nothing in response to move/click writes,
         so all incoming bytes are button stream events — no lock needed on reads.
         """
         buf = bytearray()
-        FRAME_LEN = len(_KM_PREFIX) + 2  # km. + 2-byte mask
+        PREFIX_LEN = len(_KM_PREFIX)
+        FRAME_LEN = PREFIX_LEN + 2  # km. + 2-byte mask
         while not self._stream_stop.is_set():
             try:
                 ser = self._serial
@@ -329,16 +354,35 @@ class MakcuMouse:
                         idx = buf.find(_KM_PREFIX)
                         if idx == -1:
                             # No prefix in buffer; keep only a possible partial tail
-                            del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
+                            del buf[:max(0, len(buf) - (PREFIX_LEN - 1))]
                             break
                         if idx + FRAME_LEN > len(buf):
                             # Full frame not yet arrived; drop bytes before prefix and wait
                             del buf[:idx]
                             break
+
+                        next_start = idx + FRAME_LEN
+                        can_verify = len(buf) >= next_start + PREFIX_LEN
+                        if can_verify and bytes(buf[next_start:next_start + PREFIX_LEN]) != _KM_PREFIX:
+                            # Desynced — this candidate frame's payload is not
+                            # trustworthy (regardless of whether idx's own
+                            # prefix match was itself genuine). Look past it
+                            # for the next real "km." and discard everything
+                            # up to there, including this unconfirmed frame,
+                            # instead of assuming idx was the corruption site.
+                            resync_idx = buf.find(_KM_PREFIX, idx + PREFIX_LEN)
+                            if resync_idx == -1:
+                                # No further prefix buffered yet; keep only a
+                                # possible partial tail and wait for more data.
+                                del buf[:max(0, len(buf) - (PREFIX_LEN - 1))]
+                            else:
+                                del buf[:resync_idx]
+                            continue
+
                         lo = buf[idx + 3]
                         hi = buf[idx + 4]
                         self._btn_mask = (lo | (hi << 8)) & _BTN_BITS
-                        del buf[:idx + FRAME_LEN]
+                        del buf[:next_start]
                 else:
                     time.sleep(0.001)
             except Exception:

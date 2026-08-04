@@ -1,0 +1,92 @@
+### Button Capture
+
+Per-button physical press/release event stream
+
+Button capture provides a per-button event stream that reports physical press and release events. Unlike the [button stream](/library/stream), which reports a bitmask for all buttons, catch reports events for a single button at a time. The button must be [locked](/library/locks#set-lock) before enabling catch. Maps to the firmware's [km.catch_m*()](/native/commands/catch) commands.
+
+The target button **must be [locked](/library/locks#set-lock)** first. Catch produces no events without an active lock. Unlocking the button is the only way to stop the catch stream.
+
+### enable_catch
+
+```rust
+fn enable_catch(&self, button: Button) -> Result<()>
+
+
+Enables the catch stream for the specified button. The button must already be locked via set_lock(). Calling this multiple times is idempotent. Also available through ff() and in batch sequences.
+
+Parameter	Type	Description
+button	Button	Which button to capture events for.
+
+Example
+
+use makcu::{Button, LockTarget};
+
+// Lock first, then enable catch
+device.set_lock(LockTarget::Left, true)?;
+device.enable_catch(Button::Left)?;
+
+// ... receive events ...
+
+// Unlock to stop the catch stream
+device.set_lock(LockTarget::Left, false)?;
+
+
+There is no explicit catch disable command. Unlocking the button is the only way to stop the stream. You cannot keep a button locked while disabling its catch stream.
+
+catch_events
+fn catch_events(&self) -> crossbeam_channel::Receiver<CatchEvent>
+
+
+Returns a channel receiver that emits a CatchEvent on every physical press or release of a button with catch enabled. The button must be locked and catch must be enabled first.
+
+Example
+
+use makcu::{Button, CatchEvent, LockTarget};
+
+device.set_lock(LockTarget::Left, true)?;
+device.enable_catch(Button::Left)?;
+let rx = device.catch_events();
+
+std::thread::spawn(move || {
+    while let Ok(event) = rx.recv() {
+        match (event.button, event.pressed) {
+            (Button::Left, true) => println!("Left pressed"),
+            (Button::Left, false) => println!("Left released"),
+            _ => {}
+        }
+    }
+});
+
+
+Multiple subscribers can be created by calling catch_events() multiple times. Each receiver gets its own copy of every event. For a callback-based interface, see the extras catch callbacks.
+
+CatchEvent
+pub struct CatchEvent
+
+
+Represents a single physical press or release of a captured button.
+
+Field	Type	Description
+button	Button	Which button produced this event.
+pressed	bool	true for press, false for release.
+
+Example
+
+let event: CatchEvent = rx.recv()?;
+if event.pressed {
+    println!("{:?} pressed", event.button);
+} else {
+    println!("{:?} released", event.button);
+}
+
+Catch vs Button Stream
+
+When to use which
+
+Feature	Button Stream	Catch
+Event type	ButtonMask(all buttons)	CatchEvent(single button)
+Requires lock	No	Yes
+Reports	Combined state bitmask	Individual press/release
+Blocks input	No	Yes (button is locked)
+
+Both can be active simultaneously without interference. Use the button stream for monitoring all buttons at once, and catch for tracking individual button press/release events on locked buttons.

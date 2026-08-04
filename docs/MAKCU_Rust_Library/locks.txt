@@ -1,0 +1,79 @@
+### Input Locks
+
+Lock and unlock mouse inputs
+
+Locks prevent specific mouse inputs from reaching the host. Seven targets are available: two movement axes and five buttons. Locks use the [`LockTarget`](/library/types#enums) enum. Maps to the firmware's [`km.lock_*`](/native/commands/locks) commands. Locking a button is also required to enable [button capture](/library/catch).
+
+#### LockTarget Enum
+
+```rust
+pub enum LockTarget
+
+Variant	Locks
+LockTarget::X	Horizontal mouse movement.
+LockTarget::Y	Vertical mouse movement.
+LockTarget::Left	Left button.
+LockTarget::Right	Right button.
+LockTarget::Middle	Middle button.
+LockTarget::Side1	Side button 1.
+LockTarget::Side2	Side button 2.
+set_lock
+
+Enable or disable an input lock
+
+fn set_lock(&self, target: LockTarget, locked: bool) -> Result<()>
+
+
+Locks (true) or unlocks (false) the specified input. When locked, the input is blocked from reaching the host. Also available through ff() and in batch sequences.
+
+Example
+use makcu::LockTarget;
+
+// Lock horizontal movement
+device.set_lock(LockTarget::X, true)?;
+
+// Unlock it
+device.set_lock(LockTarget::X, false)?;
+
+lock_state
+
+Query a single lock
+
+fn lock_state(&self, target: LockTarget) -> Result<bool>
+
+
+Returns true if the specified input is currently locked.
+
+Example
+let locked = device.lock_state(LockTarget::Left)?;
+println!("Left button lock: {}", locked);
+
+lock_states_all
+
+Query all locks at once
+
+fn lock_states_all(&self) -> Result<LockStates>
+
+
+Queries all seven lock states in a single call and returns a LockStates struct.
+
+LockStates Fields
+Field	Type	Description
+x	bool	Horizontal movement lock
+y	bool	Vertical movement lock
+left	bool	Left button lock
+right	bool	Right button lock
+middle	bool	Middle button lock
+side1	bool	Side button 1 lock
+side2	bool	Side button 2 lock
+Example
+let locks = device.lock_states_all()?;
+if locks.x {
+    println!("X axis is locked");
+}
+
+
+Note:
+
+Lock states are not persistent across device power cycles.
+Do not cache lock state – always query the device for current values.

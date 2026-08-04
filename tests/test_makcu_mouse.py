@@ -323,6 +323,46 @@ class TestMakcuStreamReader:
         m = _run_stream(bytes(_KM_PREFIX) + bytes([0x01]))
         assert m._btn_mask == 0x00  # untouched — never reached FRAME_LEN
 
+    def test_stray_byte_between_frames_does_not_stick_lmb(self):
+        """滾輪造成的失步位元組插入兩幀之間時，不得讓左鍵誤報「卡住按下」。
+
+        Reproduces the reported bug: a real MB1-press frame, then one stray
+        byte (simulating a leaked scroll-wheel delta of +1) landing exactly
+        where the release frame's own prefix should start, then the real
+        release frame. The stray byte breaks the fixed 5-byte framing
+        assumption for the *press* frame's boundary — the fix must detect
+        that mismatch, discard the unconfirmed press frame rather than
+        trust it, resync on the release frame's prefix, and end up
+        correctly released — not stuck reporting LMB held.
+        """
+        payload = _frame(0x01) + bytes([0x01]) + _frame(0x00)
+        m = _run_stream(payload)
+        assert m._btn_mask == 0x00
+        assert m.lmb_held is False
+
+    def test_stray_all_bits_byte_between_frames_does_not_stick_all_buttons(self):
+        """失步位元組為 0xFF（滾輪 -1）時，遮罩後會變成「五鍵全按」——
+        同樣必須被判定為不可信並捨棄，而不是卡在全部按鍵都按下的狀態。
+        """
+        payload = _frame(0x02) + bytes([0xFF]) + _frame(0x00)
+        m = _run_stream(payload)
+        assert m._btn_mask == 0x00
+        assert m.lmb_held is False
+        assert m.rmb_held is False
+
+    def test_verified_consecutive_frames_still_all_apply(self):
+        """回歸測試：正常、無失步的連續幀仍應逐幀正確套用（不誤判為失步）。"""
+        m = _run_stream(_frame(0x01) + _frame(0x02) + _frame(0x00))
+        assert m._btn_mask == 0x00
+
+    def test_isolated_single_frame_still_applies_without_lookahead(self):
+        """孤立的單一幀（緩衝區中沒有後續資料可供驗證）仍應直接套用，
+        不因為「無法驗證」而永久卡住——與失步（有後續資料但不符）的情況不同。
+        """
+        m = _run_stream(_frame(0x01))
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
+
 
 # ============================================================
 # 2. 模組級便利函式測試

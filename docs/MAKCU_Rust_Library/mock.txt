@@ -1,0 +1,103 @@
+### Testing
+
+The `mock` feature provides an in-process mock transport that simulates device responses without requiring physical hardware. Use it for unit tests, CI pipelines, and development.
+
+```sh
+cargo add makcu --features mock
+
+Creating a Mock Device
+Device::mock() constructor
+fn Device::mock() -> (Device, Arc<MockTransport>)
+
+
+Returns a Device backed by a mock transport and an Arc<MockTransport> for controlling responses and inspecting sent commands.
+
+Example
+
+use makcu::{Device, MockTransport};
+
+let (device, mock) = Device::mock();
+
+
+The mock device behaves identically to a real device from the caller’s perspective. All methods work, including fire-and-forget, batch, and extras.
+
+With the async feature, AsyncDevice::mock() is also available and returns an (AsyncDevice, Arc<MockTransport>).
+
+Registering Responses
+Define what the mock returns
+fn on_command(&self, cmd_bytes: &[u8], response_bytes: &[u8])
+
+
+Registers a response for a specific command. When the device sends a command matching cmd_bytes, the mock replies with response_bytes.
+
+Example
+
+// Register version response
+mock.on_command(
+    b"km.version()\r\n",
+    b"km.MAKCU v3.7",
+);
+
+let version = device.version()?;
+assert_eq!(version, "MAKCU v3.7");
+
+Injecting Events
+Simulate button state changes
+fn inject_button_event(&self, mask: ButtonMask)
+
+
+See ButtonMask for the bitmask type.
+
+Injects a button event into the stream as if the device had sent it. Subscribers to button_events() and event callbacks will receive it.
+
+Example
+
+use makcu::ButtonMask;
+
+let rx = device.button_events();
+mock.inject_button_event(ButtonMask::from_raw(0x01));  // left pressed
+
+let event = rx.recv()?;
+assert!(event.left());
+
+Inspecting Commands
+Verify what was sent
+Method	Returns	Description
+sent_commands()	Vec<Vec<u8>>	All commands sent to the mock since creation or last clear.
+clear_sent()	()	Clear the sent commands history.
+
+Example
+
+device.move_xy(100, 50)?;
+
+let sent = mock.sent_commands();
+assert_eq!(sent.len(), 1);
+assert_eq!(sent[0], b"km.move(100,50)\r\n");
+
+mock.clear_sent();
+assert!(mock.sent_commands().is_empty());
+
+Full Test Example
+Complete unit test pattern
+#[test]
+fn test_button_sequence() -> makcu::Result<()> {
+    let (device, mock) = Device::mock();
+
+    // Register query response
+    mock.on_command(
+        b"km.left()\r\n",
+        b"km.left()\r\n0\rn&gt;&gt;&gt; ",
+    );
+
+    // Verify initial state
+    assert!(!device.button_state(Button::Left)?);
+
+    // Send press command (fire-and-forget, no response needed)
+    device.ff().button_down(Button::Left)?;
+
+    // Verify the command was sent
+    let sent = mock.sent_commands();
+    assert!(sent.iter().any(|c| c == b"km.left(1)\r\n"));
+
+    Ok(())
+}
