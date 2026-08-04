@@ -143,7 +143,7 @@ def test_capture_frame_prints_error_prompt_once(monkeypatch, capsys):
     sc.capture_frame(FakeCapture(), {'left': 0, 'top': 0, 'width': 10, 'height': 10})
 
     output = capsys.readouterr().out
-    assert output.count('[截圖] 抓圖失敗: capture failed') == 1
+    assert output.count('[Capture] Screenshot failed: capture failed') == 1
 
 
 def test_find_ndi_source_by_name_accepts_stream_name_case_insensitive():

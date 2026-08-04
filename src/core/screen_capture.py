@@ -213,7 +213,7 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
         int(getattr(config, 'uvc_height', 0)),
         int(getattr(config, 'uvc_fps', 0)),
         bool(getattr(config, 'uvc_show_window', False)),
-        str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
+        str(getattr(config, 'uvc_capture_method', 'msmf')).lower(),
         str(getattr(config, 'uvc_video_format', 'mjpeg')).lower(),
         str(getattr(config, 'uvc_ffmpeg_path', '') or ''),
         crop_mode,
@@ -609,6 +609,11 @@ class NDICapture:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
         logger.info('[Capture][NDI] Receiver connected and video stream is ready.')
         self._last_frame_time: float = time.perf_counter()
+        # Alias read by _capture_backend_is_stale()'s external staleness
+        # fallback (kept a separate attribute from _last_frame_time, which
+        # grab()'s own internal reconnect check reads, so the two call sites
+        # stay decoupled even though they're updated together below).
+        self._last_frame_perf_time: float = self._last_frame_time
 
         # Shared refs for the preview thread — grab() writes, thread reads
         self._ndi_frame_lock: threading.Lock = threading.Lock()
@@ -861,8 +866,18 @@ class NDICapture:
                     return None
 
                 if recv_fourcc == 'uyvy':
-                    left  = left  & ~1
-                    right = (right + 1) & ~1
+                    # UYVY macropixels are 2px wide, so the crop must stay
+                    # even-aligned on both edges. Round right up to even *then*
+                    # re-clamp to an even-rounded frame_w (not the original,
+                    # possibly-odd frame_w) — otherwise an odd frame_w could
+                    # let the rounded-up right edge exceed the raw buffer's
+                    # actual width, producing a slice narrower than
+                    # expected_shape and a shape-mismatch crash in cvtColor.
+                    max_w = frame_w & ~1
+                    left  = left & ~1
+                    right = min(max_w, (right + 1) & ~1)
+                    if right <= left:
+                        return None
                     crop_raw = raw[top:bottom, left:right, :]
                     expected_shape = (bottom - top, right - left, 4)
                     idx = self._bgra_idx
@@ -889,9 +904,11 @@ class NDICapture:
 
         if frame.ndim == 3 and frame.shape[2] == 4:
             self._last_frame_time = now
+            self._last_frame_perf_time = now
             return frame
         if frame.ndim == 3 and frame.shape[2] == 3:
             self._last_frame_time = now
+            self._last_frame_perf_time = now
             return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
         return None
 
@@ -1033,7 +1050,7 @@ def _list_pygrabber_device_formats(device_index: int) -> list[dict]:
 
 def list_supported_uvc_resolutions(
     device_index: int,
-    capture_method: str = 'dshow',
+    capture_method: str = 'msmf',
 ) -> list[tuple[int, int]]:
     """Return the device's actual supported resolutions.
 
@@ -1098,7 +1115,7 @@ def list_supported_uvc_fps(
     device_index: int,
     width: int,
     height: int,
-    capture_method: str = 'dshow',
+    capture_method: str = 'msmf',
 ) -> list[int]:
     """Return the device's actual supported FPS values at a given resolution.
 
@@ -1356,7 +1373,7 @@ class UVCCapture:
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
         self.config_signature = _uvc_signature(config)
 
-        capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
+        capture_method = str(getattr(config, 'uvc_capture_method', 'msmf')).lower()
         self.is_ffmpeg = (capture_method == 'ffmpeg')
         # Only the cv2 (dshow/msmf) path below ever sets this — ffmpeg mode
         # does its own crop via -vf before Axiom ever sees a frame, so grab()
@@ -2252,12 +2269,13 @@ def initialize_screen_capture(config: Config) -> Any:
 def _capture_backend_is_stale(
     capture_backend: Any, timeout: float = _CAPTURE_STALE_TIMEOUT_SECONDS,
 ) -> bool:
-    """True when *capture_backend* is a live object whose reader thread has
-    delivered no frames for over *timeout* seconds.
+    """True when *capture_backend* is a live object that has delivered no
+    frames for over *timeout* seconds.
 
-    Only uvc/udp backends set ``_last_frame_perf_time``; anything else (mss,
-    dxcam, an object missing the attribute) is reported as not stale — those
-    backends either aren't threaded readers or have their own recovery path.
+    Only uvc/udp/ndi backends set ``_last_frame_perf_time``; anything else
+    (mss, dxcam, an object missing the attribute) is reported as not stale —
+    those backends either aren't threaded readers or have their own recovery
+    path.
     """
     last_frame_time = getattr(capture_backend, '_last_frame_perf_time', None)
     if last_frame_time is None:
@@ -2300,6 +2318,20 @@ def reinitialize_if_method_changed(
     elif desired == 'ndi' and hasattr(current_capture, 'config_signature'):
         if getattr(current_capture, 'config_signature', None) != _ndi_signature(config):
             reinit_log_msg = '[Capture][NDI] NDI configuration changed. Reinitializing NDI backend...'
+        elif _capture_backend_is_stale(current_capture):
+            # NDICapture.grab() already self-heals by re-resolving/re-setting
+            # the source on the *same* Receiver object, but if the receiver's
+            # internal state ever gets stuck such that is_connected() never
+            # returns True again, that retry alone can't recover — only a
+            # full reinit (fresh Receiver/Finder) can. This is the same
+            # external backstop UVC/UDP already get, so NDI can't be stuck
+            # forever behind a self-heal path that stopped working.
+            reinit_log_fn = logger.warning
+            reinit_log_msg = (
+                '[Capture][NDI] NDI backend has produced no frames for over %.0fs '
+                '— treating it as dead and reinitializing...'
+            )
+            reinit_log_args = (_CAPTURE_STALE_TIMEOUT_SECONDS,)
     elif desired == 'udp' and hasattr(current_capture, 'config_signature'):
         if getattr(current_capture, 'config_signature', None) != _udp_signature(config):
             reinit_log_msg = '[Capture][UDP] UDP configuration changed. Reinitializing UDP backend...'
@@ -2367,10 +2399,10 @@ def capture_frame(screen_capture: Any, region: dict[str, int]) -> np.ndarray | N
             except TypeError:
                 screenshot = screen_capture.grab(region=_to_dxcam_region(region))
     except mss.exception.ScreenShotError as exc:
-        _warn_once('capture_screenshot_error', f"[截圖] 抓圖失敗: {exc}")
+        _warn_once('capture_screenshot_error', f"[Capture] Screenshot failed: {exc}")
         return None
     except Exception as exc:
-        _warn_once('capture_unknown_error', f"[截圖] 抓圖發生例外: {exc}")
+        _warn_once('capture_unknown_error', f"[Capture] Unexpected exception during capture: {exc}")
         return None
 
     if screenshot is None:
@@ -2384,7 +2416,7 @@ def capture_frame(screen_capture: Any, region: dict[str, int]) -> np.ndarray | N
         frame = np.frombuffer(screenshot.bgra, dtype=np.uint8).reshape((screenshot.height, screenshot.width, 4))
 
     if frame.ndim != 3 or frame.shape[2] < 3:
-        _warn_once('capture_invalid_frame_shape', f"[截圖] 影像格式異常: shape={getattr(frame, 'shape', None)}")
+        _warn_once('capture_invalid_frame_shape', f"[Capture] Unexpected frame shape: shape={getattr(frame, 'shape', None)}")
         return None
 
     if frame.shape[2] == 3:
@@ -2392,7 +2424,7 @@ def capture_frame(screen_capture: Any, region: dict[str, int]) -> np.ndarray | N
         frame = np.concatenate((frame, alpha), axis=2)
 
     if frame.size == 0:
-        _warn_once('capture_empty_frame', '[截圖] 抓到空影像，已略過該幀')
+        _warn_once('capture_empty_frame', '[Capture] Captured an empty frame, skipping')
         return None
 
     return frame

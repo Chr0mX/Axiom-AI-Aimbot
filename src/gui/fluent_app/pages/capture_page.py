@@ -428,7 +428,7 @@ class CapturePage(BasePage):
         self.previewFpsCapSegment.addItem(routeKey='uncapped', text="None")
         self.previewFpsCapSegment.addItem(routeKey='30',       text="30 FPS")
         self.previewFpsCapSegment.addItem(routeKey='60',       text="60 FPS")
-        self.previewFpsCapSegment.setCurrentItem('uncapped')
+        self.previewFpsCapSegment.setCurrentItem('60')
         self.previewFpsCapCard = SettingCard(
             FluentIcon.SPEED_HIGH,
             "Preview FPS Cap",

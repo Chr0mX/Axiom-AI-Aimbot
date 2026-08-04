@@ -286,7 +286,7 @@ class Config:
         self.uvc_show_window: bool = True
         self.uvc_always_on_top: bool = True
         self.preview_crop_to_detection: bool = False
-        self.preview_fps_cap: int = 0
+        self.preview_fps_cap: int = 60
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
         self.ndi_force_reconnect: bool = False
@@ -831,8 +831,8 @@ def _validate_screenshot_method(config: Config) -> None:
     valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi', 'udp')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
-    if getattr(config, 'uvc_capture_method', 'dshow') not in ('dshow', 'msmf', 'any', 'ffmpeg'):
-        config.uvc_capture_method = 'dshow'
+    if getattr(config, 'uvc_capture_method', 'msmf') not in ('dshow', 'msmf', 'any', 'ffmpeg'):
+        config.uvc_capture_method = 'msmf'
     if getattr(config, 'uvc_video_format', 'mjpeg') not in ('mjpeg', 'yuy2', 'nv12', 'yuv420p'):
         config.uvc_video_format = 'mjpeg'
     if getattr(config, 'uvc_crop_mode', 'dynamic') not in ('dynamic', 'fixed'):
