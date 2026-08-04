@@ -246,13 +246,13 @@ class VisualsPage(BasePage):
             parent=self.appearanceGroup
         )
 
-        # === Web ESP Overlay ===
-        self.webEspGroup = SettingCardGroup(t("web_esp_settings", "Web ESP Overlay"), self.scrollWidget)
+        # === Web HUD Overlay ===
+        self.webEspGroup = SettingCardGroup(t("web_esp_settings", "Web HUD Overlay"), self.scrollWidget)
 
         self.webEspEnableCard = SwitchSettingCard(
             FluentIcon.GLOBE,
-            t("web_esp_enabled", "Enable Web ESP"),
-            t("web_esp_desc", "Stream the ESP to a browser on this PC or any device on your LAN."),
+            t("web_esp_enabled", "Enable Web HUD"),
+            t("web_esp_desc", "Stream the HUD to a browser on this PC or any device on your LAN."),
             parent=self.webEspGroup
         )
 
@@ -677,10 +677,10 @@ class VisualsPage(BasePage):
         self.windowAlphaCard.titleLabel.setText(t("acrylic_window_alpha"))
         self.windowAlphaCard.contentLabel.setText("")
 
-        # Web ESP overlay settings
-        self.webEspGroup.titleLabel.setText(t("web_esp_settings", "Web ESP Overlay"))
-        self.webEspEnableCard.titleLabel.setText(t("web_esp_enabled", "Enable Web ESP"))
-        self.webEspEnableCard.contentLabel.setText(t("web_esp_desc", "Stream the ESP to a browser on this PC or any device on your LAN."))
+        # Web HUD overlay settings
+        self.webEspGroup.titleLabel.setText(t("web_esp_settings", "Web HUD Overlay"))
+        self.webEspEnableCard.titleLabel.setText(t("web_esp_enabled", "Enable Web HUD"))
+        self.webEspEnableCard.contentLabel.setText(t("web_esp_desc", "Stream the HUD to a browser on this PC or any device on your LAN."))
         self.webEspHttpPortCard.titleLabel.setText(t("web_esp_http_port", "HTTP Port"))
         self.webEspHttpPortCard.contentLabel.setText(t("web_esp_http_port_desc", "Port for the overlay web page."))
         self.webEspWsPortCard.titleLabel.setText(t("web_esp_ws_port", "WebSocket Port"))
