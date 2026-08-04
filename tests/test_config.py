@@ -94,7 +94,6 @@ class TestConfigInit:
         c = _make_config()
         assert c.xbox_sensitivity == 1.0
         assert c.xbox_deadzone == 0.05
-        assert c.xbox_auto_connect is True
 
     def test_auto_fire_defaults(self):
         c = _make_config()

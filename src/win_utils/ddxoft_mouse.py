@@ -3,6 +3,7 @@
 
 import ctypes
 import logging
+import threading
 import time
 
 from .mouse_move import send_mouse_move_mouse_event
@@ -37,9 +38,22 @@ class DDXoftMouse:
         self.success_count = 0      # 成功次數
         self.failure_count = 0      # 失敗次數
         self.last_status = None     # 最後一次操作狀態
+        # Unlike every other mouse backend in this codebase (MAKCU, Arduino,
+        # Xbox), this class had no lock at all — move_relative() (called
+        # from the inference thread) and click_left() (called from the
+        # separate auto-fire thread) both touch the same DLL handle and
+        # stats counters with no synchronization. Held only around the
+        # actual DLL calls/state mutations, never across a sleep — same
+        # discipline the other backends already follow.
+        self._lock = threading.Lock()
 
     def ensure_initialized(self):
         """Lazy-load the ddxoft DLL when needed."""
+        with self._lock:
+            return self._ensure_initialized_locked()
+
+    def _ensure_initialized_locked(self):
+        """Caller must hold self._lock."""
         if self.available:
             return True
         # If it failed before, don't retry every single frame — but do retry
@@ -55,7 +69,7 @@ class DDXoftMouse:
 
 
     def _init_dll(self):
-        """Initialize ddxoft DLL"""
+        """Initialize ddxoft DLL. Caller must hold self._lock."""
         if self.available:
             return True
 
@@ -113,48 +127,61 @@ class DDXoftMouse:
     
     def move_relative(self, dx, dy):
         """相對移動滑鼠"""
-        if not self.ensure_initialized():
-            self.failure_count += 1
-            self.last_status = "DLL_NOT_AVAILABLE"
-            return False
-        
-        try:
-            # 確保參數為整數且在合理範圍內
-            dx = max(-32767, min(32767, int(dx)))
-            dy = max(-32767, min(32767, int(dy)))
-            
-            # 使用 DD_movR 進行相對移動
-            result = self.dll.DD_movR(dx, dy)
-            
-            if result == 1:
-                self.success_count += 1
-                self.last_status = "SUCCESS"
-                return True
-            else:
+        with self._lock:
+            if not self._ensure_initialized_locked():
                 self.failure_count += 1
-                self.last_status = f"FAILED_CODE_{result}"
+                self.last_status = "DLL_NOT_AVAILABLE"
                 return False
-                
-        except Exception as e:
-            self.failure_count += 1
-            self.last_status = f"EXCEPTION_{type(e).__name__}"
-            return False
-    
+
+            try:
+                # 確保參數為整數且在合理範圍內
+                dx = max(-32767, min(32767, int(dx)))
+                dy = max(-32767, min(32767, int(dy)))
+
+                # 使用 DD_movR 進行相對移動
+                result = self.dll.DD_movR(dx, dy)
+
+                if result == 1:
+                    self.success_count += 1
+                    self.last_status = "SUCCESS"
+                    return True
+                else:
+                    self.failure_count += 1
+                    self.last_status = f"FAILED_CODE_{result}"
+                    return False
+
+            except Exception as e:
+                self.failure_count += 1
+                self.last_status = f"EXCEPTION_{type(e).__name__}"
+                return False
+
     def click_left(self):
         """左鍵點擊"""
-        if not self.ensure_initialized():
-            self.failure_count += 1
-            self.last_status = "DLL_NOT_AVAILABLE"
-            return False
-        
-        try:
-            # 使用 DD_btn 進行滑鼠點擊
-            # 1 = 左鍵按下, 2 = 左鍵釋放
-            down_result = self.dll.DD_btn(1)
-            # 添加微小延遲確保按下和釋放被正確識別
-            time.sleep(0.001)  # 1ms延遲
-            up_result = self.dll.DD_btn(2)
-            
+        with self._lock:
+            if not self._ensure_initialized_locked():
+                self.failure_count += 1
+                self.last_status = "DLL_NOT_AVAILABLE"
+                return False
+            try:
+                # 使用 DD_btn 進行滑鼠點擊: 1 = 左鍵按下
+                down_result = self.dll.DD_btn(1)
+            except Exception as e:
+                self.failure_count += 1
+                self.last_status = f"CLICK_EXCEPTION_{type(e).__name__}"
+                return False
+
+        # Released before the delay — never hold the lock across
+        # time.sleep(), same discipline every other backend follows.
+        time.sleep(0.001)  # 1ms延遲，確保按下和釋放被正確識別
+
+        with self._lock:
+            try:
+                up_result = self.dll.DD_btn(2)  # 2 = 左鍵釋放
+            except Exception as e:
+                self.failure_count += 1
+                self.last_status = f"CLICK_EXCEPTION_{type(e).__name__}"
+                return False
+
             if down_result == 1 and up_result == 1:
                 self.success_count += 1
                 self.last_status = "CLICK_SUCCESS"
@@ -163,11 +190,6 @@ class DDXoftMouse:
                 self.failure_count += 1
                 self.last_status = f"CLICK_FAILED_DOWN_{down_result}_UP_{up_result}"
                 return False
-                
-        except Exception as e:
-            self.failure_count += 1
-            self.last_status = f"CLICK_EXCEPTION_{type(e).__name__}"
-            return False
     
     def is_available(self):
         """檢查 ddxoft 是否可用"""

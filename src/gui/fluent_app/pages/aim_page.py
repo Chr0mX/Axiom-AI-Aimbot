@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QDialog, QLabel, QPushButton,
 )
 from PyQt6.QtGui import QDesktopServices, QPainter, QPixmap, QColor, QPen
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon,
@@ -268,6 +268,31 @@ class _JitterPreviewDialog(QDialog):
         self.reject()
 
 
+class _ArduinoConnectWorker(QThread):
+    """Runs connect_arduino() off the GUI thread.
+
+    connect_arduino() sleeps 2s (outside its own lock) waiting for the
+    Leonardo's auto-restart-on-connect — safe to call from a background
+    thread, the problem was purely that "Connect Arduino" invoked it
+    synchronously on the GUI thread, freezing the whole UI for those 2s
+    on every click.
+    """
+
+    finishedResult = pyqtSignal(bool)  # ok
+
+    def __init__(self, com_port: str, parent=None):
+        super().__init__(parent)
+        self._com_port = com_port
+
+    def run(self) -> None:
+        try:
+            from win_utils import connect_arduino
+            ok = connect_arduino(self._com_port)
+        except Exception:
+            ok = False
+        self.finishedResult.emit(ok)
+
+
 class AimPage(BasePage):
     """Aim Assist Settings Page"""
 
@@ -276,6 +301,7 @@ class AimPage(BasePage):
         self._config = None
         self._isLoadingConfig = False
         self._isArduinoConnected = False
+        self._arduinoConnectWorker: _ArduinoConnectWorker | None = None
         self._isXboxConnected = False
         self._jitterRecorder = None
         self._jitterRecording = False
@@ -597,7 +623,7 @@ class AimPage(BasePage):
 
         self.smartJitterLmbCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
-            t("smart_jitter_lmb_label", "Only While Shooting (LMB Held)"),
+            t("smart_jitter_lmb_label", "Only While Aiming"),
             t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"),
             parent=self.antiRecoilGroup
         )
@@ -1384,21 +1410,37 @@ class AimPage(BasePage):
 
     def _onArduinoConnectToggle(self):
         try:
-            from win_utils import is_arduino_connected, connect_arduino, disconnect_arduino
+            from win_utils import is_arduino_connected, disconnect_arduino
             if is_arduino_connected():
                 disconnect_arduino()
+                self._updateArduinoConnectionStatus()
             else:
                 com_port = self.comPortCombo.currentText()
                 if not com_port or com_port == t("no_com_port"):
                     QMessageBox.warning(self, t("config_error"), t("no_com_port"))
                     return
-                success = connect_arduino(com_port)
-                if not success:
-                    QMessageBox.warning(self, t("config_error"),
-                                        f"Arduino {t('disconnected')}: {com_port}")
-            self._updateArduinoConnectionStatus()
+                self._startArduinoConnect(com_port)
         except ImportError:
             QMessageBox.warning(self, t("config_error"), "pyserial not installed.\npip install pyserial")
+
+    def _startArduinoConnect(self, com_port: str) -> None:
+        """Run connect_arduino() on a background thread instead of blocking
+        the GUI thread for its 2s post-connect wait (Leonardo auto-restart)."""
+        if self._arduinoConnectWorker is not None and self._arduinoConnectWorker.isRunning():
+            return  # a connect attempt is already in flight
+        self.arduinoConnectBtn.setEnabled(False)
+        self.connectionLabel.setText(t("connecting", "Connecting..."))
+        self._arduinoConnectWorker = _ArduinoConnectWorker(com_port, parent=self)
+        self._arduinoConnectWorker.finishedResult.connect(
+            lambda ok, port=com_port: self._onArduinoConnectFinished(ok, port))
+        self._arduinoConnectWorker.start()
+
+    def _onArduinoConnectFinished(self, ok: bool, com_port: str) -> None:
+        self.arduinoConnectBtn.setEnabled(True)
+        if not ok:
+            QMessageBox.warning(self, t("config_error"),
+                                f"Arduino {t('disconnected')}: {com_port}")
+        self._updateArduinoConnectionStatus()
 
     def _updateArduinoConnectionStatus(self):
         try:
@@ -1889,7 +1931,7 @@ class AimPage(BasePage):
         self.antiRecoilGroup.titleLabel.setText(t("anti_recoil", "Anti-Recoil"))
         self.smartJitterEnableCard.titleLabel.setText(t("smart_jitter_label", "Smart Jitter"))
         self.smartJitterEnableCard.contentLabel.setText(t("smart_jitter_desc", "Add jitter when target box is small (far targets). Fires while shooting."))
-        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Shooting (LMB Held)"))
+        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Aiming"))
         self.smartJitterLmbCard.contentLabel.setText(t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"))
         self.smartJitterLevelCard.titleLabel.setText(t("smart_jitter_level_label", "Jitter Strength"))
         self.smartJitterLevelCard.contentLabel.setText(t("smart_jitter_level_desc", "Max pixel offset radius applied per frame while jitter fires"))

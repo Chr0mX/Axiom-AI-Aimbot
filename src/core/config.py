@@ -197,7 +197,6 @@ _FIELD_MAP = {
     'makcu_disengage_delay':      'hardware.makcu.disengage_delay',
     'xbox_sensitivity':           'hardware.xbox.sensitivity',
     'xbox_deadzone':              'hardware.xbox.deadzone',
-    'xbox_auto_connect':          'hardware.xbox.auto_connect',
 
     # --- ui ---
     'dark_mode':                  'ui.dark_mode',
@@ -421,7 +420,6 @@ class Config:
         # Xbox 360 虛擬手把設定
         self.xbox_sensitivity: float = 1.0          # 手把靈敏度 (0.1~5.0)
         self.xbox_deadzone: float = 0.05            # 手把死區 (0.0~0.5)
-        self.xbox_auto_connect: bool = True          # 選擇 xbox 時自動連線
 
         # 檢測設定
         # 偵測節流：
