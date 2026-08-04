@@ -266,28 +266,36 @@ def _run_stream(payload):
 
 
 def _frame(lo, hi=0x00):
-    from win_utils.makcu_mouse import _KM_PREFIX
-    return bytes(_KM_PREFIX) + bytes([lo, hi])
+    """A single button-stream frame: a bare 2-byte little-endian mask, no
+    prefix — per docs/MAKCU_Native_API.md's "Streaming" section (buttons
+    stream, cmd 0x02: "2-byte mask"). An earlier version of this reader (and
+    these tests) assumed a "km."-prefixed 5-byte frame, which doesn't match
+    the documented format — real mask bytes never contain 0x6B/0x6D/0x2E, so
+    that assumption meant buf.find() essentially never matched and
+    _btn_mask stayed stuck at 0 forever, i.e. button-press detection simply
+    never worked. See _stream_reader()'s docstring for the full story.
+    """
+    return bytes([lo, hi])
 
 
 class TestMakcuStreamReader:
-    """測試 km.buttons 事件流的 2-byte LE 解析與按鍵位元遮罩"""
+    """測試按鍵事件流 (buttons stream) 的 2-byte LE 解析與按鍵位元遮罩"""
 
     def test_real_lmb_press_parses(self):
-        """km. + 01 00 → 左鍵按下"""
+        """01 00 → 左鍵按下"""
         m = _run_stream(_frame(0x01))
         assert m._btn_mask == 0x01
         assert m.lmb_held is True
         assert m.rmb_held is False
 
     def test_release_parses(self):
-        """km. + 00 00 → 全部放開"""
+        """00 00 → 全部放開"""
         m = _run_stream(_frame(0x01) + _frame(0x00))
         assert m._btn_mask == 0x00
         assert m.lmb_held is False
 
     def test_rmb_press_parses(self):
-        """km. + 02 00 → 右鍵按下，不誤報左鍵"""
+        """02 00 → 右鍵按下，不誤報左鍵"""
         m = _run_stream(_frame(0x02))
         assert m._btn_mask == 0x02
         assert m.lmb_held is False
@@ -301,67 +309,27 @@ class TestMakcuStreamReader:
         assert m.rmb_held is True
         assert m.lmb_held is False
 
-    def test_scroll_byte_cannot_fake_lmb(self):
-        """滾輪位元組 (0xFF) 落入遮罩位置時不得偽造任何按鍵以外的位元。
-
-        即使一個失步的 0xFF 進入 LO，遮罩後僅 0x1F 存活；關鍵在於放開幀
-        (00 00) 之後 lmb_held 必須回到 False，不像舊解析會殘留 bit 0。
-        """
-        # A full release frame after any prior state must clear LMB.
-        m = _run_stream(_frame(0x01) + _frame(0x00))
-        assert m.lmb_held is False
-
     def test_last_frame_wins_in_batch(self):
         """同一次讀取含多幀時，最後一幀為最終狀態"""
         m = _run_stream(_frame(0x01) + _frame(0x03) + _frame(0x00))
         assert m._btn_mask == 0x00
 
     def test_partial_frame_not_consumed(self):
-        """不足一幀 (5 bytes) 的資料不應更新狀態"""
-        from win_utils.makcu_mouse import _KM_PREFIX
-        # only km. + 1 mask byte = 4 bytes, missing the HI byte
-        m = _run_stream(bytes(_KM_PREFIX) + bytes([0x01]))
+        """不足一幀 (2 bytes) 的資料不應更新狀態"""
+        # only 1 byte — missing the HI byte
+        m = _run_stream(bytes([0x01]))
         assert m._btn_mask == 0x00  # untouched — never reached FRAME_LEN
 
-    def test_stray_byte_between_frames_does_not_stick_lmb(self):
-        """滾輪造成的失步位元組插入兩幀之間時，不得讓左鍵誤報「卡住按下」。
-
-        Reproduces the reported bug: a real MB1-press frame, then one stray
-        byte (simulating a leaked scroll-wheel delta of +1) landing exactly
-        where the release frame's own prefix should start, then the real
-        release frame. The stray byte breaks the fixed 5-byte framing
-        assumption for the *press* frame's boundary — the fix must detect
-        that mismatch, discard the unconfirmed press frame rather than
-        trust it, resync on the release frame's prefix, and end up
-        correctly released — not stuck reporting LMB held.
-        """
-        payload = _frame(0x01) + bytes([0x01]) + _frame(0x00)
-        m = _run_stream(payload)
-        assert m._btn_mask == 0x00
-        assert m.lmb_held is False
-
-    def test_stray_all_bits_byte_between_frames_does_not_stick_all_buttons(self):
-        """失步位元組為 0xFF（滾輪 -1）時，遮罩後會變成「五鍵全按」——
-        同樣必須被判定為不可信並捨棄，而不是卡在全部按鍵都按下的狀態。
-        """
-        payload = _frame(0x02) + bytes([0xFF]) + _frame(0x00)
-        m = _run_stream(payload)
-        assert m._btn_mask == 0x00
-        assert m.lmb_held is False
-        assert m.rmb_held is False
-
-    def test_verified_consecutive_frames_still_all_apply(self):
-        """回歸測試：正常、無失步的連續幀仍應逐幀正確套用（不誤判為失步）。"""
-        m = _run_stream(_frame(0x01) + _frame(0x02) + _frame(0x00))
-        assert m._btn_mask == 0x00
-
-    def test_isolated_single_frame_still_applies_without_lookahead(self):
-        """孤立的單一幀（緩衝區中沒有後續資料可供驗證）仍應直接套用，
-        不因為「無法驗證」而永久卡住——與失步（有後續資料但不符）的情況不同。
-        """
+    def test_isolated_single_frame_applies(self):
+        """孤立的單一幀應直接套用，沒有多幀情境下的任何特殊處理。"""
         m = _run_stream(_frame(0x01))
         assert m._btn_mask == 0x01
         assert m.lmb_held is True
+
+    def test_consecutive_frames_all_apply_in_order(self):
+        """連續多幀應依序套用，以最後一幀為最終狀態。"""
+        m = _run_stream(_frame(0x01) + _frame(0x02) + _frame(0x00))
+        assert m._btn_mask == 0x00
 
 
 # ============================================================

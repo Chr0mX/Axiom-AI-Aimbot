@@ -32,10 +32,8 @@ logger = logging.getLogger(__name__)
 _OPERATING_BAUD    = 4_000_000
 _BAUD_CHANGE_FRAME = bytes([0xDE, 0xAD, 0x05, 0x00, 0xA5, 0x00, 0x09, 0x3D, 0x00])
 
-# Button stream parsing — prefix emitted before each mask byte
-# Do NOT use \n/\r splitting: mask 0x0A (R+S1) and 0x0D (L+M+S1) collide with newlines
-_KM_PREFIX = bytes([0x6B, 0x6D, 0x2E])  # "km."
-_BTN_BITS = 0x1F  # bits 0-4 = L,R,M,S1,S2 — everything else is noise/wheel/high-byte
+# Button stream parsing — see _stream_reader() for the frame format.
+_BTN_BITS = 0x1F  # bits 0-4 = L,R,M,S1,S2 — everything else is noise/high-byte
 
 
 class MakcuMouse:
@@ -318,44 +316,37 @@ class MakcuMouse:
                     logger.debug("[MAKCU] Reconnect failed: %s", exc)
 
     def _stream_reader(self):
-        """Daemon thread: parse km. + 2-byte LE button mask frames, update _btn_mask.
+        """Daemon thread: parse 2-byte LE button mask frames, update _btn_mask.
 
-        Frame layout (firmware buttons stream): 0x6B 0x6D 0x2E <maskLO> <maskHI>.
-        The mask is little-endian; only bits 0-4 are real buttons (L,R,M,S1,S2).
+        Per the vendored MAKCU Native API reference (docs/MAKCU_Native_API.md,
+        "Streaming" section): the buttons stream (cmd 0x02) is a bare 2-byte
+        little-endian mask — bit0=L, bit1=R, bit2=M, bit3=S1, bit4=S2 — with
+        NO framing/prefix of any kind. "km."-prefixed replies are a *separate*
+        mechanism documented only for one-off ASCII command responses
+        (`.version()`, `.info()`, etc. → `km.reply\r\n>>>`); streaming is
+        explicitly the compact binary encoding, by design, for performance.
 
-        Scroll-wheel activity has been observed to desync this fixed 5-byte
-        framing — an extra/misplaced byte lands where <maskLO>/<maskHI> is
-        expected, e.g. a scroll delta of +1 (0x01) or -1 (0xFF). Masking to
-        _BTN_BITS alone does NOT catch this: 0x01 & _BTN_BITS still sets bit 0
-        (reads as Left held) and 0xFF & _BTN_BITS sets bits 0-4 (reads as
-        every button held) — both indistinguishable from real presses by
-        value alone, and since the stream only emits on change, a phantom
-        "held" reading from a corrupted frame can persist indefinitely (no
-        further frame ever arrives to clear it) until an unrelated real
-        button event happens to reset it. This is the "MB1 stuck engaged
-        after scrolling" bug.
+        An earlier version of this reader assumed every frame was prefixed
+        with 0x6B 0x6D 0x2E ("km.") — a 5-byte "km.<maskLO><maskHI>" framing
+        that doesn't match the documented 2-byte format at all. Since real
+        mask bytes only ever use bits 0-4 (values 0-31), that assumed prefix
+        would essentially never occur in the actual raw mask stream, so
+        buf.find() would almost never match — _btn_mask stayed permanently at
+        its initial 0 and button-press detection silently never worked at
+        all. Reading the stream as bare 2-byte masks, per spec, fixes that.
 
-        Fix: verify framing, not just content. When enough bytes are already
-        buffered to check, confirm the *next* "km." prefix actually starts
-        exactly FRAME_LEN bytes after this one before trusting the frame in
-        between as a real button mask. A mismatch means desynced/extra bytes
-        are present somewhere at or after this candidate frame — it can't be
-        trusted, so it's discarded (not applied to _btn_mask) and parsing
-        resumes from the next "km." prefix that actually appears later in
-        the buffer, rather than blindly advancing by FRAME_LEN and
-        compounding the drift, or wrongly blaming/dropping this candidate's
-        own (valid) prefix bytes. When too few bytes are buffered yet to
-        check (the common case — most frames arrive in isolation, with
-        nothing yet to validate against), fall back to accepting the frame;
-        withholding every isolated single-frame update forever would just
-        trade a false "stuck held" for an equally wrong "stuck released".
+        Masking to _BTN_BITS discards any stray high bits a corrupted/dropped
+        byte might set, so a single-byte glitch degrades to "wrong buttons
+        read as held for one frame" rather than nonsense values — with a
+        change-only stream there's no separate framing marker to resync
+        against if a byte is truly dropped or duplicated on the wire, so this
+        is the best available defense against that without one.
 
         km.echo(0) means the device sends nothing in response to move/click writes,
         so all incoming bytes are button stream events — no lock needed on reads.
         """
         buf = bytearray()
-        PREFIX_LEN = len(_KM_PREFIX)
-        FRAME_LEN = PREFIX_LEN + 2  # km. + 2-byte mask
+        FRAME_LEN = 2  # raw little-endian mask, no framing/prefix
         while not self._stream_stop.is_set():
             try:
                 ser = self._serial
@@ -367,38 +358,10 @@ class MakcuMouse:
                     if len(buf) > 256:
                         buf.clear()
                     while len(buf) >= FRAME_LEN:
-                        idx = buf.find(_KM_PREFIX)
-                        if idx == -1:
-                            # No prefix in buffer; keep only a possible partial tail
-                            del buf[:max(0, len(buf) - (PREFIX_LEN - 1))]
-                            break
-                        if idx + FRAME_LEN > len(buf):
-                            # Full frame not yet arrived; drop bytes before prefix and wait
-                            del buf[:idx]
-                            break
-
-                        next_start = idx + FRAME_LEN
-                        can_verify = len(buf) >= next_start + PREFIX_LEN
-                        if can_verify and bytes(buf[next_start:next_start + PREFIX_LEN]) != _KM_PREFIX:
-                            # Desynced — this candidate frame's payload is not
-                            # trustworthy (regardless of whether idx's own
-                            # prefix match was itself genuine). Look past it
-                            # for the next real "km." and discard everything
-                            # up to there, including this unconfirmed frame,
-                            # instead of assuming idx was the corruption site.
-                            resync_idx = buf.find(_KM_PREFIX, idx + PREFIX_LEN)
-                            if resync_idx == -1:
-                                # No further prefix buffered yet; keep only a
-                                # possible partial tail and wait for more data.
-                                del buf[:max(0, len(buf) - (PREFIX_LEN - 1))]
-                            else:
-                                del buf[:resync_idx]
-                            continue
-
-                        lo = buf[idx + 3]
-                        hi = buf[idx + 4]
+                        lo = buf[0]
+                        hi = buf[1]
                         self._btn_mask = (lo | (hi << 8)) & _BTN_BITS
-                        del buf[:next_start]
+                        del buf[:FRAME_LEN]
                 else:
                     time.sleep(0.001)
             except Exception:
