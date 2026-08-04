@@ -316,40 +316,36 @@ class MakcuMouse:
                     logger.debug("[MAKCU] Reconnect failed: %s", exc)
 
     def _stream_reader(self):
-        """Daemon thread: parse 2-byte LE button mask frames, update _btn_mask.
+        """Daemon thread: parse km.<mask>\\r\\n>>> button frames, update _btn_mask.
 
-        Two candidate wire formats exist in this codebase's own history for
-        this exact stream, and both have now been tried and reported as not
-        fixing real-hardware button detection:
+        Confirmed against a raw hex capture from real hardware (this
+        codebase's prior three attempts at this format were each tried and
+        reported as not detecting real clicks — see git history on this
+        method for what didn't work and why each guess seemed plausible at
+        the time). The actual frame, captured verbatim:
 
-        1. (Original, wrong) "km."-prefixed 5-byte frames — real mask bytes
-           never contain 0x6B/0x6D/0x2E, so this essentially never matched.
-        2. (Second attempt, also reportedly not working) a bare 2-byte LE
-           mask with no wrapper, per docs/MAKCU_Native_API.md's literal
-           "2-byte mask" description of the buttons stream.
+            6b 6d 2e 01 0d 0a 3e 3e 3e 20
+            "k  m  .  <mask=0x01>  \\r  \\n  >  >  >  ' '"
 
-        This version instead follows src/makcu_binary_decoder.py's
-        BinaryDecoder — a separate, already-implemented, self-describing
-        decoder elsewhere in this repo for the MAKCU V2 binary protocol,
-        which frames every response/stream payload (both directions) as
-        `[0x50][CMD:u8][LEN_LO:u8][LEN_HI:u8][PAYLOAD:LEN bytes]`, and
-        decodes the buttons stream (cmd 0x02) specifically as a u16 LE mask
-        payload. Unlike both prior attempts, this format is self-describing
-        (an explicit length field, not a hunted-for byte pattern or a
-        fixed-width assumption), so resyncing after any corruption is exact
-        rather than heuristic.
+        i.e. `km.` + a single mask byte + the exact same `\\r\\n>>> ` suffix
+        the docs describe for one-off ASCII command replies — the buttons
+        stream just pushes this unsolicited on every state change, using
+        the same reply framing as everything else instead of a distinct
+        compact encoding. 10 bytes total, mask is 1 byte (not 2).
 
-        Every incoming chunk is logged as a hex dump at INFO level, at least
-        once per connection — if this format is *also* wrong, that log
-        output is exactly what's needed to determine the real one from
-        actual hardware instead of guessing a fourth time.
+        Verify the trailing suffix too (not just the "km." prefix) when
+        enough bytes are buffered to check — a real mask byte can't corrupt
+        into "km.", but requiring the suffix as well catches a byte
+        misaligning the frame from either direction and forces a resync on
+        the next real "km." instead of misreading a corrupted mask.
 
         km.echo(0) means the device sends nothing in response to move/click writes,
         so all incoming bytes are button stream events — no lock needed on reads.
         """
         buf = bytearray()
-        _BINARY_HEADER = 0x50
-        _CMD_BUTTONS_STREAM = 0x02
+        _KM_PREFIX = b"km."
+        _SUFFIX = b"\r\n>>> "
+        FRAME_LEN = len(_KM_PREFIX) + 1 + len(_SUFFIX)  # km. + mask + \r\n>>>(space) = 10
         logged_chunks = 0
         while not self._stream_stop.is_set():
             try:
@@ -365,25 +361,29 @@ class MakcuMouse:
                     buf.extend(chunk)
                     if len(buf) > 256:
                         buf.clear()
-                    while len(buf) >= 4:
-                        if buf[0] != _BINARY_HEADER:
-                            # Resync: discard bytes before the next 0x50.
-                            idx = buf.find(bytes([_BINARY_HEADER]), 1)
-                            if idx == -1:
-                                buf.clear()
+                    while True:
+                        idx = buf.find(_KM_PREFIX)
+                        if idx == -1:
+                            # No prefix in buffer; keep only a possible partial tail
+                            del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
+                            break
+                        if idx + FRAME_LEN > len(buf):
+                            # Full frame not yet arrived; drop bytes before the
+                            # prefix and wait for the rest.
+                            del buf[:idx]
+                            break
+                        mask = buf[idx + 3]
+                        suffix = bytes(buf[idx + 4:idx + FRAME_LEN])
+                        if suffix != _SUFFIX:
+                            # Not a trustworthy frame — resync on the next "km."
+                            resync_idx = buf.find(_KM_PREFIX, idx + len(_KM_PREFIX))
+                            if resync_idx == -1:
+                                del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
                             else:
-                                del buf[:idx]
+                                del buf[:resync_idx]
                             continue
-                        cmd = buf[1]
-                        length = buf[2] | (buf[3] << 8)
-                        total = 4 + length
-                        if len(buf) < total:
-                            break  # payload not fully arrived yet
-                        payload = bytes(buf[4:total])
-                        del buf[:total]
-                        if cmd == _CMD_BUTTONS_STREAM and len(payload) >= 2:
-                            lo, hi = payload[0], payload[1]
-                            self._btn_mask = (lo | (hi << 8)) & _BTN_BITS
+                        self._btn_mask = mask & _BTN_BITS
+                        del buf[:idx + FRAME_LEN]
                 else:
                     time.sleep(0.001)
             except Exception:

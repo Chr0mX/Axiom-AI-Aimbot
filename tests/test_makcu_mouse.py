@@ -265,30 +265,31 @@ def _run_stream(payload):
     return m
 
 
-_BUTTONS_STREAM_CMD = 0x02
+_KM_PREFIX = b"km."
+_SUFFIX = b"\r\n>>> "
 
 
-def _frame(lo, hi=0x00, cmd=_BUTTONS_STREAM_CMD):
-    """A single button-stream frame using the MAKCU V2 binary protocol's
-    self-describing envelope (see src/makcu_binary_decoder.py's
-    BinaryDecoder, which independently implements the same format):
+def _frame(mask):
+    """A single button-stream frame in the format confirmed against real
+    MAKCU hardware (raw hex capture, 2026-08-04): "km." + a single mask
+    byte + the same "\\r\\n>>> " suffix the docs describe for one-off ASCII
+    command replies. E.g. a Left-button press is literally
+    `6b 6d 2e 01 0d 0a 3e 3e 3e 20` on the wire.
 
-        [0x50][CMD:u8][LEN_LO:u8][LEN_HI:u8][PAYLOAD:LEN bytes]
-
-    For the buttons stream (cmd 0x02) the payload is a 2-byte little-endian
-    mask. This is the third framing model this reader has used — see its
-    docstring for why the first two (a "km."-prefixed 5-byte frame, then a
-    bare unwrapped 2-byte mask) were each tried and found not to work.
+    This is the fourth framing model this reader has used — three earlier
+    guesses (a "km."-prefixed 5-byte frame with a 2-byte mask, a bare
+    2-byte mask with no prefix, and the MAKCU V2 [0x50]-wrapped binary
+    protocol) were each tried and reported as not detecting real clicks.
+    See _stream_reader()'s docstring for the confirmed capture.
     """
-    payload = bytes([lo, hi])
-    return bytes([0x50, cmd, len(payload) & 0xFF, (len(payload) >> 8) & 0xFF]) + payload
+    return _KM_PREFIX + bytes([mask]) + _SUFFIX
 
 
 class TestMakcuStreamReader:
-    """測試按鍵事件流 (buttons stream) 的 0x50 封包解析與按鍵位元遮罩"""
+    """測試按鍵事件流 (buttons stream) 的 km.<mask>\\r\\n>>> 封包解析與按鍵位元遮罩"""
 
     def test_real_lmb_press_parses(self):
-        """[0x50][0x02][02 00][01 00] → 左鍵按下"""
+        """km. + 01 + \\r\\n>>>  → 左鍵按下"""
         m = _run_stream(_frame(0x01))
         assert m._btn_mask == 0x01
         assert m.lmb_held is True
@@ -307,13 +308,12 @@ class TestMakcuStreamReader:
         assert m.lmb_held is False
         assert m.rmb_held is True
 
-    def test_high_byte_noise_masked_off(self):
-        """高位元組雜訊應被 _BTN_BITS 遮罩，僅保留真實按鍵位元"""
-        # mask LO=0x02 (R), HI=0xFF (noise) → only 0x02 survives
-        m = _run_stream(_frame(0x02, 0xFF))
-        assert m._btn_mask == 0x02
-        assert m.rmb_held is True
-        assert m.lmb_held is False
+    def test_high_bits_masked_off(self):
+        """遮罩位元組的高位元 (bits 5-7) 應被 _BTN_BITS 遮罩"""
+        # 0xE1 = 0b111_00001 -> only bits 0-4 (0x01, Left) should survive
+        m = _run_stream(_frame(0xE1))
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
 
     def test_last_frame_wins_in_batch(self):
         """同一次讀取含多幀時，最後一幀為最終狀態"""
@@ -322,9 +322,9 @@ class TestMakcuStreamReader:
 
     def test_partial_frame_not_consumed(self):
         """不足一個完整封包的資料不應更新狀態"""
-        # header + cmd + len, but the 2-byte payload hasn't arrived yet
-        m = _run_stream(bytes([0x50, _BUTTONS_STREAM_CMD, 0x02, 0x00, 0x01]))
-        assert m._btn_mask == 0x00  # untouched — payload incomplete
+        # "km." + mask byte, but the "\r\n>>> " suffix hasn't arrived yet
+        m = _run_stream(_KM_PREFIX + bytes([0x01]))
+        assert m._btn_mask == 0x00  # untouched — suffix incomplete
 
     def test_isolated_single_frame_applies(self):
         """孤立的單一封包應直接套用。"""
@@ -337,14 +337,41 @@ class TestMakcuStreamReader:
         m = _run_stream(_frame(0x01) + _frame(0x02) + _frame(0x00))
         assert m._btn_mask == 0x00
 
-    def test_non_buttons_cmd_frame_ignored(self):
-        """非按鍵串流的封包 (例如另一個 cmd) 不應影響 _btn_mask。"""
-        other = bytes([0x50, 0x0C, 0x02, 0x00, 0xFF, 0xFF])  # mouse-stream cmd, ignored
-        m = _run_stream(other + _frame(0x01))
-        assert m._btn_mask == 0x01
+    def test_mismatched_suffix_discarded_and_resynced(self):
+        """後綴不符（失步/損毀）的候選幀應被捨棄，並在下一個真正的 km. 前綴重新同步。"""
+        corrupt = _KM_PREFIX + bytes([0x01]) + b"\r\nXXXXX"  # wrong suffix
+        m = _run_stream(corrupt + _frame(0x02))
+        assert m._btn_mask == 0x02
+        assert m.rmb_held is True
 
-    def test_resyncs_past_garbage_before_header(self):
-        """0x50 之前的雜訊位元組應被丟棄，並在下一個有效封包重新同步。"""
+    def test_real_captured_sequence_from_hardware(self):
+        """回歸測試：對真實硬體擷取的原始位元組序列逐幀套用，最終狀態應為左鍵按下。
+
+        Verbatim raw capture (2026-08-04) of a user testing L, R, side-top,
+        side-bottom, middle, middle, L — confirms the parser tracks the
+        entire real sequence correctly end to end, not just synthetic frames.
+        """
+        raw_hex = (
+            "6b6d2e010d0a3e3e3e20"
+            "6b6d2e000d0a3e3e3e20"
+            "6b6d2e020d0a3e3e3e20"
+            "6b6d2e000d0a3e3e3e20"
+            "6b6d2e100d0a3e3e3e20"
+            "6b6d2e000d0a3e3e3e20"
+            "6b6d2e080d0a3e3e3e20"
+            "6b6d2e000d0a3e3e3e20"
+            "6b6d2e040d0a3e3e3e20"
+            "6b6d2e000d0a3e3e3e20"
+            "6b6d2e040d0a3e3e3e20"
+            "6b6d2e000d0a3e3e3e20"
+            "6b6d2e010d0a3e3e3e20"
+        )
+        m = _run_stream(bytes.fromhex(raw_hex))
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
+
+    def test_resyncs_past_garbage_before_prefix(self):
+        """"km." 之前的雜訊位元組應被丟棄，並在下一個有效封包重新同步。"""
         garbage = bytes([0x11, 0x22, 0x33])
         m = _run_stream(garbage + _frame(0x01))
         assert m._btn_mask == 0x01
