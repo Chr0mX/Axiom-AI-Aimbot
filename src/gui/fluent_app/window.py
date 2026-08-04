@@ -401,15 +401,14 @@ class AxiomWindow(FluentWindow):
         )
 
     def updateVisualsVisibilityForScreenshotMethod(self, screenshot_method: str):
-        """UVC 模式下隱藏 visual 頁籤，避免與 UVC 預覽重複顯示。"""
-        is_uvc = str(screenshot_method).lower() == 'uvc'
-        should_show_visuals = not is_uvc
-        if hasattr(self, 'nav_display') and self.nav_display is not None:
-            self.nav_display.setVisible(should_show_visuals)
-
-        if is_uvc and self.stackedWidget.currentWidget() is self.displayInterface:
-            self.switchTo(self.aimInterface)
-
+        """Kept as the entry point capture_page.py calls on a screenshot-method
+        change; the Visuals tab itself is no longer hidden in UVC mode — its
+        detection-box settings (FOV/boxes/confidence/tracer-line/box color
+        theme) are read by the same _draw_detection_overlay() the UVC preview
+        uses (screen_capture.py), so they still apply there. Only the
+        Crosshair section is exclusive to the in-game overlay and simply has
+        no visible effect while on UVC — not worth hiding the whole page over.
+        """
         self.updatePreviewPanelVisibility()
 
     def updatePreviewPanelVisibility(self) -> None:
