@@ -313,7 +313,7 @@ class InferencePage(BasePage):
 
             mode = getattr(self._config, 'second_inference_mode', 'off')
             self.secondInferSegment.setCurrentItem(mode if mode in ("off", "v1_ocr", "v2_onnx") else "off")
-            self.hudConfidenceCard.setValue(float(getattr(self._config, 'hud_confidence', 0.25)))
+            self.hudConfidenceCard.setValue(float(getattr(self._config, 'hud_confidence', 0.10)))
             self._updateHudConfidenceVisibility(mode)
 
             # Apply initial screenshot-method effect on fov_follow visibility

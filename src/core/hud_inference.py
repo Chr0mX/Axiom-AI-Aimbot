@@ -524,7 +524,7 @@ def _feeder(config: "Config", stop_event: threading.Event) -> None:
             roi_dict = _parse_roi(coords_str) or _parse_roi(_HUD_ROI_DEFAULT_STR)
             model_path = (hud_model_rel if os.path.isabs(hud_model_rel)
                           else os.path.join(_project_root, hud_model_rel))
-            confidence = float(getattr(config, "hud_confidence", 0.25))
+            confidence = float(getattr(config, "hud_confidence", 0.10))
             frame = get_preview_frame()
             if frame is not None and roi_dict is not None:
                 try:
