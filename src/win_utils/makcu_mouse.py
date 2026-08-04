@@ -318,35 +318,39 @@ class MakcuMouse:
     def _stream_reader(self):
         """Daemon thread: parse 2-byte LE button mask frames, update _btn_mask.
 
-        Per the vendored MAKCU Native API reference (docs/MAKCU_Native_API.md,
-        "Streaming" section): the buttons stream (cmd 0x02) is a bare 2-byte
-        little-endian mask — bit0=L, bit1=R, bit2=M, bit3=S1, bit4=S2 — with
-        NO framing/prefix of any kind. "km."-prefixed replies are a *separate*
-        mechanism documented only for one-off ASCII command responses
-        (`.version()`, `.info()`, etc. → `km.reply\r\n>>>`); streaming is
-        explicitly the compact binary encoding, by design, for performance.
+        Two candidate wire formats exist in this codebase's own history for
+        this exact stream, and both have now been tried and reported as not
+        fixing real-hardware button detection:
 
-        An earlier version of this reader assumed every frame was prefixed
-        with 0x6B 0x6D 0x2E ("km.") — a 5-byte "km.<maskLO><maskHI>" framing
-        that doesn't match the documented 2-byte format at all. Since real
-        mask bytes only ever use bits 0-4 (values 0-31), that assumed prefix
-        would essentially never occur in the actual raw mask stream, so
-        buf.find() would almost never match — _btn_mask stayed permanently at
-        its initial 0 and button-press detection silently never worked at
-        all. Reading the stream as bare 2-byte masks, per spec, fixes that.
+        1. (Original, wrong) "km."-prefixed 5-byte frames — real mask bytes
+           never contain 0x6B/0x6D/0x2E, so this essentially never matched.
+        2. (Second attempt, also reportedly not working) a bare 2-byte LE
+           mask with no wrapper, per docs/MAKCU_Native_API.md's literal
+           "2-byte mask" description of the buttons stream.
 
-        Masking to _BTN_BITS discards any stray high bits a corrupted/dropped
-        byte might set, so a single-byte glitch degrades to "wrong buttons
-        read as held for one frame" rather than nonsense values — with a
-        change-only stream there's no separate framing marker to resync
-        against if a byte is truly dropped or duplicated on the wire, so this
-        is the best available defense against that without one.
+        This version instead follows src/makcu_binary_decoder.py's
+        BinaryDecoder — a separate, already-implemented, self-describing
+        decoder elsewhere in this repo for the MAKCU V2 binary protocol,
+        which frames every response/stream payload (both directions) as
+        `[0x50][CMD:u8][LEN_LO:u8][LEN_HI:u8][PAYLOAD:LEN bytes]`, and
+        decodes the buttons stream (cmd 0x02) specifically as a u16 LE mask
+        payload. Unlike both prior attempts, this format is self-describing
+        (an explicit length field, not a hunted-for byte pattern or a
+        fixed-width assumption), so resyncing after any corruption is exact
+        rather than heuristic.
+
+        Every incoming chunk is logged as a hex dump at INFO level, at least
+        once per connection — if this format is *also* wrong, that log
+        output is exactly what's needed to determine the real one from
+        actual hardware instead of guessing a fourth time.
 
         km.echo(0) means the device sends nothing in response to move/click writes,
         so all incoming bytes are button stream events — no lock needed on reads.
         """
         buf = bytearray()
-        FRAME_LEN = 2  # raw little-endian mask, no framing/prefix
+        _BINARY_HEADER = 0x50
+        _CMD_BUTTONS_STREAM = 0x02
+        logged_chunks = 0
         while not self._stream_stop.is_set():
             try:
                 ser = self._serial
@@ -354,14 +358,32 @@ class MakcuMouse:
                     break
                 n = ser.in_waiting
                 if n:
-                    buf.extend(ser.read(n))
+                    chunk = ser.read(n)
+                    if logged_chunks < 20:
+                        logger.info("[MAKCU] stream raw bytes: %s", chunk.hex(' '))
+                        logged_chunks += 1
+                    buf.extend(chunk)
                     if len(buf) > 256:
                         buf.clear()
-                    while len(buf) >= FRAME_LEN:
-                        lo = buf[0]
-                        hi = buf[1]
-                        self._btn_mask = (lo | (hi << 8)) & _BTN_BITS
-                        del buf[:FRAME_LEN]
+                    while len(buf) >= 4:
+                        if buf[0] != _BINARY_HEADER:
+                            # Resync: discard bytes before the next 0x50.
+                            idx = buf.find(bytes([_BINARY_HEADER]), 1)
+                            if idx == -1:
+                                buf.clear()
+                            else:
+                                del buf[:idx]
+                            continue
+                        cmd = buf[1]
+                        length = buf[2] | (buf[3] << 8)
+                        total = 4 + length
+                        if len(buf) < total:
+                            break  # payload not fully arrived yet
+                        payload = bytes(buf[4:total])
+                        del buf[:total]
+                        if cmd == _CMD_BUTTONS_STREAM and len(payload) >= 2:
+                            lo, hi = payload[0], payload[1]
+                            self._btn_mask = (lo | (hi << 8)) & _BTN_BITS
                 else:
                     time.sleep(0.001)
             except Exception:

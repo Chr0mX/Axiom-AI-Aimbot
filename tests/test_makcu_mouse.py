@@ -265,37 +265,43 @@ def _run_stream(payload):
     return m
 
 
-def _frame(lo, hi=0x00):
-    """A single button-stream frame: a bare 2-byte little-endian mask, no
-    prefix — per docs/MAKCU_Native_API.md's "Streaming" section (buttons
-    stream, cmd 0x02: "2-byte mask"). An earlier version of this reader (and
-    these tests) assumed a "km."-prefixed 5-byte frame, which doesn't match
-    the documented format — real mask bytes never contain 0x6B/0x6D/0x2E, so
-    that assumption meant buf.find() essentially never matched and
-    _btn_mask stayed stuck at 0 forever, i.e. button-press detection simply
-    never worked. See _stream_reader()'s docstring for the full story.
+_BUTTONS_STREAM_CMD = 0x02
+
+
+def _frame(lo, hi=0x00, cmd=_BUTTONS_STREAM_CMD):
+    """A single button-stream frame using the MAKCU V2 binary protocol's
+    self-describing envelope (see src/makcu_binary_decoder.py's
+    BinaryDecoder, which independently implements the same format):
+
+        [0x50][CMD:u8][LEN_LO:u8][LEN_HI:u8][PAYLOAD:LEN bytes]
+
+    For the buttons stream (cmd 0x02) the payload is a 2-byte little-endian
+    mask. This is the third framing model this reader has used — see its
+    docstring for why the first two (a "km."-prefixed 5-byte frame, then a
+    bare unwrapped 2-byte mask) were each tried and found not to work.
     """
-    return bytes([lo, hi])
+    payload = bytes([lo, hi])
+    return bytes([0x50, cmd, len(payload) & 0xFF, (len(payload) >> 8) & 0xFF]) + payload
 
 
 class TestMakcuStreamReader:
-    """測試按鍵事件流 (buttons stream) 的 2-byte LE 解析與按鍵位元遮罩"""
+    """測試按鍵事件流 (buttons stream) 的 0x50 封包解析與按鍵位元遮罩"""
 
     def test_real_lmb_press_parses(self):
-        """01 00 → 左鍵按下"""
+        """[0x50][0x02][02 00][01 00] → 左鍵按下"""
         m = _run_stream(_frame(0x01))
         assert m._btn_mask == 0x01
         assert m.lmb_held is True
         assert m.rmb_held is False
 
     def test_release_parses(self):
-        """00 00 → 全部放開"""
+        """press then release → 全部放開"""
         m = _run_stream(_frame(0x01) + _frame(0x00))
         assert m._btn_mask == 0x00
         assert m.lmb_held is False
 
     def test_rmb_press_parses(self):
-        """02 00 → 右鍵按下，不誤報左鍵"""
+        """mask=0x02 → 右鍵按下，不誤報左鍵"""
         m = _run_stream(_frame(0x02))
         assert m._btn_mask == 0x02
         assert m.lmb_held is False
@@ -315,13 +321,13 @@ class TestMakcuStreamReader:
         assert m._btn_mask == 0x00
 
     def test_partial_frame_not_consumed(self):
-        """不足一幀 (2 bytes) 的資料不應更新狀態"""
-        # only 1 byte — missing the HI byte
-        m = _run_stream(bytes([0x01]))
-        assert m._btn_mask == 0x00  # untouched — never reached FRAME_LEN
+        """不足一個完整封包的資料不應更新狀態"""
+        # header + cmd + len, but the 2-byte payload hasn't arrived yet
+        m = _run_stream(bytes([0x50, _BUTTONS_STREAM_CMD, 0x02, 0x00, 0x01]))
+        assert m._btn_mask == 0x00  # untouched — payload incomplete
 
     def test_isolated_single_frame_applies(self):
-        """孤立的單一幀應直接套用，沒有多幀情境下的任何特殊處理。"""
+        """孤立的單一封包應直接套用。"""
         m = _run_stream(_frame(0x01))
         assert m._btn_mask == 0x01
         assert m.lmb_held is True
@@ -330,6 +336,19 @@ class TestMakcuStreamReader:
         """連續多幀應依序套用，以最後一幀為最終狀態。"""
         m = _run_stream(_frame(0x01) + _frame(0x02) + _frame(0x00))
         assert m._btn_mask == 0x00
+
+    def test_non_buttons_cmd_frame_ignored(self):
+        """非按鍵串流的封包 (例如另一個 cmd) 不應影響 _btn_mask。"""
+        other = bytes([0x50, 0x0C, 0x02, 0x00, 0xFF, 0xFF])  # mouse-stream cmd, ignored
+        m = _run_stream(other + _frame(0x01))
+        assert m._btn_mask == 0x01
+
+    def test_resyncs_past_garbage_before_header(self):
+        """0x50 之前的雜訊位元組應被丟棄，並在下一個有效封包重新同步。"""
+        garbage = bytes([0x11, 0x22, 0x33])
+        m = _run_stream(garbage + _frame(0x01))
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
 
 
 # ============================================================
