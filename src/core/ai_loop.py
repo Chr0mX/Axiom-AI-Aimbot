@@ -703,8 +703,10 @@ def ai_logic_loop(
                         state.aim_carry_y = 0.0
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
-                        # Target lost — clear stale Kalman state so a newly-acquired
-                        # target isn't corrupted by the old one's history.
+                        # Target lost — clear stale prediction/Kalman state so a
+                        # newly-acquired target isn't corrupted by the old one's history.
+                        if ai_aiming._predictor is not None:
+                            ai_aiming._predictor.reset()
                         if ai_aiming._kalman is not None:
                             ai_aiming._kalman.reset()
 

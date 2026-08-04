@@ -716,6 +716,40 @@ class AimPage(BasePage):
         # === Target Tracking ===
         self.trackingGroup = SettingCardGroup(t("target_tracking", "Target Tracking"), self.scrollWidget)
 
+        self.predictionEnableCard = SwitchSettingCard(
+            FluentIcon.RINGER,
+            t("prediction_enabled", "Velocity Prediction"),
+            t("prediction_desc", "Extrapolate target position forward by the prediction horizon."),
+            parent=self.trackingGroup
+        )
+
+        self.predictionHorizonCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("prediction_horizon", "Prediction Horizon"),
+            5, 50,
+            format_func=lambda v: f"{v} ms",
+            label_width=55,
+            parent=self.trackingGroup
+        )
+
+        self.predictionMaxVelCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("prediction_max_velocity", "Max Velocity Cap"),
+            300, 3000,
+            format_func=lambda v: f"{v} px/s",
+            label_width=70,
+            description=t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"),
+            parent=self.trackingGroup
+        )
+
+        self.predictionHistoryCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("prediction_history", "History Frames"),
+            2, 6,
+            format_func=lambda v: str(v),
+            parent=self.trackingGroup
+        )
+
         self.stickyLockCard = SwitchSettingCard(
             FluentIcon.PIN,
             t("sticky_lock_enabled", "Sticky Target Lock"),
@@ -951,6 +985,10 @@ class AimPage(BasePage):
         self.addContent(self.targetPriorityGroup)
 
         # Target Tracking
+        self.trackingGroup.addSettingCard(self.predictionEnableCard)
+        self.trackingGroup.addSettingCard(self.predictionHorizonCard)
+        self.trackingGroup.addSettingCard(self.predictionMaxVelCard)
+        self.trackingGroup.addSettingCard(self.predictionHistoryCard)
         self.trackingGroup.addSettingCard(self.stickyLockCard)
         self.trackingGroup.addSettingCard(self.lockDecayCard)
         self.trackingGroup.addSettingCard(self.lockIouCard)
@@ -1028,6 +1066,10 @@ class AimPage(BasePage):
         self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
 
         # Target Tracking
+        self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
+        self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
+        self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
+        self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
         self.stickyLockCard.checkedChanged.connect(self._onStickyLockChanged)
         self.lockDecayCard.valueChanged.connect(self._onLockDecayChanged)
         self.lockIouCard.valueChanged.connect(self._onLockIouChanged)
@@ -1137,6 +1179,10 @@ class AimPage(BasePage):
             self.targetPriorityWeightCard.setValue(int(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100))
 
             # Target Tracking
+            self.predictionEnableCard.setChecked(bool(getattr(self._config, 'prediction_enabled', False)))
+            self.predictionHorizonCard.setValue(int(getattr(self._config, 'prediction_horizon_ms', 10.0)))
+            self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
+            self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
             self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
             self.lockIouCard.setValue(int(getattr(self._config, 'lock_iou_threshold', 0.3) * 100))
@@ -1641,6 +1687,22 @@ class AimPage(BasePage):
 
     # === Target Tracking Callbacks ===
 
+    def _onPredictionEnableChanged(self, checked):
+        if self._config:
+            self._config.prediction_enabled = bool(checked)
+
+    def _onPredictionHorizonChanged(self, value):
+        if self._config:
+            self._config.prediction_horizon_ms = float(value)
+
+    def _onPredictionMaxVelChanged(self, value):
+        if self._config:
+            self._config.prediction_max_velocity = float(value)
+
+    def _onPredictionHistoryChanged(self, value):
+        if self._config:
+            self._config.prediction_history_len = int(value)
+
     def _onStickyLockChanged(self, checked):
         if self._config:
             self._config.sticky_lock_enabled = bool(checked)
@@ -1795,6 +1857,12 @@ class AimPage(BasePage):
         self.targetPriorityWeightCard.contentLabel.setText(t("target_priority_weight_desc", "Used in Composite mode only"))
 
         self.trackingGroup.titleLabel.setText(t("target_tracking", "Target Tracking"))
+        self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
+        self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
+        self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))
+        self.predictionMaxVelCard.titleLabel.setText(t("prediction_max_velocity", "Max Velocity Cap"))
+        self.predictionMaxVelCard.contentLabel.setText(t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"))
+        self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "History Frames"))
         self.stickyLockCard.titleLabel.setText(t("sticky_lock_enabled", "Sticky Target Lock"))
         self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
         self.lockDecayCard.titleLabel.setText(t("lock_decay_frames", "Lock Decay Frames"))

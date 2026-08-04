@@ -119,6 +119,10 @@ _FIELD_MAP = {
     'auto_fire_target_part':      'autofire.target_part',
 
     # --- tracking ---
+    'prediction_enabled':         'tracking.prediction.enabled',
+    'prediction_horizon_ms':      'tracking.prediction.horizon_ms',
+    'prediction_max_velocity':    'tracking.prediction.max_velocity',
+    'prediction_history_len':     'tracking.prediction.history_len',
     'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
     'lock_decay_frames':          'tracking.sticky_lock.decay_frames',
     'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
@@ -476,6 +480,12 @@ class Config:
         # Camera motion compensation — subtract per-frame global scene shift before PID
         self.cam_motion_comp_enabled: bool = False
         self.cam_motion_comp_size: int = 128   # downsample resolution for phase correlation (128 or 256)
+
+        # 速度預測瞄準（基於歷史位置估算目標未來位置）
+        self.prediction_enabled: bool = False
+        self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
+        self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
+        self.prediction_history_len: int = 3         # 歷史點數量
 
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False

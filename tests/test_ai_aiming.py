@@ -52,7 +52,8 @@ def _make_config(**overrides):
         aim_adaptive_ratio_enabled=False, aim_posture_aware_enabled=False,
         sticky_lock_enabled=False, lock_iou_threshold=0.3, lock_decay_frames=15,
         target_priority_mode="distance", target_priority_confidence_weight=0.5,
-        kalman_enabled=False,
+        kalman_enabled=False, prediction_enabled=False,
+        prediction_horizon_ms=10.0, prediction_max_velocity=1200.0, prediction_history_len=3,
         cam_motion_comp_enabled=False, aim_deadzone_enabled=False,
         aim_y_reduce_enabled=False, aim_y_reduce_delay=0.0,
         aim_y_reduce_settle_px=0.0, aim_y_reduce_floor=0.1, aim_y_reduce_ramp=0.0,
@@ -130,6 +131,76 @@ class TestYRecoilTargetSwapReset:
 
         dx, dy, _ = sent_moves[0]
         assert 15 <= dy <= 30
+
+
+class TestVelocityPrediction:
+    """Velocity prediction must extrapolate the aim point ahead of the raw
+    detected position by prediction_horizon_ms, not just track it exactly.
+    Restored after being merged into Kalman-only smoothing — see CLAUDE.md /
+    Aiming_Pipeline_Audit history for why."""
+
+    def test_moving_target_is_extrapolated_ahead_of_raw_position(self, sent_moves, monkeypatch):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        config = _make_config(
+            prediction_enabled=True, prediction_horizon_ms=100.0,
+            prediction_history_len=3, prediction_max_velocity=5000.0,
+        )
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        # process_aiming's prediction stage reads time.perf_counter() directly
+        # (not the current_time kwarg), so drive it deterministically here.
+        perf_times = iter([0.0, 0.1])
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: next(perf_times))
+
+        box_a = [480.0, 480.0, 520.0, 520.0]  # center (500, 500) — on crosshair
+        process_aiming(config, [box_a], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        # 100ms later, target moved +10px in X -> vx = 100 px/s.
+        box_b = [490.0, 480.0, 530.0, 520.0]  # center (510, 500)
+        sent_moves.clear()
+        process_aiming(config, [box_b], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.1, confidences=[0.9])
+
+        assert len(sent_moves) == 1
+        dx, dy, _ = sent_moves[0]
+        # Raw detected error is 510-500=10. Predicted error (horizon=100ms,
+        # vx=100px/s) = 10 + 100*0.1 = 20 — prediction must extrapolate past
+        # the raw detected position, not just reproduce it.
+        assert dx > 10, f"Prediction did not extrapolate ahead of raw position: dx={dx}"
+
+    def test_disabled_prediction_tracks_raw_position_exactly(self, sent_moves, monkeypatch):
+        """Sanity check for the test above: with prediction_enabled=False the
+        same motion must NOT be extrapolated — dx should equal the raw error."""
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        config = _make_config(prediction_enabled=False)
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        perf_times = iter([0.0, 0.1])
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: next(perf_times))
+
+        box_a = [480.0, 480.0, 520.0, 520.0]
+        process_aiming(config, [box_a], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        box_b = [490.0, 480.0, 530.0, 520.0]  # center (510, 500)
+        sent_moves.clear()
+        process_aiming(config, [box_b], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.1, confidences=[0.9])
+
+        assert len(sent_moves) == 1
+        dx, dy, _ = sent_moves[0]
+        assert dx == 10, f"Raw tracking should not extrapolate when prediction is disabled: dx={dx}"
 
 
 class TestDeadzonePreviousErrorFreshness:

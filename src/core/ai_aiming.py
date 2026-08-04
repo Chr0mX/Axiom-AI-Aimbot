@@ -11,6 +11,7 @@ from win_utils import send_mouse_move
 from .ai_loop_state import LoopState
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
+from .target_predictor import VelocityPredictor
 
 if TYPE_CHECKING:
     from .config import Config
@@ -24,6 +25,9 @@ def _box_iou(a: List[float], b: List[float]) -> float:
         return 0.0
     return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
 
+
+# Module-level singleton — shared across process_aiming calls.
+_predictor: Optional[VelocityPredictor] = None
 
 # Jitter pattern iterator cache: reloaded whenever jitter_pattern_file changes.
 _jitter_pattern_cache: dict = {"file": None, "iter": None}
@@ -46,6 +50,21 @@ def _get_kalman(config: Config) -> KalmanFilter2D:
     else:
         _kalman.reconfigure(pn, mn)
     return _kalman
+
+
+def _get_predictor(config: Config) -> VelocityPredictor:
+    """Return (and lazily create/reconfigure) the module-level VelocityPredictor."""
+    global _predictor
+    history_len = int(getattr(config, 'prediction_history_len', 3))
+    max_vel = float(getattr(config, 'prediction_max_velocity', 1200.0))
+    if _predictor is None:
+        _predictor = VelocityPredictor(history_len=history_len, max_velocity_px_per_s=max_vel)
+    else:
+        _predictor._max_velocity = max_vel
+        _predictor._history = type(_predictor._history)(
+            _predictor._history, maxlen=history_len
+        )
+    return _predictor
 
 
 def calculate_aim_target(
@@ -255,13 +274,26 @@ def process_aiming(
             config.display_locked_box = list(selected_box)
             config.display_locked_box_is_decaying = False
 
+        # --- Velocity prediction (optional) ---
+        # Extrapolates the aim point forward by prediction_horizon_ms to
+        # compensate for capture->inference->move pipeline latency — this is
+        # a genuinely different job from Kalman's below (anticipating motion
+        # vs. denoising the point), not a duplicate of it. Restored after
+        # being merged away: on a PID with Kd=0 on both axes (no derivative
+        # term of its own), this was the *only* thing in the whole pipeline
+        # compensating for target motion during that latency window — with
+        # Kalman off (as it commonly is), removing this left literally
+        # nothing anticipating a moving target, which read as the aimbot
+        # feeling permanently a step behind.
+        if getattr(config, 'prediction_enabled', False):
+            predictor = _get_predictor(config)
+            horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
+            target_x, target_y = predictor.update(target_x, target_y, time.perf_counter(), horizon_s)
+        else:
+            if _predictor is not None:
+                _predictor.reset()
+
         # --- Kalman filter aim-point smoothing (optional) ---
-        # Sole prediction/smoothing stage — a Kalman filter already is a
-        # predictor and a smoother in one principled model, so it replaces
-        # what used to be three separate, overlapping stages (Box EMA,
-        # plain Velocity Prediction, and EMA point-smoothing after Kalman)
-        # that each added their own lag in series without meaningfully
-        # improving on what Kalman alone already does.
         if getattr(config, 'kalman_enabled', False):
             kf = _get_kalman(config)
             target_x, target_y = kf.update(target_x, target_y)
