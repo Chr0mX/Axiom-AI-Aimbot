@@ -43,8 +43,6 @@ class TestConfigInit:
 
     def test_capture_defaults_match_screen(self):
         c = _make_config()
-        assert c.capture_width == 1920
-        assert c.capture_height == 1080
         assert c.screenshot_method == "mss"
 
     def test_crosshair_defaults(self):

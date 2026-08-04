@@ -161,17 +161,6 @@ def test_find_ndi_source_by_name_accepts_stream_name_case_insensitive():
     assert sc._find_ndi_source_by_name(FakeFinder(), 'mainfeed') is source
 
 
-def test_extract_ndi_source_video_meta_supports_rate_fraction():
-    from core import screen_capture as sc
-
-    source = SimpleNamespace(width=1920, height=1080, frame_rate_N=60000, frame_rate_D=1001)
-    width, height, fps = sc._extract_ndi_source_video_meta(source)
-
-    assert (width, height) == (1920, 1080)
-    assert fps is not None
-    assert abs(fps - 59.94) < 0.02
-
-
 def test_detect_active_capture_method_identifies_fallback_to_mss():
     from core import screen_capture as sc
 

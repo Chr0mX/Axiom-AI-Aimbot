@@ -383,7 +383,6 @@ def ai_logic_loop(
                     capture_state['latest_frame'] = captured_frame
                     capture_state['latest_region'] = target_region
 
-                config.last_screenshot_time = time.time()
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
         finally:
             if high_res_timer_enabled:

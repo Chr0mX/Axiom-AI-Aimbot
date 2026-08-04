@@ -205,10 +205,6 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
     }
 
 
-# Fixed title for the UVC/NDI preview window (not user-configurable).
-_UVC_WINDOW_NAME = "Axiom UVC Preview"
-
-
 def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, str, int]:
     crop_mode = str(getattr(config, 'uvc_crop_mode', 'dynamic')).lower()
     return (
@@ -305,81 +301,6 @@ def _find_ndi_source_by_name(finder: Any, target_name: str) -> Any | None:
         pass
 
     return None
-
-
-def list_available_ndi_sources() -> list[str]:
-    """Return discovered NDI source names via cyndilib when available."""
-
-    try:
-        from cyndilib.finder import Finder  # type: ignore[import-not-found]
-    except ImportError:
-        return []
-
-    def _normalize(names: list[Any]) -> list[str]:
-        result: list[str] = []
-        for entry in names:
-            name = _extract_ndi_source_name(entry)
-            if name and name not in result:
-                result.append(name)
-        return result
-
-    try:
-        with Finder() as finder:
-            if not getattr(finder, "is_open", False):
-                finder.open()
-            names = _normalize(finder.get_source_names())
-            if names:
-                return names
-
-            # Discovery can take a few seconds on some networks.
-            for _ in range(6):
-                try:
-                    changed = finder.wait_for_sources(0.5)
-                except TypeError:
-                    changed = finder.wait_for_sources(timeout=0.5)
-                if changed:
-                    finder.update_sources()
-                    names = _normalize(finder.get_source_names())
-                    if names:
-                        return names
-            return _normalize(finder.get_source_names())
-    except Exception:
-        return []
-
-
-def _format_ndi_source_label(name: str, width: int | None, height: int | None, fps: float | None) -> str:
-    _ = (width, height, fps)
-    return name
-
-
-def _extract_ndi_source_video_meta(source: Any) -> tuple[int | None, int | None, float | None]:
-    """Best-effort metadata extraction from cyndilib source objects."""
-
-    width = height = None
-    fps = None
-
-    for key in ('width', 'xres', 'video_width', 'frame_width'):
-        value = getattr(source, key, None)
-        if isinstance(value, (int, float)) and int(value) > 0:
-            width = int(value)
-            break
-    for key in ('height', 'yres', 'video_height', 'frame_height'):
-        value = getattr(source, key, None)
-        if isinstance(value, (int, float)) and int(value) > 0:
-            height = int(value)
-            break
-    for key in ('frame_rate', 'framerate', 'fps', 'video_fps'):
-        value = getattr(source, key, None)
-        if isinstance(value, (int, float)) and float(value) > 0:
-            fps = float(value)
-            break
-    if fps is None:
-        num = getattr(source, 'frame_rate_N', None)
-        den = getattr(source, 'frame_rate_D', None)
-        if isinstance(num, (int, float)) and isinstance(den, (int, float)) and float(den) > 0:
-            fps = float(num) / float(den)
-
-    return width, height, fps
 
 
 def _draw_detection_overlay(
@@ -555,17 +476,13 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
                 return []
 
             for name in names:
-                width: int | None = None
-                height: int | None = None
-                fps: float | None = None
-
                 details.append(
                     {
                         'name': name,
-                        'width': width,
-                        'height': height,
-                        'fps': fps,
-                        'label': _format_ndi_source_label(name, width, height, fps),
+                        'width': None,
+                        'height': None,
+                        'fps': None,
+                        'label': name,
                     }
                 )
     except Exception:
@@ -587,7 +504,6 @@ class NDICapture:
         # The GUI exposes a single shared "Capture Preview Window" toggle that
         # writes uvc_show_window for both UVC and NDI backends.
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
-        self.window_name = str(getattr(config, 'ndi_window_name', 'Axiom NDI Preview'))
         self._finder: Any | None = None
         self._source_assigned = False
         self._reconnect_logged = False
@@ -1438,7 +1354,6 @@ class UVCCapture:
         fps = int(getattr(config, 'uvc_fps', 60))
         self._target_fps = fps  # requested rate, for _reader_worker's shortfall check
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
-        self.window_name = _UVC_WINDOW_NAME
         self.config_signature = _uvc_signature(config)
 
         capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
@@ -2029,7 +1944,6 @@ class UVCCapture:
                 self.cap.release()
             except Exception:
                 pass
-        # destroyWindow is handled by the preview thread's run() exit path
 
 
 class UdpCapture:
@@ -2043,7 +1957,6 @@ class UdpCapture:
         bind_port = int(getattr(config, 'udp_bind_port', 5600))
         recv_buffer_size = int(getattr(config, 'udp_recv_buffer_size', 65536))
         frame_timeout = float(getattr(config, 'udp_frame_timeout', 1.0))
-        self.window_name = _UVC_WINDOW_NAME
         self.config_signature = _udp_signature(config)
 
         self._receiver = UdpJpegReceiver(

@@ -30,9 +30,9 @@ STATE_FIELDS = ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_on
 # Single source of truth for the grouped (v2) schema: maps each flat Config
 # attribute to its dotted path in the nested JSON. Drives to_dict() and from_dict().
 # Fields intentionally absent (never persisted): runtime-derived (current_provider),
-# auto-detected (model_input_size), derived (uvc_resolution), constants
-# (uvc_window_name, latency_stats_alpha), state (see STATE_FIELDS), and the
-# specially-handled crosshair color triplet + humanization dataclass.
+# auto-detected (model_input_size), constants (latency_stats_alpha), state (see
+# STATE_FIELDS), and the specially-handled crosshair color triplet + humanization
+# dataclass.
 _FIELD_MAP = {
     # --- model ---
     'model_path':                 'model.path',
@@ -254,12 +254,6 @@ class Config:
 
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
-
-        # Not read anywhere in src/ today, but tests/test_config.py asserts
-        # these as part of Config's default contract — keep them until that
-        # test is revisited rather than silently breaking it.
-        self.capture_width: int = self.width
-        self.capture_height: int = self.height
 
         self.screenshot_method: str = "dxcam"  # 螢幕截圖方式
         self.uvc_device_index: int = 0
@@ -564,7 +558,6 @@ class Config:
         self.latency_stats_interval: float = 1.0  # 秒
 
         # 供統計使用的時間戳（由不同線程更新）
-        self.last_screenshot_time: float = 0.0
         self.last_detection_time: float = 0.0
         self.last_overlay_update_time: float = 0.0
 

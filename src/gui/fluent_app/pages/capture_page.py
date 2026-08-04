@@ -159,7 +159,7 @@ class CapturePage(BasePage):
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
 
         self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "ffmpeg"])
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "any", "ffmpeg"])
         self.uvcCaptureMethodCombo.setMinimumWidth(140)
         self.uvcCaptureMethodCard = SettingCard(
             FluentIcon.CAMERA,
