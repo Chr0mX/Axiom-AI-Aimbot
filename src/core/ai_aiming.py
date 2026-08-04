@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
-from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .target_predictor import VelocityPredictor
@@ -169,34 +168,6 @@ def _apply_adaptive_deadzone(
         scale = min(1.0, (mag - deadzone) / (deadzone * 0.3 + 1e-6))
         ratio = (mag - deadzone) / mag
         return error_x * ratio * scale, error_y * ratio * scale
-    except Exception:
-        return error_x, error_y
-
-
-def _apply_lateral_overshoot_brake(
-    error_x: float, error_y: float, box: list, config
-) -> tuple:
-    # Slows horizontal correction when vertical error dominates, mimicking the human
-    # tendency to settle onto a target rather than diagonal-snapping.
-    # Ported from Someone_idea/ai_aiming.py.
-    try:
-        if not getattr(config, 'aim_lateral_brake_enabled', False):
-            return error_x, error_y
-        ex = abs(error_x)
-        ey = abs(error_y)
-        if ey < 1e-6:
-            return error_x, error_y
-        dom_trigger = float(getattr(config, 'aim_lateral_brake_dom_trigger', 1.12))
-        dominance = ex / max(ey, 1e-6)
-        if dominance < dom_trigger:
-            return error_x, error_y
-        dom_max = float(getattr(config, 'aim_lateral_brake_dom_max', 3.0))
-        strength = float(getattr(config, 'aim_lateral_brake_strength', 0.75))
-        min_scale = float(getattr(config, 'aim_lateral_brake_min_scale', 0.26))
-        t = min(1.0, (dominance - dom_trigger) / max(dom_max - dom_trigger, 0.1))
-        brake_raw = 1.0 - (1.0 - min_scale) * (t ** 0.9) * strength
-        x_scale = max(min_scale, min(1.0, brake_raw))
-        return error_x * x_scale, error_y
     except Exception:
         return error_x, error_y
 
@@ -383,10 +354,6 @@ def process_aiming(
                 pid_y.update(0.0)
                 return
 
-        # --- Lateral overshoot brake (new feature from Someone_idea) ---
-        if getattr(config, 'aim_lateral_brake_enabled', False):
-            errorX, errorY = _apply_lateral_overshoot_brake(errorX, errorY, selected_box, config)
-
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
 
         # Track target Y velocity for the velocity-restore gate (independent of prediction_enabled)
@@ -422,17 +389,6 @@ def process_aiming(
                         factor = floor
                     dy *= factor
 
-        # Apply humanization layer (post-PID, pre-rounding, pre-injection).
-        # Operates only on dx/dy; never touches PID state or coordinate space.
-        _hcfg = getattr(config, 'humanization', None)
-        if _hcfg is not None and _hcfg.enabled:
-            _result = apply_humanization(dx, dy, _hcfg)
-            if _result is None:
-                # Reaction variability: suppress this frame's injection.
-                # PID error persists and is corrected on the next frame.
-                return
-            dx, dy = _result
-
         # Sub-pixel carry (all backends): accumulate the fractional remainder that
         # integer truncation would otherwise discard, so micro-corrections (e.g. a
         # PID output of 0.4 px) are carried forward and applied on a later frame.
@@ -449,11 +405,6 @@ def process_aiming(
         if getattr(config, 'max_move_per_frame_px', 0) > 0:
             _mx, _my = _apply_per_frame_cap(float(move_x), float(move_y), config)
             move_x, move_y = int(round(_mx)), int(round(_my))
-
-        if getattr(config, 'jitter_enabled', False) and (move_x != 0 or move_y != 0):
-            j = float(getattr(config, 'jitter_strength', 1.5))
-            move_x += int(random.uniform(-j, j))
-            move_y += int(random.uniform(-j, j))
 
         # --- Smart jitter: fires when box is small (far target) ---
         if getattr(config, 'smart_jitter_enabled', False):

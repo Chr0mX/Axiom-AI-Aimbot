@@ -4,15 +4,12 @@
 from __future__ import annotations
 
 import ctypes
-import dataclasses
 import json
 import logging
 import os
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
-
-from .humanization import HumanizationConfig
 
 
 def _get_screen_size() -> tuple[int, int]:
@@ -31,8 +28,7 @@ STATE_FIELDS = ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_on
 # attribute to its dotted path in the nested JSON. Drives to_dict() and from_dict().
 # Fields intentionally absent (never persisted): runtime-derived (current_provider),
 # auto-detected (model_input_size), constants (latency_stats_alpha), state (see
-# STATE_FIELDS), and the specially-handled crosshair color triplet + humanization
-# dataclass.
+# STATE_FIELDS), and the specially-handled crosshair color triplet.
 _FIELD_MAP = {
     # --- model ---
     'model_path':                 'model.path',
@@ -98,8 +94,6 @@ _FIELD_MAP = {
     'ema_alpha':                  'aim.ema.alpha',
     'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
     'cam_motion_comp_size':       'aim.cam_motion_comp.size',
-    'jitter_enabled':             'aim.jitter.enabled',
-    'jitter_strength':            'aim.jitter.strength',
     'smart_jitter_enabled':       'aim.smart_jitter.enabled',
     'smart_jitter_strength':      'aim.smart_jitter.strength',
     'smart_jitter_box_threshold_pct': 'aim.smart_jitter.box_threshold_pct',
@@ -109,11 +103,6 @@ _FIELD_MAP = {
     'aim_deadzone_enabled':       'aim.deadzone.enabled',
     'aim_deadzone_min_px':        'aim.deadzone.min_px',
     'aim_deadzone_close_px':      'aim.deadzone.close_px',
-    'aim_lateral_brake_enabled':  'aim.lateral_brake.enabled',
-    'aim_lateral_brake_strength': 'aim.lateral_brake.strength',
-    'aim_lateral_brake_dom_trigger': 'aim.lateral_brake.dom_trigger',
-    'aim_lateral_brake_dom_max':  'aim.lateral_brake.dom_max',
-    'aim_lateral_brake_min_scale': 'aim.lateral_brake.min_scale',
     'head_width_ratio':           'aim.target_area.head_width_ratio',
     'head_height_ratio':          'aim.target_area.head_height_ratio',
     'body_width_ratio':           'aim.target_area.body_width_ratio',
@@ -481,10 +470,6 @@ class Config:
         self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
         self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier
 
-        # Basic jitter
-        self.jitter_enabled: bool = False
-        self.jitter_strength: float = 1.5          # pixel offset radius
-
         # Frame skip gate
         self.frame_skip_enabled: bool = False
         self.frame_skip_threshold: float = 2.0     # avg pixel diff below this → skip
@@ -533,11 +518,6 @@ class Config:
         self.aim_deadzone_enabled: bool = False
         self.aim_deadzone_min_px: float = 0.4
         self.aim_deadzone_close_px: float = 0.2
-        self.aim_lateral_brake_enabled: bool = False
-        self.aim_lateral_brake_strength: float = 0.75
-        self.aim_lateral_brake_dom_trigger: float = 1.12
-        self.aim_lateral_brake_dom_max: float = 3.0
-        self.aim_lateral_brake_min_scale: float = 0.26
         self.max_move_per_frame_px: float = 85.0
 
         # Semantic false-positive filter (ported from Someone_idea)
@@ -589,9 +569,6 @@ class Config:
         self.hud_game: str = "Apex Legends"              # selected game profile key from game.json
         self.hud_roi_coords: str = "1490,953,1870,1041"  # HUD ROI as "x1,y1,x2,y2" (from game.json)
 
-        # Humanization post-processing layer (operates only on final dx/dy output)
-        self.humanization: HumanizationConfig = HumanizationConfig()
-    
     def to_dict(self) -> Dict[str, Any]:
         """Serialize persisted config into the grouped (v2) JSON schema.
 
@@ -604,7 +581,6 @@ class Config:
         # Crosshair RGB triplet → single [r, g, b] array.
         _set_path(out, 'display.crosshair.color',
                   [self.crosshair_color_r, self.crosshair_color_g, self.crosshair_color_b])
-        out['humanization'] = dataclasses.asdict(self.humanization)
         return out
 
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -644,13 +620,6 @@ class Config:
         for f in STATE_FIELDS:
             if f in data and hasattr(self, f):
                 setattr(self, f, data[f])
-
-        # Humanization dataclass — update in place, ignore unknown keys.
-        hud = data.get('humanization')
-        if isinstance(hud, dict):
-            for hk, hv in hud.items():
-                if hasattr(self.humanization, hk):
-                    setattr(self.humanization, hk, hv)
 
 
 def _state_path_for(config_path: str) -> str:
