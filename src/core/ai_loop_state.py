@@ -19,9 +19,14 @@ class LoopState:
     aiming_start_time: float = 0.0
 
     # EMA smoothing state — running average of the aim-point coordinates.
-    # Reset to 0.0 when aiming starts; converges to the target on the first frame.
+    # Reset to 0.0 (and smooth_initialized to False) when aiming starts;
+    # converges to the target on the first frame. smooth_initialized is the
+    # actual "needs bootstrap" signal — smooth_x/y == 0.0 used to double as
+    # that sentinel, which wrongly re-bootstrapped on a legitimately
+    # smoothed aim-point of exactly (0, 0).
     smooth_x: float = 0.0
     smooth_y: float = 0.0
+    smooth_initialized: bool = False
 
     # Sticky target lock — hold the selected target across short detection gaps.
     # locked_box/locked_confidence are updated on every successful selection

@@ -692,6 +692,9 @@ def ai_logic_loop(
                         pid_y.reset()
                         state.smooth_x = 0.0
                         state.smooth_y = 0.0
+                        state.smooth_initialized = False
+                        state.aim_y_last_target_y = 0.0
+                        state.aim_y_last_target_t = 0.0
                         state.locked_box = None
                         state.no_detection_frames = 0
                         state.smoothed_box = None

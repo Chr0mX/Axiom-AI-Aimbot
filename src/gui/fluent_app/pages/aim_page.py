@@ -521,6 +521,19 @@ class AimPage(BasePage):
             parent=self.pidGroup
         )
 
+        # Hard per-frame pixel cap on PID output, applied to both axes after
+        # sub-pixel carry. Defaults to 85px (non-zero) even with no GUI
+        # control previously exposing it — surfaced here so it's visible/
+        # adjustable instead of silently capping every correction.
+        self.maxMovePerFrameCard = SliderLabelCard(
+            FluentIcon.CARE_DOWN_SOLID,
+            "Max Move Per Frame",
+            0, 500,
+            format_func=lambda v: "Off" if v == 0 else f"{v} px",
+            description="Hard cap on PID output per frame, both axes (0 = off)",
+            parent=self.pidGroup
+        )
+
         self.pidYReduceEnableCard = SwitchSettingCard(
             FluentIcon.CARE_UP_SOLID,
             t("aim_y_reduce_enable"),
@@ -962,6 +975,7 @@ class AimPage(BasePage):
 
         self.pidGroup.vBoxLayout.addWidget(pivotWidget)
         self.pidGroup.vBoxLayout.addWidget(self.pidStackedWidget)
+        self.pidGroup.addSettingCard(self.maxMovePerFrameCard)
         self.addContent(self.pidGroup)
 
         # Y-Axis Recoil Suppression (separate group so X tab has no height gap)
@@ -1050,6 +1064,8 @@ class AimPage(BasePage):
         self.pidPyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kp_y', v))
         self.pidIyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_ki_y', v))
         self.pidDyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kd_y', v))
+        self.maxMovePerFrameCard.valueChanged.connect(
+            lambda v: setattr(self._config, 'max_move_per_frame_px', float(v)) if self._config else None)
         self.pidYReduceEnableCard.checkedChanged.connect(lambda checked: self._onPidChanged('aim_y_reduce_enabled', checked, is_bool=True))
         self.pidYReduceDelayCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_delay', v))
         self.pidYReduceFloorCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_floor', v))
@@ -1148,6 +1164,7 @@ class AimPage(BasePage):
             self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * 200)))
             self.pidIyCard.setValue(int(self._config.pid_ki_y * 100))
             self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
+            self.maxMovePerFrameCard.setValue(min(500, max(0, int(getattr(self._config, 'max_move_per_frame_px', 85.0)))))
             self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
             self.pidYReduceDelayCard.setValue(int(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100))
             self.pidYReduceFloorCard.setValue(int(getattr(self._config, 'aim_y_reduce_floor', 0.0) * 100))
@@ -1860,6 +1877,7 @@ class AimPage(BasePage):
         self.pidPyCard.titleLabel.setText(t("reaction_speed_p"))
         self.pidIyCard.titleLabel.setText(t("error_correction_i"))
         self.pidDyCard.titleLabel.setText(t("stability_suppression_d"))
+        self.maxMovePerFrameCard.titleLabel.setText("Max Move Per Frame")
         self.yReduceGroup.titleLabel.setText("Y-Axis Recoil Suppression")
         self.pidYReduceEnableCard.titleLabel.setText(t("aim_y_reduce_enable"))
         self.pidYReduceDelayCard.titleLabel.setText(t("aim_y_reduce_delay"))

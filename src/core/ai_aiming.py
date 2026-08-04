@@ -277,6 +277,7 @@ def process_aiming(
                     best_iou, best_item = iou, item
             if best_iou >= iou_thresh and best_item is not None:
                 selected = best_item
+        _prev_locked_box = state.locked_box
         _, _conf, target_x, target_y, selected_box = selected
         # Always record what got selected — independent of sticky_lock_enabled —
         # so callers (e.g. single_target_mode's box-list reduction in ai_loop.py)
@@ -284,6 +285,20 @@ def process_aiming(
         # one, which is what let single_target_mode silently defeat sticky lock.
         state.locked_box = selected_box
         state.locked_confidence = _conf
+
+        # The Y-recoil-suppression velocity-restore gate (below) computes how
+        # fast the CURRENT target is moving vertically frame-to-frame. If the
+        # top pick swaps to a physically different target this same frame
+        # (boxes stayed non-empty, so the full target-loss reset in
+        # ai_loop.py never runs), the stale last-target Y/timestamp belongs
+        # to the old target — dividing a cross-target Y jump by one frame's
+        # dt can produce a huge spurious velocity that wrongly disables Y
+        # suppression right when it's needed. Reset the gate's timestamp
+        # whenever the selected box isn't a continuation of the previous one.
+        _iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
+        if _prev_locked_box is None or _box_iou(_prev_locked_box, selected_box) < _iou_thresh:
+            state.aim_y_last_target_t = 0.0
+
         if sticky:
             state.no_detection_frames = 0
             config.display_locked_box = list(selected_box)
@@ -334,10 +349,11 @@ def process_aiming(
         # without introducing the drift risk of full Kalman filtering.
         if getattr(config, 'ema_enabled', False):
             alpha = float(getattr(config, 'ema_alpha', 0.7))
-            if state.smooth_x == 0.0 and state.smooth_y == 0.0:
+            if not state.smooth_initialized:
                 # Bootstrap on first frame so the aim doesn't spring from (0, 0).
                 state.smooth_x = target_x
                 state.smooth_y = target_y
+                state.smooth_initialized = True
             else:
                 state.smooth_x = alpha * target_x + (1.0 - alpha) * state.smooth_x
                 state.smooth_y = alpha * target_y + (1.0 - alpha) * state.smooth_y
@@ -345,6 +361,7 @@ def process_aiming(
         else:
             state.smooth_x = 0.0
             state.smooth_y = 0.0
+            state.smooth_initialized = False
 
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
@@ -358,6 +375,13 @@ def process_aiming(
         if getattr(config, 'aim_deadzone_enabled', False):
             errorX, errorY = _apply_adaptive_deadzone(errorX, errorY, selected_box[3] - selected_box[1], config)
             if errorX == 0.0 and errorY == 0.0:
+                # Keep previous_error current even while suppressed by the
+                # deadzone, so the derivative term doesn't see a multi-frame-
+                # stale error (and produce a one-frame Kd kick) the moment
+                # the target exits the deadzone. Outputs discarded — no
+                # movement is intended this frame.
+                pid_x.update(0.0)
+                pid_y.update(0.0)
                 return
 
         # --- Lateral overshoot brake (new feature from Someone_idea) ---
