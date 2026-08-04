@@ -674,10 +674,16 @@ def ai_logic_loop(
                         confidences=confidences,
                     )
                 else:
-                    # No detections this frame. If sticky lock is enabled and a
-                    # target is currently locked, hold the lock (and all PID /
-                    # smoothing state) for up to lock_decay_frames frames before
-                    # giving up, instead of dropping it instantly.
+                    # Not aiming this frame — either no detections came back, or
+                    # detection did find boxes but the aim key isn't held (e.g.
+                    # keep_detecting is on and the user simply isn't aiming right
+                    # now). Both cases hit this branch identically: aimed_this_frame
+                    # is False either way. If sticky lock is enabled and a target
+                    # is currently locked, hold the lock (and all PID / smoothing
+                    # state) for up to lock_decay_frames frames before giving up,
+                    # instead of dropping it instantly — this is what makes
+                    # releasing/re-pressing the aim key on the same target not
+                    # restart tracking from scratch every time.
                     sticky = getattr(config, 'sticky_lock_enabled', False)
                     holding_lock = False
                     if sticky and state.locked_box is not None:

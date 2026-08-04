@@ -6,7 +6,7 @@ import random
 import time
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from win_utils import send_mouse_move, is_makcu_connected
+from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
 from .humanization import apply_humanization
@@ -236,10 +236,9 @@ def process_aiming(
 
     aim_part = config.aim_part
     head_height_ratio = config.head_height_ratio
-    config._current_confidences = confidences or []
+    confidences = confidences or []
 
     valid_targets = []
-    confidences = getattr(config, '_current_confidences', [])
     for i, box in enumerate(boxes):
         target_x, target_y = calculate_aim_target(box, aim_part, head_height_ratio, config)
         moveX = target_x - crosshair_x
@@ -461,10 +460,14 @@ def process_aiming(
             lmb_gate = getattr(config, 'smart_jitter_lmb_gate', True)
             if not lmb_gate:
                 is_shooting = True
-            elif getattr(config, 'mouse_move_method', '') == 'makcu' and is_makcu_connected():
-                from win_utils.makcu_mouse import makcu_mouse as _mm
-                is_shooting = _mm.lmb_held
             else:
+                # aiming_start_time already reflects the fully-resolved
+                # aim-active state computed once in ai_loop.py — including
+                # MAKCU's configured makcu_aim_button (lmb/rmb), toggle mode,
+                # and the disengage delay. Re-deriving MAKCU's physical LMB
+                # state here separately ignored a non-LMB makcu_aim_button
+                # setting entirely, so this now shares the same signal every
+                # other backend already uses instead of a second, narrower one.
                 is_shooting = state.aiming_start_time > 0
             if is_shooting:
                 box_h = selected_box[3] - selected_box[1]
@@ -484,6 +487,13 @@ def process_aiming(
                                 cache["iter"] = None
                                 cache["file"] = None
                         if cache["iter"]:
+                            # Only the recorded (dx, dy) shape is replayed — the
+                            # recording's own dt_ms per frame (~1ms, see
+                            # jitter_recorder.py) is intentionally not honored
+                            # here; playback cadence instead follows this
+                            # detection loop's own tick rate, tunable via
+                            # jitter_speed_multiplier. See "Recorded Pattern"'s
+                            # tooltip for the same note.
                             _mult = max(1, int(getattr(config, 'jitter_speed_multiplier', 1)))
                             for _ in range(_mult):
                                 f = next(cache["iter"])

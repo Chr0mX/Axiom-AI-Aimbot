@@ -669,7 +669,7 @@ class AimPage(BasePage):
         self.jitterPatternCard = SettingCard(
             FluentIcon.LABEL,
             t("jitter_pattern_label", "Recorded Pattern"),
-            t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on)"),
+            t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on). Only the recorded motion's shape is replayed — playback speed follows the detection loop's own tick rate, not the recording's original timing; use the speed multiplier below to tune the feel."),
             self.antiRecoilGroup
         )
         self.jitterPatternCard.hBoxLayout.addWidget(self.jitterPatternCombo, 0)
@@ -1356,18 +1356,29 @@ class AimPage(BasePage):
     def _updateTargetAreaVisibility(self, aim_part):
         is_smart = aim_part == "center"
         is_custom = aim_part == "custom"
+        is_head_or_body = aim_part in ("head", "body")
         uses_custom_y = is_smart or is_custom
         if is_smart:
             suffix = t("aim_smart_mode_note", " — Smart + Custom Y")
         elif is_custom:
             suffix = t("aim_custom_mode_note", " — Custom Y mode")
         else:
-            suffix = t("aim_smart_mode_only", " — Smart mode only")
+            suffix = t("aim_head_body_mode_note", " — Head/Body mode")
         self.targetAreaGroup.titleLabel.setText(t("target_area_settings") + suffix)
-        for card in [self.headWidthCard, self.headHeightCard, self.bodyWidthCard,
-                     self.adaptiveRatioCard, self.adaptiveRatioRefHCard,
-                     self.postureAwareCard, self.crouchAspectCard]:
-            card.setEnabled(is_smart)
+        # head_height_ratio and the adaptive-ratio scale it feeds are only
+        # consumed by calculate_aim_target()'s Head/Body branches — Smart and
+        # Custom modes use aim_custom_y_pct instead, so these do nothing there.
+        for card in [self.headHeightCard, self.adaptiveRatioCard, self.adaptiveRatioRefHCard]:
+            card.setEnabled(is_head_or_body)
+        # head_width_ratio/body_width_ratio are consumed only by auto_fire.py's
+        # hit-zone geometry, entirely independent of aim_part — always tunable.
+        self.headWidthCard.setEnabled(True)
+        self.bodyWidthCard.setEnabled(True)
+        # Posture-aware's crouch check runs before the aim_part switch inside
+        # calculate_aim_target() and applies to every mode, not just Smart —
+        # always tunable so it can't get silently stuck on/off from another tab.
+        self.postureAwareCard.setEnabled(True)
+        self.crouchAspectCard.setEnabled(True)
         self.customYCard.setEnabled(uses_custom_y)
         head_h = self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20
         head_w = self.headWidthCard.value() if hasattr(self.headWidthCard, 'value') else 38
@@ -1940,7 +1951,7 @@ class AimPage(BasePage):
         self.jitterRecordCard.titleLabel.setText(t("jitter_record_label", "Record Jitter"))
         self.jitterRecordCard.contentLabel.setText(t("jitter_record_desc", "Record your mouse shake to create a custom jitter pattern"))
         self.jitterPatternCard.titleLabel.setText(t("jitter_pattern_label", "Recorded Pattern"))
-        self.jitterPatternCard.contentLabel.setText(t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on)"))
+        self.jitterPatternCard.contentLabel.setText(t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on). Only the recorded motion's shape is replayed — playback speed follows the detection loop's own tick rate, not the recording's original timing; use the speed multiplier below to tune the feel."))
         self.jitterSpeedCard.titleLabel.setText(t("jitter_speed_label", "Playback Speed"))
 
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))

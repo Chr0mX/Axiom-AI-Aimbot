@@ -2,12 +2,12 @@
 """Regression tests for src/core/ai_aiming.py's process_aiming() fixes.
 
 ai_aiming.py imports `win_utils` at module level (`from win_utils import
-send_mouse_move, is_makcu_connected`), and win_utils/__init__.py transitively
-imports win32api via mouse_move.py — this fails at *collection* on a
-non-Windows box (see CLAUDE.md). Every test here defers the `core.ai_aiming`
-import to inside the test function, after stubbing sys.modules['win_utils'],
-matching the pattern already used in test_makcu_mouse.py/test_screen_capture.py
-for other win_utils-dependent modules.
+send_mouse_move`), and win_utils/__init__.py transitively imports win32api
+via mouse_move.py — this fails at *collection* on a non-Windows box (see
+CLAUDE.md). Every test here defers the `core.ai_aiming` import to inside the
+test function, after stubbing sys.modules['win_utils'], matching the pattern
+already used in test_makcu_mouse.py/test_screen_capture.py for other
+win_utils-dependent modules.
 """
 
 import sys
@@ -19,8 +19,8 @@ import pytest
 
 @pytest.fixture
 def sent_moves(monkeypatch):
-    """Stub win_utils.send_mouse_move/is_makcu_connected and capture every
-    move sent by process_aiming() during the test.
+    """Stub win_utils.send_mouse_move and capture every move sent by
+    process_aiming() during the test.
 
     `from win_utils import send_mouse_move` (ai_aiming.py's module top)
     only ever executes once per process — after the first test imports
@@ -37,17 +37,12 @@ def sent_moves(monkeypatch):
     def _fake_send_mouse_move(dx, dy, method=None):
         moves.append((dx, dy, method))
 
-    def _fake_is_makcu_connected():
-        return False
-
     stub = types.ModuleType("win_utils")
     stub.send_mouse_move = _fake_send_mouse_move
-    stub.is_makcu_connected = _fake_is_makcu_connected
     monkeypatch.setitem(sys.modules, "win_utils", stub)
 
     import core.ai_aiming as _aiming_mod
     monkeypatch.setattr(_aiming_mod, "send_mouse_move", _fake_send_mouse_move)
-    monkeypatch.setattr(_aiming_mod, "is_makcu_connected", _fake_is_makcu_connected)
     return moves
 
 
