@@ -11,7 +11,6 @@ from win_utils import send_mouse_move
 from .ai_loop_state import LoopState
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
-from .target_predictor import VelocityPredictor
 
 if TYPE_CHECKING:
     from .config import Config
@@ -25,9 +24,6 @@ def _box_iou(a: List[float], b: List[float]) -> float:
         return 0.0
     return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
 
-
-# Module-level singletons — shared across process_aiming calls.
-_predictor: Optional[VelocityPredictor] = None
 
 # Jitter pattern iterator cache: reloaded whenever jitter_pattern_file changes.
 _jitter_pattern_cache: dict = {"file": None, "iter": None}
@@ -50,21 +46,6 @@ def _get_kalman(config: Config) -> KalmanFilter2D:
     else:
         _kalman.reconfigure(pn, mn)
     return _kalman
-
-
-def _get_predictor(config: Config) -> VelocityPredictor:
-    """Return (and lazily create/reconfigure) the module-level VelocityPredictor."""
-    global _predictor
-    history_len = int(getattr(config, 'prediction_history_len', 3))
-    max_vel = float(getattr(config, 'prediction_max_velocity', 1200.0))
-    if _predictor is None:
-        _predictor = VelocityPredictor(history_len=history_len, max_velocity_px_per_s=max_vel)
-    else:
-        _predictor._max_velocity = max_vel
-        _predictor._history = type(_predictor._history)(
-            _predictor._history, maxlen=history_len
-        )
-    return _predictor
 
 
 def calculate_aim_target(
@@ -274,64 +255,19 @@ def process_aiming(
             config.display_locked_box = list(selected_box)
             config.display_locked_box_is_decaying = False
 
-        # --- Box EMA — smooth raw box coords to suppress size-jitter wobble ---
-        # Runs after sticky lock (which needs the raw box for IOU matching) but
-        # before aim-point computation so that frame-to-frame box size variance
-        # doesn't propagate into target_x / target_y.
-        if getattr(config, 'box_ema_enabled', False):
-            raw_box = list(selected_box)
-            if state.smoothed_box is None:
-                state.smoothed_box = raw_box[:]
-            else:
-                ax = float(getattr(config, 'box_ema_alpha_x', 0.8))
-                ay = float(getattr(config, 'box_ema_alpha_y', 0.5))
-                sb = state.smoothed_box
-                state.smoothed_box = [
-                    ax * raw_box[0] + (1.0 - ax) * sb[0],
-                    ay * raw_box[1] + (1.0 - ay) * sb[1],
-                    ax * raw_box[2] + (1.0 - ax) * sb[2],
-                    ay * raw_box[3] + (1.0 - ay) * sb[3],
-                ]
-            target_x, target_y = calculate_aim_target(state.smoothed_box, aim_part, head_height_ratio, config)
-            selected_box = state.smoothed_box
-        else:
-            state.smoothed_box = list(selected_box)
-
-        # --- Velocity prediction (optional) ---
-        if getattr(config, 'prediction_enabled', False):
-            predictor = _get_predictor(config)
-            horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
-            target_x, target_y = predictor.update(target_x, target_y, time.perf_counter(), horizon_s)
-        else:
-            if _predictor is not None:
-                _predictor.reset()
-
-        # --- Kalman filter aim-point smoothing (optional, UI-exclusive with EMA) ---
+        # --- Kalman filter aim-point smoothing (optional) ---
+        # Sole prediction/smoothing stage — a Kalman filter already is a
+        # predictor and a smoother in one principled model, so it replaces
+        # what used to be three separate, overlapping stages (Box EMA,
+        # plain Velocity Prediction, and EMA point-smoothing after Kalman)
+        # that each added their own lag in series without meaningfully
+        # improving on what Kalman alone already does.
         if getattr(config, 'kalman_enabled', False):
             kf = _get_kalman(config)
             target_x, target_y = kf.update(target_x, target_y)
         else:
             if _kalman is not None:
                 _kalman.reset()
-
-        # --- EMA aim-point smoothing (optional) ---
-        # Smooths the target coordinate before feeding to PID, reducing jitter
-        # without introducing the drift risk of full Kalman filtering.
-        if getattr(config, 'ema_enabled', False):
-            alpha = float(getattr(config, 'ema_alpha', 0.7))
-            if not state.smooth_initialized:
-                # Bootstrap on first frame so the aim doesn't spring from (0, 0).
-                state.smooth_x = target_x
-                state.smooth_y = target_y
-                state.smooth_initialized = True
-            else:
-                state.smooth_x = alpha * target_x + (1.0 - alpha) * state.smooth_x
-                state.smooth_y = alpha * target_y + (1.0 - alpha) * state.smooth_y
-            target_x, target_y = state.smooth_x, state.smooth_y
-        else:
-            state.smooth_x = 0.0
-            state.smooth_y = 0.0
-            state.smooth_initialized = False
 
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
@@ -356,7 +292,7 @@ def process_aiming(
 
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
 
-        # Track target Y velocity for the velocity-restore gate (independent of prediction_enabled)
+        # Track target Y velocity for the velocity-restore gate
         if state.aim_y_last_target_t > 0:
             _y_dt = current_time - state.aim_y_last_target_t
             _vy = (target_y - state.aim_y_last_target_y) / _y_dt if _y_dt > 0 else 0.0

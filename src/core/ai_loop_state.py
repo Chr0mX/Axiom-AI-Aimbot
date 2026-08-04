@@ -18,16 +18,6 @@ class LoopState:
 
     aiming_start_time: float = 0.0
 
-    # EMA smoothing state — running average of the aim-point coordinates.
-    # Reset to 0.0 (and smooth_initialized to False) when aiming starts;
-    # converges to the target on the first frame. smooth_initialized is the
-    # actual "needs bootstrap" signal — smooth_x/y == 0.0 used to double as
-    # that sentinel, which wrongly re-bootstrapped on a legitimately
-    # smoothed aim-point of exactly (0, 0).
-    smooth_x: float = 0.0
-    smooth_y: float = 0.0
-    smooth_initialized: bool = False
-
     # Sticky target lock — hold the selected target across short detection gaps.
     # locked_box/locked_confidence are updated on every successful selection
     # (regardless of sticky_lock_enabled) so callers can read back what aiming
@@ -36,9 +26,6 @@ class LoopState:
     locked_box: Optional[List[float]] = field(default=None)
     locked_confidence: float = 0.0
     no_detection_frames: int = 0
-
-    # Box EMA — running average of selected box coords [x1, y1, x2, y2].
-    smoothed_box: Optional[List[float]] = field(default=None)
 
     # Y-reduce velocity gate — track target Y position across frames to estimate vy.
     aim_y_last_target_y: float = 0.0

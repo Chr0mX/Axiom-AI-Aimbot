@@ -716,84 +716,6 @@ class AimPage(BasePage):
         # === Target Tracking ===
         self.trackingGroup = SettingCardGroup(t("target_tracking", "Target Tracking"), self.scrollWidget)
 
-        self.boxEmaEnableCard = SwitchSettingCard(
-            FluentIcon.FILTER,
-            t("box_ema_enabled", "Box EMA"),
-            t("box_ema_desc", "Smooth raw detection box coordinates before aim calculation. Reduces jitter at high Kp."),
-            parent=self.trackingGroup
-        )
-
-        self.boxEmaAlphaXCard = SliderLabelCard(
-            FluentIcon.LEFT_ARROW,
-            t("box_ema_alpha_x", "Box EMA Alpha X"),
-            10, 100,
-            format_func=lambda v: f"{v / 100:.2f}",
-            description=t("box_ema_alpha_x_desc", "X-axis smoothing. Lower = heavier smooth, less jitter. Higher = more responsive."),
-            slider_width=160,
-            parent=self.trackingGroup
-        )
-
-        self.boxEmaAlphaYCard = SliderLabelCard(
-            FluentIcon.UP,
-            t("box_ema_alpha_y", "Box EMA Alpha Y"),
-            10, 100,
-            format_func=lambda v: f"{v / 100:.2f}",
-            description=t("box_ema_alpha_y_desc", "Y-axis smoothing. Lower = heavier smooth."),
-            slider_width=160,
-            parent=self.trackingGroup
-        )
-
-        self.emaEnableCard = SwitchSettingCard(
-            FluentIcon.SPEED_MEDIUM,
-            t("ema_enabled", "EMA Smoothing"),
-            t("ema_desc", "Exponential moving average on aim-point coordinates before PID. Reduces jitter."),
-            parent=self.trackingGroup
-        )
-
-        self.emaAlphaCard = SliderLabelCard(
-            FluentIcon.MIX_VOLUMES,
-            t("ema_alpha", "EMA Alpha"),
-            30, 100,
-            format_func=lambda v: f"{v / 100:.2f}",
-            description=t("ema_alpha_desc", "1.0 = raw (no smoothing), 0.30 = heavy smoothing"),
-            slider_width=160,
-            parent=self.trackingGroup
-        )
-
-        self.predictionEnableCard = SwitchSettingCard(
-            FluentIcon.RINGER,
-            t("prediction_enabled", "Velocity Prediction"),
-            t("prediction_desc", "Extrapolate target position forward by the prediction horizon."),
-            parent=self.trackingGroup
-        )
-
-        self.predictionHorizonCard = SliderLabelCard(
-            FluentIcon.HISTORY,
-            t("prediction_horizon", "Prediction Horizon"),
-            5, 50,
-            format_func=lambda v: f"{v} ms",
-            label_width=55,
-            parent=self.trackingGroup
-        )
-
-        self.predictionMaxVelCard = SliderLabelCard(
-            FluentIcon.SPEED_HIGH,
-            t("prediction_max_velocity", "Max Velocity Cap"),
-            300, 3000,
-            format_func=lambda v: f"{v} px/s",
-            label_width=70,
-            description=t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"),
-            parent=self.trackingGroup
-        )
-
-        self.predictionHistoryCard = SliderLabelCard(
-            FluentIcon.HISTORY,
-            t("prediction_history", "History Frames"),
-            2, 6,
-            format_func=lambda v: str(v),
-            parent=self.trackingGroup
-        )
-
         self.stickyLockCard = SwitchSettingCard(
             FluentIcon.PIN,
             t("sticky_lock_enabled", "Sticky Target Lock"),
@@ -824,7 +746,7 @@ class AimPage(BasePage):
         self.kalmanEnableCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("kalman_enabled_label", "Kalman Filter"),
-            t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing. Mutually exclusive with EMA."),
+            t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing."),
             parent=self.trackingGroup
         )
 
@@ -1029,15 +951,6 @@ class AimPage(BasePage):
         self.addContent(self.targetPriorityGroup)
 
         # Target Tracking
-        self.trackingGroup.addSettingCard(self.boxEmaEnableCard)
-        self.trackingGroup.addSettingCard(self.boxEmaAlphaXCard)
-        self.trackingGroup.addSettingCard(self.boxEmaAlphaYCard)
-        self.trackingGroup.addSettingCard(self.emaEnableCard)
-        self.trackingGroup.addSettingCard(self.emaAlphaCard)
-        self.trackingGroup.addSettingCard(self.predictionEnableCard)
-        self.trackingGroup.addSettingCard(self.predictionHorizonCard)
-        self.trackingGroup.addSettingCard(self.predictionMaxVelCard)
-        self.trackingGroup.addSettingCard(self.predictionHistoryCard)
         self.trackingGroup.addSettingCard(self.stickyLockCard)
         self.trackingGroup.addSettingCard(self.lockDecayCard)
         self.trackingGroup.addSettingCard(self.lockIouCard)
@@ -1115,15 +1028,6 @@ class AimPage(BasePage):
         self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
 
         # Target Tracking
-        self.boxEmaEnableCard.checkedChanged.connect(self._onBoxEmaEnableChanged)
-        self.boxEmaAlphaXCard.valueChanged.connect(self._onBoxEmaAlphaXChanged)
-        self.boxEmaAlphaYCard.valueChanged.connect(self._onBoxEmaAlphaYChanged)
-        self.emaEnableCard.checkedChanged.connect(self._onEmaEnableChanged)
-        self.emaAlphaCard.valueChanged.connect(self._onEmaAlphaChanged)
-        self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
-        self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
-        self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
-        self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
         self.stickyLockCard.checkedChanged.connect(self._onStickyLockChanged)
         self.lockDecayCard.valueChanged.connect(self._onLockDecayChanged)
         self.lockIouCard.valueChanged.connect(self._onLockIouChanged)
@@ -1233,18 +1137,6 @@ class AimPage(BasePage):
             self.targetPriorityWeightCard.setValue(int(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100))
 
             # Target Tracking
-            box_ema_on = bool(getattr(self._config, 'box_ema_enabled', True))
-            self.boxEmaEnableCard.setChecked(box_ema_on)
-            self.boxEmaAlphaXCard.setValue(int(getattr(self._config, 'box_ema_alpha_x', 0.55) * 100))
-            self.boxEmaAlphaYCard.setValue(int(getattr(self._config, 'box_ema_alpha_y', 0.45) * 100))
-            self.boxEmaAlphaXCard.setEnabled(box_ema_on)
-            self.boxEmaAlphaYCard.setEnabled(box_ema_on)
-            self.emaEnableCard.setChecked(bool(getattr(self._config, 'ema_enabled', False)))
-            self.emaAlphaCard.setValue(int(getattr(self._config, 'ema_alpha', 0.7) * 100))
-            self.predictionEnableCard.setChecked(bool(getattr(self._config, 'prediction_enabled', False)))
-            self.predictionHorizonCard.setValue(int(getattr(self._config, 'prediction_horizon_ms', 10.0)))
-            self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
-            self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
             self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
             self.lockIouCard.setValue(int(getattr(self._config, 'lock_iou_threshold', 0.3) * 100))
@@ -1255,12 +1147,6 @@ class AimPage(BasePage):
             self.kalmanMeasNoiseCard.setValue(int(getattr(self._config, 'kalman_measurement_noise', 0.1) * 100))
             self.kalmanProcessNoiseCard.setEnabled(kalman_on)
             self.kalmanMeasNoiseCard.setEnabled(kalman_on)
-            self.emaEnableCard.setEnabled(not kalman_on)
-            self.emaAlphaCard.setEnabled(not kalman_on and bool(getattr(self._config, 'ema_enabled', False)))
-            if kalman_on:
-                self.emaEnableCard.setChecked(False)
-                if self._config:
-                    self._config.ema_enabled = False
 
             cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
             self.camMotionCompCard.setChecked(cmc_on)
@@ -1755,52 +1641,6 @@ class AimPage(BasePage):
 
     # === Target Tracking Callbacks ===
 
-    def _onBoxEmaEnableChanged(self, checked):
-        if self._config:
-            self._config.box_ema_enabled = bool(checked)
-        self.boxEmaAlphaXCard.setEnabled(bool(checked))
-        self.boxEmaAlphaYCard.setEnabled(bool(checked))
-
-    def _onBoxEmaAlphaXChanged(self, value):
-        if self._config:
-            self._config.box_ema_alpha_x = value / 100.0
-
-    def _onBoxEmaAlphaYChanged(self, value):
-        if self._config:
-            self._config.box_ema_alpha_y = value / 100.0
-
-    def _onEmaEnableChanged(self, checked):
-        if self._config:
-            self._config.ema_enabled = bool(checked)
-        self.kalmanEnableCard.setEnabled(not checked)
-        if checked:
-            self.kalmanEnableCard.setChecked(False)
-            if self._config:
-                self._config.kalman_enabled = False
-            self.kalmanProcessNoiseCard.setEnabled(False)
-            self.kalmanMeasNoiseCard.setEnabled(False)
-        self.emaAlphaCard.setEnabled(bool(checked))
-
-    def _onEmaAlphaChanged(self, value):
-        if self._config:
-            self._config.ema_alpha = value / 100.0
-
-    def _onPredictionEnableChanged(self, checked):
-        if self._config:
-            self._config.prediction_enabled = bool(checked)
-
-    def _onPredictionHorizonChanged(self, value):
-        if self._config:
-            self._config.prediction_horizon_ms = float(value)
-
-    def _onPredictionMaxVelChanged(self, value):
-        if self._config:
-            self._config.prediction_max_velocity = float(value)
-
-    def _onPredictionHistoryChanged(self, value):
-        if self._config:
-            self._config.prediction_history_len = int(value)
-
     def _onStickyLockChanged(self, checked):
         if self._config:
             self._config.sticky_lock_enabled = bool(checked)
@@ -1816,12 +1656,6 @@ class AimPage(BasePage):
     def _onKalmanEnableChanged(self, checked):
         if self._config:
             self._config.kalman_enabled = bool(checked)
-        self.emaEnableCard.setEnabled(not checked)
-        if checked:
-            self.emaEnableCard.setChecked(False)
-            if self._config:
-                self._config.ema_enabled = False
-            self.emaAlphaCard.setEnabled(False)
         self.kalmanProcessNoiseCard.setEnabled(bool(checked))
         self.kalmanMeasNoiseCard.setEnabled(bool(checked))
 
@@ -1961,22 +1795,6 @@ class AimPage(BasePage):
         self.targetPriorityWeightCard.contentLabel.setText(t("target_priority_weight_desc", "Used in Composite mode only"))
 
         self.trackingGroup.titleLabel.setText(t("target_tracking", "Target Tracking"))
-        self.boxEmaEnableCard.titleLabel.setText(t("box_ema_enabled", "Box EMA"))
-        self.boxEmaEnableCard.contentLabel.setText(t("box_ema_desc", "Smooth raw detection box coordinates before aim calculation. Reduces jitter at high Kp."))
-        self.boxEmaAlphaXCard.titleLabel.setText(t("box_ema_alpha_x", "Box EMA Alpha X"))
-        self.boxEmaAlphaXCard.contentLabel.setText(t("box_ema_alpha_x_desc", "X-axis smoothing. Lower = heavier smooth, less jitter. Higher = more responsive."))
-        self.boxEmaAlphaYCard.titleLabel.setText(t("box_ema_alpha_y", "Box EMA Alpha Y"))
-        self.boxEmaAlphaYCard.contentLabel.setText(t("box_ema_alpha_y_desc", "Y-axis smoothing. Lower = heavier smooth."))
-        self.emaEnableCard.titleLabel.setText(t("ema_enabled", "EMA Smoothing"))
-        self.emaEnableCard.contentLabel.setText(t("ema_desc", "Exponential moving average on aim-point coordinates before PID. Reduces jitter."))
-        self.emaAlphaCard.titleLabel.setText(t("ema_alpha", "EMA Alpha"))
-        self.emaAlphaCard.contentLabel.setText(t("ema_alpha_desc", "1.0 = raw (no smoothing), 0.30 = heavy smoothing"))
-        self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
-        self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
-        self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))
-        self.predictionMaxVelCard.titleLabel.setText(t("prediction_max_velocity", "Max Velocity Cap"))
-        self.predictionMaxVelCard.contentLabel.setText(t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"))
-        self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "History Frames"))
         self.stickyLockCard.titleLabel.setText(t("sticky_lock_enabled", "Sticky Target Lock"))
         self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
         self.lockDecayCard.titleLabel.setText(t("lock_decay_frames", "Lock Decay Frames"))
@@ -1984,7 +1802,7 @@ class AimPage(BasePage):
         self.lockIouCard.titleLabel.setText(t("lock_iou_threshold", "IoU Match Threshold"))
         self.lockIouCard.contentLabel.setText(t("lock_iou_desc", "Minimum overlap required to match the same target across frames"))
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
-        self.kalmanEnableCard.contentLabel.setText(t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing. Mutually exclusive with EMA."))
+        self.kalmanEnableCard.contentLabel.setText(t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing."))
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
         self.kalmanProcessNoiseCard.contentLabel.setText(t("kalman_noise_desc", "Lower = smoother but slower to react"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))

@@ -695,22 +695,16 @@ def ai_logic_loop(
                     if not holding_lock:
                         pid_x.reset()
                         pid_y.reset()
-                        state.smooth_x = 0.0
-                        state.smooth_y = 0.0
-                        state.smooth_initialized = False
                         state.aim_y_last_target_y = 0.0
                         state.aim_y_last_target_t = 0.0
                         state.locked_box = None
                         state.no_detection_frames = 0
-                        state.smoothed_box = None
                         state.aim_carry_x = 0.0
                         state.aim_carry_y = 0.0
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
-                        # Target lost — clear stale prediction/smoothing state so a
-                        # newly-acquired target isn't corrupted by the old one's history.
-                        if ai_aiming._predictor is not None:
-                            ai_aiming._predictor.reset()
+                        # Target lost — clear stale Kalman state so a newly-acquired
+                        # target isn't corrupted by the old one's history.
                         if ai_aiming._kalman is not None:
                             ai_aiming._kalman.reset()
 

@@ -52,8 +52,8 @@ def _make_config(**overrides):
         aim_adaptive_ratio_enabled=False, aim_posture_aware_enabled=False,
         sticky_lock_enabled=False, lock_iou_threshold=0.3, lock_decay_frames=15,
         target_priority_mode="distance", target_priority_confidence_weight=0.5,
-        box_ema_enabled=False, prediction_enabled=False, kalman_enabled=False,
-        ema_enabled=False, cam_motion_comp_enabled=False, aim_deadzone_enabled=False,
+        kalman_enabled=False,
+        cam_motion_comp_enabled=False, aim_deadzone_enabled=False,
         aim_y_reduce_enabled=False, aim_y_reduce_delay=0.0,
         aim_y_reduce_settle_px=0.0, aim_y_reduce_floor=0.1, aim_y_reduce_ramp=0.0,
         aim_y_vel_restore_px_s=0.0, max_move_per_frame_px=0.0,
@@ -130,41 +130,6 @@ class TestYRecoilTargetSwapReset:
 
         dx, dy, _ = sent_moves[0]
         assert 15 <= dy <= 30
-
-
-class TestEmaBootstrapSentinel:
-    """smooth_initialized (a real flag) must gate the EMA bootstrap, not a
-    smooth_x == 0.0 and smooth_y == 0.0 value check — a legitimately smoothed
-    aim-point of exactly (0, 0) must not wrongly re-trigger the bootstrap."""
-
-    def test_legit_zero_point_does_not_force_a_resnap_next_frame(self, sent_moves):
-        from core.ai_aiming import process_aiming
-        from core.ai_loop_state import LoopState
-        from core.inference import PIDController
-
-        config = _make_config(ema_enabled=True, ema_alpha=0.5)
-        state = LoopState()
-        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
-
-        box_zero = [-5.0, -5.0, 5.0, 5.0]  # target lands exactly on (0, 0)
-        process_aiming(config, [box_zero], 0, 0, pid_x, pid_y, "sendinput", state,
-                        current_time=1.0, confidences=[0.9])
-        assert state.smooth_initialized is True
-        assert state.smooth_x == 0.0 and state.smooth_y == 0.0
-
-        # Frame 2: target jumps to (100, 100). With the fix, this blends
-        # (alpha=0.5) toward it: 0.5*100 + 0.5*0 = 50. The old (0,0)-sentinel
-        # bug would misread smooth_x/y == 0.0 as "still uninitialized" and
-        # re-bootstrap by snapping straight to 100 instead of blending.
-        box_far = [95.0, 95.0, 105.0, 105.0]
-        sent_moves.clear()
-        process_aiming(config, [box_far], 0, 0, pid_x, pid_y, "sendinput", state,
-                        current_time=1.05, confidences=[0.9])
-
-        dx, dy, _ = sent_moves[0]
-        assert 45 <= dx <= 55 and 45 <= dy <= 55, (
-            f"EMA bootstrap sentinel bug reproduced — re-snapped instead of blending: dx={dx} dy={dy}"
-        )
 
 
 class TestDeadzonePreviousErrorFreshness:

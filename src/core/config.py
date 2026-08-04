@@ -90,8 +90,6 @@ _FIELD_MAP = {
     'kalman_enabled':             'aim.kalman.enabled',
     'kalman_process_noise':       'aim.kalman.process_noise',
     'kalman_measurement_noise':   'aim.kalman.measurement_noise',
-    'ema_enabled':                'aim.ema.enabled',
-    'ema_alpha':                  'aim.ema.alpha',
     'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
     'cam_motion_comp_size':       'aim.cam_motion_comp.size',
     'smart_jitter_enabled':       'aim.smart_jitter.enabled',
@@ -121,17 +119,10 @@ _FIELD_MAP = {
     'auto_fire_target_part':      'autofire.target_part',
 
     # --- tracking ---
-    'prediction_enabled':         'tracking.prediction.enabled',
-    'prediction_horizon_ms':      'tracking.prediction.horizon_ms',
-    'prediction_max_velocity':    'tracking.prediction.max_velocity',
-    'prediction_history_len':     'tracking.prediction.history_len',
     'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
     'lock_decay_frames':          'tracking.sticky_lock.decay_frames',
     'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
     'sticky_adaptive_iou':        'tracking.sticky_lock.adaptive_iou',
-    'box_ema_enabled':            'tracking.box_ema.enabled',
-    'box_ema_alpha_x':            'tracking.box_ema.alpha_x',
-    'box_ema_alpha_y':            'tracking.box_ema.alpha_y',
     'target_priority_mode':       'tracking.target_priority.mode',
     'target_priority_confidence_weight': 'tracking.target_priority.confidence_weight',
 
@@ -482,28 +473,15 @@ class Config:
         self.jitter_pattern_file: str = ""
         self.jitter_speed_multiplier: int = 1
 
-        # EMA 瞄準點平滑（在 PID 前平滑目標座標）
-        self.ema_enabled: bool = False
-        self.ema_alpha: float = 0.7  # 1.0=原始，0.3=強平滑
-
         # Camera motion compensation — subtract per-frame global scene shift before PID
         self.cam_motion_comp_enabled: bool = False
         self.cam_motion_comp_size: int = 128   # downsample resolution for phase correlation (128 or 256)
-
-        # 速度預測瞄準（基於歷史位置估算目標未來位置）
-        self.prediction_enabled: bool = False
-        self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
-        self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
-        self.prediction_history_len: int = 3         # 歷史點數量
 
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
         self.lock_decay_frames: int = 15
         self.lock_iou_threshold: float = 0.3
         self.sticky_adaptive_iou: bool = True
-        self.box_ema_enabled: bool = True
-        self.box_ema_alpha_x: float = 0.55
-        self.box_ema_alpha_y: float = 0.45
 
         # FOV filter mode
         self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square
