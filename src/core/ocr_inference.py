@@ -133,6 +133,18 @@ def _kill_proc() -> None:
         except Exception:
             pass
         logger.info("[OCR] child process released")
+    # Each mp.Queue owns a background feeder thread in this process; leaving
+    # them for GC instead of closing explicitly works but can accumulate
+    # fd/semaphore churn across frequent start/stop toggling in a long
+    # session. cancel_join_thread() first so close() doesn't block waiting
+    # to flush a queue whose reader (the child process) is already gone.
+    for q in (_frame_q, _result_q):
+        if q is not None:
+            try:
+                q.cancel_join_thread()
+                q.close()
+            except Exception:
+                pass
     _proc = None
     _proc_stop = None
     _frame_q = None

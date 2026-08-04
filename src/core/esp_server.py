@@ -407,6 +407,13 @@ def start(config) -> bool:
     global _config, _actual_ws_port, _http_thread, _ws_accept_thread, _broadcast_thread
     if is_running():
         return True
+    if _http_thread is not None or _ws_accept_thread is not None or _broadcast_thread is not None:
+        # is_running() only reflects the HTTP thread — if a previous start()
+        # bound the HTTP port successfully but it later died (or the HTTP bind
+        # itself failed) while the WS-accept/broadcast threads and the bound WS
+        # listener socket kept running, they'd otherwise leak: a retried
+        # start() would spawn a brand new thread set on top of the orphans.
+        stop()
     _config = config
     _stop.clear()
 
