@@ -57,7 +57,7 @@ def _make_config(**overrides):
         cam_motion_comp_enabled=False, aim_deadzone_enabled=False,
         aim_y_reduce_enabled=False, aim_y_reduce_delay=0.0,
         aim_y_reduce_settle_px=0.0, aim_y_reduce_floor=0.1, aim_y_reduce_ramp=0.0,
-        aim_y_vel_restore_px_s=0.0, max_move_per_frame_px=0.0,
+        aim_y_vel_restore_px_s=0.0, humanization=None, max_move_per_frame_px=0.0,
         smart_jitter_enabled=False, mouse_move_method="sendinput",
     )
     for k, v in overrides.items():

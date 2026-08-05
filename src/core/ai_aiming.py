@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
+from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .target_predictor import VelocityPredictor
@@ -356,6 +357,17 @@ def process_aiming(
                     else:
                         factor = floor
                     dy *= factor
+
+        # Apply humanization layer (post-PID, pre-rounding, pre-injection).
+        # Operates only on dx/dy; never touches PID state or coordinate space.
+        _hcfg = getattr(config, 'humanization', None)
+        if _hcfg is not None and _hcfg.enabled:
+            _result = apply_humanization(dx, dy, _hcfg)
+            if _result is None:
+                # Reaction variability: suppress this frame's injection.
+                # PID error persists and is corrected on the next frame.
+                return
+            dx, dy = _result
 
         # Sub-pixel carry (all backends): accumulate the fractional remainder that
         # integer truncation would otherwise discard, so micro-corrections (e.g. a

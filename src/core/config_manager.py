@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import os
@@ -141,6 +142,8 @@ class ConfigManager:
         data['crosshair_color_r'] = getattr(config_instance, 'crosshair_color_r', 255)
         data['crosshair_color_g'] = getattr(config_instance, 'crosshair_color_g', 255)
         data['crosshair_color_b'] = getattr(config_instance, 'crosshair_color_b', 255)
+        if hasattr(config_instance, 'humanization'):
+            data['humanization'] = dataclasses.asdict(config_instance.humanization)
 
         # model_input_size is auto-detected at runtime and deliberately not
         # in _FIELD_MAP, but was part of the old hand-picked preset list —

@@ -4,12 +4,15 @@
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import json
 import logging
 import os
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+from .humanization import HumanizationConfig
 
 
 def _get_screen_size() -> tuple[int, int]:
@@ -28,7 +31,8 @@ STATE_FIELDS = ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_on
 # attribute to its dotted path in the nested JSON. Drives to_dict() and from_dict().
 # Fields intentionally absent (never persisted): runtime-derived (current_provider),
 # auto-detected (model_input_size), constants (latency_stats_alpha), state (see
-# STATE_FIELDS), and the specially-handled crosshair color triplet.
+# STATE_FIELDS), and the specially-handled crosshair color triplet + humanization
+# dataclass.
 _FIELD_MAP = {
     # --- model ---
     'model_path':                 'model.path',
@@ -557,6 +561,9 @@ class Config:
         self.hud_game: str = "Apex Legends"              # selected game profile key from game.json
         self.hud_roi_coords: str = "1490,953,1870,1041"  # HUD ROI as "x1,y1,x2,y2" (from game.json)
 
+        # Humanization post-processing layer (operates only on final dx/dy output)
+        self.humanization: HumanizationConfig = HumanizationConfig()
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize persisted config into the grouped (v2) JSON schema.
 
@@ -569,6 +576,7 @@ class Config:
         # Crosshair RGB triplet → single [r, g, b] array.
         _set_path(out, 'display.crosshair.color',
                   [self.crosshair_color_r, self.crosshair_color_g, self.crosshair_color_b])
+        out['humanization'] = dataclasses.asdict(self.humanization)
         return out
 
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -603,6 +611,13 @@ class Config:
             for k in ('crosshair_color_r', 'crosshair_color_g', 'crosshair_color_b'):
                 if k in data:
                     setattr(self, k, data[k])
+
+        # Humanization dataclass — update in place, ignore unknown keys.
+        hud = data.get('humanization')
+        if isinstance(hud, dict):
+            for hk, hv in hud.items():
+                if hasattr(self.humanization, hk):
+                    setattr(self.humanization, hk, hv)
 
         # Legacy flat state fields (back-compat; canonical source is state.json).
         for f in STATE_FIELDS:

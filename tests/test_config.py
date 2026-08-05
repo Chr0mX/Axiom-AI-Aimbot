@@ -148,7 +148,7 @@ class TestConfigSerialization:
         d = c.to_dict()
         # v2 grouped schema: top-level sections present, config_version stays top-level.
         for section in ('model', 'capture', 'aim', 'autofire', 'tracking',
-                        'performance', 'display', 'hardware', 'ui'):
+                        'performance', 'display', 'hardware', 'ui', 'humanization'):
             assert section in d, f"Missing section: {section}"
         assert d['config_version'] == 2
         # Spot-check nested paths.
