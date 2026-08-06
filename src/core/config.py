@@ -77,6 +77,7 @@ _FIELD_MAP = {
     'fov_follow_mouse':           'aim.fov_follow_mouse',
     'fov_circle_filter_enabled':  'aim.fov_circle_filter_enabled',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
+    'nms_iou_threshold':          'model.nms_iou_threshold',
     'model_box_format':           'model.box_format',
     'model_has_objectness':       'model.has_objectness',
     'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
@@ -386,6 +387,12 @@ class Config:
         # alone, and a wrong guess corrupts silently rather than erroring.
         #   model_box_format:     'auto' | 'cxcywh' | 'xyxy'
         #   model_has_objectness: 'auto' | 'yes' (YOLOv5-family) | 'no' (YOLOv8-family)
+        # IoU above which NMS suppresses the lower-confidence of two
+        # overlapping boxes. Was hardcoded at 0.4. Lower = more aggressive
+        # merging (good for a model that emits duplicates); higher = keeps
+        # genuinely adjacent targets separate.
+        self.nms_iou_threshold: float = 0.4
+
         self.model_box_format: str = 'auto'
         self.model_has_objectness: str = 'auto'
 

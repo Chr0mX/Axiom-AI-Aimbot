@@ -5,6 +5,17 @@ Drop-in companion to makcu_mouse.py (ASCII API).
 Uses the binary frame format:
     RX (PC→Device): [0x50][CMD][LEN_LO][LEN_HI][PAYLOAD...]
     TX (Device→PC): [0x50][CMD][LEN_LO][LEN_HI][STATUS or DATA]
+
+RESERVED — not wired into production.
+
+MAKCU V2 binary-protocol variant, kept for a future firmware revision.
+Nothing imports this outside makcu_debug_binary.py. Before wiring it in,
+fix its lock-across-sleep violation in connect()/_send_cmd(): holding
+_lock across a time.sleep() stalls the inference thread's move()/click()
+for the sleep's duration. makcu_mouse.py (the shipping ASCII variant) is
+written specifically to avoid that and is the model to follow.
+tests/test_gui_invariants.py asserts this violation is still present, so
+this note can't quietly go stale.
 """
 
 import os

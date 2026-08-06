@@ -61,10 +61,7 @@ def _get_predictor(config: Config) -> VelocityPredictor:
     if _predictor is None:
         _predictor = VelocityPredictor(history_len=history_len, max_velocity_px_per_s=max_vel)
     else:
-        _predictor._max_velocity = max_vel
-        _predictor._history = type(_predictor._history)(
-            _predictor._history, maxlen=history_len
-        )
+        _predictor.reconfigure(history_len, max_vel)
     return _predictor
 
 
@@ -234,13 +231,18 @@ def process_aiming(
         # preventing aim from snapping to a different target mid-track.
         sticky = getattr(config, 'sticky_lock_enabled', False)
         selected = valid_targets[0]
+        _base_iou = float(getattr(config, 'lock_iou_threshold', 0.3))
+        # Threshold the continuity check below will use. Defaults to the raw
+        # configured value, and is replaced with whatever the sticky lock
+        # actually applied when the lock runs — see the comment there.
+        _continuity_thresh = _base_iou
         if sticky and state.locked_box is not None:
             # Replaced fixed lock_iou_threshold with adaptive area-scaled version (Someone_idea).
-            _base_iou = float(getattr(config, 'lock_iou_threshold', 0.3))
             if getattr(config, 'sticky_adaptive_iou', True):
                 iou_thresh = _adaptive_sticky_iou(_base_iou, state.locked_box, float(getattr(config, 'fov_size', 222)))
             else:
                 iou_thresh = _base_iou
+            _continuity_thresh = iou_thresh
             best_item, best_iou = None, 0.0
             for item in valid_targets:
                 iou = _box_iou(state.locked_box, item[4])
@@ -266,8 +268,14 @@ def process_aiming(
         # dt can produce a huge spurious velocity that wrongly disables Y
         # suppression right when it's needed. Reset the gate's timestamp
         # whenever the selected box isn't a continuation of the previous one.
-        _iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
-        if _prev_locked_box is None or _box_iou(_prev_locked_box, selected_box) < _iou_thresh:
+        # _continuity_thresh is the SAME threshold the lock just applied (see
+        # where it is set above). It previously read the raw
+        # lock_iou_threshold while sticky lock may have matched at the
+        # adaptive, looser one — so a target the lock had deliberately kept
+        # could still be judged "changed" here, resetting the Y-velocity gate
+        # mid-track on exactly the small/far targets the adaptive threshold
+        # exists to hold on to.
+        if _prev_locked_box is None or _box_iou(_prev_locked_box, selected_box) < _continuity_thresh:
             state.aim_y_last_target_t = 0.0
 
         if sticky:
@@ -297,7 +305,13 @@ def process_aiming(
         # --- Kalman filter aim-point smoothing (optional) ---
         if getattr(config, 'kalman_enabled', False):
             kf = _get_kalman(config)
-            target_x, target_y = kf.update(target_x, target_y)
+            # Same dt the PID uses below — the filter's state-transition
+            # matrix models position advancing by velocity * dt, so a fixed
+            # dt made its response depend on the loop rate.
+            _kf_dt = None
+            if state.pid_last_update_t > 0.0:
+                _kf_dt = current_time - state.pid_last_update_t
+            target_x, target_y = kf.update(target_x, target_y, _kf_dt)
         else:
             if _kalman is not None:
                 _kalman.reset()

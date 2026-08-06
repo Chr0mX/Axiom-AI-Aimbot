@@ -46,6 +46,10 @@ game/desktop footage — using it overstates the real decode cost badly
 (e.g. ~50fps for noise vs ~100-200+fps for realistic content at the same
 1920x1080 resolution on the same CPU). Pass `--image <path to a real
 screenshot>` for the most accurate reading against your actual content.
+
+BENCHMARK HARNESS — run directly, not imported.
+Loopback throughput/latency bench for the MJPEG-over-UDP path. Spawns
+_bench_udp_sender.py as a separate process. Not part of the application.
 """
 from __future__ import annotations
 

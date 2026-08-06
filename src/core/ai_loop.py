@@ -7,7 +7,6 @@ import os
 import queue
 import threading
 import time
-import traceback
 from typing import TYPE_CHECKING
 
 import logging
@@ -665,7 +664,9 @@ def ai_logic_loop(
                     # a separately-held class_ids list stops matching boxes
                     # positionally the moment more than one detection exists.
                     boxes, confidences, class_ids = non_max_suppression(
-                        boxes, confidences, class_ids=class_ids,
+                        boxes, confidences,
+                        iou_threshold=float(getattr(config, 'nms_iou_threshold', 0.4)),
+                        class_ids=class_ids,
                     )
                     t4 = time.perf_counter()
                     config.last_detection_time = time.time()
@@ -815,9 +816,12 @@ def ai_logic_loop(
                         )
                         last_stats_print = now
 
-            except Exception as e:
-                logger.error("[AI Loop Error] %s", e)
-                traceback.print_exc()
+            except Exception:
+                # logger.exception, not print_exc: the traceback belongs in
+                # the log file. This handler also throttles the loop to 1 Hz
+                # while it keeps firing, so a persistent error is both slow
+                # and — previously — invisible to anyone reading logs.
+                logger.exception("[AI Loop Error]")
                 time.sleep(1.0)
     finally:
         _hud_stop()

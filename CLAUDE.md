@@ -23,6 +23,8 @@ pytest tests/test_config.py::TestConfigInit::test_screen_dimensions
 
 Tests add `src/` to `sys.path` via `tests/conftest.py` — no install step needed.
 
+`tests/test_gui_invariants.py` is pure static source analysis (no PyQt6, no numpy, no display), so it runs everywhere the rest of the GUI suite can't. It enforces the three manual invariants below against a **baseline of known existing violations** rather than zero — fixing one and lowering its baseline is expected, and the test tells you the new number. Raising a baseline to make it pass defeats the point.
+
 **On non-Windows (e.g. this sandbox)**: this is fundamentally a Windows app — `pytest tests/` currently reports a stable baseline of 160 failed / 183 passed, all environment-only (missing `win32api`/PyQt6/pywin32, not code bugs). When verifying a change doesn't regress anything, compare the failed/passed counts against this baseline rather than expecting a clean run. Any module with a top-level `import win32api` (or that transitively imports one, e.g. anything importing `win_utils`) fails at **collection**, not just at test-run time, which aborts the whole suite unless the import is deferred — the established pattern here is a pytest fixture (or an in-test `from ... import ...`) that does the import lazily, so a missing `win32api` fails just that file's tests individually instead of blocking every other test file's collection. `ai_loop_utils.py`, `ai_loop.py`, and `ai_aiming.py` (via `win_utils`) all hit this; `detection_semantics.py`, `udp_receiver.py`, and `esp_server.py` don't and are fully testable here.
 
 ## Architecture
@@ -162,6 +164,9 @@ Models go in `Model/` (`Model_Hud/` for the secondary weapon-detector model). Th
 | `single_target_mode` | `aim.single_target_mode` | Reduce Web ESP/auto-fire/preview box list to the locked target only (applied *after* sticky lock resolves the pick — see Aiming section) |
 | `target_priority_mode` | `tracking.target_priority.mode` | `'distance'` / `'confidence'` / `'composite'` |
 | `target_priority_confidence_weight` | `tracking.target_priority.confidence_weight` | Weight of confidence vs. distance in `'composite'` mode |
+| `nms_iou_threshold` | `model.nms_iou_threshold` | IoU above which NMS suppresses the lower-confidence of two overlapping boxes (was hardcoded 0.4) |
+| `model_box_format` | `model.box_format` | `'auto'` / `'cxcywh'` / `'xyxy'` — ONNX box encoding. `'auto'` infers, but only with ≥3 detections (the x2>x1 test is near a coin flip below that) and logs when it does |
+| `model_has_objectness` | `model.has_objectness` | `'auto'` / `'yes'` (YOLOv5-family) / `'no'` (YOLOv8-family). Getting this wrong makes confidence `max(obj,cls)` instead of `obj*cls` and shifts every class id by one |
 | `detect_semantic_filter_enabled` | `aim.detect_semantic_filter_enabled` | Filter vegetation/vehicle/sign/HUD false positives before target selection |
 | `second_inference_mode` | `ocr.mode` | `'off'` / `'v1_ocr'` / `'v2_onnx'` — secondary weapon-detection method |
 | `hud_roi_coords` | `ocr.hud_roi_coords` | ROI `"x1,y1,x2,y2"` for the ONNX weapon/attachment HUD scanner |

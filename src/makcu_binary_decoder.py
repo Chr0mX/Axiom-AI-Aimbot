@@ -9,6 +9,9 @@ Frame format (both directions):
 Setter response:  LEN=1, payload = 0x00 (OK) or 0x01 (ERR)
 Getter response:  LEN>1, payload = data bytes
 Stream frames:    same header, payload = stream-specific struct
+
+RESERVED — supports makcu_mouse_binary.py (see its header).
+Not reachable from the running application.
 """
 
 import struct
