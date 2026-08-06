@@ -26,6 +26,21 @@ class VelocityPredictor:
         """Clear history (call when target is lost or aim deactivated)."""
         self._history.clear()
 
+    def reconfigure(self, history_len: int, max_velocity_px_per_s: float) -> None:
+        """Apply new settings in place, preserving observations.
+
+        Mirrors KalmanFilter2D.reconfigure(). Callers previously reached into
+        the private attributes and rebuilt the deque on *every frame* just to
+        pick up settings that almost never change; this makes that a no-op
+        unless something actually changed.
+        """
+        self._max_velocity = max_velocity_px_per_s
+        if history_len != self._history.maxlen:
+            # Rebuild only on a real change. deque(existing, maxlen=n) keeps
+            # the most recent n entries, so tightening the window drops the
+            # oldest rather than losing the track.
+            self._history = deque(self._history, maxlen=history_len)
+
     def update(
         self,
         x: float,

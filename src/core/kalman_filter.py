@@ -66,8 +66,35 @@ class KalmanFilter2D:
         self._Q = np.eye(4, dtype=np.float64) * process_noise
         self._R = np.eye(2, dtype=np.float64) * measurement_noise
 
-    def update(self, x: float, y: float) -> tuple[float, float]:
-        """Feed one measurement and return the filtered position estimate."""
+    def _set_dt(self, dt: float) -> None:
+        """Update the state-transition matrix for a new timestep.
+
+        F encodes "position advances by velocity * dt". It was built once
+        with dt=1.0 and never touched again, so the filter modelled every
+        update as one fixed tick regardless of how much time had actually
+        passed — which made its behaviour depend on the loop rate, and
+        change at runtime when idle_detect_interval slowed the loop.
+
+        Only the two velocity terms depend on dt, so patch those rather
+        than rebuilding the matrix each frame.
+        """
+        if dt <= 0.0 or dt == self._dt:
+            return
+        self._dt = dt
+        self._F[0, 2] = dt
+        self._F[1, 3] = dt
+
+    def update(self, x: float, y: float, dt: float | None = None) -> tuple[float, float]:
+        """Feed one measurement and return the filtered position estimate.
+
+        dt: seconds since the previous update. None keeps the current
+        timestep, preserving the historical fixed-step behaviour for callers
+        that don't track it.
+        """
+        if dt is not None:
+            # Clamp for the same reason the PID does: one stalled frame
+            # shouldn't be modelled as a huge coasting step.
+            self._set_dt(max(0.001, min(0.25, dt)))
         z = np.array([[x], [y]], dtype=np.float64)
 
         if not self._initialized:

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import queue
 import time
-import traceback
 import logging
 from typing import TYPE_CHECKING
 
@@ -144,8 +143,7 @@ def auto_fire_loop(config: Config, boxes_queue: queue.Queue) -> None:
             
             time.sleep(1 / 60)
             
-        except Exception as e:
-            logger.error("AutoFire 發生錯誤: %s", e)
-            traceback.print_exc()
+        except Exception:
+            logger.exception("AutoFire error")
             time.sleep(1.0)
 

@@ -1,3 +1,8 @@
+"""DEVELOPER TOOL — run directly, not imported.
+Interactive MAKCU connection/protocol probe for diagnosing a device that
+won't connect. Not part of the application.
+"""
+
 import sys
 import os
 import re

@@ -5,6 +5,8 @@ interpreter) so it doesn't share a GIL with the receiver or the simulated
 capture/inference contender threads -- matching the real deployment where
 the OBS sender is an independent process from Axiom's Python receiver.
 Not meant to be run directly.
+
+BENCHMARK HARNESS — subprocess entry point for bench_udp.py.
 """
 import socket
 import struct
