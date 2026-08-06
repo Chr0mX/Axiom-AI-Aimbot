@@ -31,6 +31,7 @@ def test_dsc_result_constants_match_c_header():
 
     assert dsn.DSC_OK == 0
     assert dsn.DSC_ERR_NO_FRAME_YET == -9
+    assert dsn.DSC_ERR_CROP_NOT_SUPPORTED == -11
 
 
 def test_capture_params_struct_field_order_matches_c_header():
@@ -38,14 +39,37 @@ def test_capture_params_struct_field_order_matches_c_header():
     directshow_capture.h — field order/count/types must not drift
     independently of the C header. This is exactly the class of bug that
     slipped through before (5 fields instead of 7, missing device_substr
-    and buffer_count, wrong order)."""
+    and buffer_count, wrong order). The four crop_* fields are a strict
+    append (V2) on top of the original 7-field layout, not a reordering —
+    a DLL build that predates them still opens fine since it never reads
+    past buffer_count (see the module docstring's native-crop section)."""
     from core import dshow_capture_native as dsn
 
     field_names = [name for name, _ in dsn.CaptureParams._fields_]
     assert field_names == [
         'device_substr', 'device_index', 'pixel_format',
         'width', 'height', 'fps', 'buffer_count',
+        'crop_x', 'crop_y', 'crop_width', 'crop_height',
     ]
+
+
+def test_capture_params_crop_fields_round_trip():
+    """Pure ctypes struct assignment, no DLL/Windows needed — confirms the
+    four appended crop fields actually land at distinct offsets and hold
+    the values assigned to them (would catch a copy-paste field-name typo
+    aliasing two fields to the same memory, which _fields_ order alone
+    doesn't rule out)."""
+    from core import dshow_capture_native as dsn
+
+    params = dsn.CaptureParams()
+    params.crop_x = 640
+    params.crop_y = 220
+    params.crop_width = 1080
+    params.crop_height = 640
+    assert (params.crop_x, params.crop_y, params.crop_width, params.crop_height) == (640, 220, 1080, 640)
+    # Untouched fields stay at their zero-initialized default — confirms
+    # the crop fields don't overlap/alias any of the original 7.
+    assert (params.device_index, params.width, params.height, params.buffer_count) == (0, 0, 0, 0)
 
 
 @pytest.mark.skipif(platform.system() == 'Windows', reason='exercises the non-Windows guard specifically')

@@ -246,9 +246,17 @@ def _compute_fixed_uvc_crop_region(
     crop_size = max(0, min(crop_size, capture_width, capture_height))
     if crop_size <= 0:
         return None
+    # left/top: even capture_width/crop_size don't guarantee an even
+    # quotient (e.g. (1926-1080)//2 == 423) — mask down explicitly rather
+    # than relying on each consumer to re-derive this. _crop_nv12() (the
+    # software-crop path) already self-corrects for odd left/top on its
+    # own, but the native DLL crop path does not: its ValidateCropRect()
+    # rejects an odd x/y outright (DSC_ERR_INVALID_ARG) rather than
+    # rounding, so an unmasked value here would silently forfeit the
+    # upstream crop on perfectly ordinary resolutions.
     return {
-        'left': (capture_width - crop_size) // 2,
-        'top': (capture_height - crop_size) // 2,
+        'left': ((capture_width - crop_size) // 2) & ~1,
+        'top': ((capture_height - crop_size) // 2) & ~1,
         'width': crop_size,
         'height': crop_size,
     }
@@ -1645,21 +1653,33 @@ class UVCCapture:
         decoded to BGR in the reader thread below, same as UdpCapture's
         JPEG-over-UDP path.
 
-        Fixed-crop upstream negotiation: when uvc_crop_mode == 'fixed', this
-        asks the DLL to capture the crop square directly (e.g. 320x320)
-        instead of the full requested resolution — a genuine reduction in
-        what the device/driver actually captures and delivers, not just what
-        Axiom processes afterward (that's what makes this different from
-        cv2's fixed-crop path, and from this DLL's own dynamic mode: the
-        USB/DirectShow-graph bandwidth itself shrinks, the same category of
-        win ffmpeg's own '-vf crop' gets by cropping before the subprocess
-        pipe — except here it's before the *device* delivers pixels at all).
-        Not every UVC device advertises an arbitrary small resolution like
-        320x320 as one of its supported modes, so a rejected open() at the
-        crop size falls back to the full requested resolution with the
-        crop applied in software afterward (the pre-existing behavior) —
-        same visual result, just without the upstream bandwidth win on
-        devices that can't negotiate the small size directly.
+        Fixed-crop via native DLL crop (NV12 only): when uvc_crop_mode ==
+        'fixed', this requests a real, DLL-side spatial crop of the
+        negotiated frame via dsc_open_params' crop_x/y/width/height — device
+        negotiation itself always asks for the full requested width/height,
+        exactly as it always has; the crop is a separate, later, in-DLL step
+        applied to the frame after capture (see directshow_capture.h's
+        dsc_open_params doc comment). This is deliberately NOT the same
+        thing as requesting a smaller resolution mode from the device — a
+        prior version of this method did that, and it's unsound: a device
+        advertising a smaller mode is under no obligation to hand back a
+        spatial crop of the same framing rather than the whole scene
+        rescaled, so "the device accepted a smaller size" is not evidence
+        that a real crop happened.
+
+        Native crop is NV12-only (MJPEG frames are already compressed at
+        capture time — a real crop there would need decode+crop+re-encode,
+        which the DLL doesn't implement and correctly refuses rather than
+        attempting). MJPEG's fixed-crop mode falls straight through to the
+        pre-existing software crop-after-decode path instead.
+
+        Because a DLL build that predates this crop ABI addition silently
+        ignores the trailing crop fields rather than rejecting them (see
+        dshow_capture_native.py's module docstring), capture_open()
+        returning success is not proof the crop actually took effect either
+        — the reader thread below confirms it against the first real
+        frame's actual delivered dimensions and self-heals to software
+        cropping if they don't match the requested crop size.
         """
         from .dshow_capture_native import NativeDshowCapture, PIXEL_FORMAT_NV12
 
@@ -1667,57 +1687,70 @@ class UVCCapture:
         pixel_format, format_name = _resolve_native_dll_pixel_format(self.config)
         self._native_is_compressed = (pixel_format != PIXEL_FORMAT_NV12)
 
-        crop_mode = str(getattr(self.config, 'uvc_crop_mode', 'dynamic')).lower()
-        upstream_crop_size = 0
-        if crop_mode == 'fixed':
-            upstream_crop_size = int(getattr(self.config, 'detect_range_size', 0) or 0) & ~1
-            upstream_crop_size = max(0, min(upstream_crop_size, width, height))
-        open_width, open_height = (
-            (upstream_crop_size, upstream_crop_size) if upstream_crop_size > 0 else (width, height)
-        )
+        # Native crop is NV12-only — for MJPEG, don't even attempt it (we
+        # already know from the DLL's own contract it would be rejected);
+        # go straight to the software crop-after-decode path instead.
+        native_crop_rect = None
+        if not self._native_is_compressed:
+            native_crop_rect = _compute_fixed_uvc_crop_region(self.config, width, height)
 
-        def _try_open(w: int, h: int) -> "NativeDshowCapture":
+        def _crop_tuple(region: dict[str, int] | None) -> tuple[int, int, int, int] | None:
+            if region is None:
+                return None
+            return (region['left'], region['top'], region['width'], region['height'])
+
+        def _try_open(crop_rect: dict[str, int] | None) -> "NativeDshowCapture":
             native = NativeDshowCapture(
-                device_index, w, h, fps,
+                device_index, width, height, fps,
                 pixel_format=pixel_format, buffer_count=4,
+                crop=_crop_tuple(crop_rect),
             )
             native.start()
             return native
 
-        opened_width, opened_height = open_width, open_height
+        requested_crop = native_crop_rect
         try:
-            self._native = _try_open(open_width, open_height)
+            self._native = _try_open(requested_crop)
         except Exception as exc:
-            if upstream_crop_size > 0:
+            if requested_crop is not None:
                 logging.getLogger(__name__).warning(
-                    "[UVC][NativeDLL] Upstream fixed-crop open at %dx%d failed (%s) — "
-                    "this device likely doesn't advertise that exact resolution. "
-                    "Falling back to full-resolution capture (%dx%d) with the crop "
-                    "applied in software instead.",
-                    open_width, open_height, exc, width, height,
+                    "[UVC][NativeDLL] Native crop open failed (%s) — retrying without "
+                    "a crop request and falling back to a software crop instead.",
+                    exc,
                 )
+                requested_crop = None
                 try:
-                    self._native = _try_open(width, height)
-                    opened_width, opened_height = width, height
+                    self._native = _try_open(None)
                 except Exception as exc2:
                     raise RuntimeError(f'Native DirectShow-Capture-DLL open failed: {exc2}') from exc2
             else:
                 raise RuntimeError(f'Native DirectShow-Capture-DLL open failed: {exc}') from exc
 
-        self.preview_width = opened_width
-        self.preview_height = opened_height
+        # The DLL always negotiates the full requested resolution now — the
+        # reader thread below overwrites these per real frame regardless
+        # (crop or not), this is just the pre-first-frame default.
+        self.preview_width = width
+        self.preview_height = height
         self.preview_fps = max(1, fps)
         self.config.source_nominal_fps = float(self.preview_fps)
         self.config.uvc_actual_width = self.preview_width
         self.config.uvc_actual_height = self.preview_height
         self.config.uvc_actual_fps = float(self.preview_fps)
         self.is_expected_format = True
-        # Computed against whichever resolution actually got negotiated
-        # above — a no-op (full-frame) region when the upstream crop
-        # succeeded (opened_width/height already equal the crop size), or
-        # the real centered-crop rect when it fell back to full resolution.
-        # Either way grab() below applies the same math uniformly.
-        self._fixed_region = _compute_fixed_uvc_crop_region(self.config, opened_width, opened_height)
+        # Optimistic default: if a crop was requested and capture_open()
+        # accepted it, assume grab() needs no further (software) cropping —
+        # the reader thread confirms this against the first real frame's
+        # actual dimensions and corrects _fixed_region if the DLL didn't
+        # really honor it (old DLL build, silently ignored crop fields).
+        # If no crop was requested/accepted at all (MJPEG, or the retry-
+        # without-crop path above), fall back to the plain software-crop
+        # rect immediately — there's nothing to confirm in that case.
+        self._native_crop_requested = _crop_tuple(requested_crop)
+        self._native_crop_confirmed = False
+        self._fixed_region = (
+            None if self._native_crop_requested is not None
+            else _compute_fixed_uvc_crop_region(self.config, width, height)
+        )
         # Gates grab()'s shared raw-NV12 crop-before-convert path (same one
         # the cv2 CAP_PROP_CONVERT_RGB path uses) — only meaningful for NV12;
         # MJPEG frames are already decoded to BGR by the reader thread below.
@@ -1725,18 +1758,21 @@ class UVCCapture:
 
         logging.getLogger(__name__).info(
             "[UVC][NativeDLL] Opened device index=%d via directshow_capture.dll "
-            "at %dx%d @ %d fps (%s%s, driver may still negotiate differently — "
-            "reader thread updates preview_width/height per frame).",
-            device_index, opened_width, opened_height, fps, format_name,
-            ", upstream fixed-crop" if opened_width == upstream_crop_size and upstream_crop_size > 0 else "",
+            "at %dx%d @ %d fps (%s%s).",
+            device_index, width, height, fps, format_name,
+            f", requesting native crop {self._native_crop_requested}" if self._native_crop_requested else "",
         )
 
         self._latest_frame_lock = threading.Lock()
         self._latest_frame_ref: list = [None]
-        # Seeded with the frozen fixed-crop rect, not always None — see the
-        # matching cv2-path comment above self._region_ref for why (the
-        # preview thread reads this independently of grab(), which only
-        # writes it once the main AI loop's target_region is populated).
+        # Seeded with self._fixed_region as computed above — the frozen
+        # software-crop rect if fixed-crop mode isn't relying on native
+        # crop, or None (pending the reader thread's first-frame
+        # confirmation) if a native crop was requested. See the matching
+        # cv2-path comment above self._region_ref for why this needs seeding
+        # at all (the preview thread reads this independently of grab(),
+        # which only writes it once the main AI loop's target_region is
+        # populated).
         self._region_ref: list = [self._fixed_region]
         self._reader_stop = threading.Event()
         self._last_frame_perf_time = time.perf_counter()
@@ -1805,6 +1841,31 @@ class UVCCapture:
                 time.sleep(0.001)
                 continue
             _last_ts_qpc = ts_qpc
+
+            if self._native_crop_requested is not None and not self._native_crop_confirmed:
+                # One-shot self-heal, same idiom as _confirm_raw_nv12(): a
+                # DLL build that predates the crop ABI addition silently
+                # ignores dsc_open_params' trailing crop fields rather than
+                # rejecting them, so capture_open() succeeding is not proof
+                # the crop actually happened — only the real delivered
+                # dimensions of an actual frame are. Checked once, on the
+                # first frame, and locked in from there (crop state can't
+                # change mid-stream on its own).
+                self._native_crop_confirmed = True
+                _, _, crop_w, crop_h = self._native_crop_requested
+                if (w, h) == (crop_w, crop_h):
+                    self._fixed_region = None  # DLL is genuinely delivering the crop already
+                else:
+                    logging.getLogger(__name__).warning(
+                        "[UVC][NativeDLL] Native crop was requested (%s) but the DLL "
+                        "delivered %dx%d frames instead — this build of "
+                        "directshow_capture.dll likely predates native crop support "
+                        "(rebuild from chr0mx/DirectShow-Capture-DLL's latest "
+                        "claude/directshow-dll-mjpeg-nv12-kuglu1 branch). Falling back "
+                        "to a software crop of the full frame.",
+                        self._native_crop_requested, w, h,
+                    )
+                    self._fixed_region = _compute_fixed_uvc_crop_region(self.config, w, h)
 
             if self._native_is_compressed:
                 # MJPEG: decode to BGR here (same place UdpCapture's reader

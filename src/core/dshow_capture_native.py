@@ -36,6 +36,23 @@ against the actual DLL. This version matches the real header field-for-field
 previous version assumed NV12 was the only format this build implements,
 which was itself an artifact of not having the header (the real DLL supports
 both ``DSC_PIXEL_FORMAT_NV12`` and ``DSC_PIXEL_FORMAT_MJPEG``).
+
+Native crop (V2 ABI addition): ``dsc_open_params`` gained four trailing
+fields (``crop_x``/``crop_y``/``crop_width``/``crop_height``) for a real,
+DLL-side spatial crop — see ``directshow_capture.h``'s doc comment on why
+that's a distinct thing from just requesting a smaller resolution (a device
+advertising a smaller mode carries no guarantee it's a crop of the same
+framing rather than the whole scene rescaled; ``screen_capture.py``'s
+``uvc_crop_mode == 'fixed'`` path used to do exactly that resolution-request
+trick before this field existed — see its own history for the corrected
+architecture). ``CaptureParams`` below is a strict append — same 7 fields as
+before, unchanged offsets, plus these 4 new ones at the end — so a DLL build
+that predates this addition still opens fine (it never reads past
+``buffer_count``, so trailing crop fields are silently ignored, not
+rejected). That "silently ignored" behavior is exactly why callers here
+can't just trust that requesting a crop worked because ``capture_open()``
+returned OK — see ``UVCCapture._init_native_dll``'s first-frame dimension
+check for how that gets verified for real.
 """
 
 from __future__ import annotations
@@ -62,6 +79,7 @@ DSC_ERR_START_FAILED = -7
 DSC_ERR_NOT_RUNNING = -8
 DSC_ERR_NO_FRAME_YET = -9
 DSC_ERR_ALREADY_RUNNING = -10
+DSC_ERR_CROP_NOT_SUPPORTED = -11  # crop requested for MJPEG (NV12-only), or an invalid/misaligned rect
 DSC_ERR_UNKNOWN = -99
 
 # --- dsc_pixel_format ---
@@ -72,7 +90,9 @@ PIXEL_FORMAT_MJPEG = 1
 class CaptureParams(ctypes.Structure):
     """Raw memory-layout match with ``dsc_open_params`` in
     directshow_capture.h — field order/types are load-bearing, not just
-    internally consistent (see module docstring)."""
+    internally consistent (see module docstring). The four crop_* fields are
+    appended at the end (V2) — a superset of the original 7-field layout,
+    not a reordering."""
     _fields_ = [
         ("device_substr", ctypes.c_char_p),  # UTF-8, case-insensitive substring; nullable
         ("device_index", ctypes.c_int32),    # -1 = use device_substr / first available
@@ -81,6 +101,10 @@ class CaptureParams(ctypes.Structure):
         ("height", ctypes.c_int32),
         ("fps", ctypes.c_int32),
         ("buffer_count", ctypes.c_int32),
+        ("crop_x", ctypes.c_int32),
+        ("crop_y", ctypes.c_int32),
+        ("crop_width", ctypes.c_int32),   # <= 0 = no crop, full negotiated frame
+        ("crop_height", ctypes.c_int32),
     ]
 
 
@@ -166,6 +190,11 @@ def _load_dll() -> ctypes.WinDLL:
     ]
     dll.capture_get_latest_frame.restype = ctypes.c_int32
 
+    dll.capture_set_crop.argtypes = [
+        ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32,
+    ]
+    dll.capture_set_crop.restype = ctypes.c_int32
+
     dll.capture_get_qpc_frequency.argtypes = []
     dll.capture_get_qpc_frequency.restype = ctypes.c_int64
 
@@ -241,13 +270,24 @@ class NativeDshowCapture:
 
     def __init__(self, device_index: int, width: int, height: int, fps: int,
                  pixel_format: int = PIXEL_FORMAT_NV12, buffer_count: int = 4,
-                 device_substr: Optional[str] = None):
+                 device_substr: Optional[str] = None,
+                 crop: Optional[tuple[int, int, int, int]] = None):
+        """crop: optional (x, y, width, height), in the negotiated width/
+        height's own coordinate space — requests a real, DLL-side spatial
+        crop of every captured frame (NV12 only; raises CaptureError with
+        DSC_ERR_CROP_NOT_SUPPORTED if combined with pixel_format=
+        PIXEL_FORMAT_MJPEG). All four values must be even and fit inside
+        width x height, or capture_open() raises DSC_ERR_INVALID_ARG.
+        Device negotiation itself (width/height/fps/pixel_format) is
+        unaffected either way — this is a separate, later, in-DLL step, not
+        a request for a different resolution mode."""
         self._dll = _load_dll()
         format_name = 'MJPEG' if pixel_format == PIXEL_FORMAT_MJPEG else 'NV12'
         self.is_compressed = (pixel_format == PIXEL_FORMAT_MJPEG)
         logger.info(
-            "[dshow_capture_native] DLL loaded, requesting device=%s %dx%d@%dfps (%s)",
+            "[dshow_capture_native] DLL loaded, requesting device=%s %dx%d@%dfps (%s)%s",
             device_substr if device_substr else device_index, width, height, fps, format_name,
+            f", crop={crop}" if crop else "",
         )
 
         params = CaptureParams()
@@ -264,6 +304,12 @@ class NativeDshowCapture:
         params.height = height
         params.fps = fps
         params.buffer_count = buffer_count
+        if crop is not None:
+            crop_x, crop_y, crop_w, crop_h = crop
+            params.crop_x = crop_x
+            params.crop_y = crop_y
+            params.crop_width = crop_w
+            params.crop_height = crop_h
         logger.info("[dshow_capture_native] capture_default_params ok, calling capture_open...")
 
         result = ctypes.c_int32()
@@ -311,6 +357,20 @@ class NativeDshowCapture:
 
         raw = bytes(ctypes.cast(data_ptr, ctypes.POINTER(ctypes.c_uint8 * data_len.value))[0])
         return raw, w.value, h.value, ts.value
+
+    def set_crop(self, x: int, y: int, width: int, height: int) -> None:
+        """Live-adjusts the native crop rectangle without a graph rebuild —
+        see capture_set_crop()'s doc comment in directshow_capture.h.
+        Coordinates are in the negotiated capture resolution's own space,
+        same rules as the constructor's `crop`. Not currently called from
+        UVCCapture (a Detection Range change already triggers a full backend
+        reinit via _uvc_signature), but kept available for a future
+        live-adjust path without paying that reinit cost."""
+        _check(self._dll, self._dll.capture_set_crop(self._handle, x, y, width, height), self._handle)
+
+    def disable_crop(self) -> None:
+        """Stops cropping — get_latest_frame() goes back to full frames."""
+        _check(self._dll, self._dll.capture_set_crop(self._handle, 0, 0, 0, 0), self._handle)
 
     def stop(self) -> None:
         if self._started:
