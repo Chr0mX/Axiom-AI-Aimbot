@@ -258,8 +258,10 @@ class Config:
         #     a purpose-built app like OBS on the same device/settings.
         #   'v2' = the native DirectShow-Capture-DLL — owns the filter graph
         #     and allocator directly (see the DirectShow Capture DLL roadmap),
-        #     closing that gap. NV12-only in this build. Irrelevant/ignored
-        #     for 'msmf' or 'any'.
+        #     closing that gap. Supports MJPEG and NV12 (uvc_video_format,
+        #     restricted to those two in the GUI while v2 is active — see
+        #     _resolve_native_dll_pixel_format in screen_capture.py).
+        #     Irrelevant/ignored for 'msmf' or 'any'.
         self.uvc_dshow_backend: str = "v1"
         # FFmpeg subprocess capture, only meaningful for capture_method ==
         # 'dshow' + dshow_backend == 'v1' — ffmpeg has no MSMF demuxer on

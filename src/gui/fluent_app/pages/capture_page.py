@@ -184,7 +184,8 @@ class CapturePage(BasePage):
             "Use Native DirectShow DLL (V2)",
             "Off = OpenCV's DirectShow wrapper (V1, default). On = the native "
             "directshow_capture.dll — owns the capture graph directly for "
-            "lower, OBS-like latency. NV12 only in this build. Requires "
+            "lower, OBS-like latency. Supports MJPEG and NV12 (Video Format "
+            "below is restricted to those two while this is on). Requires "
             "directshow_capture.dll to be present (see FFmpeg Path card's "
             "location convention).",
             parent=self.uvcGroup
@@ -1108,6 +1109,28 @@ class CapturePage(BasePage):
         self.uvcDshowV2Card.setVisible(is_dshow)
         self.uvcFfmpegEnabledCard.setVisible(is_dshow and is_v1)
         self.uvcFfmpegPathCard.setVisible(is_dshow and is_v1 and ffmpeg_on)
+        self._updateVideoFormatOptions(is_v2=(is_dshow and not is_v1))
+
+    def _updateVideoFormatOptions(self, is_v2: bool):
+        """The native DLL (v2, dshow_capture_native.py) only implements
+        MJPEG/NV12 — restrict the combo's selectable items to those two
+        while v2 is active, so the GUI never offers a format that's silently
+        unsupported by that path (see _resolve_native_dll_pixel_format in
+        screen_capture.py, which would otherwise have to fall back for you).
+        """
+        items = ["MJPEG", "NV12"] if is_v2 else ["MJPEG", "YUY2", "NV12", "YUV420P"]
+        current_items = [self.uvcVideoFormatCombo.itemText(i) for i in range(self.uvcVideoFormatCombo.count())]
+        if current_items == items:
+            return  # already matches — avoid signal churn on every visibility refresh
+        current = self.uvcVideoFormatCombo.currentText()
+        self.uvcVideoFormatCombo.blockSignals(True)
+        self.uvcVideoFormatCombo.clear()
+        self.uvcVideoFormatCombo.addItems(items)
+        new_selection = current if current in items else "MJPEG"
+        self.uvcVideoFormatCombo.setCurrentText(new_selection)
+        self.uvcVideoFormatCombo.blockSignals(False)
+        if new_selection != current and self._config:
+            self._config.uvc_video_format = new_selection.lower()
 
     def _onUvcPreviewChanged(self, checked):
         if self._config:
@@ -1360,7 +1383,8 @@ class CapturePage(BasePage):
         self.uvcDshowV2Card.contentLabel.setText(
             "Off = OpenCV's DirectShow wrapper (V1, default). On = the native "
             "directshow_capture.dll — owns the capture graph directly for "
-            "lower, OBS-like latency. NV12 only in this build. Requires "
+            "lower, OBS-like latency. Supports MJPEG and NV12 (Video Format "
+            "below is restricted to those two while this is on). Requires "
             "directshow_capture.dll to be present (see FFmpeg Path card's "
             "location convention)."
         )

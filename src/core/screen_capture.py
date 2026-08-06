@@ -229,6 +229,31 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
     )
 
 
+def _resolve_native_dll_pixel_format(config: Config) -> tuple[int, str]:
+    """Map uvc_video_format to the native DLL's dsc_pixel_format for the
+    uvc_dshow_backend == 'v2' path.
+
+    The DLL only implements two formats (NV12/MJPEG) — 'yuy2'/'yuv420p'
+    (valid for the cv2 v1 path) have no v2 equivalent, so they fall back to
+    'mjpeg' here with a warning rather than silently being coerced to a
+    format the user didn't ask for without saying so.
+    """
+    from .dshow_capture_native import PIXEL_FORMAT_MJPEG, PIXEL_FORMAT_NV12
+
+    video_format = str(getattr(config, 'uvc_video_format', 'mjpeg')).lower()
+    if video_format == 'nv12':
+        return PIXEL_FORMAT_NV12, 'NV12'
+    if video_format == 'mjpeg':
+        return PIXEL_FORMAT_MJPEG, 'MJPEG'
+    _warn_once(
+        f'native_dll_unsupported_format_{video_format}',
+        f"[UVC][NativeDLL] Video format '{video_format}' has no v2 (native DLL) "
+        "equivalent — only mjpeg/nv12 are supported by directshow_capture.dll. "
+        "Falling back to MJPEG.",
+    )
+    return PIXEL_FORMAT_MJPEG, 'MJPEG'
+
+
 def _udp_signature(config: Config) -> tuple[str, int, int, float, bool]:
     return (
         str(getattr(config, 'udp_bind_ip', '0.0.0.0')),
@@ -1588,17 +1613,25 @@ class UVCCapture:
         Unlike cv2's generic DirectShow wrapper, this DLL owns the filter
         graph and allocator directly — the whole point of it existing (see
         the DirectShow Capture DLL roadmap / this file's Capture Pipeline
-        Audit artifact for the "why v2" writeup). NV12-only in this build —
-        reuses the exact same raw-NV12 crop-before-convert path in grab()
-        that the cv2 path's CAP_PROP_CONVERT_RGB optimization already uses,
-        since the frame shape this hands back is identical (2-D, luma+UV
-        rows stacked, one row = preview_width bytes).
+        Audit artifact for the "why v2" writeup). Supports both of the DLL's
+        pixel formats via uvc_video_format (mjpeg/nv12 — see
+        _resolve_native_dll_pixel_format): NV12 reuses the exact same
+        raw-NV12 crop-before-convert path in grab() that the cv2 path's
+        CAP_PROP_CONVERT_RGB optimization already uses (the frame shape this
+        hands back is identical — 2-D, luma+UV rows stacked); MJPEG is
+        decoded to BGR in the reader thread below, same as UdpCapture's
+        JPEG-over-UDP path.
         """
-        from .dshow_capture_native import NativeDshowCapture
+        from .dshow_capture_native import NativeDshowCapture, PIXEL_FORMAT_NV12
 
         self.cap = None
+        pixel_format, format_name = _resolve_native_dll_pixel_format(self.config)
+        self._native_is_compressed = (pixel_format != PIXEL_FORMAT_NV12)
         try:
-            self._native = NativeDshowCapture(device_index, width, height, fps)
+            self._native = NativeDshowCapture(
+                device_index, width, height, fps,
+                pixel_format=pixel_format, buffer_count=4,
+            )
             self._native.start()
         except Exception as exc:
             raise RuntimeError(f'Native DirectShow-Capture-DLL open failed: {exc}') from exc
@@ -1611,13 +1644,16 @@ class UVCCapture:
         self.config.uvc_actual_height = self.preview_height
         self.config.uvc_actual_fps = float(self.preview_fps)
         self.is_expected_format = True
-        self.is_raw_nv12 = True  # only pixel format this DLL build implements
+        # Gates grab()'s shared raw-NV12 crop-before-convert path (same one
+        # the cv2 CAP_PROP_CONVERT_RGB path uses) — only meaningful for NV12;
+        # MJPEG frames are already decoded to BGR by the reader thread below.
+        self.is_raw_nv12 = not self._native_is_compressed
 
         logging.getLogger(__name__).info(
             "[UVC][NativeDLL] Opened device index=%d via directshow_capture.dll "
-            "at %dx%d @ %d fps (requested — driver may negotiate differently, "
-            "reader thread updates preview_width/height per frame).",
-            device_index, width, height, fps,
+            "at %dx%d @ %d fps (%s, requested — driver may negotiate "
+            "differently, reader thread updates preview_width/height per frame).",
+            device_index, width, height, fps, format_name,
         )
 
         self._latest_frame_lock = threading.Lock()
@@ -1654,10 +1690,10 @@ class UVCCapture:
                 if not _warned_broken_read:
                     _warned_broken_read = True
                     logging.getLogger(__name__).error(
-                        "[UVC][NativeDLL] get_latest_frame() raised %s — "
-                        "retrying. If this persists, the DLL's ABI may not "
-                        "match this wrapper's inferred struct layout (see "
-                        "dshow_capture_native.py's module docstring).",
+                        "[UVC][NativeDLL] get_latest_frame() raised %s — retrying. "
+                        "If this persists, confirm directshow_capture.dll's build "
+                        "matches the ABI dshow_capture_native.py expects (see that "
+                        "module's docstring for the reference header it's based on).",
                         exc,
                     )
                 time.sleep(0.05)
@@ -1670,9 +1706,35 @@ class UVCCapture:
                 time.sleep(0.005)
                 continue
 
-            frame_nv12, w, h, _ts_qpc = result
+            raw, w, h, _ts_qpc = result
+            if self._native_is_compressed:
+                # MJPEG: decode to BGR here (same place UdpCapture's reader
+                # thread decodes its JPEG chunks) so grab()'s generic
+                # (non-raw-NV12) crop+BGRA path handles the rest unchanged.
+                arr = np.frombuffer(raw, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if frame is None:
+                    time.sleep(0.001)
+                    continue
+            else:
+                # NV12: h*3//2 rows (Y plane + interleaved UV plane) at w
+                # columns — the DLL reports stride == width (no row padding,
+                # see its own docs), matching what _crop_nv12/grab()'s
+                # raw-NV12 path already expects.
+                expected_len = h * 3 // 2 * w
+                if len(raw) != expected_len:
+                    _warn_once(
+                        'native_dll_nv12_size_mismatch',
+                        f"[UVC][NativeDLL] NV12 frame size {len(raw)} != expected "
+                        f"{expected_len} for {w}x{h} — device may be padding rows; "
+                        "dropping this frame.",
+                    )
+                    time.sleep(0.001)
+                    continue
+                frame = np.frombuffer(raw, dtype=np.uint8).reshape((h * 3 // 2, w))
+
             with self._latest_frame_lock:
-                self._latest_frame_ref[0] = frame_nv12
+                self._latest_frame_ref[0] = frame
             self._last_frame_perf_time = time.perf_counter()
             self.preview_width = w
             self.preview_height = h
