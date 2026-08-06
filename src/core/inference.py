@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List, Tuple, Any
 
 import cv2
@@ -12,6 +13,29 @@ import numpy.typing as npt
 # Pre-allocated letterbox canvases keyed by model_input_size.
 # Reused across frames to eliminate per-frame np.full() allocation.
 _canvas_cache: Dict[int, npt.NDArray[np.uint8]] = {}
+
+# Minimum detections before postprocess_outputs' 'auto' box-format inference
+# will conclude xyxy. Below this the test (x2>x1 and y2>y1 for every row) is
+# too easily satisfied by chance on cxcywh data — see the comment at the
+# check itself — so cxcywh, the far more common encoding, is assumed instead.
+_XYXY_AUTO_MIN_DETECTIONS = 3
+
+_warned_box_format = False
+
+
+def _warn_once_box_format() -> None:
+    """Say something the first time the box encoding is *inferred* rather
+    than configured. Silent inference is how a wrong guess here stays
+    invisible: it corrupts every box without erroring."""
+    global _warned_box_format
+    if _warned_box_format:
+        return
+    _warned_box_format = True
+    logging.getLogger(__name__).info(
+        "[Inference] Model output inferred as xyxy box format. If detections "
+        "look wrong, set model_box_format to 'cxcywh' (or 'xyxy' to pin this "
+        "choice) rather than relying on inference."
+    )
 
 
 class PIDController:
@@ -26,6 +50,11 @@ class PIDController:
         Kd: Derivative coefficient, suppresses jitter and overshoot
     """
     
+    # Loop period the historical (dt-less) tuning was implicitly written
+    # against — Config.detect_interval's default. See update() for why this
+    # is a reference point rather than a hardcoded assumption.
+    REFERENCE_DT: float = 0.01
+
     def __init__(self, Kp: float, Ki: float, Kd: float) -> None:
         self.Kp = Kp  # Proportional
         self.Ki = Ki  # Integral
@@ -37,32 +66,64 @@ class PIDController:
         self.integral: float = 0.0
         self.previous_error: float = 0.0
 
-    def update(self, error: float) -> float:
+    def update(self, error: float, dt: float | None = None) -> float:
         """
-        Calculates control output based on current error
-        
+        Calculates control output based on current error.
+
         Args:
             error: Current error (e.g., target_x - current_x)
-            
+            dt:    Seconds since the previous update. None (or <= 0) keeps
+                   the historical fixed-step behaviour.
+
         Returns:
             Control amount (e.g., amount mouse should move)
+
+        Time normalization
+        ------------------
+        The I and D terms are scaled by ``dt / REFERENCE_DT`` rather than by
+        ``dt`` directly, which is deliberate.
+
+        The controller previously did ``integral += error`` and
+        ``derivative = error - previous_error`` with no notion of elapsed
+        time, so the effective Ki and Kd were a function of how fast the
+        loop happened to be running. Tuning done at 100 Hz behaved
+        differently at 240 Hz — and *changed underfoot at runtime*, because
+        ``idle_detect_interval`` deliberately runs the loop slower while not
+        aiming, so simply releasing the aim key altered the response.
+
+        Scaling by raw ``dt`` would be the textbook fix but would silently
+        invalidate every saved config: at a 10 ms step, Ki would become
+        ~100x weaker and Kd ~100x stronger. Normalizing against
+        REFERENCE_DT instead makes the ratio exactly 1.0 at the historical
+        default rate — so existing tunings behave *identically* to before —
+        while still cancelling the rate dependence everywhere else. No
+        config migration is needed, which is why this is safe to enable
+        unconditionally.
         """
+        if dt is not None and dt > 0.0:
+            # Clamp the ratio so one stalled frame (GC pause, model
+            # hot-swap, a breakpoint) can't inject a huge integral step or a
+            # near-zero derivative and kick the output.
+            scale = max(0.25, min(4.0, dt / self.REFERENCE_DT))
+        else:
+            scale = 1.0
+
         # Integral term (with anti-windup clamping)
-        self.integral += error
+        self.integral += error * scale
         self.integral = max(-1000.0, min(1000.0, self.integral))
-        
-        # Derivative term
-        derivative = error - self.previous_error
-        
+
+        # Derivative term — rate of change, so it divides by the step
+        derivative = (error - self.previous_error) / scale
+
         # Adjust P parameter response curve
         adjusted_kp = self._calculate_adjusted_kp(self.Kp)
-        
+
         # Calculate output
         output = (adjusted_kp * error) + (self.Ki * self.integral) + (self.Kd * derivative)
-        
+
         # Update previous error
         self.previous_error = error
-        
+
         return output
     
     def _calculate_adjusted_kp(self, kp: float) -> float:
@@ -181,6 +242,8 @@ def postprocess_outputs(
     letterbox_scale: float = 1.0,
     letterbox_pad_x: int = 0,
     letterbox_pad_y: int = 0,
+    box_format: str = 'auto',
+    has_objectness: str = 'auto',
 ) -> Tuple[List[List[float]], List[float], List[int]]:
     """Post-process ONNX model output into screen-space bounding boxes.
 
@@ -215,22 +278,75 @@ def postprocess_outputs(
     _is_layout_b = raw.ndim == 2 and raw.shape[0] < raw.shape[1]
     predictions = raw.T if _is_layout_b else raw
 
-    # Use max class score (cols 4+) so any model layout reports a real 0-1 confidence.
-    # Reading col 4 raw would yield a bbox coordinate (~thousands) for Layout A models.
-    _conf_scores = predictions[:, 4:].max(axis=1)
+    # --- Objectness column (YOLOv5-family exports) ---
+    # YOLOv5 lays out [cx, cy, w, h, objectness, cls0..clsN]; YOLOv8 drops
+    # objectness entirely and uses [cx, cy, w, h, cls0..clsN]. Treating a
+    # v5 export as v8 folds objectness into the class max — so confidence
+    # becomes max(obj, cls...) instead of obj * cls — and shifts every class
+    # id by one, because argmax then counts objectness as class 0. That id
+    # shift is invisible until something actually reads class names, which
+    # is exactly what the semantic filter does.
+    #
+    # There is no shape that distinguishes 4+1+N from 4+M, so 'auto' uses
+    # the strongest available signal (v5 exports are anchors-major with a
+    # class block; v8 are features-major) and can be overridden when it
+    # guesses wrong.
+    _objectness_mode = str(has_objectness or 'auto').lower()
+    if _objectness_mode == 'yes':
+        _has_obj = True
+    elif _objectness_mode == 'no':
+        _has_obj = False
+    else:
+        _has_obj = (not _is_layout_b) and predictions.shape[1] > 6
+
+    if _has_obj:
+        _obj = predictions[:, 4]
+        _cls = predictions[:, 5:]
+        _conf_scores = _obj * _cls.max(axis=1) if _cls.shape[1] else _obj
+        _class_col_start = 5
+    else:
+        # Max class score (cols 4+) so any layout reports a real 0-1
+        # confidence. Reading col 4 raw would yield a bbox coordinate
+        # (~thousands) for Layout A models.
+        _conf_scores = predictions[:, 4:].max(axis=1)
+        _class_col_start = 4
+
     conf_mask = _conf_scores >= min_confidence
     filtered_predictions = predictions[conf_mask]
 
     if len(filtered_predictions) == 0:
         return [], [], []
 
-    # Layout A models may export in xyxy (x1,y1,x2,y2) instead of cxcywh.
-    # xyxy is identified by x2 > x1 and y2 > y1 holding for every detection.
-    # Layout B models are always cxcywh after the transpose above.
-    if not _is_layout_b and (
-        np.all(filtered_predictions[:, 2] > filtered_predictions[:, 0]) and
-        np.all(filtered_predictions[:, 3] > filtered_predictions[:, 1])
-    ):
+    # --- Box encoding ---
+    # Layout B models are always cxcywh after the transpose above; Layout A
+    # models may export either cxcywh or xyxy.
+    #
+    # 'auto' infers xyxy from x2>x1 and y2>y1 holding for every detection —
+    # but that test is far weaker than it looks. On cxcywh data those
+    # columns are w and h, so it is really asking "is w > cx and h > cy for
+    # every row", which is entirely possible by coincidence for a target
+    # near the top-left with a large box. With one or two detections it is
+    # close to a coin flip, and guessing wrong silently corrupts every box.
+    # So 'auto' now also requires enough rows to make coincidence unlikely,
+    # and defaults to cxcywh (overwhelmingly the common case) below that.
+    # Anyone whose model really is xyxy can pin it instead of relying on
+    # detection count.
+    _box_format = str(box_format or 'auto').lower()
+    if _box_format == 'xyxy':
+        _treat_as_xyxy = not _is_layout_b
+    elif _box_format == 'cxcywh':
+        _treat_as_xyxy = False
+    else:
+        _treat_as_xyxy = (
+            not _is_layout_b
+            and len(filtered_predictions) >= _XYXY_AUTO_MIN_DETECTIONS
+            and np.all(filtered_predictions[:, 2] > filtered_predictions[:, 0])
+            and np.all(filtered_predictions[:, 3] > filtered_predictions[:, 1])
+        )
+        if _treat_as_xyxy:
+            _warn_once_box_format()
+
+    if _treat_as_xyxy:
         fp = filtered_predictions
         _cx = (fp[:, 0] + fp[:, 2]) * 0.5
         _cy = (fp[:, 1] + fp[:, 3]) * 0.5
@@ -264,11 +380,13 @@ def postprocess_outputs(
     boxes = np.stack([x1, y1, x2, y2], axis=1).tolist()
     confidences = _conf_scores[conf_mask].tolist()
 
-    # Class IDs: argmax over class columns (cols 4+).
-    # Using [:, 4:] not [:, 5:] so class 0 (col 4) is correctly included.
+    # Class IDs: argmax over the class columns only. _class_col_start is 4
+    # for YOLOv8-style layouts (class 0 lives in col 4) and 5 when an
+    # objectness column precedes them — counting objectness as a class is
+    # what shifted every id by one on v5-family models.
     num_cols = filtered_predictions.shape[1]
-    if num_cols > 5:
-        class_ids = filtered_predictions[:, 4:].argmax(axis=1).tolist()
+    if num_cols > _class_col_start + 1:
+        class_ids = filtered_predictions[:, _class_col_start:].argmax(axis=1).tolist()
         class_ids = [int(c) for c in class_ids]
     else:
         class_ids = [0] * len(boxes)

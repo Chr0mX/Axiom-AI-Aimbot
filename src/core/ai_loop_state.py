@@ -49,3 +49,9 @@ class LoopState:
     # over a long burst. Carrying the fraction preserves the invariant.
     jitter_carry_x: float = 0.0
     jitter_carry_y: float = 0.0
+
+    # Wall-clock timestamp of the last PID update, so the controller can be
+    # given a real dt instead of assuming a fixed step. 0.0 = no previous
+    # frame (fresh, or just reset on target loss), which the PID treats as
+    # "use the reference step" rather than guessing.
+    pid_last_update_t: float = 0.0

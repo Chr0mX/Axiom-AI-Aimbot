@@ -331,3 +331,123 @@ class TestNonMaxSuppression:
         boxes, confs, cids = non_max_suppression(boxes_in, confs_in)
         assert cids == [0, 0]
         assert len(cids) == len(boxes)
+
+
+# ============================================================
+# PID time normalization (Phase 4)
+# ============================================================
+
+class TestPIDTimeNormalization:
+    """The I/D terms used to depend on how fast the loop happened to run —
+    and changed underfoot at runtime, since idle_detect_interval slows the
+    loop while not aiming. Normalizing against REFERENCE_DT fixes the rate
+    dependence while leaving behaviour at the reference rate untouched, so
+    existing tunings keep their meaning."""
+
+    def test_reference_dt_matches_legacy_fixed_step(self):
+        from core.inference import PIDController
+        legacy = PIDController(0.5, 0.1, 0.2)
+        timed = PIDController(0.5, 0.1, 0.2)
+        for err in (10.0, 8.0, 5.0, 5.0, -3.0):
+            a = legacy.update(err)                                  # no dt = legacy path
+            b = timed.update(err, PIDController.REFERENCE_DT)       # dt == reference
+            assert a == pytest.approx(b), "reference dt must reproduce legacy output exactly"
+
+    def test_none_dt_is_legacy_behaviour(self):
+        from core.inference import PIDController
+        p = PIDController(0.4, 0.05, 0.1)
+        p.update(10.0, None)
+        assert p.integral == pytest.approx(10.0)  # scale 1.0, not scaled by seconds
+
+    def test_integral_accumulates_with_elapsed_time_not_call_count(self):
+        """Two half-length steps must integrate the same as one full step —
+        that equivalence is the entire point."""
+        from core.inference import PIDController
+        ref = PIDController.REFERENCE_DT
+        one_step = PIDController(0.0, 1.0, 0.0)
+        two_steps = PIDController(0.0, 1.0, 0.0)
+
+        one_step.update(10.0, ref)
+        two_steps.update(10.0, ref / 2)
+        two_steps.update(10.0, ref / 2)
+
+        assert one_step.integral == pytest.approx(two_steps.integral)
+
+    def test_derivative_is_a_rate_not_a_difference(self):
+        from core.inference import PIDController
+        ref = PIDController.REFERENCE_DT
+        slow = PIDController(0.0, 0.0, 1.0)
+        fast = PIDController(0.0, 0.0, 1.0)
+
+        slow.update(0.0, ref)
+        fast.update(0.0, ref)
+        # Same error change, but fast covers it in half the time -> twice the rate.
+        out_slow = slow.update(10.0, ref)
+        out_fast = fast.update(10.0, ref / 2)
+        assert out_fast == pytest.approx(out_slow * 2)
+
+    def test_extreme_dt_is_clamped(self):
+        """A stalled frame (GC pause, model hot-swap) must not inject a huge
+        integral step or a near-zero derivative."""
+        from core.inference import PIDController
+        ref = PIDController.REFERENCE_DT
+        p = PIDController(0.0, 1.0, 0.0)
+        p.update(10.0, ref * 1000)      # 10 s stall
+        assert p.integral == pytest.approx(10.0 * 4.0)  # clamped at 4x, not 1000x
+
+
+# ============================================================
+# Model output-format overrides (Phase 4)
+# ============================================================
+
+class TestModelOutputFormat:
+    def _layout_a_cxcywh(self, n=1):
+        # anchors x features, [cx, cy, w, h, cls0, cls1] — no objectness.
+        # cx small and w large so the naive xyxy test (x2>x1, y2>y1) is
+        # satisfied, which is exactly the coincidence that used to corrupt
+        # boxes.
+        return np.array([[10.0, 10.0, 100.0, 120.0, 0.9, 0.1]] * n, dtype=np.float32)
+
+    def test_auto_does_not_guess_xyxy_from_too_few_detections(self):
+        """One detection satisfying x2>x1 and y2>y1 is close to a coin flip —
+        cxcywh is far more common, so 'auto' must not flip on it."""
+        from core.inference import postprocess_outputs
+        raw = self._layout_a_cxcywh(1)
+        boxes, confs, cids = postprocess_outputs([raw[None, ...]], 640, 640, 640, 0.5)
+        # cxcywh reading: cx=10,w=100 -> x1 = 10 - 50 = -40
+        assert boxes[0][0] == pytest.approx(-40.0)
+
+    def test_explicit_cxcywh_overrides_auto(self):
+        from core.inference import postprocess_outputs
+        raw = self._layout_a_cxcywh(5)  # enough rows that auto WOULD infer xyxy
+        boxes, _, _ = postprocess_outputs(
+            [raw[None, ...]], 640, 640, 640, 0.5, box_format='cxcywh')
+        assert boxes[0][0] == pytest.approx(-40.0)
+
+    def test_explicit_xyxy_is_honoured(self):
+        from core.inference import postprocess_outputs
+        raw = self._layout_a_cxcywh(1)
+        boxes, _, _ = postprocess_outputs(
+            [raw[None, ...]], 640, 640, 640, 0.5, box_format='xyxy')
+        # xyxy reading: x1=10, x2=100 -> centre 55, width 90 -> x1 back to 10
+        assert boxes[0][0] == pytest.approx(10.0)
+
+    def test_objectness_yes_multiplies_and_shifts_class_ids(self):
+        """YOLOv5 layout: [cx,cy,w,h,obj,cls0,cls1]. Confidence is obj*cls,
+        and class ids must not count objectness as class 0."""
+        from core.inference import postprocess_outputs
+        raw = np.array([[100.0, 100.0, 20.0, 20.0, 0.8, 0.1, 0.9]], dtype=np.float32)
+        boxes, confs, cids = postprocess_outputs(
+            [raw[None, ...]], 640, 640, 640, 0.5,
+            box_format='cxcywh', has_objectness='yes')
+        assert confs[0] == pytest.approx(0.8 * 0.9)
+        assert cids[0] == 1   # cls1 wins; objectness is not a class
+
+    def test_objectness_no_uses_class_max(self):
+        from core.inference import postprocess_outputs
+        raw = np.array([[100.0, 100.0, 20.0, 20.0, 0.6, 0.9]], dtype=np.float32)
+        boxes, confs, cids = postprocess_outputs(
+            [raw[None, ...]], 640, 640, 640, 0.5,
+            box_format='cxcywh', has_objectness='no')
+        assert confs[0] == pytest.approx(0.9)
+        assert cids[0] == 1
