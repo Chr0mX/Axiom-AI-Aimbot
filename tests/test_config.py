@@ -45,20 +45,6 @@ class TestConfigInit:
         c = _make_config()
         assert c.screenshot_method == "mss"
 
-    def test_directshow_defaults(self):
-        c = _make_config()
-        assert c.directshow_device_index == -1
-        assert c.directshow_device_substr == ""
-        assert c.directshow_pixel_format == "mjpeg"
-        assert c.directshow_width == 0
-        assert c.directshow_height == 0
-        assert c.directshow_fps == 0
-        assert c.directshow_buffer_count == 4
-        # Runtime-only, not persisted (see _FIELD_MAP) — published by
-        # DirectShowCapture.grab() once a device is actually open.
-        assert c.directshow_actual_width == 0
-        assert c.directshow_actual_height == 0
-
     def test_crosshair_defaults(self):
         c = _make_config()
         assert c.crosshairX == 960
@@ -223,29 +209,6 @@ class TestConfigSerialization:
         assert c2.pid_kp_x == 0.99
         assert c2.mouse_click_method == "xbox"
         assert c2.smart_jitter_enabled is True
-
-    def test_directshow_fields_roundtrip_through_to_dict_from_dict(self):
-        c1 = _make_config()
-        c1.directshow_device_index = 2
-        c1.directshow_device_substr = 'Elgato'
-        c1.directshow_pixel_format = 'nv12'
-        c1.directshow_width = 1920
-        c1.directshow_height = 1080
-        c1.directshow_fps = 60
-        c1.directshow_buffer_count = 6
-        d = c1.to_dict()
-        assert d['capture']['directshow']['pixel_format'] == 'nv12'
-        assert d['capture']['directshow']['device_substr'] == 'Elgato'
-
-        c2 = _make_config()
-        c2.from_dict(d)
-        assert c2.directshow_device_index == 2
-        assert c2.directshow_device_substr == 'Elgato'
-        assert c2.directshow_pixel_format == 'nv12'
-        assert c2.directshow_width == 1920
-        assert c2.directshow_height == 1080
-        assert c2.directshow_fps == 60
-        assert c2.directshow_buffer_count == 6
 
 
 # ============================================================
@@ -570,27 +533,6 @@ class TestValidateScreenshotMethod:
         c.screenshot_method = 'unknown_backend'
         _validate_screenshot_method(c)
         assert c.screenshot_method == 'mss'
-
-    def test_directshow_is_preserved(self):
-        from core.config import _validate_screenshot_method
-        c = _make_config()
-        c.screenshot_method = 'directshow'
-        _validate_screenshot_method(c)
-        assert c.screenshot_method == 'directshow'
-
-    def test_invalid_directshow_pixel_format_falls_back_to_mjpeg(self):
-        from core.config import _validate_screenshot_method
-        c = _make_config()
-        c.directshow_pixel_format = 'yuy2'
-        _validate_screenshot_method(c)
-        assert c.directshow_pixel_format == 'mjpeg'
-
-    def test_directshow_device_substr_is_stripped(self):
-        from core.config import _validate_screenshot_method
-        c = _make_config()
-        c.directshow_device_substr = '  My Capture Card  '
-        _validate_screenshot_method(c)
-        assert c.directshow_device_substr == 'My Capture Card'
 
 
 # ============================================================
