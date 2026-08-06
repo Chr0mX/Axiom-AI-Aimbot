@@ -678,3 +678,116 @@ def test_wait_for_receiver_connection_succeeds_after_connect(monkeypatch):
     )
 
     assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# try_live_reconfigure — Detection Range changes without a device teardown
+# ---------------------------------------------------------------------------
+
+def _live_crop_capture(sc, config, *, confirmed=False, fixed_region=None):
+    """A UVCCapture pre-wired as if _init_native_dll had run with an accepted
+    native crop, without touching a real device."""
+    calls = []
+
+    class FakeNative:
+        def set_crop(self, x, y, w, h):
+            calls.append((x, y, w, h))
+
+    cap = object.__new__(sc.UVCCapture)
+    cap.config = config
+    cap.config_signature = sc._uvc_signature(config)
+    cap.preview_width = 1920
+    cap.preview_height = 1080
+    cap._native = FakeNative()
+    cap._native_crop_requested = (640, 220, 640, 640)
+    cap._native_crop_confirmed = confirmed
+    cap._fixed_region = fixed_region
+    cap._region_ref = [fixed_region]
+    return cap, calls
+
+
+def _uvc_config(**over):
+    base = dict(
+        uvc_device_index=0, uvc_width=1920, uvc_height=1080, uvc_fps=60,
+        uvc_show_window=False, uvc_capture_method='dshow', uvc_dshow_backend='v2',
+        uvc_video_format='nv12', uvc_ffmpeg_enabled=False, uvc_ffmpeg_path='',
+        uvc_crop_mode='fixed', detect_range_size=640,
+    )
+    base.update(over)
+    return SimpleNamespace(**base)
+
+
+def test_live_reconfigure_moves_crop_without_reinit():
+    """A Detection Range change in fixed-crop mode on the native DLL must be
+    applied via capture_set_crop, not by closing and reopening the device —
+    every tick of a slider drag used to trigger a full graph rebuild."""
+    from core import screen_capture as sc
+
+    cap, calls = _live_crop_capture(sc, _uvc_config(), confirmed=True, fixed_region=None)
+    newcfg = _uvc_config(detect_range_size=800)
+
+    assert cap.try_live_reconfigure(newcfg) is True
+    # Centered 800x800 in 1920x1080: left=(1920-800)//2=560, top=(1080-800)//2=140
+    assert calls == [(560, 140, 800, 800)]
+    assert cap.config_signature == sc._uvc_signature(newcfg)
+    # Verification is re-armed so the next frame confirms the DLL honored it.
+    assert cap._native_crop_confirmed is False
+    assert cap._fixed_region is None
+
+
+def test_live_reconfigure_declines_resolution_change():
+    """Anything beyond the crop rect needs real renegotiation."""
+    from core import screen_capture as sc
+
+    cap, calls = _live_crop_capture(sc, _uvc_config(), confirmed=True)
+    newcfg = _uvc_config(uvc_width=1280, uvc_height=720)
+
+    assert cap.try_live_reconfigure(newcfg) is False
+    assert calls == []
+
+
+def test_live_reconfigure_declines_when_dll_ignored_the_crop():
+    """If the first-frame check already found the DLL ignoring the crop (so a
+    software crop is in force), set_crop would be ignored too."""
+    from core import screen_capture as sc
+
+    cap, calls = _live_crop_capture(
+        sc, _uvc_config(), confirmed=True,
+        fixed_region={'left': 640, 'top': 220, 'width': 640, 'height': 640},
+    )
+    newcfg = _uvc_config(detect_range_size=800)
+
+    assert cap.try_live_reconfigure(newcfg) is False
+    assert calls == []
+
+
+def test_live_reconfigure_declines_without_native_crop():
+    """cv2/ffmpeg/MJPEG paths crop in software downstream — no device-side
+    rectangle exists to move."""
+    from core import screen_capture as sc
+
+    cap, calls = _live_crop_capture(sc, _uvc_config(), confirmed=True)
+    cap._native_crop_requested = None
+    newcfg = _uvc_config(detect_range_size=800)
+
+    assert cap.try_live_reconfigure(newcfg) is False
+    assert calls == []
+
+
+def test_live_reconfigure_declines_on_set_crop_failure():
+    """A rejected set_crop must fall back to a full reinit, not leave the
+    backend claiming a rect it never applied."""
+    from core import screen_capture as sc
+
+    cap, _ = _live_crop_capture(sc, _uvc_config(), confirmed=True)
+
+    class Failing:
+        def set_crop(self, *a):
+            raise RuntimeError('rectangle must be even-aligned')
+
+    cap._native = Failing()
+    before = cap.config_signature
+    newcfg = _uvc_config(detect_range_size=800)
+
+    assert cap.try_live_reconfigure(newcfg) is False
+    assert cap.config_signature == before  # unchanged, so the caller still reinits
