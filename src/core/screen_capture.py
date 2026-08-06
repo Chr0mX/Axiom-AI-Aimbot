@@ -1594,7 +1594,14 @@ class UVCCapture:
         # grab() can return the newest frame without blocking the inference loop.
         self._latest_frame_lock = threading.Lock()
         self._latest_frame_ref: list = [None]   # list[np.ndarray | None]
-        self._region_ref: list = [None]         # list[dict | None]
+        # Seeded with the frozen fixed-crop rect (None in dynamic mode) rather
+        # than always None — the preview thread reads this independently of
+        # grab(), and grab() (the only other writer) doesn't run until the
+        # main AI loop's target_region is populated. Without this seed,
+        # "Crop preview to detection" stayed a no-op (showing the full frame)
+        # for however long that takes, or indefinitely if inference never runs
+        # while the preview panel is open.
+        self._region_ref: list = [self._fixed_region]  # list[dict | None]
         self._reader_stop = threading.Event()
         # Seeded to "now" (not None) so a device that opens but never delivers
         # a single frame within the stale timeout is caught by the same check
@@ -1686,7 +1693,11 @@ class UVCCapture:
 
         self._latest_frame_lock = threading.Lock()
         self._latest_frame_ref: list = [None]
-        self._region_ref: list = [None]
+        # Seeded with the frozen fixed-crop rect, not always None — see the
+        # matching cv2-path comment above self._region_ref for why (the
+        # preview thread reads this independently of grab(), which only
+        # writes it once the main AI loop's target_region is populated).
+        self._region_ref: list = [self._fixed_region]
         self._reader_stop = threading.Event()
         self._last_frame_perf_time = time.perf_counter()
         self._reader_thread = threading.Thread(
