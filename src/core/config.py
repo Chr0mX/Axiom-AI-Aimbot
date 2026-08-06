@@ -757,6 +757,9 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
 
         # 向後兼容：確保偵測範圍在合理範圍內
         _validate_detect_range_size(config_instance)
+
+        # 向後兼容：確保 UDP 接收緩衝區大於單一資料包最大值
+        _validate_udp_recv_buffer_size(config_instance)
         
         logger.info("Config loaded")
         return True
@@ -804,6 +807,39 @@ def _validate_screenshot_interval(config: Config) -> None:
     elif screenshot_interval_ms > 100:
         config.screenshot_interval = 0.1  # 100ms
         logger.warning("[Config] screenshot_interval too large, clamped to 100ms")
+
+
+def _validate_udp_recv_buffer_size(config: Config) -> None:
+    """Keep udp_recv_buffer_size at or above the largest datagram the OBS
+    sender can emit.
+
+    This is the size passed to ``socket.recvfrom()``. UDP is message-oriented:
+    if the buffer is smaller than the arriving datagram, the OS delivers only
+    that many bytes and **silently discards the rest** — no error, no short-read
+    signal. The truncated payload still satisfies the receiver's completeness
+    check (which counts chunks, not bytes), so the corruption survives all the
+    way to ``cv2.imdecode`` and surfaces as unexplained decode failures rather
+    than anything pointing back at this setting.
+
+    The sender's ceiling is ``UDP_HEADER_SIZE + UDP_MAX_PAYLOAD`` = 14 + 60000
+    (see udp_stream_filter.cpp); round up to 65536, which is also the maximum a
+    single UDP datagram can be, so this can never be the limiting factor.
+    """
+    minimum = 65536
+    try:
+        raw = int(getattr(config, 'udp_recv_buffer_size', minimum))
+    except (TypeError, ValueError):
+        raw = minimum
+    if raw < minimum:
+        config.udp_recv_buffer_size = minimum
+        logger.warning(
+            "[Config] udp_recv_buffer_size %d is below the %d-byte maximum datagram "
+            "the sender can emit — raised to %d. Values below this silently "
+            "truncate frames instead of erroring.",
+            raw, minimum, minimum,
+        )
+    else:
+        config.udp_recv_buffer_size = raw
 
 
 def _validate_mouse_method(config: Config) -> None:

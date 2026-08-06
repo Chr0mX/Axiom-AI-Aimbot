@@ -292,6 +292,15 @@ def ai_logic_loop(
         'latest_frame': None,
         'latest_region': None,
         'target_region': None,
+        # Monotonic publish counter, bumped under frame_lock every time
+        # latest_frame is replaced. The preprocess worker uses this — NOT
+        # id(latest_frame) — to tell "new frame" from "same frame again".
+        # id() is a memory address that CPython reuses the moment an object
+        # is freed, and every captured frame is an identically-shaped
+        # ndarray from the same allocator, so a genuinely new frame can land
+        # on the address the previous one just vacated and be skipped as a
+        # duplicate (classic ABA). A counter can't collide.
+        'frame_seq': 0,
     }
     _last_valid_frame: list = [None]  # mutable container for closure
     # Mutable containers so the capture worker can hot-swap the backend
@@ -382,6 +391,7 @@ def ai_logic_loop(
                 with frame_lock:
                     capture_state['latest_frame'] = captured_frame
                     capture_state['latest_region'] = target_region
+                    capture_state['frame_seq'] = int(capture_state['frame_seq']) + 1
 
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
         finally:
@@ -392,18 +402,18 @@ def ai_logic_loop(
 
     def _preprocess_worker() -> None:
         _set_thread_priority(getattr(config, 'thread_priority', 'high'))
-        last_frame_id: int = -1
+        last_frame_seq: int = -1
         _cmc_prev: list = [None]  # previous 128×128 float32 gray frame for phase correlation
         while not _preprocess_stop.is_set() and config.Running:
             try:
                 with frame_lock:
                     frame = capture_state.get('latest_frame')
                     region = capture_state.get('latest_region')
-                    frame_id = id(frame)
-                if frame is None or region is None or frame_id == last_frame_id:
+                    frame_seq = int(capture_state['frame_seq'])
+                if frame is None or region is None or frame_seq == last_frame_seq:
                     time.sleep(0.001)
                     continue
-                last_frame_id = frame_id
+                last_frame_seq = frame_seq
 
                 if getattr(config, 'cam_motion_comp_enabled', False):
                     cmc_size = int(getattr(config, 'cam_motion_comp_size', 128))
@@ -622,7 +632,13 @@ def ai_logic_loop(
                         letterbox_pad_x=lb_pad_x,
                         letterbox_pad_y=lb_pad_y,
                     )
-                    boxes, confidences = non_max_suppression(boxes, confidences)
+                    # class_ids must go through NMS with the boxes: NMS drops
+                    # detections and reorders the survivors by confidence, so
+                    # a separately-held class_ids list stops matching boxes
+                    # positionally the moment more than one detection exists.
+                    boxes, confidences, class_ids = non_max_suppression(
+                        boxes, confidences, class_ids=class_ids,
+                    )
                     t4 = time.perf_counter()
                     config.last_detection_time = time.time()
                     config.detection_frame_count = int(getattr(config, 'detection_frame_count', 0)) + 1

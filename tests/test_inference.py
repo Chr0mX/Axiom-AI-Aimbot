@@ -237,30 +237,33 @@ class TestNonMaxSuppression:
 
     def test_empty_input(self):
         from core.inference import non_max_suppression
-        boxes, confs = non_max_suppression([], [])
+        boxes, confs, cids = non_max_suppression([], [])
         assert boxes == []
         assert confs == []
+        assert cids == []
 
     def test_single_box(self):
         from core.inference import non_max_suppression
         boxes_in = [[10, 10, 50, 50]]
         confs_in = [0.9]
-        boxes, confs = non_max_suppression(boxes_in, confs_in)
+        boxes, confs, cids = non_max_suppression(boxes_in, confs_in)
         assert len(boxes) == 1
+        assert cids == [0]
 
     def test_non_overlapping_boxes_kept(self):
         from core.inference import non_max_suppression
         boxes_in = [[10, 10, 50, 50], [200, 200, 250, 250]]
         confs_in = [0.9, 0.8]
-        boxes, confs = non_max_suppression(boxes_in, confs_in)
+        boxes, confs, cids = non_max_suppression(boxes_in, confs_in)
         assert len(boxes) == 2
+        assert len(cids) == 2
 
     def test_overlapping_boxes_suppressed(self):
         from core.inference import non_max_suppression
         # 兩個幾乎完全重疊的框
         boxes_in = [[10, 10, 50, 50], [11, 11, 51, 51]]
         confs_in = [0.9, 0.8]
-        boxes, confs = non_max_suppression(boxes_in, confs_in, iou_threshold=0.4)
+        boxes, confs, cids = non_max_suppression(boxes_in, confs_in, iou_threshold=0.4)
         assert len(boxes) == 1
         assert confs[0] == 0.9  # 高置信度的保留
 
@@ -269,13 +272,62 @@ class TestNonMaxSuppression:
         boxes_in = [[10, 10, 50, 50], [15, 15, 55, 55]]
         confs_in = [0.9, 0.85]
         # 使用高 IoU 閾值
-        boxes, confs = non_max_suppression(boxes_in, confs_in, iou_threshold=0.99)
+        boxes, confs, cids = non_max_suppression(boxes_in, confs_in, iou_threshold=0.99)
         assert len(boxes) == 2  # 高閾值，兩個都保留
 
     def test_keeps_highest_confidence(self):
         from core.inference import non_max_suppression
         boxes_in = [[10, 10, 50, 50], [10, 10, 50, 50], [10, 10, 50, 50]]
         confs_in = [0.5, 0.9, 0.3]
-        boxes, confs = non_max_suppression(boxes_in, confs_in, iou_threshold=0.4)
+        boxes, confs, cids = non_max_suppression(boxes_in, confs_in, iou_threshold=0.4)
         assert len(boxes) == 1
         assert confs[0] == 0.9
+
+    def test_class_ids_follow_reordered_survivors(self):
+        """NMS sorts survivors by descending confidence, so class_ids must be
+        reindexed by the same order — not left in input order. Regression for
+        the misalignment that made the semantic class-name filter read the
+        class of an unrelated detection."""
+        from core.inference import non_max_suppression
+        # Three well-separated boxes, deliberately NOT in confidence order.
+        boxes_in = [[0, 0, 20, 20], [200, 200, 220, 220], [400, 400, 420, 420]]
+        confs_in = [0.3, 0.9, 0.6]
+        cids_in = [7, 1, 4]  # class id travels with its own box
+
+        boxes, confs, cids = non_max_suppression(
+            boxes_in, confs_in, iou_threshold=0.4, class_ids=cids_in,
+        )
+
+        assert len(boxes) == 3  # nothing overlaps, all survive
+        # Output is confidence-descending: 0.9 (box1/cls1), 0.6 (box2/cls4), 0.3 (box0/cls7)
+        assert confs == [0.9, 0.6, 0.3]
+        assert cids == [1, 4, 7]
+        # And every triple still describes one real detection.
+        for box, conf, cid in zip(boxes, confs, cids):
+            i = boxes_in.index(box)
+            assert confs_in[i] == conf
+            assert cids_in[i] == cid
+
+    def test_class_ids_dropped_with_suppressed_boxes(self):
+        """A suppressed box must take its class id with it."""
+        from core.inference import non_max_suppression
+        boxes_in = [[10, 10, 50, 50], [11, 11, 51, 51], [400, 400, 420, 420]]
+        confs_in = [0.5, 0.9, 0.7]
+        cids_in = [2, 3, 5]
+
+        boxes, confs, cids = non_max_suppression(
+            boxes_in, confs_in, iou_threshold=0.4, class_ids=cids_in,
+        )
+
+        # Boxes 0/1 overlap → only the 0.9 one (class 3) survives, plus box 2 (class 5).
+        assert len(boxes) == 2
+        assert confs == [0.9, 0.7]
+        assert cids == [3, 5]
+
+    def test_class_ids_default_to_zero_when_absent(self):
+        from core.inference import non_max_suppression
+        boxes_in = [[0, 0, 20, 20], [200, 200, 220, 220]]
+        confs_in = [0.9, 0.8]
+        boxes, confs, cids = non_max_suppression(boxes_in, confs_in)
+        assert cids == [0, 0]
+        assert len(cids) == len(boxes)
