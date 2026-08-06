@@ -383,7 +383,6 @@ def ai_logic_loop(
                     capture_state['latest_frame'] = captured_frame
                     capture_state['latest_region'] = target_region
 
-                config.last_screenshot_time = time.time()
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
         finally:
             if high_res_timer_enabled:
@@ -675,10 +674,16 @@ def ai_logic_loop(
                         confidences=confidences,
                     )
                 else:
-                    # No detections this frame. If sticky lock is enabled and a
-                    # target is currently locked, hold the lock (and all PID /
-                    # smoothing state) for up to lock_decay_frames frames before
-                    # giving up, instead of dropping it instantly.
+                    # Not aiming this frame — either no detections came back, or
+                    # detection did find boxes but the aim key isn't held (e.g.
+                    # keep_detecting is on and the user simply isn't aiming right
+                    # now). Both cases hit this branch identically: aimed_this_frame
+                    # is False either way. If sticky lock is enabled and a target
+                    # is currently locked, hold the lock (and all PID / smoothing
+                    # state) for up to lock_decay_frames frames before giving up,
+                    # instead of dropping it instantly — this is what makes
+                    # releasing/re-pressing the aim key on the same target not
+                    # restart tracking from scratch every time.
                     sticky = getattr(config, 'sticky_lock_enabled', False)
                     holding_lock = False
                     if sticky and state.locked_box is not None:
@@ -690,16 +695,15 @@ def ai_logic_loop(
                     if not holding_lock:
                         pid_x.reset()
                         pid_y.reset()
-                        state.smooth_x = 0.0
-                        state.smooth_y = 0.0
+                        state.aim_y_last_target_y = 0.0
+                        state.aim_y_last_target_t = 0.0
                         state.locked_box = None
                         state.no_detection_frames = 0
-                        state.smoothed_box = None
                         state.aim_carry_x = 0.0
                         state.aim_carry_y = 0.0
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
-                        # Target lost — clear stale prediction/smoothing state so a
+                        # Target lost — clear stale prediction/Kalman state so a
                         # newly-acquired target isn't corrupted by the old one's history.
                         if ai_aiming._predictor is not None:
                             ai_aiming._predictor.reset()

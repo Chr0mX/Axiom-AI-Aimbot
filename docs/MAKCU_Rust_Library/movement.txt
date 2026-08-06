@@ -1,0 +1,52 @@
+### Movement
+
+Relative cursor movement, silent move, and scroll wheel
+
+Three methods control cursor position and scroll input. All accept signed integers and validate ranges before sending to the device. For smooth multi-step movement, see the [`extras`](https://makcu.rs/library/features/extras#move-smooth) feature. All movement methods support [fire-and-forget](https://makcu.rs/library/fire-and-forget) mode and [batch sequences](https://makcu.rs/library/features/batch#batch-methods).
+
+### move\_xy
+
+```rust
+fn move_xy(&self, x: i32, y: i32) -> Result<()>
+
+
+Moves the cursor by (x, y) relative to its current position. Positive x moves right, positive y moves down. Maps to the firmware’s km.move(x,y) command.
+
+Parameter	Type	Range	Description
+x	i32	-32767 to 32767	Horizontal offset. Positive moves right.
+y	i32	-32767 to 32767	Vertical offset. Positive moves down.
+
+Example
+
+device.move_xy(100, -50)?;  // right 100, up 50
+
+
+Values outside the valid range return MakcuError::OutOfRange without sending any data to the device.
+
+silent_move
+fn silent_move(&self, x: i32, y: i32) -> Result<()>
+
+
+Performs a left-button-down, move, left-button-up sequence across two HID frames. The host sees a brief drag rather than a plain move. This maps to the firmware’s km.silent(x,y) command.
+
+Parameter	Type	Range	Description
+x	i32	-32767 to 32767	Horizontal offset.
+y	i32	-32767 to 32767	Vertical offset.
+
+Example
+
+device.silent_move(200, 0)?;  // drag right 200
+
+wheel
+fn wheel(&self, delta: i32) -> Result<()>
+
+
+Sends a scroll wheel event. Positive values scroll up, negative values scroll down. Maps to the firmware’s km.wheel(n) command.
+
+Parameter	Type	Range	Description
+delta	i32	-127 to 127	Scroll amount. Positive scrolls up.
+
+Example
+
+device.wheel(3)?;   // scroll up 3
+device.wheel(-5)?;  // scroll down 5

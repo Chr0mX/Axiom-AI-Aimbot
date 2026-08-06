@@ -9,7 +9,6 @@ import win32con
 from .ddxoft_mouse import ddxoft_mouse
 
 
-_hardware_not_impl_warned = False
 logger = logging.getLogger(__name__)
 
 
@@ -19,21 +18,6 @@ def send_mouse_click_sendinput():
     """SendInput left click"""
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-
-
-def send_mouse_click_hardware():
-    """Hardware-level left click
-    
-    TODO: Implement real hardware-level mouse click
-    Currently using SendInput method as a fallback, 
-    integrate ddxoft or other driver-level solutions in the future.
-    """
-    global _hardware_not_impl_warned
-    if not _hardware_not_impl_warned:
-        logger.warning("hardware mode not implemented, falling back to sendinput")
-        _hardware_not_impl_warned = True
-    # Temporarily using the same implementation as sendinput
-    send_mouse_click_sendinput()
 
 
 def send_mouse_click_mouse_event():
@@ -65,7 +49,6 @@ def send_mouse_click(method="ddxoft"):
     Unified mouse click function, supports multiple methods
     method options:
     - "sendinput": SendInput (original method, easily detected)
-    - "hardware": Hardware-level (more stealthy)
     - "mouse_event": mouse_event (very stealthy)
     - "ddxoft": ddxoft (most stealthy, requires ddxoft.dll)
     - "xbox": Xbox 360 Virtual Gamepad (RT trigger)
@@ -73,8 +56,6 @@ def send_mouse_click(method="ddxoft"):
     try:
         if method == "sendinput":
             send_mouse_click_sendinput()
-        elif method == "hardware":
-            send_mouse_click_hardware()
         elif method == "mouse_event":
             send_mouse_click_mouse_event()
         elif method == "ddxoft":
@@ -104,7 +85,7 @@ def test_mouse_click_methods():
     """Test all mouse click methods"""
     print("[測試] 開始測試所有滑鼠點擊方式...")
     
-    methods = ["mouse_event", "sendinput", "hardware", "ddxoft"]
+    methods = ["mouse_event", "sendinput", "ddxoft"]
     
     for method in methods:
         print(f"[測試] 測試 {method} 點擊方式...")

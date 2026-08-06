@@ -184,36 +184,6 @@ class InferencePage(BasePage):
             parent=self.inferPerfGroup
         )
 
-        # === Box Smoothing ===
-        self.boxSmoothGroup = SettingCardGroup(t("box_smoothing", "Box Smoothing"), self.scrollWidget)
-
-        self.boxEmaEnableCard = SwitchSettingCard(
-            FluentIcon.FILTER,
-            t("box_smoothing", "Box Smoothing"),
-            t("box_smoothing_desc", "Apply EMA smoothing to raw detection boxes to suppress size jitter and reduce bounding box wobble"),
-            parent=self.boxSmoothGroup
-        )
-
-        self.boxEmaAlphaXCard = SliderDoubleSpinCard(
-            FluentIcon.MOVE,
-            t("box_smoothing_x", "X Smoothing"),
-            0.05, 1.0,
-            decimals=2,
-            step=0.05,
-            description=t("box_smoothing_alpha_desc", "1.0 = no smoothing  ·  0.5 = balanced"),
-            parent=self.boxSmoothGroup
-        )
-
-        self.boxEmaAlphaYCard = SliderDoubleSpinCard(
-            FluentIcon.ALIGNMENT,
-            t("box_smoothing_y", "Y Smoothing"),
-            0.05, 1.0,
-            decimals=2,
-            step=0.05,
-            description=t("box_smoothing_alpha_y_desc", "1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)"),
-            parent=self.boxSmoothGroup
-        )
-
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -241,11 +211,6 @@ class InferencePage(BasePage):
         self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
         self.addContent(self.inferPerfGroup)
 
-        self.boxSmoothGroup.addSettingCard(self.boxEmaEnableCard)
-        self.boxSmoothGroup.addSettingCard(self.boxEmaAlphaXCard)
-        self.boxSmoothGroup.addSettingCard(self.boxEmaAlphaYCard)
-        self.addContent(self.boxSmoothGroup)
-
         self.scrollLayout.addStretch(1)
 
     # ──────────────────────────────────────────────
@@ -269,10 +234,6 @@ class InferencePage(BasePage):
         self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
         self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
         self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
-
-        self.boxEmaEnableCard.checkedChanged.connect(self._onBoxEmaEnableChanged)
-        self.boxEmaAlphaXCard.valueChanged.connect(self._onBoxEmaAlphaXChanged)
-        self.boxEmaAlphaYCard.valueChanged.connect(self._onBoxEmaAlphaYChanged)
 
         self.secondInferSegment.currentItemChanged.connect(self._onSecondInferChanged)
         self.hudConfidenceCard.valueChanged.connect(self._onHudConfidenceChanged)
@@ -307,13 +268,9 @@ class InferencePage(BasePage):
             self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
             self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
 
-            self.boxEmaEnableCard.setChecked(bool(getattr(self._config, 'box_ema_enabled', False)))
-            self.boxEmaAlphaXCard.setValue(float(getattr(self._config, 'box_ema_alpha_x', 0.8)))
-            self.boxEmaAlphaYCard.setValue(float(getattr(self._config, 'box_ema_alpha_y', 0.5)))
-
             mode = getattr(self._config, 'second_inference_mode', 'off')
             self.secondInferSegment.setCurrentItem(mode if mode in ("off", "v1_ocr", "v2_onnx") else "off")
-            self.hudConfidenceCard.setValue(float(getattr(self._config, 'hud_confidence', 0.25)))
+            self.hudConfidenceCard.setValue(float(getattr(self._config, 'hud_confidence', 0.10)))
             self._updateHudConfidenceVisibility(mode)
 
             # Apply initial screenshot-method effect on fov_follow visibility
@@ -330,7 +287,11 @@ class InferencePage(BasePage):
 
     def _applyScreenshotMethodEffect(self, method: str):
         """Called by capture page (and on load) to sync fov_follow visibility."""
-        is_external = method in ('uvc', 'ndi', 'directshow')
+        # udp is the same class of external-source capture as uvc/ndi — the
+        # desktop cursor position is meaningless against any of these feeds,
+        # so fov_follow_mouse must be force-disabled for all three, not just
+        # uvc/ndi.
+        is_external = method in ('uvc', 'ndi', 'udp')
         self.fovFollowCard.setVisible(not is_external)
         if is_external and self._config:
             self._config.fov_follow_mouse = False
@@ -420,18 +381,6 @@ class InferencePage(BasePage):
         if self._config:
             self._config.frame_skip_threshold = value / 10.0
 
-    def _onBoxEmaEnableChanged(self, checked):
-        if self._config:
-            self._config.box_ema_enabled = bool(checked)
-
-    def _onBoxEmaAlphaXChanged(self, value):
-        if self._config:
-            self._config.box_ema_alpha_x = float(value)
-
-    def _onBoxEmaAlphaYChanged(self, value):
-        if self._config:
-            self._config.box_ema_alpha_y = float(value)
-
     def _onSecondInferChanged(self, key: str):
         if self._config:
             self._config.second_inference_mode = key
@@ -486,11 +435,3 @@ class InferencePage(BasePage):
         self.frameSkipCard.contentLabel.setText(t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."))
         self.frameSkipThresholdCard.titleLabel.setText(t("frame_skip_threshold", "Skip Threshold"))
         self.frameSkipThresholdCard.contentLabel.setText(t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"))
-
-        self.boxSmoothGroup.titleLabel.setText(t("box_smoothing", "Box Smoothing"))
-        self.boxEmaEnableCard.titleLabel.setText(t("box_smoothing", "Box Smoothing"))
-        self.boxEmaEnableCard.contentLabel.setText(t("box_smoothing_desc", "Apply EMA smoothing to raw detection boxes to suppress size jitter and reduce bounding box wobble"))
-        self.boxEmaAlphaXCard.titleLabel.setText(t("box_smoothing_x", "X Smoothing"))
-        self.boxEmaAlphaXCard.contentLabel.setText(t("box_smoothing_alpha_desc", "1.0 = no smoothing  ·  0.5 = balanced"))
-        self.boxEmaAlphaYCard.titleLabel.setText(t("box_smoothing_y", "Y Smoothing"))
-        self.boxEmaAlphaYCard.contentLabel.setText(t("box_smoothing_alpha_y_desc", "1.0 = no smoothing  ·  0.5 = balanced (main wobble fix)"))

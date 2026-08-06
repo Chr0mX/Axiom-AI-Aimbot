@@ -1,7 +1,7 @@
 # keys_page.py
 """Hardware Output page — keybinds, MAKCU connection + keys"""
 
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtWidgets import QWidget, QHBoxLayout
 from PyQt6.QtGui import QKeySequence
 from qfluentwidgets import (
@@ -258,6 +258,34 @@ _MAKCU_PID = 0x55D3
 _MAKCU_DESC_KEYWORDS = ("USB-Enhanced-SERIAL CH343", "USB Single Serial")
 
 
+class _MakcuConnectWorker(QThread):
+    """Runs connect_makcu() off the GUI thread.
+
+    connect_makcu() internally never holds its own lock across a sleep, so
+    it's already safe to call from a background thread — the problem was
+    purely that both call sites (the manual "Connect MAKCU" button and the
+    startup auto-connect in _loadMakcuConnFromConfig, which main.py runs
+    before the window is even shown) invoked it synchronously ON the GUI/
+    main thread, freezing the whole UI for however long the connect
+    sequence's internal sleeps take.
+    """
+
+    finishedResult = pyqtSignal(bool)  # ok
+
+    def __init__(self, port: str, baud: int, parent=None):
+        super().__init__(parent)
+        self._port = port
+        self._baud = baud
+
+    def run(self) -> None:
+        try:
+            from win_utils.makcu_mouse import connect_makcu
+            ok = connect_makcu(self._port, self._baud)
+        except Exception:
+            ok = False
+        self.finishedResult.emit(ok)
+
+
 class KeysPage(BasePage):
     """Hardware Output page — keybinds, MAKCU connection + keys"""
 
@@ -265,6 +293,7 @@ class KeysPage(BasePage):
         super().__init__("tab_hardware_output", parent)
         self._config = None
         self._isMakcuConnected = False
+        self._makcuConnectWorker: _MakcuConnectWorker | None = None
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -748,11 +777,9 @@ class KeysPage(BasePage):
         # Auto-connect if a MAKCU device is detected and not yet connected
         if effective_port:
             try:
-                from win_utils.makcu_mouse import is_makcu_connected, connect_makcu
+                from win_utils.makcu_mouse import is_makcu_connected
                 if not is_makcu_connected():
-                    ok = connect_makcu(effective_port, 4_000_000)
-                    self._isMakcuConnected = ok
-                    self._updateMakcuConnectionStatus()
+                    self._startMakcuConnect(effective_port, 4_000_000)
             except Exception:
                 pass
 
@@ -814,13 +841,14 @@ class KeysPage(BasePage):
     def _onMakcuConnectToggle(self):
         """Connect or disconnect MAKCU."""
         try:
-            from win_utils.makcu_mouse import connect_makcu, disconnect_makcu, is_makcu_connected
+            from win_utils.makcu_mouse import disconnect_makcu, is_makcu_connected
         except ImportError:
             return
 
         if self._isMakcuConnected or is_makcu_connected():
             disconnect_makcu()
             self._isMakcuConnected = False
+            self._updateMakcuConnectionStatus()
         else:
             port = self.makcuComPortCombo.currentText()
             if not port or port == t("no_com_port", "No COM Port"):
@@ -829,9 +857,25 @@ class KeysPage(BasePage):
                 baud = int(self.makcuBaudCombo.currentText())
             except ValueError:
                 baud = 4_000_000
-            ok = connect_makcu(port, baud)
-            self._isMakcuConnected = ok
+            self._startMakcuConnect(port, baud)
 
+    def _startMakcuConnect(self, port: str, baud: int) -> None:
+        """Run connect_makcu() on a background thread instead of blocking
+        the GUI/main thread — connect_makcu() is already safe to call off
+        the GUI thread (it never holds its own lock across a sleep), the
+        problem was purely that both call sites here used to invoke it
+        synchronously."""
+        if self._makcuConnectWorker is not None and self._makcuConnectWorker.isRunning():
+            return  # a connect attempt is already in flight
+        self.makcuConnectBtn.setEnabled(False)
+        self.makcuConnectionLabel.setText(t("connecting", "Connecting..."))
+        self._makcuConnectWorker = _MakcuConnectWorker(port, baud, parent=self)
+        self._makcuConnectWorker.finishedResult.connect(self._onMakcuConnectFinished)
+        self._makcuConnectWorker.start()
+
+    def _onMakcuConnectFinished(self, ok: bool) -> None:
+        self._isMakcuConnected = ok
+        self.makcuConnectBtn.setEnabled(True)
         self._updateMakcuConnectionStatus()
 
     def _updateMakcuConnectionStatus(self):

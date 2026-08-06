@@ -1,0 +1,137 @@
+### Async API
+
+Full async parity with Tokio
+
+The `async` feature provides [`AsyncDevice`](/library/types#core-types), an async equivalent of [`Device`](/library/types#core-types) with identical functionality. All command methods are `async fn` and require a Tokio runtime.
+
+```bash
+cargo add makcu --features async
+
+Connecting
+
+Async connection methods
+
+Method	Description
+AsyncDevice::connect().await	Auto-detect and connect.
+AsyncDevice::connect_port(port).await	Connect to a specific port.
+AsyncDevice::with_config(config).await	Connect with custom configuration.
+Example
+use makcu::AsyncDevice;
+
+#[tokio::main]
+async fn main() -> makcu::Result<()> {
+    let device = AsyncDevice::connect().await?;
+    device.move_xy(100, 0).await?;
+    Ok(())
+}
+
+Async Methods
+
+All device methods have async equivalents
+
+Every method on Device has an async counterpart on AsyncDevice. The signatures are identical except for the async qualifier.
+
+Movement
+
+device.move_xy(100, 0).await?;
+device.silent_move(200, 0).await?;
+device.wheel(3).await?;
+
+
+Buttons
+
+device.button_down(Button::Left).await?;
+device.button_up(Button::Left).await?;
+let pressed = device.button_state(Button::Left).await?;
+
+
+Locks
+
+device.set_lock(LockTarget::X, true).await?;
+let locked = device.lock_state(LockTarget::X).await?;
+let all = device.lock_states_all().await()?;
+
+
+Device Info
+
+let version = device.version().await?;
+let info = device.device_info().await?;
+let serial = device.serial().await?;
+
+
+Button Stream
+
+device.enable_button_stream().await?;
+let rx = device.button_events();  // sync -- returns channel
+
+
+Button Capture
+
+device.enable_catch(Button::Left).await?;
+let rx = device.catch_events();  // sync -- returns channel
+
+AsyncFireAndForget
+
+Async fire-and-forget guard
+
+fn ff(&self) -> AsyncFireAndForget<'_>
+
+
+Works identically to the sync FireAndForget guard. Derefs to AsyncDevice, so all methods are available. Write commands skip waiting for responses while the guard is alive. Methods are still async and must be .awaited – the .await returns immediately after the command is queued.
+
+Example
+let ff = device.ff();
+ff.move_xy(10, 0).await?;
+ff.button_down(Button::Left).await?;
+ff.click(Button::Left, Duration::from_millis(50)).await)?;
+
+AsyncBatchBuilder
+
+Async batch command sequences
+
+Requires both async and batch features. The builder methods are synchronous (they just queue commands), but execute() is async.
+
+device.batch()
+    .button_down(Button::Left)
+    .move_xy(100, 0)
+    .button_up(Button::Left)
+    .execute()
+    . await?
+;
+
+Async Extras
+
+Async versions of extras operations
+
+With both async and extras features, all extras methods have async equivalents.
+
+device.click(Button::Left, Duration::from_millis(50)).await?;
+device.move_smooth(500, 0, 50, Duration::from_millis(5)).await?;
+device.drag(Button::Left, 300, 0, 30, Duration::from_millis(5)).await?;
+
+
+All callback registration methods (on_button_press, on_button_event, on_catch, on_catch_event) are async on AsyncDevice and must be .awaited. All callbacks spawn standard threads internally for event delivery.
+
+let _h = device.on_button_press(Button::Left, |pressed| {
+    println!("{}", if pressed { "down" } else { "up" });
+}). await?;
+
+let _h = device.on_catch(Button::Left, |pressed| {
+    println!("{}", if pressed { "pressed" } else { "released" });
+}). await?;
+
+Synchronous Methods
+
+Methods that are not async on AsyncDevice
+
+Some methods on Async_device are synchronous because they do not involve device I/O:
+
+Method	Reason
+disconnect()	Signals shutdown to internal threads.
+is_connected()	Reads an atomic flag.
+port_name()	Returns a stored string.
+connection_events()	Returns a channel receiver.
+button_events()	Returns a channel receiver.
+catch_events()	Returns a channel receiver.
+ff()	Returns an RAII guard.
+batch()	Returns a builder.

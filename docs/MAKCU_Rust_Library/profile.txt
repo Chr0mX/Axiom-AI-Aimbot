@@ -1,0 +1,91 @@
+### Profiler
+
+Per-command timing statistics
+
+The `profile` feature enables per-command timing measurement. When disabled, all profiler code compiles to no-ops with zero runtime overhead.
+
+```bash
+cargo add makcu --features profile
+
+Usage
+
+Recording and reading command timings
+
+With the feature enabled, every command sent through the library automatically records its round-trip time. Use the profiler module to access the collected statistics.
+
+Functions
+Function	Returns	Description
+profiler::stats()	HashMap<&str, CommandStat>	All recorded timing statistics.
+profiler::reset()	()	Clear all recorded statistics.
+profiler::record(name, duration)	()	Manually record a timing entry.
+CommandStat
+
+Per-command timing breakdown
+
+pub struct CommandStat
+
+
+See also the type reference.
+
+Field	Type	Description
+count	u64	Number of executions.
+total_us	u64	Total microseconds across all executions.
+avg_us	f64	Average microseconds per execution.
+min_us	u64	Fastest execution in microseconds.
+max_us	u64	Slowest execution in microseconds.
+Example
+
+Benchmarking command performance
+
+use makcu::profiler;
+
+// Run a series of commands
+for _ in 0..100 {
+    device.move_xy(10, 0)?;
+}
+
+for _ in 0..50 {
+    device.wheel(1)?;
+}
+
+// Print timing stats for each command
+for (cmd, stat) in profiler::stats() {
+    println!(
+        "{}: avg={:.0}us min={}us max={}us (n={})",
+        cmd, stat.avg_us, stat.min_us, stat.max_us, stat.count,
+    );
+}
+
+// Reset for the next measurement
+profiler::reset();
+
+timed! Macro
+
+Time arbitrary expressions
+
+timed!("label", { expression })
+
+
+Records the execution time of any expression under the given label. When the profile feature is disabled, this compiles to just the inner expression with no overhead.
+
+Example
+use makcu::timed;
+
+let result = timed!("custom_operation", {
+    device.move_xy(100, 0)?;
+    device.move_xy(0, 100)?;
+    Ok::<(), makcu::MakcuError>()
+});
+
+Zero-Cost When Disabled
+
+No overhead without the feature
+
+When compiled without the profile feature:
+
+profiler::record() is a no-op.
+profiler::stats() returns an empty map.
+profiler::reset() is a no-op.
+timed! evaluates to just the inner expression.
+
+This means profiling code can be left in place without affecting release builds.

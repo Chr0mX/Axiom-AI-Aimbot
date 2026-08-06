@@ -27,6 +27,14 @@ class VisualsPage(BasePage):
         self._acrylicRefreshTimer.setSingleShot(True)
         self._acrylicRefreshTimer.setInterval(120)
         self._acrylicRefreshTimer.timeout.connect(self._refreshWindowEffect)
+        # Debounces a Web HUD server restart after a port-field edit — restart
+        # is a real socket rebind, not a cheap config write, so this coalesces
+        # rapid spinbox changes (typing, click-and-hold) into a single restart
+        # once the user actually stops changing the value.
+        self._webEspRestartTimer = QTimer(self)
+        self._webEspRestartTimer.setSingleShot(True)
+        self._webEspRestartTimer.setInterval(600)
+        self._webEspRestartTimer.timeout.connect(self._restartWebEspIfRunning)
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -564,10 +572,33 @@ class VisualsPage(BasePage):
     def _onWebEspHttpPortChanged(self, value):
         if self._config:
             self._config.web_esp_http_port = int(value)
+        self._webEspRestartTimer.start()
 
     def _onWebEspWsPortChanged(self, value):
         if self._config:
             self._config.web_esp_ws_port = int(value)
+        self._webEspRestartTimer.start()
+
+    def _restartWebEspIfRunning(self):
+        """Web HUD binds its HTTP/WS sockets once in esp_server.start() —
+        changing either port while the server is already running doesn't
+        rebind on its own, which left the displayed connect URL/QR pointing
+        at a port nothing was actually listening on. Restart the server on
+        the current (new) ports so it stays in sync, same as toggling the
+        enable switch off then on.
+        """
+        try:
+            from core import esp_server
+            if esp_server.is_running():
+                esp_server.stop()
+                esp_server.start(self._config)
+                # _actual_ws_port settles asynchronously inside the accept
+                # loop's bind-with-fallback — same re-check pattern as
+                # _onWebEspEnableChanged.
+                QTimer.singleShot(400, self._refreshWebEspConnect)
+        except Exception:
+            pass
+        self._refreshWebEspConnect()
 
     def _onWebEspOpen(self):
         try:

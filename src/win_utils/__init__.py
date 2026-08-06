@@ -84,7 +84,6 @@ from .xbox_controller import (
 # Mouse click
 from .mouse_click import (
     send_mouse_click_sendinput,
-    send_mouse_click_hardware,
     send_mouse_click_mouse_event,
     send_mouse_click_ddxoft,
     send_mouse_click,
@@ -216,7 +215,6 @@ __all__ = [
     # 滑鼠點擊
     'send_mouse_click',
     'send_mouse_click_sendinput',
-    'send_mouse_click_hardware',
     'send_mouse_click_mouse_event',
     'send_mouse_click_ddxoft',
     'send_mouse_click_arduino',

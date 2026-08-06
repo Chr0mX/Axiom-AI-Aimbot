@@ -334,9 +334,12 @@ def main() -> None:
              "'trt' uses the tensorrt Python API directly",
     )
     ap.add_argument(
-        "--engine-prefix", default="",
-        help="Prefix added to ORT TRT engine cache filenames (e.g. model stem). "
-             "Must match the prefix used at runtime for the cache to be reused.",
+        "--engine-prefix", default=None,
+        help="Prefix added to ORT TRT engine cache filenames. Must match the "
+             "prefix used at runtime for the cache to be reused — defaults to "
+             "the model's filename stem, which is what the app itself uses "
+             "(session_utils.py's build_provider_list()). Pass an empty "
+             "string explicitly to disable prefixing.",
     )
     ap.add_argument(
         "--print-trtexec", action="store_true",
@@ -374,6 +377,9 @@ def main() -> None:
     print(f"[CONV] FP16     : {fp16}")
     print(f"[CONV] Method   : {args.method}")
     print(f"[CONV] Workspace: {args.workspace} MiB")
+    if args.method == "ort":
+        _effective_prefix = args.engine_prefix if args.engine_prefix is not None else model_stem
+        print(f"[CONV] Prefix   : '{_effective_prefix}' (must match at runtime for the cache to be reused)")
     print()
 
     if args.method == "trt":
@@ -381,9 +387,16 @@ def main() -> None:
             onnx_path, output_engine, fp16=fp16, workspace_mb=args.workspace
         )
     else:
+        # Default to the model stem — matches session_utils.py's
+        # build_provider_list(), which always keys its runtime cache lookup
+        # by the model filename stem. Without this, the documented default
+        # invocation (no --engine-prefix) built a cache under a prefix the
+        # running app would never look for, silently rebuilding from scratch
+        # on first launch instead of reusing the pre-built engine.
+        engine_prefix = args.engine_prefix if args.engine_prefix is not None else model_stem
         ok = build_engine_via_ort(
             onnx_path, output_dir, fp16=fp16, workspace_mb=args.workspace,
-            engine_prefix=args.engine_prefix,
+            engine_prefix=engine_prefix,
         )
 
     if not ok:

@@ -1,0 +1,118 @@
+# Connecting
+
+## Auto-detect and connect to a MAKCU device
+
+Three methods are available for establishing a connection. All handle [baud rate negotiation](/native/connection#baud-change-frame) automatically.
+
+### Auto-detect
+
+```rust
+fn Device::connect() -> Result<Device>
+
+
+Scans all serial ports for a device matching the MAKCU USB VID/PID(0x1A86:0x55D3). Connects to the first match.
+
+let device = Device::connect()?;
+println!("Connected to {}", device.port_name());
+
+Specific Port
+fn Device::connect_port(port: &str) -> Result<Device>
+
+
+Connects to a known serial port path. Skips auto-detection.
+
+let device = Device::connect_port("/dev/ttyACM0");
+
+Custom Configuration
+fn Device::with_config(config: DeviceConfig) -> Result<Device>
+
+
+Connects using a DeviceConfig struct for full control over connection behaviour.
+
+use makcu::{Device, DeviceConfig};
+use std::time::Duration;
+
+let config = DeviceConfig {
+    port: Some("/dev/ttyACM0".into()),
+    try_4m_first: false,
+    command_timeout: Duration::from_millis(1000),
+    reconnect: true,
+    reconnect_backoff: Duration::from_millis(200),
+    fire_and_forget: false,
+};
+let device = Device::with_config(config)?;
+
+DeviceConfig
+Connection configuration options
+pub struct DeviceConfig
+
+Field	Type	Default	Description
+port	Option<String>	None	Serial port path. None for auto-detect by VID/PID.
+try_4m_first	bool	true	Attempt 4 Mbaud before falling back to baud change sequence.
+command_timeout	Duration	500 ms	Timeout for each command response.
+reconnect	bool	true	Automatically reconnect on disconnect.
+reconnect_backoff	Duration	100 ms	Initial backoff delay between reconnection attempts.
+fire_and_forget	bool	false	Make all commands fire-and-forget by default.
+
+When try_4m_first is true (the default), the library first attempts to connect at 4 Mbaud. If the device is already at high speed (e.g., from a previous session), this avoids the baud change sequence entirely.
+
+Connection State
+Monitor and manage the connection
+Method	Returns	Description
+is_connected()	bool	Check whether the device is currently connected.
+port_name()	String	Get the serial port name.
+disconnect()	(())	Gracefully disconnect and shut down all internal threads.
+Connection Events
+Subscribe to connection state changes
+fn connection_events(&self) -> crossbeam_channel::Receiver<ConnectionState>
+
+
+Returns a channel receiver that emits ConnectionState values whenever the connection state changes.
+
+ConnectionState Variants
+Variant	Description
+Disconnected	No active connection.
+Connecting	Reconnection attempt in progress.
+Connected	Device is connected and ready.
+use makcu::ConnectionState;
+
+let rx = device.connection_events();
+std::thread::spawn(move || {
+    while let Ok(state) = rx.recv() {
+        match state {
+            ConnectionState::Connected => println!("Connected"),
+            ConnectionState::Disconnected => println!("Disconnected"),
+            ConnectionState::Connecting => println!("Reconnecting..."),
+        }
+    }
+});
+
+Automatic Reconnection
+Transparent recovery from disconnects
+
+When reconnect is enabled in DeviceConfig (the default), the library automatically attempts to re-establish the connection if the device disconnects. Reconnection uses exponential backoff starting from [reconnect_backoff].
+
+During reconnection, commands that require a response will return MakcuError::NotConnected. Fire-and-forget commands are silently dropped.
+
+Automatic reconnection re-opens the same serial port. If the device is plugged into a different port after a disconnect, auto-reconnect will not find it. Call disconnect() and Device::connect() to re-scan.
+
+Threading Model
+Internal architecture
+
+Device is Send + Sync, and can be shared across threads via Arc. Internally, three threads handle I/O:
+
+Thread	Role
+Writer	Coalesces pending commands into single write_all() calls.
+Reader	Parses responses, routes them to waiting callers, fans out button events.
+Monitor	Handles automatic reconnection with exponential backoff.
+
+All public methods use channels to communicate with these threads. No method requires <&mut self>.
+
+send_raw
+Send arbitrary command bytes
+fn send_raw(&self, cmd: &[u8]) -> Result<Vec<u8>>
+
+
+Sends raw bytes to the device and returns the raw response. The command must include the \r\n terminator. Use this as an escape hatch for firmware commands the library doesn’t wrap yet.
+
+In fire-and-forget mode, the command is sent without waiting and an empty Vec is returned. Also available in batch sequences.

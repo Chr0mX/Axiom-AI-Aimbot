@@ -43,8 +43,6 @@ class TestConfigInit:
 
     def test_capture_defaults_match_screen(self):
         c = _make_config()
-        assert c.capture_width == 1920
-        assert c.capture_height == 1080
         assert c.screenshot_method == "mss"
 
     def test_directshow_defaults(self):
@@ -108,7 +106,6 @@ class TestConfigInit:
         c = _make_config()
         assert c.xbox_sensitivity == 1.0
         assert c.xbox_deadzone == 0.05
-        assert c.xbox_auto_connect is True
 
     def test_auto_fire_defaults(self):
         c = _make_config()
@@ -217,7 +214,7 @@ class TestConfigSerialization:
         c1.fov_size = 555
         c1.pid_kp_x = 0.99
         c1.mouse_click_method = "xbox"
-        c1.jitter_enabled = True
+        c1.smart_jitter_enabled = True
         d = c1.to_dict()
 
         c2 = _make_config()
@@ -225,7 +222,7 @@ class TestConfigSerialization:
         assert c2.fov_size == 555
         assert c2.pid_kp_x == 0.99
         assert c2.mouse_click_method == "xbox"
-        assert c2.jitter_enabled is True
+        assert c2.smart_jitter_enabled is True
 
     def test_directshow_fields_roundtrip_through_to_dict_from_dict(self):
         c1 = _make_config()

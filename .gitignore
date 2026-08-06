@@ -41,6 +41,9 @@ src/python/Lib/site-packages/cyndilib/
 src/python/Lib/site-packages/cyndilib-*/
 src/python/Lib/site-packages/cyndilib*.dist-info/
 
+# comtypes (pygrabber's dependency for native COM device enumeration)
+src/python/Lib/site-packages/comtypes/
+
 # TensorRT engine cache and compiled engines
 trt_cache/
 *.engine

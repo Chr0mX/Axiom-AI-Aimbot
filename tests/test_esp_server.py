@@ -8,6 +8,7 @@ Covers:
 
 import json
 import socket
+import time
 
 import pytest
 
@@ -212,3 +213,55 @@ def test_handshake_accepts_connection():
         b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
     )
     assert _do_handshake(req) is True
+
+
+def _free_tcp_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def test_start_cleans_up_orphaned_threads_when_http_thread_already_dead(monkeypatch):
+    """is_running() only reflects the HTTP thread. If a prior start() left the
+    WS-accept/broadcast threads alive while the HTTP thread had already died
+    (e.g. its port bind failed), start() must not just spawn a second thread
+    set on top of the orphans — it should stop() them first."""
+    import threading as th
+
+    monkeypatch.setattr(esp_server, "_http_thread", None)
+
+    orphan_stop = th.Event()
+
+    def _orphan_body():
+        while not orphan_stop.is_set() and not esp_server._stop.is_set():
+            time.sleep(0.01)
+
+    orphan_ws = th.Thread(target=_orphan_body, name="orphan-ws", daemon=True)
+    orphan_broadcast = th.Thread(target=_orphan_body, name="orphan-cast", daemon=True)
+    orphan_ws.start()
+    orphan_broadcast.start()
+    monkeypatch.setattr(esp_server, "_ws_accept_thread", orphan_ws)
+    monkeypatch.setattr(esp_server, "_broadcast_thread", orphan_broadcast)
+
+    assert esp_server.is_running() is False  # http thread is None -> not "running"
+    assert orphan_ws.is_alive() and orphan_broadcast.is_alive()
+
+    cfg = _FakeConfig()
+    cfg.web_esp_http_port = _free_tcp_port()
+    cfg.web_esp_ws_port = _free_tcp_port()
+
+    try:
+        assert esp_server.start(cfg) is True
+        # The orphans must have been joined by the cleanup stop() call — proving
+        # start() didn't just leak them running forever in the background.
+        assert not orphan_ws.is_alive()
+        assert not orphan_broadcast.is_alive()
+        # And a fresh, genuinely running thread set replaced them.
+        assert esp_server.is_running() is True
+        assert esp_server._ws_accept_thread is not orphan_ws
+        assert esp_server._broadcast_thread is not orphan_broadcast
+    finally:
+        esp_server.stop()
+        orphan_stop.set()

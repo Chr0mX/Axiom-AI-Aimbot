@@ -1,0 +1,66 @@
+### Device Info
+
+**Description:** Version, identification, and serial number
+
+**Methods for querying device identity and managing the serial number.**
+
+### version
+
+**Signature:** `fn version(&self) -> Result<String>`
+
+Returns the firmware version string. The `km.` prefix is stripped automatically. Maps to [`km.version()`](/native/commands/version#km-version).
+
+**Example:**
+```rust
+let version = device.version()?;
+println!("{}", version);  // "MAKCU v3.7"
+
+device_info
+
+Signature: fn device_info(&self) -> Result<DeviceInfo>
+
+Returns a DeviceInfo struct containing the serial port name and firmware version.
+
+DeviceInfo Fields
+
+Field	Type	Description
+port	String	Serial port name.
+firmware	String	Firmware version string.
+
+Example:
+
+let info = device.device_info()?;
+println!("{}", info);  // "/dev/ttyACM0 (firmware: MAKCU v3.7)"
+
+serial
+
+Signature: fn serial(&self) -> Result<String>
+
+Returns the current mouse serial number. The km. prefix is stripped. Maps to km.serial().
+
+Example:
+
+let serial = device.serial()?;
+println!("Serial: {}", serial);
+
+set_serial
+
+Signature: fn set_serial(&self, value: &str) -> Result<String>
+
+Changes the mouse serial number reported to the host. Maximum 45 characters. Returns the new serial number. Maps to km.serial('value').
+
+Example:
+
+let new_serial = device.set_serial("CUSTOM-001")?;
+println!("Set to: {}", new_serial);
+
+reset_serial
+
+Signature: fn reset_serial(&self) -> Result<String>
+
+Restores the original factory serial number. Returns the restored value. Maps to km.serial(0).
+
+Example:
+
+let original = device.reset_serial()?;
+println!("Restored: {}", original);

@@ -1,0 +1,140 @@
+# Section
+
+## Native API
+## Rust Library
+
+## Getting Started
+### Introduction
+### Connection
+
+## API
+### Movement
+### Buttons
+### Locks
+### Device Info
+### Button Stream
+### Button Capture
+### Fire and Forget
+
+## Features
+#### Async
+#### Batch
+#### Extras
+#### Mock
+#### Profile
+
+## Reference
+### Types and Errors
+
+---
+
+# MAKCU - Rust Library
+
+Safe, high-performance Rust interface for MAKCU mouse input devices over serial. It handles connection negotiation, baud rate switching, command serialization, response parsing, automatic reconnection, and concurrent access.
+
+| Property              | Value                                                                 |
+|-----------------------|-------------------------------------------------------------------------|
+| Crate Version         | `0.1.1`                                                               |
+| Rust Edition          | `2024`                                                                   |
+| MSRV                  | `1.85`                                                                    |
+| Firmware Compatibility | v3.2 (left) / v3.7 (right)                                              |
+| Transport             | Serial at 4 Mbaud (auto-negotiated)                                       |
+| Thread Safety        | `Send + Sync` (shareable via `Arc`)                                         |
+
+---
+
+# Installation
+
+Add makcu to your project:
+
+```sh
+cargo add makcu
+
+
+With optional features:
+
+cargo add makcu --features async,batch,extras
+
+
+Feature Flags
+
+Feature	Description
+async	Async API via AsyncDevice. Requires Tokio.
+batch	Fluent command batching with automatic coalescing.
+extras	Software-implemented operations: click, smooth move, drag, patterns, catch convenience, event callbacks.
+profile	Per-command timing profiler. Zero cost when disabled.
+mock	In-process mock transport for testing without hardware.
+Quick Start
+
+Connect and send commands in five lines:
+
+use makcu::{Device, Button};
+
+let device = Device::connect()?;
+device.move_xy(100, -50)?;
+device.button_down(Button::Left)?;
+device.button_up(Button::Left)?;
+device.wheel(3)?;
+
+
+Device::connect() auto-detects the MAKCU by USB VID/PID, negotiates the baud rate to 4 Mbaud, and verifies the firmware responds. All methods take &self and can be called concurrently from multiple threads. See the threading model for details.
+
+Getting Started
+Connection
+
+Auto-detect, connect, configure, and reconnect
+
+API
+Movement
+
+Relative cursor movement, silent move, and scroll wheel
+
+Buttons
+
+Press, release, and query button states
+
+Locks
+
+Lock and unlock mouse inputs
+
+Device Info
+
+Version, device info, and serial number
+
+Button Stream
+
+Real-time button state change events
+
+Button Capture
+
+Per-button press/release event stream
+
+Fire and Forget
+
+Send commands without waiting for responses
+
+Features
+Async
+
+Full async parity with Tokio
+
+Batch
+
+Fluent command sequences with automatic coalescing
+
+Extras
+
+Click, smooth move, drag, patterns, catch convenience, and callbacks
+
+Mock
+
+In-process mock transport for testing
+
+Profile
+
+Per-command timing statistics
+
+Reference
+Types and Errors
+
+Complete type reference and error handling

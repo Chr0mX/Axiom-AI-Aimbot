@@ -294,8 +294,8 @@
             ctx.fillText(`${Math.round(conf * 100)}%`, x1 - 4, y1 - 6);
           }
 
-          const [tx, ty] = aimPoint(x1, y1, x2, y2, st);
-          if (st.show_tracer_line) {
+          if (st.show_tracer_line && inFov) {
+            const [tx, ty] = aimPoint(x1, y1, x2, y2, st);
             ctx.strokeStyle = "rgba(0,220,255,0.5)"; ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
           }

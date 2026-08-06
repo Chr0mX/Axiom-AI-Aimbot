@@ -1,0 +1,140 @@
+### Section
+
+#### Native API
+#### Rust Library
+
+#### Getting Started
+##### Introduction
+##### Connection
+
+#### API
+##### Movement
+##### Buttons
+##### Locks
+##### Device Info
+##### Button Stream
+##### Button Capture
+##### Fire and Forget
+
+#### Features
+##### Async
+##### Batch
+##### Extras
+##### Mock
+##### Profile
+
+#### Reference
+##### Types and Errors
+
+---
+
+## BATCH BUILDER
+
+Fluent command sequences with automatic coalescing
+
+The batch builder lets you queue multiple commands and execute them as a single operation. Consecutive native commands are coalesced into a single write call, reducing transport overhead. Requires the `batch` feature. See also the [async batch builder](/library/features/async#async-batch) for async usage.
+
+```bash
+cargo add makcu --features batch
+
+USAGE
+
+Build and execute command sequences
+
+fn batch(&self) -> BatchBuilder<'_>
+
+
+Returns a fluent builder. Chain commands with method calls, then call execute() to send them all.
+
+Example
+
+use makcu::Button;
+
+device.batch()
+    .button_down(Button::Left)
+    .move_xy(100, 0)
+    .move_xy(0, 50)
+    .button_up(Button::Left)
+    .execute()?;
+
+
+In this example, all four commands are coalesced into a single write to the transport.
+
+AVAILABLE COMMANDS
+
+Methods available on BatchBuilder:
+
+All builder methods consume and return self for chaining.
+
+Method	Description
+move_xy(x, y)	Relative cursor movement.
+silent_move(x, y)	Atomic drag operation.
+wheel(delta)	Scroll wheel input.
+button_down(button)	Press a button.
+button_up(button)	Soft release a button.
+button_up_force(button)	Force release a button.
+set_lock(target, locked)	Set an input lock.
+enable_catch(button)	Enable catch stream for a button.
+enable_button_stream()	Enable button event stream.
+disable_button_stream()	Disable button event stream.
+send_raw(cmd)	Send arbitrary command bytes.
+
+Consecutive native commands are automatically coalesced into a single transport write. This minimizes serial overhead when sending rapid sequences.
+
+Query methods (button_state, lock_state, version, etc.) are not available in batches. Batches use fire-and-forget writes internally — coalescing multiple commands into a single write means responses cannot be aligned to individual commands.
+
+EXTRAS COMMANDS
+
+Software-implemented operations in batches
+
+With the extras feature enabled alongside batch, additional methods are available on the builder. These introduce timing (sleeps, intervals) and break the coalescing boundary.
+
+Method	Description
+click(button, hold)	Press, wait, release.
+click_sequence(button, hold, count, interval)	Repeated clicks with intervals.
+move_smooth(x, y, steps, interval)	Smooth movement over multiple steps.
+move_pattern(waypoints, steps, interval)	Navigate waypoints smoothly.
+drag(button, x, y, steps, interval)	Smooth move with button held.
+start_catch(button)	Lock + enable catch in one step.
+stop_catch(button)	Unlock button, stopping catch.
+
+Example
+
+use makcu::Button;
+use std::time::Duration;
+
+device.batch()
+    .click(Button::Left, Duration::from_millis(50))
+    .move_smooth(500, 0, 20, Duration::from_millis(10))
+    .click(Button::Left, Duration::from_millis(50))
+    .execute()?;
+
+COMMAND COALESCING
+
+How consecutive commands are merged
+
+The batch builder groups consecutive native commands into single transport writes. Extras commands (which involve timing) break the coalescing boundary.
+
+device.batch()
+    .move_xy(10, 0)       // ─┐
+    .move_xy(0, 10)       //  ├─ coalesced into one write
+    .button_down(b)       // ─┘
+    .click(b, hold)       // ── separate (has timing)
+    .move_xy(20, 0)       // ─┐
+    .wheel(3)             //  ├─ coalesced into one write
+    .button_up(b)         // ─┘
+    .execute()?;
+
+
+Range validation for parametric commands (move, wheel) is deferred until execute() is called. If any command has invalid parameters, the entire batch fails.
+
+EXECUTION
+
+Running the batch
+
+fn execute(self) -> Result(())
+
+
+Consumes the builder and executes all queued commands. Coalesced groups are sent as fire-and-forget writes. Returns an error if any command fails validation or the transport is unavailable.
+
+The builder is consumed on execution — create a new batch with device.batch() for additional sequences.
