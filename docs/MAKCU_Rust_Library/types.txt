@@ -1,0 +1,117 @@
+### Types and Errors
+
+Complete type reference and error handling
+
+All public types are re-exported from the crate root. Import them with `use makcu::TypeName`.
+
+### Core Types
+
+| Type          | Kind   | Description                                                                 |
+|---------------|--------|-----------------------------------------------------------------------------|
+| `Device`      | struct  | Main sync API. `Send + Sync`. See [Connection](https://docs.makcu.k4tech.net/library/connection#connecting). |
+| `AsyncDevice` | struct  | Async API. Requires [`async`](https://docs.makcu.k4tech.net/library/features/async) feature. |
+| `DeviceConfig` | struct  | [Connection configuration](https://docs.makcu.k4tech.net/library/connection#device-config). |
+| `DeviceInfo`   | struct  | Combined port + firmware info. Implements `Display`. See [Device Info](https://docs.makcu.k4tech.net/library/info#device-info). |
+| `FireAndForget<'d>` | struct  | [Fire-and-forget](https://docs.makcu.k4tech.net/library/fire-and-forget) RAII guard. Derefs to `Device`. |
+| `AsyncFireAndForget<'d>` | struct  | Async [fire-and-forget](https://docs.makcu.k4tech.net/library/fire-and-forget) RAII guard. Derefs to `AsyncDevice`. Requires [`async`](https://docs.makcu.k4tech.net/library/features/async). |
+
+### Enums
+
+#### Button
+
+```rust
+pub enum Button { Left, Right, Middle, Side1, Side2 }
+
+
+Identifies a mouse button for press, release, and query operations.
+
+LockTarget
+pub enum LockTarget { X, Y, Left, Right, Middle, Side1, Side2 }
+
+
+Identifies a mouse input (axis or button) for lock operations.
+
+ConnectionState
+pub enum ConnectionState { Disconnected, Connecting, Connected }
+
+
+Observable connection states emitted by connection_events().
+
+Data Structures
+ButtonMask
+Method	Returns	Description
+left()	bool	Left button state (bit 0).
+right()	bool	Right button state (bit 1).
+middle()	bool	Middle button state (bit 2).
+side1()	bool	Side 1 state (bit 3).
+side2()	bool	Side 2 state (bit 4).
+is_pressed(button)	bool	Query by Button variant.
+raw()	u8	Raw bitmask byte.
+CatchEvent
+Field	Type	Description
+button	Button variant.	
+pressed	bool	true for press, false for release.
+LockStates
+Field	Type	Description
+x	bool	Horizontal movement lock.
+y	bool	Vertical movement lock.
+left	bool	Left button lock.
+right	bool	Right button lock.
+middle	bool	Middle button lock.
+x_side1 { true/false } Side 1 lock		
+x_side2 { true/false } Side 2 lock		
+DeviceInfo
+port: Serial port name.
+firmware: Firmware version string.
+
+Implements Display as "port (firmware: version)".
+
+Feature-Gated Types
+BatchBuilder<'d>
+AsyncBatchBuilder<'d>
+EventHandle
+MockTransport
+CommandStat
+Error Handling
+
+MakcuError and Result
+
+pub type Result<T> = std::result::Result<T, MakcuError>
+
+
+All fallible methods return makcu::Result<T>. The error type is MakcuError.
+
+MakcuError
+Variant List
+
+NotConnected
+
+No active device connection.
+
+Port(serialport::Error)
+
+Serial port error from the underlying driver.
+
+Io(io::Error)
+
+Standard I/O error.
+
+Timeout
+
+Command response timed out. Controlled by command_timeout.
+
+NotFound
+
+No MAKCU device found during auto-detection.
+
+Disconnected
+
+Device disconnected during an operation. See reconnection.
+
+Protocol(String)
+
+Protocol parsing or formatting error.
+
+OutOfRange { value, min, max }
+
+Parameter outside the valid range.

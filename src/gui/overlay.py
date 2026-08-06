@@ -23,6 +23,22 @@ except ImportError:
     HAS_THEME_COLORS = False
 
 
+_calculate_aim_target = None
+
+
+def _get_calculate_aim_target():
+    """Lazily import ai_aiming.calculate_aim_target so the overlay uses the exact
+    same aim-point formula (custom part, adaptive-ratio, posture-aware) the real
+    aiming logic uses, instead of a duplicated/drifted copy. Deferred because
+    ai_aiming.py transitively imports win_utils (win32api), which isn't
+    importable off Windows."""
+    global _calculate_aim_target
+    if _calculate_aim_target is None:
+        from core.ai_aiming import calculate_aim_target
+        _calculate_aim_target = calculate_aim_target
+    return _calculate_aim_target
+
+
 class OverlayColors:
     """Overlay Color Configuration - Integrated with ThemeColors for unified management"""
     
@@ -219,21 +235,26 @@ class PyQtOverlay(QWidget):
         pen = QPen(tracer_color, 2, Qt.PenStyle.SolidLine)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        fov_half = int(self.config.fov_size) // 2
+        fov_half = float(self.config.fov_size) / 2.0
+        use_circle = getattr(self.config, 'fov_circle_filter_enabled', False)
         aim_part     = str(getattr(self.config, 'aim_part', 'head'))
         head_h_ratio = float(getattr(self.config, 'head_height_ratio', 0.26))
+        calc_target = _get_calculate_aim_target()
         for box in self.boxes:
-            x1, y1, x2, y2 = map(int, box)
-            box_h = y2 - y1
-            bx = (x1 + x2) // 2
-            if aim_part == 'center':
-                by = (y1 + y2) // 2
-            elif aim_part == 'head':
-                by = int(y1 + box_h * head_h_ratio * 0.5)
+            bx1, by1, bx2, by2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+            # Same in/out-of-FOV test the box-color pass uses, so the tracer
+            # respects fov_circle_filter_enabled instead of a hardcoded square test.
+            if use_circle:
+                nx = min(max(cx, bx1), bx2)
+                ny = min(max(cy, by1), by2)
+                in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
             else:
-                by = int((y1 + box_h * head_h_ratio + y2) * 0.5)
-            if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
-                painter.drawLine(cx, cy, bx, by)
+                in_fov = (bx1 < cx + fov_half and bx2 > cx - fov_half and
+                          by1 < cy + fov_half and by2 > cy - fov_half)
+            if not in_fov:
+                continue
+            bx, by = calc_target(list(box), aim_part, head_h_ratio, self.config)
+            painter.drawLine(cx, cy, int(bx), int(by))
 
     def paintEvent(self, event):
         if getattr(self.config, 'screenshot_method', 'mss') in ('uvc', 'ndi', 'udp'):
@@ -311,6 +332,7 @@ class PyQtOverlay(QWidget):
             head_h_ratio    = float(getattr(self.config, 'head_height_ratio', 0.26))
             aim_x_color     = OverlayColors.get_aim_marker_color()
             pen_aim_x       = QPen(aim_x_color, 1)
+            calc_target     = _get_calculate_aim_target()
 
             for i, box in enumerate(self.boxes):
                 x1, y1, x2, y2 = map(int, box)
@@ -340,14 +362,8 @@ class PyQtOverlay(QWidget):
 
                 # Draw X at the inferred head / aim point
                 box_w = x2 - x1
-                box_h = y2 - y1
-                tx = int(x1 + box_w * 0.5)
-                if aim_part == 'center':
-                    ty = int((y1 + y2) * 0.5)
-                elif aim_part == 'head':
-                    ty = int(y1 + box_h * head_h_ratio * 0.5)
-                else:
-                    ty = int((y1 + box_h * head_h_ratio + y2) * 0.5)
+                tx, ty = calc_target([x1, y1, x2, y2], aim_part, head_h_ratio, self.config)
+                tx, ty = int(tx), int(ty)
                 r = max(3, min(6, box_w // 8))   # arm length scales with box width
                 painter.setPen(pen_aim_x)
                 painter.drawLine(tx - r, ty - r, tx + r, ty + r)

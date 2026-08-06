@@ -1,0 +1,233 @@
+### Extras
+
+Software-implemented convenience operations
+
+The `extras` feature adds higher-level operations built on top of the base API. These are implemented in software with controlled timing -- they are not firmware commands. These operations can also be used in [batch sequences](https://docs.makcu.k4tech.net/library/features/batch#batch-extras) and through [`ff()`](https://docs.makcu.k4tech.net/library/fire-and-forget#ff-wrapper) for fire-and-forget mode.
+
+```bash
+cargo add makcu --features extras
+
+click
+
+Press, hold, and release
+
+fn click(&self, button: Button, hold: Duration) -> Result<>()
+
+
+Presses the button, waits for hold duration, then releases.
+
+Parameter	Type	Description
+button	Button	Which button to click.
+hold	Duration	How long to hold the button down.
+
+Example
+
+use makcu::Button;
+use std::time::Duration;
+
+device.click(Button::Left, Duration::from_millis(50))?;
+
+click_sequence
+
+Repeated clicks with intervals
+
+fn click_sequence(
+    &self,
+    button: Button,
+    hold: Duration,
+    count: u32,
+    interval: Duration,
+) -> Result<>()
+
+
+Performs count clicks with interval delay between each cycle. Each click holds the button for hold duration.
+
+Example
+
+// Triple-click with 50ms hold and 100ms between clicks
+device.click_sequence(
+    Button::Left,
+    Duration::from_millis(50),
+    3,
+    Duration::from_millis(100),
+)?;
+
+move_smooth
+
+Smooth cursor movement over multiple steps
+
+fn move_smooth(
+    &self,
+    x: i32,
+    y: i32,
+    steps: u32,
+    interval: Duration,
+) -> Result<>()
+
+
+Moves the cursor by (x, y) total, divided evenly across steps increments with interval delay between each. Remainder pixels are applied on the final step.
+
+If steps is 0, executes as a single move_xy.
+
+Example
+
+// Move right 500px over 50 steps, 5ms apart
+device.move_smooth(500, 0, 50, Duration::from_millis(5))?;
+
+
+This provides the smooth movement that the firmware’s broken 3-argumentkm.move(x,y,steps) was supposed to offer.
+
+drag
+
+Smooth move with button held
+
+fn drag(
+    &self,
+    button: Button,
+    x: i32,
+    y: i32,
+    steps: u32,
+    interval: Duration,
+) -> Result<>()
+
+
+Presses the button, performs a smooth move, then releases. Equivalent to button_down, move_smooth, button_up.
+
+Example
+
+// Drag left button right 300px over 30 steps
+device.drag(
+    Button::Left,
+    300, 0,
+    30,
+    Duration::from_millis(5),
+)?;
+
+move_pattern
+
+Navigate a sequence of waypoints
+
+fn move_pattern(
+    &self,
+    waypoints: &[('i32, 'i32)],
+    steps: u32,
+    interval: Duration,
+) -> Result<>()
+
+
+Navigates through a list of relative waypoints. Each waypoint is reached via move_smooth with the given steps and interval.
+
+Example
+
+// Draw a triangle pattern
+device.move_pattern(
+    &[(-100, 0), (50, 87), (-50, -87)],
+    20,
+    Duration::from_millis(5),
+)?;
+
+Catch Convenience
+
+Lock, enable, and stop catch in one call
+
+These methods combine lock management with catch, wrapping the base catch API for common use cases.
+
+Start Catch
+fn start_catch(&self, button: Button) -> Result<()>
+
+
+Locks the button and enables catch in one call. Equivalent to set_lock(target, true) followed by enable_catch(button).
+
+use makcu::Button;
+
+device.start_catch(Button::Left)?;
+let rx = device.catch_events();
+
+// ... receive events ...
+
+device.stop_catch(Button::Left)?;
+
+Stop Catch
+fn stop_catch(&self, button: Button) -> Result<()>
+
+
+Unlocks the button entirely. This stops the catch stream. There is no explicit disable command in the firmware.
+
+Note:
+
+stop_catch ``` unlocks the button entirely. If the button was locked for other reasons (e.g., blocking input), those locks are also released.
+
+Catch Callbacks
+
+Register handlers for catch events
+
+Catch callbacks provide a higher-level interface to the catch stream. Instead of manually reading a channel register a closure that fires on physical press/release events.
+
+On Catch
+fn on_catch<F>(&self, button: Button, f: F) -> Result<EventHandle>
+where F: Fn(bool) + Send + 'static
+
+
+Registers a callback for a specific button’s catch events. The closure receives true on press and false on release.
+
+device.start_catch(Button::Left)?;
+let _handle = device.on_catch(Button::Left, |pressed| {
+    if pressed {
+        println!("Left physically pressed");
+    } else {
+        println!("Left physically released");
+    }
+})?;
+
+On Catch Event
+fn on_catch_event<F>(&self, f: F) -> Result<EventHandle>
+where F: Fn(CatchEvent) + Send + 'static
+
+
+Registers a callback that fires on any catch event from any button. Receives the full CatchEvent.
+
+let _handle = device.on_catch_event(|event| {
+    println!("{:?} {}", event.button,
+        if event.pressed { "pressed" } else { "released" });
+})();
+
+Event Handle
+
+Both methods return an EventHandle wrapped in [Result]. The callback remains active as long as the handle is alive. Dropping the handle unregisters the callback.
+
+Event Callbacks
+
+Register handlers for button events
+
+Event callbacks provide a higher-level interface to the button stream. Instead of manually reading a channel register a closure that fires on button state changes. The button stream is enabled automatically when a callback is registered.
+
+On Button Press
+fn on_button_press<F>(&self, button: Button, f: F) -> Result<EventHandle>
+where F: Fn(bool) + Send + 'static
+
+
+Registers a callback for a specific button. The closure receives true on press and false on release.
+
+let _handle = device.on_button_press(Button::Left, |pressed| {
+    if pressed {
+        println!("Left pressed");
+    } else {
+        println!("Left released");
+    }
+})();
+
+On Button Event
+fn on_button_event<F>(&self, f: F) -> Result<EventHandle>
+where F: Fn(ButtonMask) + Send + 'static
+
+
+Registers a callback that fires on any button state change. Receives the full ButtonMask.
+
+let _handle = device.on_button_event(|mask| {
+    println!("Buttons: {:05b}", mask.raw());
+})();
+
+
+Both methods return an EventHandle wrapped in [Result]. The callback remains active as long as the handle is alive. Dropping the handle unregisters the callback.
+
+Note: Store the EventHandle in a variable. If the handle is dropped immediately (e.g., by not binding it), the callback is unregistered instantly.

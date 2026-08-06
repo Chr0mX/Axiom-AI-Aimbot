@@ -32,10 +32,8 @@ logger = logging.getLogger(__name__)
 _OPERATING_BAUD    = 4_000_000
 _BAUD_CHANGE_FRAME = bytes([0xDE, 0xAD, 0x05, 0x00, 0xA5, 0x00, 0x09, 0x3D, 0x00])
 
-# Button stream parsing — prefix emitted before each mask byte
-# Do NOT use \n/\r splitting: mask 0x0A (R+S1) and 0x0D (L+M+S1) collide with newlines
-_KM_PREFIX = bytes([0x6B, 0x6D, 0x2E])  # "km."
-_BTN_BITS = 0x1F  # bits 0-4 = L,R,M,S1,S2 — everything else is noise/wheel/high-byte
+# Button stream parsing — see _stream_reader() for the frame format.
+_BTN_BITS = 0x1F  # bits 0-4 = L,R,M,S1,S2 — everything else is noise/high-byte
 
 
 class MakcuMouse:
@@ -218,15 +216,31 @@ class MakcuMouse:
     # ------------------------------------------------------------------
 
     def _start_stream(self):
-        """Enable km.buttons(1) stream and start the reader thread."""
+        """Enable km.buttons(1) stream and start the reader thread.
+
+        _query_info() (called earlier in connect()) reads only whatever's
+        already waiting 0.15s after its km.info() write — a slow/late-
+        arriving tail of that reply can still be sitting in the input
+        buffer here. _stream_reader() trusts byte-aligned "km.<mask>"
+        framing from the very first frame it sees, so any stray leftover
+        bytes at this point desync it before it ever reads a real button
+        frame — with echo off, nothing else will resync it until an
+        unrelated event happens to line the framing back up. Reset the
+        buffer right before enabling the stream so it always starts clean.
+        """
         self._stream_stop.clear()
         self._btn_mask = 0
         try:
             with self._lock:
                 if self._serial and self._serial.is_open:
+                    self._serial.reset_input_buffer()
                     self._serial.write(b'km.buttons(1)\r\n')
                     self._serial.flush()
-        except Exception:
+                else:
+                    logger.warning("[MAKCU] _start_stream: serial not open, button stream not started")
+                    return
+        except Exception as exc:
+            logger.warning("[MAKCU] _start_stream: failed to enable button stream: %s", exc)
             return
         self._stream_thread = threading.Thread(
             target=self._stream_reader, daemon=True, name="makcu-stream")
@@ -302,19 +316,37 @@ class MakcuMouse:
                     logger.debug("[MAKCU] Reconnect failed: %s", exc)
 
     def _stream_reader(self):
-        """Daemon thread: parse km. + 2-byte LE button mask frames, update _btn_mask.
+        """Daemon thread: parse km.<mask>\\r\\n>>> button frames, update _btn_mask.
 
-        Frame layout (firmware buttons stream): 0x6B 0x6D 0x2E <maskLO> <maskHI>.
-        The mask is little-endian; only bits 0-4 are real buttons (L,R,M,S1,S2).
-        Masking to _BTN_BITS prevents a desynced wheel/data byte — e.g. a scroll
-        delta of +1 (0x01) or -1 (0xFF), both of which carry bit 0 — from being
-        misread as a held left button.
+        Confirmed against a raw hex capture from real hardware (this
+        codebase's prior three attempts at this format were each tried and
+        reported as not detecting real clicks — see git history on this
+        method for what didn't work and why each guess seemed plausible at
+        the time). The actual frame, captured verbatim:
+
+            6b 6d 2e 01 0d 0a 3e 3e 3e 20
+            "k  m  .  <mask=0x01>  \\r  \\n  >  >  >  ' '"
+
+        i.e. `km.` + a single mask byte + the exact same `\\r\\n>>> ` suffix
+        the docs describe for one-off ASCII command replies — the buttons
+        stream just pushes this unsolicited on every state change, using
+        the same reply framing as everything else instead of a distinct
+        compact encoding. 10 bytes total, mask is 1 byte (not 2).
+
+        Verify the trailing suffix too (not just the "km." prefix) when
+        enough bytes are buffered to check — a real mask byte can't corrupt
+        into "km.", but requiring the suffix as well catches a byte
+        misaligning the frame from either direction and forces a resync on
+        the next real "km." instead of misreading a corrupted mask.
 
         km.echo(0) means the device sends nothing in response to move/click writes,
         so all incoming bytes are button stream events — no lock needed on reads.
         """
         buf = bytearray()
-        FRAME_LEN = len(_KM_PREFIX) + 2  # km. + 2-byte mask
+        _KM_PREFIX = b"km."
+        _SUFFIX = b"\r\n>>> "
+        FRAME_LEN = len(_KM_PREFIX) + 1 + len(_SUFFIX)  # km. + mask + \r\n>>>(space) = 10
+        logged_chunks = 0
         while not self._stream_stop.is_set():
             try:
                 ser = self._serial
@@ -322,22 +354,35 @@ class MakcuMouse:
                     break
                 n = ser.in_waiting
                 if n:
-                    buf.extend(ser.read(n))
+                    chunk = ser.read(n)
+                    if logged_chunks < 20:
+                        logger.info("[MAKCU] stream raw bytes: %s", chunk.hex(' '))
+                        logged_chunks += 1
+                    buf.extend(chunk)
                     if len(buf) > 256:
                         buf.clear()
-                    while len(buf) >= FRAME_LEN:
+                    while True:
                         idx = buf.find(_KM_PREFIX)
                         if idx == -1:
                             # No prefix in buffer; keep only a possible partial tail
                             del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
                             break
                         if idx + FRAME_LEN > len(buf):
-                            # Full frame not yet arrived; drop bytes before prefix and wait
+                            # Full frame not yet arrived; drop bytes before the
+                            # prefix and wait for the rest.
                             del buf[:idx]
                             break
-                        lo = buf[idx + 3]
-                        hi = buf[idx + 4]
-                        self._btn_mask = (lo | (hi << 8)) & _BTN_BITS
+                        mask = buf[idx + 3]
+                        suffix = bytes(buf[idx + 4:idx + FRAME_LEN])
+                        if suffix != _SUFFIX:
+                            # Not a trustworthy frame — resync on the next "km."
+                            resync_idx = buf.find(_KM_PREFIX, idx + len(_KM_PREFIX))
+                            if resync_idx == -1:
+                                del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
+                            else:
+                                del buf[:resync_idx]
+                            continue
+                        self._btn_mask = mask & _BTN_BITS
                         del buf[:idx + FRAME_LEN]
                 else:
                     time.sleep(0.001)

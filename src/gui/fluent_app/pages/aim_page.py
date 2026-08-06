@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QDialog, QLabel, QPushButton,
 )
 from PyQt6.QtGui import QDesktopServices, QPainter, QPixmap, QColor, QPen
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon,
@@ -268,6 +268,31 @@ class _JitterPreviewDialog(QDialog):
         self.reject()
 
 
+class _ArduinoConnectWorker(QThread):
+    """Runs connect_arduino() off the GUI thread.
+
+    connect_arduino() sleeps 2s (outside its own lock) waiting for the
+    Leonardo's auto-restart-on-connect — safe to call from a background
+    thread, the problem was purely that "Connect Arduino" invoked it
+    synchronously on the GUI thread, freezing the whole UI for those 2s
+    on every click.
+    """
+
+    finishedResult = pyqtSignal(bool)  # ok
+
+    def __init__(self, com_port: str, parent=None):
+        super().__init__(parent)
+        self._com_port = com_port
+
+    def run(self) -> None:
+        try:
+            from win_utils import connect_arduino
+            ok = connect_arduino(self._com_port)
+        except Exception:
+            ok = False
+        self.finishedResult.emit(ok)
+
+
 class AimPage(BasePage):
     """Aim Assist Settings Page"""
 
@@ -276,6 +301,7 @@ class AimPage(BasePage):
         self._config = None
         self._isLoadingConfig = False
         self._isArduinoConnected = False
+        self._arduinoConnectWorker: _ArduinoConnectWorker | None = None
         self._isXboxConnected = False
         self._jitterRecorder = None
         self._jitterRecording = False
@@ -521,6 +547,19 @@ class AimPage(BasePage):
             parent=self.pidGroup
         )
 
+        # Hard per-frame pixel cap on PID output, applied to both axes after
+        # sub-pixel carry. Defaults to 85px (non-zero) even with no GUI
+        # control previously exposing it — surfaced here so it's visible/
+        # adjustable instead of silently capping every correction.
+        self.maxMovePerFrameCard = SliderLabelCard(
+            FluentIcon.CARE_DOWN_SOLID,
+            "Max Move Per Frame",
+            0, 500,
+            format_func=lambda v: "Off" if v == 0 else f"{v} px",
+            description="Hard cap on PID output per frame, both axes (0 = off)",
+            parent=self.pidGroup
+        )
+
         self.pidYReduceEnableCard = SwitchSettingCard(
             FluentIcon.CARE_UP_SOLID,
             t("aim_y_reduce_enable"),
@@ -584,7 +623,7 @@ class AimPage(BasePage):
 
         self.smartJitterLmbCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
-            t("smart_jitter_lmb_label", "Only While Shooting (LMB Held)"),
+            t("smart_jitter_lmb_label", "Only While Aiming"),
             t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"),
             parent=self.antiRecoilGroup
         )
@@ -630,7 +669,7 @@ class AimPage(BasePage):
         self.jitterPatternCard = SettingCard(
             FluentIcon.LABEL,
             t("jitter_pattern_label", "Recorded Pattern"),
-            t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on)"),
+            t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on). Only the recorded motion's shape is replayed — playback speed follows the detection loop's own tick rate, not the recording's original timing; use the speed multiplier below to tune the feel."),
             self.antiRecoilGroup
         )
         self.jitterPatternCard.hBoxLayout.addWidget(self.jitterPatternCombo, 0)
@@ -648,6 +687,63 @@ class AimPage(BasePage):
         )
         self.jitterSpeedCard.hBoxLayout.addWidget(self.jitterSpeedSegment, 0, Qt.AlignmentFlag.AlignRight)
         self.jitterSpeedCard.hBoxLayout.addSpacing(16)
+
+        # === Humanization ===
+        # Post-processing layer applied to the final PID dx/dy, right before mouse
+        # injection — see ai_aiming.py's apply_humanization() call site.
+        self.humanizationGroup = SettingCardGroup(t("humanization", "Humanization"), self.scrollWidget)
+
+        self.humanizationEnableCard = SwitchSettingCard(
+            FluentIcon.PEOPLE,
+            t("humanization_enabled", "Humanization"),
+            t("humanization_desc", "Perturb the final mouse output to look less robotic. Operates only on dx/dy — never touches detection or PID state."),
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationIntensityCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("humanization_intensity", "Intensity"),
+            0, 100,
+            format_func=lambda v: f"{v}%",
+            description=t("humanization_intensity_desc", "0% = robotic precision, 100% = fully human-like. Scales every effect below."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationMicroJitterCard = SwitchSettingCard(
+            FluentIcon.MOVE,
+            t("humanization_micro_jitter", "Micro-Jitter"),
+            t("humanization_micro_jitter_desc", "Small zero-mean noise added to every move, scaled by movement size."),
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationMotionVariationCard = SwitchSettingCard(
+            FluentIcon.SYNC,
+            t("humanization_motion_variation", "Motion Variation"),
+            t("humanization_motion_variation_desc", "Randomize output scale slightly each frame (mean-preserving, no drift)."),
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationSpeedShapingCard = SwitchSettingCard(
+            FluentIcon.ZOOM_IN,
+            t("humanization_speed_shaping", "Speed Shaping"),
+            t("humanization_speed_shaping_desc", "Compress small corrections and pass through large movements unmodified, like human fine-motor control."),
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationMicroStutterCard = SwitchSettingCard(
+            FluentIcon.PAUSE_BOLD,
+            t("humanization_micro_stutter", "Micro-Stutter"),
+            t("humanization_micro_stutter_desc", "Occasional brief magnitude reduction, modeling muscle hesitation before committing to a move."),
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationReactionVariabilityCard = SwitchSettingCard(
+            FluentIcon.PAUSE_BOLD,
+            t("humanization_reaction_variability", "Reaction Variability"),
+            t("humanization_reaction_variability_desc", "Occasionally skip a frame's mouse injection to simulate human micro-hesitation. Adds real per-frame latency — off by default."),
+            parent=self.humanizationGroup
+        )
 
         # === Target Priority ===
         self.targetPriorityGroup = SettingCardGroup(t("target_priority", "Target Priority"), self.scrollWidget)
@@ -676,50 +772,6 @@ class AimPage(BasePage):
 
         # === Target Tracking ===
         self.trackingGroup = SettingCardGroup(t("target_tracking", "Target Tracking"), self.scrollWidget)
-
-        self.boxEmaEnableCard = SwitchSettingCard(
-            FluentIcon.FILTER,
-            t("box_ema_enabled", "Box EMA"),
-            t("box_ema_desc", "Smooth raw detection box coordinates before aim calculation. Reduces jitter at high Kp."),
-            parent=self.trackingGroup
-        )
-
-        self.boxEmaAlphaXCard = SliderLabelCard(
-            FluentIcon.LEFT_ARROW,
-            t("box_ema_alpha_x", "Box EMA Alpha X"),
-            10, 100,
-            format_func=lambda v: f"{v / 100:.2f}",
-            description=t("box_ema_alpha_x_desc", "X-axis smoothing. Lower = heavier smooth, less jitter. Higher = more responsive."),
-            slider_width=160,
-            parent=self.trackingGroup
-        )
-
-        self.boxEmaAlphaYCard = SliderLabelCard(
-            FluentIcon.UP,
-            t("box_ema_alpha_y", "Box EMA Alpha Y"),
-            10, 100,
-            format_func=lambda v: f"{v / 100:.2f}",
-            description=t("box_ema_alpha_y_desc", "Y-axis smoothing. Lower = heavier smooth."),
-            slider_width=160,
-            parent=self.trackingGroup
-        )
-
-        self.emaEnableCard = SwitchSettingCard(
-            FluentIcon.SPEED_MEDIUM,
-            t("ema_enabled", "EMA Smoothing"),
-            t("ema_desc", "Exponential moving average on aim-point coordinates before PID. Reduces jitter."),
-            parent=self.trackingGroup
-        )
-
-        self.emaAlphaCard = SliderLabelCard(
-            FluentIcon.MIX_VOLUMES,
-            t("ema_alpha", "EMA Alpha"),
-            30, 100,
-            format_func=lambda v: f"{v / 100:.2f}",
-            description=t("ema_alpha_desc", "1.0 = raw (no smoothing), 0.30 = heavy smoothing"),
-            slider_width=160,
-            parent=self.trackingGroup
-        )
 
         self.predictionEnableCard = SwitchSettingCard(
             FluentIcon.RINGER,
@@ -785,7 +837,7 @@ class AimPage(BasePage):
         self.kalmanEnableCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("kalman_enabled_label", "Kalman Filter"),
-            t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing. Mutually exclusive with EMA."),
+            t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing."),
             parent=self.trackingGroup
         )
 
@@ -962,6 +1014,7 @@ class AimPage(BasePage):
 
         self.pidGroup.vBoxLayout.addWidget(pivotWidget)
         self.pidGroup.vBoxLayout.addWidget(self.pidStackedWidget)
+        self.pidGroup.addSettingCard(self.maxMovePerFrameCard)
         self.addContent(self.pidGroup)
 
         # Y-Axis Recoil Suppression (separate group so X tab has no height gap)
@@ -983,17 +1036,22 @@ class AimPage(BasePage):
         self.antiRecoilGroup.addSettingCard(self.jitterSpeedCard)
         self.addContent(self.antiRecoilGroup)
 
+        # Humanization
+        self.humanizationGroup.addSettingCard(self.humanizationEnableCard)
+        self.humanizationGroup.addSettingCard(self.humanizationIntensityCard)
+        self.humanizationGroup.addSettingCard(self.humanizationMicroJitterCard)
+        self.humanizationGroup.addSettingCard(self.humanizationMotionVariationCard)
+        self.humanizationGroup.addSettingCard(self.humanizationSpeedShapingCard)
+        self.humanizationGroup.addSettingCard(self.humanizationMicroStutterCard)
+        self.humanizationGroup.addSettingCard(self.humanizationReactionVariabilityCard)
+        self.addContent(self.humanizationGroup)
+
         # Target Priority
         self.targetPriorityGroup.addSettingCard(self.targetPriorityModeCard)
         self.targetPriorityGroup.addSettingCard(self.targetPriorityWeightCard)
         self.addContent(self.targetPriorityGroup)
 
         # Target Tracking
-        self.trackingGroup.addSettingCard(self.boxEmaEnableCard)
-        self.trackingGroup.addSettingCard(self.boxEmaAlphaXCard)
-        self.trackingGroup.addSettingCard(self.boxEmaAlphaYCard)
-        self.trackingGroup.addSettingCard(self.emaEnableCard)
-        self.trackingGroup.addSettingCard(self.emaAlphaCard)
         self.trackingGroup.addSettingCard(self.predictionEnableCard)
         self.trackingGroup.addSettingCard(self.predictionHorizonCard)
         self.trackingGroup.addSettingCard(self.predictionMaxVelCard)
@@ -1050,6 +1108,8 @@ class AimPage(BasePage):
         self.pidPyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kp_y', v))
         self.pidIyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_ki_y', v))
         self.pidDyCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kd_y', v))
+        self.maxMovePerFrameCard.valueChanged.connect(
+            lambda v: setattr(self._config, 'max_move_per_frame_px', float(v)) if self._config else None)
         self.pidYReduceEnableCard.checkedChanged.connect(lambda checked: self._onPidChanged('aim_y_reduce_enabled', checked, is_bool=True))
         self.pidYReduceDelayCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_delay', v))
         self.pidYReduceFloorCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_floor', v))
@@ -1068,16 +1128,20 @@ class AimPage(BasePage):
         self.jitterPatternCombo.currentIndexChanged.connect(self._onJitterPatternChanged)
         self.jitterSpeedSegment.currentItemChanged.connect(self._onJitterSpeedChanged)
 
+        # Humanization
+        self.humanizationEnableCard.checkedChanged.connect(self._onHumanizationEnableChanged)
+        self.humanizationIntensityCard.valueChanged.connect(self._onHumanizationIntensityChanged)
+        self.humanizationMicroJitterCard.checkedChanged.connect(self._onHumanizationMicroJitterChanged)
+        self.humanizationMotionVariationCard.checkedChanged.connect(self._onHumanizationMotionVariationChanged)
+        self.humanizationSpeedShapingCard.checkedChanged.connect(self._onHumanizationSpeedShapingChanged)
+        self.humanizationMicroStutterCard.checkedChanged.connect(self._onHumanizationMicroStutterChanged)
+        self.humanizationReactionVariabilityCard.checkedChanged.connect(self._onHumanizationReactionVariabilityChanged)
+
         # Target Priority
         self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
         self.targetPriorityWeightCard.valueChanged.connect(self._onTargetPriorityWeightChanged)
 
         # Target Tracking
-        self.boxEmaEnableCard.checkedChanged.connect(self._onBoxEmaEnableChanged)
-        self.boxEmaAlphaXCard.valueChanged.connect(self._onBoxEmaAlphaXChanged)
-        self.boxEmaAlphaYCard.valueChanged.connect(self._onBoxEmaAlphaYChanged)
-        self.emaEnableCard.checkedChanged.connect(self._onEmaEnableChanged)
-        self.emaAlphaCard.valueChanged.connect(self._onEmaAlphaChanged)
         self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
         self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
         self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
@@ -1148,6 +1212,7 @@ class AimPage(BasePage):
             self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * 200)))
             self.pidIyCard.setValue(int(self._config.pid_ki_y * 100))
             self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
+            self.maxMovePerFrameCard.setValue(min(500, max(0, int(getattr(self._config, 'max_move_per_frame_px', 85.0)))))
             self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
             self.pidYReduceDelayCard.setValue(int(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100))
             self.pidYReduceFloorCard.setValue(int(getattr(self._config, 'aim_y_reduce_floor', 0.0) * 100))
@@ -1183,6 +1248,23 @@ class AimPage(BasePage):
             self.jitterPatternCard.setEnabled(sj_on)
             self.jitterSpeedCard.setEnabled(sj_on)
 
+            # Humanization
+            hcfg = getattr(self._config, 'humanization', None)
+            h_on = bool(getattr(hcfg, 'enabled', False))
+            self.humanizationEnableCard.setChecked(h_on)
+            self.humanizationIntensityCard.setValue(int(getattr(hcfg, 'intensity', 0.5) * 100))
+            self.humanizationMicroJitterCard.setChecked(bool(getattr(hcfg, 'micro_jitter_enabled', True)))
+            self.humanizationMotionVariationCard.setChecked(bool(getattr(hcfg, 'motion_variation_enabled', True)))
+            self.humanizationSpeedShapingCard.setChecked(bool(getattr(hcfg, 'speed_shaping_enabled', True)))
+            self.humanizationMicroStutterCard.setChecked(bool(getattr(hcfg, 'micro_stutter_enabled', False)))
+            self.humanizationReactionVariabilityCard.setChecked(bool(getattr(hcfg, 'reaction_variability_enabled', False)))
+            self.humanizationIntensityCard.setEnabled(h_on)
+            self.humanizationMicroJitterCard.setEnabled(h_on)
+            self.humanizationMotionVariationCard.setEnabled(h_on)
+            self.humanizationSpeedShapingCard.setEnabled(h_on)
+            self.humanizationMicroStutterCard.setEnabled(h_on)
+            self.humanizationReactionVariabilityCard.setEnabled(h_on)
+
             # Target Priority
             mode_map = {"distance": "Distance", "confidence": "Confidence", "composite": "Composite"}
             mode_text = mode_map.get(str(getattr(self._config, 'target_priority_mode', 'distance')), "Distance")
@@ -1190,14 +1272,6 @@ class AimPage(BasePage):
             self.targetPriorityWeightCard.setValue(int(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100))
 
             # Target Tracking
-            box_ema_on = bool(getattr(self._config, 'box_ema_enabled', True))
-            self.boxEmaEnableCard.setChecked(box_ema_on)
-            self.boxEmaAlphaXCard.setValue(int(getattr(self._config, 'box_ema_alpha_x', 0.55) * 100))
-            self.boxEmaAlphaYCard.setValue(int(getattr(self._config, 'box_ema_alpha_y', 0.45) * 100))
-            self.boxEmaAlphaXCard.setEnabled(box_ema_on)
-            self.boxEmaAlphaYCard.setEnabled(box_ema_on)
-            self.emaEnableCard.setChecked(bool(getattr(self._config, 'ema_enabled', False)))
-            self.emaAlphaCard.setValue(int(getattr(self._config, 'ema_alpha', 0.7) * 100))
             self.predictionEnableCard.setChecked(bool(getattr(self._config, 'prediction_enabled', False)))
             self.predictionHorizonCard.setValue(int(getattr(self._config, 'prediction_horizon_ms', 10.0)))
             self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
@@ -1212,12 +1286,6 @@ class AimPage(BasePage):
             self.kalmanMeasNoiseCard.setValue(int(getattr(self._config, 'kalman_measurement_noise', 0.1) * 100))
             self.kalmanProcessNoiseCard.setEnabled(kalman_on)
             self.kalmanMeasNoiseCard.setEnabled(kalman_on)
-            self.emaEnableCard.setEnabled(not kalman_on)
-            self.emaAlphaCard.setEnabled(not kalman_on and bool(getattr(self._config, 'ema_enabled', False)))
-            if kalman_on:
-                self.emaEnableCard.setChecked(False)
-                if self._config:
-                    self._config.ema_enabled = False
 
             cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
             self.camMotionCompCard.setChecked(cmc_on)
@@ -1313,18 +1381,29 @@ class AimPage(BasePage):
     def _updateTargetAreaVisibility(self, aim_part):
         is_smart = aim_part == "center"
         is_custom = aim_part == "custom"
+        is_head_or_body = aim_part in ("head", "body")
         uses_custom_y = is_smart or is_custom
         if is_smart:
             suffix = t("aim_smart_mode_note", " — Smart + Custom Y")
         elif is_custom:
             suffix = t("aim_custom_mode_note", " — Custom Y mode")
         else:
-            suffix = t("aim_smart_mode_only", " — Smart mode only")
+            suffix = t("aim_head_body_mode_note", " — Head/Body mode")
         self.targetAreaGroup.titleLabel.setText(t("target_area_settings") + suffix)
-        for card in [self.headWidthCard, self.headHeightCard, self.bodyWidthCard,
-                     self.adaptiveRatioCard, self.adaptiveRatioRefHCard,
-                     self.postureAwareCard, self.crouchAspectCard]:
-            card.setEnabled(is_smart)
+        # head_height_ratio and the adaptive-ratio scale it feeds are only
+        # consumed by calculate_aim_target()'s Head/Body branches — Smart and
+        # Custom modes use aim_custom_y_pct instead, so these do nothing there.
+        for card in [self.headHeightCard, self.adaptiveRatioCard, self.adaptiveRatioRefHCard]:
+            card.setEnabled(is_head_or_body)
+        # head_width_ratio/body_width_ratio are consumed only by auto_fire.py's
+        # hit-zone geometry, entirely independent of aim_part — always tunable.
+        self.headWidthCard.setEnabled(True)
+        self.bodyWidthCard.setEnabled(True)
+        # Posture-aware's crouch check runs before the aim_part switch inside
+        # calculate_aim_target() and applies to every mode, not just Smart —
+        # always tunable so it can't get silently stuck on/off from another tab.
+        self.postureAwareCard.setEnabled(True)
+        self.crouchAspectCard.setEnabled(True)
         self.customYCard.setEnabled(uses_custom_y)
         head_h = self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20
         head_w = self.headWidthCard.value() if hasattr(self.headWidthCard, 'value') else 38
@@ -1367,21 +1446,37 @@ class AimPage(BasePage):
 
     def _onArduinoConnectToggle(self):
         try:
-            from win_utils import is_arduino_connected, connect_arduino, disconnect_arduino
+            from win_utils import is_arduino_connected, disconnect_arduino
             if is_arduino_connected():
                 disconnect_arduino()
+                self._updateArduinoConnectionStatus()
             else:
                 com_port = self.comPortCombo.currentText()
                 if not com_port or com_port == t("no_com_port"):
                     QMessageBox.warning(self, t("config_error"), t("no_com_port"))
                     return
-                success = connect_arduino(com_port)
-                if not success:
-                    QMessageBox.warning(self, t("config_error"),
-                                        f"Arduino {t('disconnected')}: {com_port}")
-            self._updateArduinoConnectionStatus()
+                self._startArduinoConnect(com_port)
         except ImportError:
             QMessageBox.warning(self, t("config_error"), "pyserial not installed.\npip install pyserial")
+
+    def _startArduinoConnect(self, com_port: str) -> None:
+        """Run connect_arduino() on a background thread instead of blocking
+        the GUI thread for its 2s post-connect wait (Leonardo auto-restart)."""
+        if self._arduinoConnectWorker is not None and self._arduinoConnectWorker.isRunning():
+            return  # a connect attempt is already in flight
+        self.arduinoConnectBtn.setEnabled(False)
+        self.connectionLabel.setText(t("connecting", "Connecting..."))
+        self._arduinoConnectWorker = _ArduinoConnectWorker(com_port, parent=self)
+        self._arduinoConnectWorker.finishedResult.connect(
+            lambda ok, port=com_port: self._onArduinoConnectFinished(ok, port))
+        self._arduinoConnectWorker.start()
+
+    def _onArduinoConnectFinished(self, ok: bool, com_port: str) -> None:
+        self.arduinoConnectBtn.setEnabled(True)
+        if not ok:
+            QMessageBox.warning(self, t("config_error"),
+                                f"Arduino {t('disconnected')}: {com_port}")
+        self._updateArduinoConnectionStatus()
 
     def _updateArduinoConnectionStatus(self):
         try:
@@ -1673,6 +1768,43 @@ class AimPage(BasePage):
         self.jitterPatternCombo.setCurrentIndex(max(0, _idx))
         self.jitterPatternCombo.blockSignals(False)
 
+    # === Humanization Callbacks ===
+
+    def _onHumanizationEnableChanged(self, checked):
+        h_on = bool(checked)
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.enabled = h_on
+        self.humanizationIntensityCard.setEnabled(h_on)
+        self.humanizationMicroJitterCard.setEnabled(h_on)
+        self.humanizationMotionVariationCard.setEnabled(h_on)
+        self.humanizationSpeedShapingCard.setEnabled(h_on)
+        self.humanizationMicroStutterCard.setEnabled(h_on)
+        self.humanizationReactionVariabilityCard.setEnabled(h_on)
+
+    def _onHumanizationIntensityChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.intensity = value / 100.0
+
+    def _onHumanizationMicroJitterChanged(self, checked):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.micro_jitter_enabled = bool(checked)
+
+    def _onHumanizationMotionVariationChanged(self, checked):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.motion_variation_enabled = bool(checked)
+
+    def _onHumanizationSpeedShapingChanged(self, checked):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.speed_shaping_enabled = bool(checked)
+
+    def _onHumanizationMicroStutterChanged(self, checked):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.micro_stutter_enabled = bool(checked)
+
+    def _onHumanizationReactionVariabilityChanged(self, checked):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.reaction_variability_enabled = bool(checked)
+
     # === Target Priority Callbacks ===
 
     def _onTargetPriorityModeChanged(self, text):
@@ -1684,36 +1816,6 @@ class AimPage(BasePage):
             self._config.target_priority_confidence_weight = value / 100.0
 
     # === Target Tracking Callbacks ===
-
-    def _onBoxEmaEnableChanged(self, checked):
-        if self._config:
-            self._config.box_ema_enabled = bool(checked)
-        self.boxEmaAlphaXCard.setEnabled(bool(checked))
-        self.boxEmaAlphaYCard.setEnabled(bool(checked))
-
-    def _onBoxEmaAlphaXChanged(self, value):
-        if self._config:
-            self._config.box_ema_alpha_x = value / 100.0
-
-    def _onBoxEmaAlphaYChanged(self, value):
-        if self._config:
-            self._config.box_ema_alpha_y = value / 100.0
-
-    def _onEmaEnableChanged(self, checked):
-        if self._config:
-            self._config.ema_enabled = bool(checked)
-        self.kalmanEnableCard.setEnabled(not checked)
-        if checked:
-            self.kalmanEnableCard.setChecked(False)
-            if self._config:
-                self._config.kalman_enabled = False
-            self.kalmanProcessNoiseCard.setEnabled(False)
-            self.kalmanMeasNoiseCard.setEnabled(False)
-        self.emaAlphaCard.setEnabled(bool(checked))
-
-    def _onEmaAlphaChanged(self, value):
-        if self._config:
-            self._config.ema_alpha = value / 100.0
 
     def _onPredictionEnableChanged(self, checked):
         if self._config:
@@ -1746,12 +1848,6 @@ class AimPage(BasePage):
     def _onKalmanEnableChanged(self, checked):
         if self._config:
             self._config.kalman_enabled = bool(checked)
-        self.emaEnableCard.setEnabled(not checked)
-        if checked:
-            self.emaEnableCard.setChecked(False)
-            if self._config:
-                self._config.ema_enabled = False
-            self.emaAlphaCard.setEnabled(False)
         self.kalmanProcessNoiseCard.setEnabled(bool(checked))
         self.kalmanMeasNoiseCard.setEnabled(bool(checked))
 
@@ -1860,6 +1956,7 @@ class AimPage(BasePage):
         self.pidPyCard.titleLabel.setText(t("reaction_speed_p"))
         self.pidIyCard.titleLabel.setText(t("error_correction_i"))
         self.pidDyCard.titleLabel.setText(t("stability_suppression_d"))
+        self.maxMovePerFrameCard.titleLabel.setText("Max Move Per Frame")
         self.yReduceGroup.titleLabel.setText("Y-Axis Recoil Suppression")
         self.pidYReduceEnableCard.titleLabel.setText(t("aim_y_reduce_enable"))
         self.pidYReduceDelayCard.titleLabel.setText(t("aim_y_reduce_delay"))
@@ -1871,7 +1968,7 @@ class AimPage(BasePage):
         self.antiRecoilGroup.titleLabel.setText(t("anti_recoil", "Anti-Recoil"))
         self.smartJitterEnableCard.titleLabel.setText(t("smart_jitter_label", "Smart Jitter"))
         self.smartJitterEnableCard.contentLabel.setText(t("smart_jitter_desc", "Add jitter when target box is small (far targets). Fires while shooting."))
-        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Shooting (LMB Held)"))
+        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Aiming"))
         self.smartJitterLmbCard.contentLabel.setText(t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"))
         self.smartJitterLevelCard.titleLabel.setText(t("smart_jitter_level_label", "Jitter Strength"))
         self.smartJitterLevelCard.contentLabel.setText(t("smart_jitter_level_desc", "Max pixel offset radius applied per frame while jitter fires"))
@@ -1880,8 +1977,24 @@ class AimPage(BasePage):
         self.jitterRecordCard.titleLabel.setText(t("jitter_record_label", "Record Jitter"))
         self.jitterRecordCard.contentLabel.setText(t("jitter_record_desc", "Record your mouse shake to create a custom jitter pattern"))
         self.jitterPatternCard.titleLabel.setText(t("jitter_pattern_label", "Recorded Pattern"))
-        self.jitterPatternCard.contentLabel.setText(t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on)"))
+        self.jitterPatternCard.contentLabel.setText(t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on). Only the recorded motion's shape is replayed — playback speed follows the detection loop's own tick rate, not the recording's original timing; use the speed multiplier below to tune the feel."))
         self.jitterSpeedCard.titleLabel.setText(t("jitter_speed_label", "Playback Speed"))
+
+        self.humanizationGroup.titleLabel.setText(t("humanization", "Humanization"))
+        self.humanizationEnableCard.titleLabel.setText(t("humanization_enabled", "Humanization"))
+        self.humanizationEnableCard.contentLabel.setText(t("humanization_desc", "Perturb the final mouse output to look less robotic. Operates only on dx/dy — never touches detection or PID state."))
+        self.humanizationIntensityCard.titleLabel.setText(t("humanization_intensity", "Intensity"))
+        self.humanizationIntensityCard.contentLabel.setText(t("humanization_intensity_desc", "0% = robotic precision, 100% = fully human-like. Scales every effect below."))
+        self.humanizationMicroJitterCard.titleLabel.setText(t("humanization_micro_jitter", "Micro-Jitter"))
+        self.humanizationMicroJitterCard.contentLabel.setText(t("humanization_micro_jitter_desc", "Small zero-mean noise added to every move, scaled by movement size."))
+        self.humanizationMotionVariationCard.titleLabel.setText(t("humanization_motion_variation", "Motion Variation"))
+        self.humanizationMotionVariationCard.contentLabel.setText(t("humanization_motion_variation_desc", "Randomize output scale slightly each frame (mean-preserving, no drift)."))
+        self.humanizationSpeedShapingCard.titleLabel.setText(t("humanization_speed_shaping", "Speed Shaping"))
+        self.humanizationSpeedShapingCard.contentLabel.setText(t("humanization_speed_shaping_desc", "Compress small corrections and pass through large movements unmodified, like human fine-motor control."))
+        self.humanizationMicroStutterCard.titleLabel.setText(t("humanization_micro_stutter", "Micro-Stutter"))
+        self.humanizationMicroStutterCard.contentLabel.setText(t("humanization_micro_stutter_desc", "Occasional brief magnitude reduction, modeling muscle hesitation before committing to a move."))
+        self.humanizationReactionVariabilityCard.titleLabel.setText(t("humanization_reaction_variability", "Reaction Variability"))
+        self.humanizationReactionVariabilityCard.contentLabel.setText(t("humanization_reaction_variability_desc", "Occasionally skip a frame's mouse injection to simulate human micro-hesitation. Adds real per-frame latency — off by default."))
 
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
         self.targetPriorityModeCard.titleLabel.setText(t("target_priority_mode", "Priority Mode"))
@@ -1890,16 +2003,6 @@ class AimPage(BasePage):
         self.targetPriorityWeightCard.contentLabel.setText(t("target_priority_weight_desc", "Used in Composite mode only"))
 
         self.trackingGroup.titleLabel.setText(t("target_tracking", "Target Tracking"))
-        self.boxEmaEnableCard.titleLabel.setText(t("box_ema_enabled", "Box EMA"))
-        self.boxEmaEnableCard.contentLabel.setText(t("box_ema_desc", "Smooth raw detection box coordinates before aim calculation. Reduces jitter at high Kp."))
-        self.boxEmaAlphaXCard.titleLabel.setText(t("box_ema_alpha_x", "Box EMA Alpha X"))
-        self.boxEmaAlphaXCard.contentLabel.setText(t("box_ema_alpha_x_desc", "X-axis smoothing. Lower = heavier smooth, less jitter. Higher = more responsive."))
-        self.boxEmaAlphaYCard.titleLabel.setText(t("box_ema_alpha_y", "Box EMA Alpha Y"))
-        self.boxEmaAlphaYCard.contentLabel.setText(t("box_ema_alpha_y_desc", "Y-axis smoothing. Lower = heavier smooth."))
-        self.emaEnableCard.titleLabel.setText(t("ema_enabled", "EMA Smoothing"))
-        self.emaEnableCard.contentLabel.setText(t("ema_desc", "Exponential moving average on aim-point coordinates before PID. Reduces jitter."))
-        self.emaAlphaCard.titleLabel.setText(t("ema_alpha", "EMA Alpha"))
-        self.emaAlphaCard.contentLabel.setText(t("ema_alpha_desc", "1.0 = raw (no smoothing), 0.30 = heavy smoothing"))
         self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
         self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
         self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))
@@ -1913,7 +2016,7 @@ class AimPage(BasePage):
         self.lockIouCard.titleLabel.setText(t("lock_iou_threshold", "IoU Match Threshold"))
         self.lockIouCard.contentLabel.setText(t("lock_iou_desc", "Minimum overlap required to match the same target across frames"))
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
-        self.kalmanEnableCard.contentLabel.setText(t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing. Mutually exclusive with EMA."))
+        self.kalmanEnableCard.contentLabel.setText(t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing."))
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
         self.kalmanProcessNoiseCard.contentLabel.setText(t("kalman_noise_desc", "Lower = smoother but slower to react"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))

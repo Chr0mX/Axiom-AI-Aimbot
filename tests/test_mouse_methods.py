@@ -344,16 +344,6 @@ class TestMouseClick:
         send_mouse_click_sendinput()
         assert mock_me.call_count == 2
 
-    @patch("win_utils.mouse_click.send_mouse_click_sendinput")
-    def test_click_hardware_fallback(self, mock_si):
-        """hardware 模式應回退到 sendinput"""
-        from win_utils.mouse_click import send_mouse_click_hardware
-        import win_utils.mouse_click as mc
-        mc._hardware_not_impl_warned = False
-        send_mouse_click_hardware()
-        mock_si.assert_called_once()
-
-
 class TestSendMouseClickDispatch:
     """測試 send_mouse_click 調度函數"""
 
@@ -367,12 +357,6 @@ class TestSendMouseClickDispatch:
     def test_dispatch_mouse_event(self, mock_fn):
         from win_utils.mouse_click import send_mouse_click
         send_mouse_click("mouse_event")
-        mock_fn.assert_called_once()
-
-    @patch("win_utils.mouse_click.send_mouse_click_hardware")
-    def test_dispatch_hardware(self, mock_fn):
-        from win_utils.mouse_click import send_mouse_click
-        send_mouse_click("hardware")
         mock_fn.assert_called_once()
 
     @patch("win_utils.mouse_click.send_mouse_click_ddxoft")

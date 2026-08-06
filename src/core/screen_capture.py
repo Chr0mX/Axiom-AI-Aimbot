@@ -205,11 +205,7 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
     }
 
 
-# Fixed title for the UVC/NDI preview window (not user-configurable).
-_UVC_WINDOW_NAME = "Axiom UVC Preview"
-
-
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, str, str, int]:
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, bool, str, str, int]:
     crop_mode = str(getattr(config, 'uvc_crop_mode', 'dynamic')).lower()
     return (
         int(getattr(config, 'uvc_device_index', 0)),
@@ -217,9 +213,10 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
         int(getattr(config, 'uvc_height', 0)),
         int(getattr(config, 'uvc_fps', 0)),
         bool(getattr(config, 'uvc_show_window', False)),
-        str(getattr(config, 'uvc_capture_method', 'dshow')).lower(),
-        str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
+        str(getattr(config, 'uvc_capture_method', 'msmf')).lower(),
+        str(getattr(config, 'uvc_dshow_backend', 'v1')).lower(),
         str(getattr(config, 'uvc_video_format', 'mjpeg')).lower(),
+        bool(getattr(config, 'uvc_ffmpeg_enabled', False)),
         str(getattr(config, 'uvc_ffmpeg_path', '') or ''),
         crop_mode,
         # Only fixed-crop mode bakes detect_range_size into the frozen crop
@@ -242,11 +239,10 @@ def _udp_signature(config: Config) -> tuple[str, int, int, float, bool]:
     )
 
 
-def _ndi_signature(config: Config) -> tuple[str, bool, str, str, bool]:
+def _ndi_signature(config: Config) -> tuple[str, bool, str, bool]:
     return (
         str(getattr(config, 'ndi_source_name', '')).strip(),
         bool(getattr(config, 'uvc_show_window', False)),
-        str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
         str(getattr(config, 'ndi_bandwidth', 'highest')).lower(),
         bool(getattr(config, 'ndi_force_reconnect', False)),
     )
@@ -307,81 +303,6 @@ def _find_ndi_source_by_name(finder: Any, target_name: str) -> Any | None:
         pass
 
     return None
-
-
-def list_available_ndi_sources() -> list[str]:
-    """Return discovered NDI source names via cyndilib when available."""
-
-    try:
-        from cyndilib.finder import Finder  # type: ignore[import-not-found]
-    except ImportError:
-        return []
-
-    def _normalize(names: list[Any]) -> list[str]:
-        result: list[str] = []
-        for entry in names:
-            name = _extract_ndi_source_name(entry)
-            if name and name not in result:
-                result.append(name)
-        return result
-
-    try:
-        with Finder() as finder:
-            if not getattr(finder, "is_open", False):
-                finder.open()
-            names = _normalize(finder.get_source_names())
-            if names:
-                return names
-
-            # Discovery can take a few seconds on some networks.
-            for _ in range(6):
-                try:
-                    changed = finder.wait_for_sources(0.5)
-                except TypeError:
-                    changed = finder.wait_for_sources(timeout=0.5)
-                if changed:
-                    finder.update_sources()
-                    names = _normalize(finder.get_source_names())
-                    if names:
-                        return names
-            return _normalize(finder.get_source_names())
-    except Exception:
-        return []
-
-
-def _format_ndi_source_label(name: str, width: int | None, height: int | None, fps: float | None) -> str:
-    _ = (width, height, fps)
-    return name
-
-
-def _extract_ndi_source_video_meta(source: Any) -> tuple[int | None, int | None, float | None]:
-    """Best-effort metadata extraction from cyndilib source objects."""
-
-    width = height = None
-    fps = None
-
-    for key in ('width', 'xres', 'video_width', 'frame_width'):
-        value = getattr(source, key, None)
-        if isinstance(value, (int, float)) and int(value) > 0:
-            width = int(value)
-            break
-    for key in ('height', 'yres', 'video_height', 'frame_height'):
-        value = getattr(source, key, None)
-        if isinstance(value, (int, float)) and int(value) > 0:
-            height = int(value)
-            break
-    for key in ('frame_rate', 'framerate', 'fps', 'video_fps'):
-        value = getattr(source, key, None)
-        if isinstance(value, (int, float)) and float(value) > 0:
-            fps = float(value)
-            break
-    if fps is None:
-        num = getattr(source, 'frame_rate_N', None)
-        den = getattr(source, 'frame_rate_D', None)
-        if isinstance(num, (int, float)) and isinstance(den, (int, float)) and float(den) > 0:
-            fps = float(num) / float(den)
-
-    return width, height, fps
 
 
 def _draw_detection_overlay(
@@ -525,55 +446,6 @@ def _draw_detection_overlay(
     return frame
 
 
-def _render_preview_frame(window_name: str, mode: str, frame_bgr: np.ndarray) -> np.ndarray:
-    """Render capture preview according to configured preview mode."""
-
-    # Lowest-latency mode: avoid any resize/canvas composition work.
-    if mode == 'low_latency':
-        return frame_bgr
-
-    if mode == 'scale_to_canvas':
-        try:
-            _, _, width, height = cv2.getWindowImageRect(window_name)
-            if width > 0 and height > 0:
-                return cv2.resize(frame_bgr, (width, height), interpolation=cv2.INTER_NEAREST)
-        except Exception:
-            return frame_bgr
-    if mode == 'fit_to_screen':
-        try:
-            screen_w, screen_h = 1920, 1080
-            max_w = max(320, int(screen_w * 0.9))
-            max_h = max(240, int(screen_h * 0.9))
-            h, w = frame_bgr.shape[:2]
-            ratio = min(max_w / max(1, w), max_h / max(1, h))
-            target_w = max(1, int(w * ratio))
-            target_h = max(1, int(h * ratio))
-            cv2.resizeWindow(window_name, target_w, target_h)
-        except Exception:
-            pass
-        return frame_bgr
-
-    # default: scale_to_fit
-    try:
-        _, _, width, height = cv2.getWindowImageRect(window_name)
-        if width <= 0 or height <= 0:
-            return frame_bgr
-        h, w = frame_bgr.shape[:2]
-        ratio = min(width / max(1, w), height / max(1, h))
-        draw_w = max(1, int(w * ratio))
-        draw_h = max(1, int(h * ratio))
-        resized = cv2.resize(frame_bgr, (draw_w, draw_h), interpolation=cv2.INTER_NEAREST)
-        channels = 1 if frame_bgr.ndim < 3 else frame_bgr.shape[2]
-        canvas_shape = (height, width) if channels == 1 else (height, width, channels)
-        canvas = np.zeros(canvas_shape, dtype=np.uint8)
-        x = (width - draw_w) // 2
-        y = (height - draw_h) // 2
-        canvas[y:y + draw_h, x:x + draw_w] = resized
-        return canvas
-    except Exception:
-        return frame_bgr
-
-
 def list_available_ndi_source_details() -> list[dict[str, str | int | float | None]]:
     """Return discovered NDI sources without querying stream resolution/FPS."""
 
@@ -606,17 +478,13 @@ def list_available_ndi_source_details() -> list[dict[str, str | int | float | No
                 return []
 
             for name in names:
-                width: int | None = None
-                height: int | None = None
-                fps: float | None = None
-
                 details.append(
                     {
                         'name': name,
-                        'width': width,
-                        'height': height,
-                        'fps': fps,
-                        'label': _format_ndi_source_label(name, width, height, fps),
+                        'width': None,
+                        'height': None,
+                        'fps': None,
+                        'label': name,
                     }
                 )
     except Exception:
@@ -638,10 +506,6 @@ class NDICapture:
         # The GUI exposes a single shared "Capture Preview Window" toggle that
         # writes uvc_show_window for both UVC and NDI backends.
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
-        self.window_name = str(getattr(config, 'ndi_window_name', 'Axiom NDI Preview'))
-        # NDI preview prioritizes minimal display latency by default.
-        ndi_preview_scale_mode = str(getattr(config, 'ndi_preview_scale_mode', '')).lower().strip()
-        self.preview_scale_mode = ndi_preview_scale_mode or 'low_latency'
         self._finder: Any | None = None
         self._source_assigned = False
         self._reconnect_logged = False
@@ -747,6 +611,11 @@ class NDICapture:
             raise RuntimeError('Failed to connect to NDI source via cyndilib')
         logger.info('[Capture][NDI] Receiver connected and video stream is ready.')
         self._last_frame_time: float = time.perf_counter()
+        # Alias read by _capture_backend_is_stale()'s external staleness
+        # fallback (kept a separate attribute from _last_frame_time, which
+        # grab()'s own internal reconnect check reads, so the two call sites
+        # stay decoupled even though they're updated together below).
+        self._last_frame_perf_time: float = self._last_frame_time
 
         # Shared refs for the preview thread — grab() writes, thread reads
         self._ndi_frame_lock: threading.Lock = threading.Lock()
@@ -767,18 +636,13 @@ class NDICapture:
         self._ndi_preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
             self._ndi_preview_thread = _UVCPreviewThread(
-                window_name=self.window_name,
-                scale_mode=self.preview_scale_mode,
                 frame_lock=self._ndi_frame_lock,
                 frame_ref=self._ndi_frame_ref,
                 stop_event=self._ndi_stop,
                 draw_overlay_fn=self._draw_overlay,
                 region_ref=self._ndi_region_ref,
                 target_fps=60,
-                preview_width=self.preview_width or 1920,
-                preview_height=self.preview_height or 1080,
                 config=self.config,
-                show_cv2_window=False,  # Qt panel is the primary display; cv2 window suppressed
             )
             self._ndi_preview_thread.start()
 
@@ -1004,8 +868,18 @@ class NDICapture:
                     return None
 
                 if recv_fourcc == 'uyvy':
-                    left  = left  & ~1
-                    right = (right + 1) & ~1
+                    # UYVY macropixels are 2px wide, so the crop must stay
+                    # even-aligned on both edges. Round right up to even *then*
+                    # re-clamp to an even-rounded frame_w (not the original,
+                    # possibly-odd frame_w) — otherwise an odd frame_w could
+                    # let the rounded-up right edge exceed the raw buffer's
+                    # actual width, producing a slice narrower than
+                    # expected_shape and a shape-mismatch crash in cvtColor.
+                    max_w = frame_w & ~1
+                    left  = left & ~1
+                    right = min(max_w, (right + 1) & ~1)
+                    if right <= left:
+                        return None
                     crop_raw = raw[top:bottom, left:right, :]
                     expected_shape = (bottom - top, right - left, 4)
                     idx = self._bgra_idx
@@ -1032,9 +906,11 @@ class NDICapture:
 
         if frame.ndim == 3 and frame.shape[2] == 4:
             self._last_frame_time = now
+            self._last_frame_perf_time = now
             return frame
         if frame.ndim == 3 and frame.shape[2] == 3:
             self._last_frame_time = now
+            self._last_frame_perf_time = now
             return cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
         return None
 
@@ -1176,7 +1052,7 @@ def _list_pygrabber_device_formats(device_index: int) -> list[dict]:
 
 def list_supported_uvc_resolutions(
     device_index: int,
-    capture_method: str = 'dshow',
+    capture_method: str = 'msmf',
 ) -> list[tuple[int, int]]:
     """Return the device's actual supported resolutions.
 
@@ -1241,7 +1117,7 @@ def list_supported_uvc_fps(
     device_index: int,
     width: int,
     height: int,
-    capture_method: str = 'dshow',
+    capture_method: str = 'msmf',
 ) -> list[int]:
     """Return the device's actual supported FPS values at a given resolution.
 
@@ -1316,23 +1192,6 @@ def list_supported_uvc_fps(
     return supported or [30, 60]
 
 
-def _set_window_topmost(window_name: str, topmost: bool) -> None:
-    """Set an OpenCV window always-on-top via Win32 SetWindowPos."""
-    try:
-        import ctypes
-        hwnd = ctypes.windll.user32.FindWindowW(None, window_name)
-        if hwnd:
-            HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
-            SWP_NOMOVE, SWP_NOSIZE = 0x0002, 0x0001
-            ctypes.windll.user32.SetWindowPos(
-                hwnd,
-                HWND_TOPMOST if topmost else HWND_NOTOPMOST,
-                0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE,
-            )
-    except Exception:
-        pass
-
-
 class _UVCPreviewThread(threading.Thread):
     """Dedicated thread that refreshes the UVC preview window at a fixed rate.
 
@@ -1344,45 +1203,24 @@ class _UVCPreviewThread(threading.Thread):
 
     def __init__(
         self,
-        window_name: str,
-        scale_mode: str,
         frame_lock: threading.Lock,
         frame_ref: list,
         stop_event: threading.Event,
         draw_overlay_fn,
         region_ref: list,
         target_fps: int = 60,
-        preview_width: int = 1920,
-        preview_height: int = 1080,
         config=None,
-        show_cv2_window: bool = True,
     ) -> None:
         super().__init__(daemon=True, name='UVCPreview')
-        self._window_name    = window_name
-        self._scale_mode     = scale_mode
         self._lock           = frame_lock
         self._frame_ref      = frame_ref      # list[np.ndarray | None]
         self._stop           = stop_event
         self._draw_overlay   = draw_overlay_fn
         self._region_ref     = region_ref     # list[dict | None]
         self._interval       = 1.0 / max(1, target_fps)
-        self._preview_width  = preview_width
-        self._preview_height = preview_height
         self._config         = config
-        self._show_cv2       = show_cv2_window
 
     def run(self) -> None:
-        # cv2 GUI operations must stay on this thread.
-        if self._show_cv2:
-            try:
-                cv2.namedWindow(self._window_name, cv2.WINDOW_NORMAL)
-                cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
-            except Exception:
-                pass
-
-        _crop_active = False
-        _topmost_active: bool | None = None
-
         while not self._stop.is_set():
             t0 = time.perf_counter()
             with self._lock:
@@ -1391,56 +1229,15 @@ class _UVCPreviewThread(threading.Thread):
                 try:
                     region  = self._region_ref[0]
                     preview = self._draw_overlay(frame.copy(), region)
-                    # Share full overlay-rendered frame with the Qt preview panel
-                    # (before any crop so the panel can apply its own crop).
+                    # Share the overlay-rendered frame with the Qt preview
+                    # panel (before any crop so the panel can apply its own).
                     set_preview_frame(preview)
                     set_preview_region(region)
-
-                    if self._show_cv2:
-                        # Crop to detection region when requested so the user sees
-                        # exactly what the model infers on.
-                        crop = bool(region is not None and getattr(self._config, 'preview_crop_to_detection', False))
-                        if crop != _crop_active:
-                            _crop_active = crop
-                            try:
-                                if crop and region is not None:
-                                    rw = max(64, int(region.get('width', self._preview_width)))
-                                    rh = max(64, int(region.get('height', self._preview_height)))
-                                    cv2.resizeWindow(self._window_name, rw, rh)
-                                else:
-                                    cv2.resizeWindow(self._window_name, self._preview_width, self._preview_height)
-                            except Exception:
-                                pass
-
-                        if crop and region is not None:
-                            _l = max(0, int(region.get('left', 0)))
-                            _t = max(0, int(region.get('top', 0)))
-                            _w = max(1, int(region.get('width', preview.shape[1])))
-                            _h = max(1, int(region.get('height', preview.shape[0])))
-                            _r = min(preview.shape[1], _l + _w)
-                            _b = min(preview.shape[0], _t + _h)
-                            if _r > _l and _b > _t:
-                                preview = preview[_t:_b, _l:_r]
-
-                        rendered = _render_preview_frame(
-                            self._window_name, self._scale_mode, preview)
-                        cv2.imshow(self._window_name, rendered)
-                        cv2.waitKey(1)
-                        topmost = bool(getattr(self._config, 'uvc_always_on_top', True))
-                        if topmost != _topmost_active:
-                            _topmost_active = topmost
-                            _set_window_topmost(self._window_name, topmost)
                 except Exception:
                     pass
             remaining = self._interval - (time.perf_counter() - t0)
             if remaining > 0.001:
                 time.sleep(remaining)
-
-        if self._show_cv2:
-            try:
-                cv2.destroyWindow(self._window_name)
-            except Exception:
-                pass
 
 
 def list_uvc_device_names() -> list[str]:
@@ -1486,7 +1283,7 @@ def _resolve_dshow_device_name(config: Config, device_index: int) -> str:
 
 
 def _resolve_ffmpeg_path(config: Config) -> str:
-    """Locate an ffmpeg executable for the 'ffmpeg' capture method.
+    """Locate an ffmpeg executable for uvc_ffmpeg_enabled mode.
 
     Checked in order: an explicit ``uvc_ffmpeg_path`` override, a bundled
     copy at ``<project root>/ffmpeg/ffmpeg.exe`` (drop a build there,
@@ -1576,17 +1373,30 @@ class UVCCapture:
         fps = int(getattr(config, 'uvc_fps', 60))
         self._target_fps = fps  # requested rate, for _reader_worker's shortfall check
         self.show_window = bool(getattr(config, 'uvc_show_window', False))
-        self.window_name = _UVC_WINDOW_NAME
         self.config_signature = _uvc_signature(config)
 
-        capture_method = str(getattr(config, 'uvc_capture_method', 'dshow')).lower()
-        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
-        self.is_ffmpeg = (capture_method == 'ffmpeg')
+        capture_method = str(getattr(config, 'uvc_capture_method', 'msmf')).lower()
+        dshow_backend = str(getattr(config, 'uvc_dshow_backend', 'v1')).lower()
+        # FFmpeg and the native DLL are both DirectShow-only — 'ffmpeg' used
+        # to be its own top-level capture_method value, but ffmpeg has no
+        # MSMF demuxer on Windows, and the native DLL (v2) already owns the
+        # DirectShow graph directly, so routing v2 through an ffmpeg
+        # subprocess would defeat the point of it. Both are gated to
+        # dshow + v1 only — see uvc_ffmpeg_enabled's docstring in config.py.
+        self.is_native_dll = (capture_method == 'dshow' and dshow_backend == 'v2')
+        self.is_ffmpeg = (
+            capture_method == 'dshow' and dshow_backend == 'v1'
+            and bool(getattr(config, 'uvc_ffmpeg_enabled', False))
+        )
         # Only the cv2 (dshow/msmf) path below ever sets this — ffmpeg mode
         # does its own crop via -vf before Axiom ever sees a frame, so grab()
         # just uses whatever region get_capture_dimensions()'s fixed-mode
         # reporting already resolves to a no-op crop.
         self._fixed_region: dict[str, int] | None = None
+
+        if self.is_native_dll:
+            self._init_native_dll(device_index, width, height, fps)
+            return
 
         if self.is_ffmpeg:
             self._init_ffmpeg(device_index, width, height, fps)
@@ -1683,8 +1493,7 @@ class UVCCapture:
         # ~237 MB/s — beyond USB 2.0 bandwidth — so the driver silently
         # throttles to 5–15 fps with no error raised.
         actual_fourcc_int = int(self.cap.get(cv2.CAP_PROP_FOURCC))
-        self.is_mjpeg = (actual_fourcc_int == target_fourcc)  # kept for back-compat; means "requested format accepted"
-        self.is_expected_format = self.is_mjpeg
+        self.is_expected_format = (actual_fourcc_int == target_fourcc)
         if not self.is_expected_format:
             actual_str = ''.join(
                 chr((actual_fourcc_int >> i) & 0xFF) for i in [0, 8, 16, 24]
@@ -1757,26 +1566,124 @@ class UVCCapture:
         self._reader_thread.start()
 
         # --- Dedicated preview thread ---
-        # Renders the preview window (background + overlays) at camera FPS,
-        # fully decoupled from inference. namedWindow/imshow/destroyWindow all
-        # run on this thread so OpenCV's GUI-thread affinity requirement is met.
+        # Renders overlay-composited frames for the Qt preview panel at
+        # camera FPS, fully decoupled from inference.
         self._preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
             self._preview_thread = _UVCPreviewThread(
-                window_name=self.window_name,
-                scale_mode=self.preview_scale_mode,
                 frame_lock=self._latest_frame_lock,
                 frame_ref=self._latest_frame_ref,
                 stop_event=self._reader_stop,
                 draw_overlay_fn=self._draw_overlay,
                 region_ref=self._region_ref,
                 target_fps=self.preview_fps,
-                preview_width=self.preview_width,
-                preview_height=self.preview_height,
                 config=self.config,
-                show_cv2_window=False,  # Qt panel is the primary display; cv2 window suppressed
             )
             self._preview_thread.start()
+
+    def _init_native_dll(self, device_index: int, width: int, height: int, fps: int) -> None:
+        """Open a UVC device via the native DirectShow-Capture-DLL
+        (uvc_dshow_backend == 'v2') instead of cv2.VideoCapture.
+
+        Unlike cv2's generic DirectShow wrapper, this DLL owns the filter
+        graph and allocator directly — the whole point of it existing (see
+        the DirectShow Capture DLL roadmap / this file's Capture Pipeline
+        Audit artifact for the "why v2" writeup). NV12-only in this build —
+        reuses the exact same raw-NV12 crop-before-convert path in grab()
+        that the cv2 path's CAP_PROP_CONVERT_RGB optimization already uses,
+        since the frame shape this hands back is identical (2-D, luma+UV
+        rows stacked, one row = preview_width bytes).
+        """
+        from .dshow_capture_native import NativeDshowCapture
+
+        self.cap = None
+        try:
+            self._native = NativeDshowCapture(device_index, width, height, fps)
+            self._native.start()
+        except Exception as exc:
+            raise RuntimeError(f'Native DirectShow-Capture-DLL open failed: {exc}') from exc
+
+        self.preview_width = width
+        self.preview_height = height
+        self.preview_fps = max(1, fps)
+        self.config.source_nominal_fps = float(self.preview_fps)
+        self.config.uvc_actual_width = self.preview_width
+        self.config.uvc_actual_height = self.preview_height
+        self.config.uvc_actual_fps = float(self.preview_fps)
+        self.is_expected_format = True
+        self.is_raw_nv12 = True  # only pixel format this DLL build implements
+
+        logging.getLogger(__name__).info(
+            "[UVC][NativeDLL] Opened device index=%d via directshow_capture.dll "
+            "at %dx%d @ %d fps (requested — driver may negotiate differently, "
+            "reader thread updates preview_width/height per frame).",
+            device_index, width, height, fps,
+        )
+
+        self._latest_frame_lock = threading.Lock()
+        self._latest_frame_ref: list = [None]
+        self._region_ref: list = [None]
+        self._reader_stop = threading.Event()
+        self._last_frame_perf_time = time.perf_counter()
+        self._reader_thread = threading.Thread(
+            target=self._reader_worker_native_dll, name='UVCReaderNativeDLL', daemon=True
+        )
+        self._reader_thread.start()
+
+        self._preview_thread: _UVCPreviewThread | None = None
+        if self.show_window:
+            self._preview_thread = _UVCPreviewThread(
+                frame_lock=self._latest_frame_lock,
+                frame_ref=self._latest_frame_ref,
+                stop_event=self._reader_stop,
+                draw_overlay_fn=self._draw_overlay,
+                region_ref=self._region_ref,
+                target_fps=self.preview_fps,
+                config=self.config,
+            )
+            self._preview_thread.start()
+
+    def _reader_worker_native_dll(self) -> None:
+        _fps_count = 0
+        _fps_t0 = time.perf_counter()
+        _warned_broken_read = False
+        while not self._reader_stop.is_set():
+            try:
+                result = self._native.get_latest_frame()
+            except Exception as exc:
+                if not _warned_broken_read:
+                    _warned_broken_read = True
+                    logging.getLogger(__name__).error(
+                        "[UVC][NativeDLL] get_latest_frame() raised %s — "
+                        "retrying. If this persists, the DLL's ABI may not "
+                        "match this wrapper's inferred struct layout (see "
+                        "dshow_capture_native.py's module docstring).",
+                        exc,
+                    )
+                time.sleep(0.05)
+                continue
+
+            if result is None:
+                # No frame captured yet — expected for the first poll or two
+                # after start(), same as every other backend's grab()
+                # returning None rather than raising.
+                time.sleep(0.005)
+                continue
+
+            frame_nv12, w, h, _ts_qpc = result
+            with self._latest_frame_lock:
+                self._latest_frame_ref[0] = frame_nv12
+            self._last_frame_perf_time = time.perf_counter()
+            self.preview_width = w
+            self.preview_height = h
+
+            _fps_count += 1
+            _now = time.perf_counter()
+            _elapsed = _now - _fps_t0
+            if _elapsed >= 1.0:
+                self.config.source_nominal_fps = _fps_count / _elapsed
+                _fps_count = 0
+                _fps_t0 = _now
 
     def _init_ffmpeg(self, device_index: int, width: int, height: int, fps: int) -> None:
         """Open a UVC device via an external ffmpeg.exe subprocess instead of
@@ -1883,7 +1790,6 @@ class UVCCapture:
         self.config.uvc_actual_height = self.preview_height
         self.config.uvc_actual_fps = float(self.preview_fps)
         self.is_expected_format = True  # ffmpeg fails loudly rather than silently misnegotiating
-        self.is_mjpeg = self.is_expected_format  # kept for back-compat
         self.is_raw_nv12 = False  # ffmpeg always outputs plain bgr24, not raw NV12
 
         logging.getLogger(__name__).info(
@@ -1911,18 +1817,13 @@ class UVCCapture:
         self._preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
             self._preview_thread = _UVCPreviewThread(
-                window_name=self.window_name,
-                scale_mode=self.preview_scale_mode,
                 frame_lock=self._latest_frame_lock,
                 frame_ref=self._latest_frame_ref,
                 stop_event=self._reader_stop,
                 draw_overlay_fn=self._draw_overlay,
                 region_ref=self._region_ref,
                 target_fps=self.preview_fps,
-                preview_width=self.preview_width,
-                preview_height=self.preview_height,
                 config=self.config,
-                show_cv2_window=False,
             )
             self._preview_thread.start()
 
@@ -2137,27 +2038,48 @@ class UVCCapture:
             frame_bgr = cv2.cvtColor(frame_bgr, cv2.COLOR_YUV2BGR_NV12)
         return _draw_detection_overlay(frame_bgr, region, self.config, has_alpha=False)
 
-    def _render_preview_frame(self, frame_bgr: np.ndarray) -> np.ndarray:
-        return _render_preview_frame(self.window_name, self.preview_scale_mode, frame_bgr)
-
     def close(self) -> None:
         self._reader_stop.set()
+        is_native_dll = getattr(self, 'is_native_dll', False)
+        is_ffmpeg = getattr(self, 'is_ffmpeg', False)
+        proc = getattr(self, '_ffmpeg_proc', None) if is_ffmpeg else None
+        if is_ffmpeg and proc is not None:
+            # Kill the subprocess BEFORE joining the reader thread below.
+            # _reader_worker_ffmpeg is blocked in a synchronous read() on
+            # this process's stdout — setting _reader_stop alone can't
+            # interrupt that (it's only checked on the next loop iteration,
+            # which needs the current blocking read to return first).
+            # Killing the process here makes its stdout pipe hit EOF right
+            # away, unblocking the read immediately instead of the joins
+            # below reliably eating their full 1s timeout on every close.
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=2.0)
+            except Exception:
+                pass
+
         if self._preview_thread is not None and self._preview_thread.is_alive():
             self._preview_thread.join(timeout=1.0)
         if self._reader_thread.is_alive():
             self._reader_thread.join(timeout=1.0)
-        if getattr(self, 'is_ffmpeg', False):
-            proc = getattr(self, '_ffmpeg_proc', None)
-            if proc is not None:
+
+        if is_native_dll:
+            native = getattr(self, '_native', None)
+            if native is not None:
                 try:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=2.0)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait(timeout=2.0)
+                    native.stop()
                 except Exception:
                     pass
+                try:
+                    native.close()
+                except Exception:
+                    pass
+        elif is_ffmpeg:
+            if proc is not None:
                 for pipe in (proc.stdout, proc.stderr):
                     try:
                         if pipe is not None:
@@ -2172,7 +2094,6 @@ class UVCCapture:
                 self.cap.release()
             except Exception:
                 pass
-        # destroyWindow is handled by the preview thread's run() exit path
 
 
 class UdpCapture:
@@ -2186,8 +2107,6 @@ class UdpCapture:
         bind_port = int(getattr(config, 'udp_bind_port', 5600))
         recv_buffer_size = int(getattr(config, 'udp_recv_buffer_size', 65536))
         frame_timeout = float(getattr(config, 'udp_frame_timeout', 1.0))
-        self.window_name = _UVC_WINDOW_NAME
-        self.preview_scale_mode = str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower()
         self.config_signature = _udp_signature(config)
 
         self._receiver = UdpJpegReceiver(
@@ -2219,22 +2138,17 @@ class UdpCapture:
         self.preview_height = 1080
         config.source_nominal_fps = 0.0
 
-        # Always start the preview thread so the Qt side panel receives frames
-        # even when the "Capture Preview Window" toggle is off.  show_cv2_window=False
-        # means no OpenCV window is ever opened; the thread only feeds set_preview_frame().
+        # Always start the preview thread so the Qt side panel receives
+        # frames even when the "Capture Preview Window" toggle is off — it
+        # only feeds set_preview_frame(), no OpenCV window is ever opened.
         self._preview_thread = _UVCPreviewThread(
-            window_name=self.window_name,
-            scale_mode=self.preview_scale_mode,
             frame_lock=self._latest_frame_lock,
             frame_ref=self._latest_frame_ref,
             stop_event=self._stop,
             draw_overlay_fn=self._draw_overlay,
             region_ref=self._region_ref,
             target_fps=60,
-            preview_width=self.preview_width,
-            preview_height=self.preview_height,
             config=self.config,
-            show_cv2_window=False,
         )
         self._preview_thread.start()
 
@@ -2423,8 +2337,9 @@ def _cleanup_capture(screen_capture: Any) -> None:
 def initialize_screen_capture(config: Config) -> Any:
     """Initialize screen capture backend and normalize config.
 
-    Returns ``(capture_backend, active_method_name)`` so the caller can
-    track which method is currently active.
+    Returns the bare capture backend object. Callers that need to track the
+    active method name separately should derive it themselves (see
+    _detect_active_capture_method), typically alongside this call.
     """
 
     screenshot_method = getattr(config, 'screenshot_method', 'mss')
@@ -2487,12 +2402,13 @@ def initialize_screen_capture(config: Config) -> Any:
 def _capture_backend_is_stale(
     capture_backend: Any, timeout: float = _CAPTURE_STALE_TIMEOUT_SECONDS,
 ) -> bool:
-    """True when *capture_backend* is a live object whose reader thread has
-    delivered no frames for over *timeout* seconds.
+    """True when *capture_backend* is a live object that has delivered no
+    frames for over *timeout* seconds.
 
-    Only uvc/udp backends set ``_last_frame_perf_time``; anything else (mss,
-    dxcam, an object missing the attribute) is reported as not stale — those
-    backends either aren't threaded readers or have their own recovery path.
+    Only uvc/udp/ndi backends set ``_last_frame_perf_time``; anything else
+    (mss, dxcam, an object missing the attribute) is reported as not stale —
+    those backends either aren't threaded readers or have their own recovery
+    path.
     """
     last_frame_time = getattr(capture_backend, '_last_frame_perf_time', None)
     if last_frame_time is None:
@@ -2535,6 +2451,20 @@ def reinitialize_if_method_changed(
     elif desired == 'ndi' and hasattr(current_capture, 'config_signature'):
         if getattr(current_capture, 'config_signature', None) != _ndi_signature(config):
             reinit_log_msg = '[Capture][NDI] NDI configuration changed. Reinitializing NDI backend...'
+        elif _capture_backend_is_stale(current_capture):
+            # NDICapture.grab() already self-heals by re-resolving/re-setting
+            # the source on the *same* Receiver object, but if the receiver's
+            # internal state ever gets stuck such that is_connected() never
+            # returns True again, that retry alone can't recover — only a
+            # full reinit (fresh Receiver/Finder) can. This is the same
+            # external backstop UVC/UDP already get, so NDI can't be stuck
+            # forever behind a self-heal path that stopped working.
+            reinit_log_fn = logger.warning
+            reinit_log_msg = (
+                '[Capture][NDI] NDI backend has produced no frames for over %.0fs '
+                '— treating it as dead and reinitializing...'
+            )
+            reinit_log_args = (_CAPTURE_STALE_TIMEOUT_SECONDS,)
     elif desired == 'udp' and hasattr(current_capture, 'config_signature'):
         if getattr(current_capture, 'config_signature', None) != _udp_signature(config):
             reinit_log_msg = '[Capture][UDP] UDP configuration changed. Reinitializing UDP backend...'
@@ -2582,16 +2512,30 @@ def _to_dxcam_region(region: dict[str, int]) -> tuple[int, int, int, int]:
 def capture_frame(screen_capture: Any, region: dict[str, int]) -> np.ndarray | None:
     """Capture one frame and return BGRA ndarray, or None when capture fails."""
 
+    # dxcam is the only backend using a (left, top, right, bottom) tuple
+    # instead of an mss-style region dict — detect it explicitly (same
+    # module-name check _detect_active_capture_method already uses) rather
+    # than relying solely on catching whatever TypeError dxcam's own region
+    # validation happens to raise when handed a dict. That's an incidental
+    # detail of a vendored third-party library, not a documented contract —
+    # a future dxcam version could raise something else instead, or worse,
+    # silently misinterpret the dict, with no fallback triggered. The
+    # TypeError catch stays as a last-resort fallback for any other backend
+    # we didn't anticipate.
+    is_dxcam = str(getattr(type(screen_capture), '__module__', '')).lower().startswith('dxcam')
     try:
-        try:
-            screenshot = screen_capture.grab(region)
-        except TypeError:
+        if is_dxcam:
             screenshot = screen_capture.grab(region=_to_dxcam_region(region))
+        else:
+            try:
+                screenshot = screen_capture.grab(region)
+            except TypeError:
+                screenshot = screen_capture.grab(region=_to_dxcam_region(region))
     except mss.exception.ScreenShotError as exc:
-        _warn_once('capture_screenshot_error', f"[截圖] 抓圖失敗: {exc}")
+        _warn_once('capture_screenshot_error', f"[Capture] Screenshot failed: {exc}")
         return None
     except Exception as exc:
-        _warn_once('capture_unknown_error', f"[截圖] 抓圖發生例外: {exc}")
+        _warn_once('capture_unknown_error', f"[Capture] Unexpected exception during capture: {exc}")
         return None
 
     if screenshot is None:
@@ -2605,7 +2549,7 @@ def capture_frame(screen_capture: Any, region: dict[str, int]) -> np.ndarray | N
         frame = np.frombuffer(screenshot.bgra, dtype=np.uint8).reshape((screenshot.height, screenshot.width, 4))
 
     if frame.ndim != 3 or frame.shape[2] < 3:
-        _warn_once('capture_invalid_frame_shape', f"[截圖] 影像格式異常: shape={getattr(frame, 'shape', None)}")
+        _warn_once('capture_invalid_frame_shape', f"[Capture] Unexpected frame shape: shape={getattr(frame, 'shape', None)}")
         return None
 
     if frame.shape[2] == 3:
@@ -2613,7 +2557,7 @@ def capture_frame(screen_capture: Any, region: dict[str, int]) -> np.ndarray | N
         frame = np.concatenate((frame, alpha), axis=2)
 
     if frame.size == 0:
-        _warn_once('capture_empty_frame', '[截圖] 抓到空影像，已略過該幀')
+        _warn_once('capture_empty_frame', '[Capture] Captured an empty frame, skipping')
         return None
 
     return frame

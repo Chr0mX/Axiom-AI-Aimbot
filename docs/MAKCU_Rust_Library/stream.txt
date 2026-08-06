@@ -1,0 +1,84 @@
+### Button Stream
+
+Real-time button state change events
+
+The button stream provides asynchronous notification of physical button state changes. When enabled, the device sends a bitmask byte on every button press or release. The library parses these into [`ButtonMask`](/library/types#data-structs) values and delivers them through a channel. See the [native button stream](/native/commands/stream) documentation for details on the underlying firmware protocol.
+
+### Enable / Disable
+
+Control the button event stream
+
+Enable/disable methods support [fire-and-forget](/library/fire-and-forget) mode and [batch sequences](/library/features/batch#batch-methods).
+
+| Method | Description |
+| --- | --- |
+| `enable_button_stream()` | Enable the button event stream on the device. |
+| `disable_button_stream()` | Disable the button event stream. |
+| `button_stream_state()` | Query whether the stream is currently enabled. Returns `Result<bool>` |
+
+```rust
+device.enable_button_stream()?;
+// ... receive events ...
+device.disable_button_stream()?;
+
+button_events
+
+Subscribe to button state changes
+
+fn button_events(&self) -> crossbeam_channel::Receiver<ButtonMask>
+
+
+Returns a channel receiver that emits a ButtonMask on every button state change. The stream must be enabled first via enable_button_stream().
+
+Example
+use makcu::ButtonMask;
+
+device.enable_button_stream()?;
+let rx = device.button_events();
+
+std::thread::spawn(move || {
+    while let Ok(mask) = rx.recv() {
+        if mask.left() {
+            println!("Left button pressed");
+        }
+    }
+});
+
+
+Multiple subscribers can be created by calling button_events() multiple times. Each receiver gets its own copy of every event. For a callback-based interface, see the extras event callbacks. For per-button physical press/release events, see Button Capture.
+
+ButtonMask
+
+Button state snapshot
+
+pub struct ButtonMask
+
+
+Represents the state of all five buttons at a point in time. Each method returns true if the corresponding button is pressed.
+
+Method	Returns	Bit
+left()	bool	0
+right()	bool	1
+middle()	bool	2
+side1()	bool	3
+side2()	bool	4
+is_pressed(button``)`	bool	–
+raw()	u8	–
+
+The raw() method returns the underlying bitmask byte. Bit 0 is left, bit 4 is side2. See the native bitmask format for the bit layout.
+
+Example
+let mask: ButtonMask = rx.recv()?;
+
+// Named accessors
+if mask.left() && mask.right() {
+    println!("Both left and right pressed");
+}
+
+// Generic accessor
+if mask.is_pressed(Button::Middle) {
+    println!("Middle pressed");
+}
+
+// Raw bitmask
+println!("Raw: 0x{:02X}", mask.raw());

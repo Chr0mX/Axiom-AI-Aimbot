@@ -159,20 +159,49 @@ class CapturePage(BasePage):
         self.uvcGroup = SettingCardGroup("UVC Camera", self.scrollWidget)
 
         self.uvcCaptureMethodCombo = ComboBox()
-        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "ffmpeg"])
+        self.uvcCaptureMethodCombo.addItems(["msmf", "dshow", "any"])
         self.uvcCaptureMethodCombo.setMinimumWidth(140)
         self.uvcCaptureMethodCard = SettingCard(
             FluentIcon.CAMERA,
             "UVC Capture Method",
-            "msmf recommended for 1080p60 on Windows 10/11. If MJPEG "
-            "negotiation fails despite the device working fine in other "
-            "DirectShow apps (e.g. OBS), try 'dshow' instead. 'ffmpeg' uses "
-            "an external ffmpeg.exe subprocess instead of OpenCV — see the "
-            "FFmpeg options below.",
+            "msmf recommended for 1080p60 on Windows 10/11. If negotiation "
+            "fails despite the device working fine in other DirectShow apps "
+            "(e.g. OBS), try 'dshow' — it unlocks the DirectShow Version and "
+            "FFmpeg options below. 'any' lets OpenCV auto-pick a backend.",
             self.uvcGroup
         )
         self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcCaptureMethodCard.hBoxLayout.addSpacing(16)
+
+        # DirectShow implementation toggle — only meaningful when
+        # uvcCaptureMethodCombo == 'dshow'. V1 is cv2.VideoCapture(CAP_DSHOW);
+        # V2 is the native DirectShow-Capture-DLL, which owns the filter
+        # graph/allocator directly instead of going through OpenCV's generic
+        # (and buffer-control-blind) DirectShow wrapper. See uvc_dshow_backend's
+        # docstring in config.py and the DirectShow Capture DLL roadmap for why.
+        self.uvcDshowV2Card = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            "Use Native DirectShow DLL (V2)",
+            "Off = OpenCV's DirectShow wrapper (V1, default). On = the native "
+            "directshow_capture.dll — owns the capture graph directly for "
+            "lower, OBS-like latency. NV12 only in this build. Requires "
+            "directshow_capture.dll to be present (see FFmpeg Path card's "
+            "location convention).",
+            parent=self.uvcGroup
+        )
+
+        # FFmpeg is DirectShow-only (no MSMF demuxer on Windows) and only
+        # makes sense under V1 — V2 already owns the graph directly, so
+        # routing it through an ffmpeg subprocess would defeat the point.
+        self.uvcFfmpegEnabledCard = SwitchSettingCard(
+            FluentIcon.VIDEO,
+            "Use FFmpeg Subprocess",
+            "Captures via an external ffmpeg.exe process instead of OpenCV. "
+            "ffmpeg's dshow demuxer negotiates directly and fails loudly "
+            "instead of silently substituting something else — useful when "
+            "OpenCV's DirectShow wrapper lies about negotiated state.",
+            parent=self.uvcGroup
+        )
 
         self.uvcDeviceCombo = ComboBox()
         self.uvcDeviceCombo.setMinimumWidth(260)
@@ -255,17 +284,16 @@ class CapturePage(BasePage):
             "Dynamic: Axiom crops per-frame to the live Detection Range. "
             "Fixed: the crop rectangle is frozen (centered) at capture-start "
             "instead — a Detection Range change then needs a capture restart "
-            "to take effect. With 'ffmpeg' capture method, the crop also "
+            "to take effect. With the FFmpeg toggle on, the crop also "
             "happens inside ffmpeg itself before the frame is piped back, "
-            "so far less data crosses the subprocess pipe; with 'dshow'/"
-            "'msmf' this only freezes which region is used, no throughput "
-            "difference.",
+            "so far less data crosses the subprocess pipe; otherwise this "
+            "only freezes which region is used, no throughput difference.",
             self.uvcGroup
         )
         self.uvcCropModeCard.hBoxLayout.addWidget(self.uvcCropModeCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcCropModeCard.hBoxLayout.addSpacing(16)
 
-        # === FFmpeg mode options (only relevant/visible when Capture Method == 'ffmpeg') ===
+        # === FFmpeg mode options (only relevant/visible when dshow + V1 + FFmpeg toggle is on) ===
         self.uvcFfmpegPathEdit = LineEdit()
         self.uvcFfmpegPathEdit.setPlaceholderText("auto-detect (bundled ffmpeg/ or system PATH)")
         self.uvcFfmpegPathEdit.setMinimumWidth(260)
@@ -417,18 +445,6 @@ class CapturePage(BasePage):
             parent=self.previewGroup
         )
 
-        self.uvcPreviewScaleCombo = ComboBox()
-        self.uvcPreviewScaleCombo.addItems(["scale_to_fit", "scale_to_canvas", "fit_to_screen"])
-        self.uvcPreviewScaleCombo.setMinimumWidth(170)
-        self.uvcPreviewScaleCard = SettingCard(
-            FluentIcon.FULL_SCREEN,
-            "Capture Preview Scale Mode",
-            "",
-            self.previewGroup
-        )
-        self.uvcPreviewScaleCard.hBoxLayout.addWidget(self.uvcPreviewScaleCombo, 0, Qt.AlignmentFlag.AlignRight)
-        self.uvcPreviewScaleCard.hBoxLayout.addSpacing(16)
-
         self.uvcAlwaysOnTopCard = SwitchSettingCard(
             FluentIcon.PIN,
             "Always On Top",
@@ -440,7 +456,7 @@ class CapturePage(BasePage):
         self.previewFpsCapSegment.addItem(routeKey='uncapped', text="None")
         self.previewFpsCapSegment.addItem(routeKey='30',       text="30 FPS")
         self.previewFpsCapSegment.addItem(routeKey='60',       text="60 FPS")
-        self.previewFpsCapSegment.setCurrentItem('uncapped')
+        self.previewFpsCapSegment.setCurrentItem('60')
         self.previewFpsCapCard = SettingCard(
             FluentIcon.SPEED_HIGH,
             "Preview FPS Cap",
@@ -528,6 +544,8 @@ class CapturePage(BasePage):
         self.addContent(self.captureGroup)
 
         self.uvcGroup.addSettingCard(self.uvcCaptureMethodCard)
+        self.uvcGroup.addSettingCard(self.uvcDshowV2Card)
+        self.uvcGroup.addSettingCard(self.uvcFfmpegEnabledCard)
         self.uvcGroup.addSettingCard(self.uvcDeviceCard)
         self.uvcGroup.addSettingCard(self.uvcResolutionCard)
         self.uvcGroup.addSettingCard(self.uvcWidthCard)
@@ -557,7 +575,6 @@ class CapturePage(BasePage):
 
         self.previewGroup.addSettingCard(self.uvcPreviewCard)
         self.previewGroup.addSettingCard(self.previewCropCard)
-        self.previewGroup.addSettingCard(self.uvcPreviewScaleCard)
         self.previewGroup.addSettingCard(self.uvcAlwaysOnTopCard)
         self.previewGroup.addSettingCard(self.previewFpsCapCard)
         self.addContent(self.previewGroup)
@@ -583,6 +600,8 @@ class CapturePage(BasePage):
         self.uvcRefreshResolutionBtn.clicked.connect(self._startUvcProbe)
         self.uvcFpsCombo.currentTextChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
+        self.uvcDshowV2Card.checkedChanged.connect(self._onUvcDshowV2Changed)
+        self.uvcFfmpegEnabledCard.checkedChanged.connect(self._onUvcFfmpegEnabledChanged)
         self.uvcVideoFormatCombo.currentTextChanged.connect(self._onUvcVideoFormatChanged)
         self.uvcFfmpegPathEdit.editingFinished.connect(self._onUvcFfmpegPathChanged)
         self.uvcCropModeCombo.currentTextChanged.connect(self._onUvcCropModeChanged)
@@ -590,7 +609,6 @@ class CapturePage(BasePage):
         self.ndiRefreshInfoBtn.clicked.connect(self._refreshNdiHwInfo)
         self.uvcPreviewCard.checkedChanged.connect(self._onUvcPreviewChanged)
         self.previewCropCard.checkedChanged.connect(self._onPreviewCropChanged)
-        self.uvcPreviewScaleCombo.currentTextChanged.connect(self._onUvcPreviewScaleModeChanged)
         self.uvcAlwaysOnTopCard.checkedChanged.connect(self._onAlwaysOnTopChanged)
         self.previewFpsCapSegment.currentItemChanged.connect(self._onPreviewFpsCapChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
@@ -634,13 +652,15 @@ class CapturePage(BasePage):
             self.uvcDeviceCombo.blockSignals(False)
             _capture_method = str(getattr(self._config, 'uvc_capture_method', 'msmf'))
             self.uvcCaptureMethodCombo.setCurrentText(_capture_method)
+            self.uvcDshowV2Card.setChecked(str(getattr(self._config, 'uvc_dshow_backend', 'v1')).lower() == 'v2')
+            self.uvcFfmpegEnabledCard.setChecked(bool(getattr(self._config, 'uvc_ffmpeg_enabled', False)))
             self.uvcVideoFormatCombo.setCurrentText(str(getattr(self._config, 'uvc_video_format', 'mjpeg')).upper())
             self.uvcFfmpegPathEdit.setText(str(getattr(self._config, 'uvc_ffmpeg_path', '') or ''))
             self.uvcCropModeCombo.setCurrentText(
                 'Fixed (centered)' if str(getattr(self._config, 'uvc_crop_mode', 'dynamic')).lower() == 'fixed'
                 else 'Dynamic'
             )
-            self._updateFfmpegControlsVisibility(_capture_method)
+            self._updateDshowControlsVisibility(_capture_method)
             resolution_text = (
                 f"{getattr(self._config, 'uvc_width', self._config.width)}"
                 f"x{getattr(self._config, 'uvc_height', self._config.height)}")
@@ -664,7 +684,6 @@ class CapturePage(BasePage):
             self.uvcFpsCombo.setCurrentText(str(int(getattr(self._config, 'uvc_fps', 60))))
             self.uvcPreviewCard.setChecked(bool(getattr(self._config, 'uvc_show_window', True)))
             self.previewCropCard.setChecked(bool(getattr(self._config, 'preview_crop_to_detection', False)))
-            self.uvcPreviewScaleCombo.setCurrentText(str(getattr(self._config, 'uvc_preview_scale_mode', 'scale_to_fit')))
             self.uvcAlwaysOnTopCard.setChecked(bool(getattr(self._config, 'uvc_always_on_top', True)))
             _cap_key = {0: 'uncapped', 30: '30', 60: '60'}.get(
                 getattr(self._config, 'preview_fps_cap', 0), 'uncapped'
@@ -1035,9 +1054,26 @@ class CapturePage(BasePage):
     def _onUvcCaptureMethodChanged(self, text):
         if self._config:
             self._config.uvc_capture_method = str(text)
-        self._updateFfmpegControlsVisibility(text)
+        self._updateDshowControlsVisibility(text)
         self._startUvcProbeDelayed()
         QTimer.singleShot(700, self._queryUvcHwInfo)
+
+    def _onUvcDshowV2Changed(self, checked):
+        if self._config:
+            self._config.uvc_dshow_backend = 'v2' if checked else 'v1'
+            if checked:
+                # V2 already owns the DirectShow graph directly — routing it
+                # through an ffmpeg subprocess on top would defeat the point.
+                self._config.uvc_ffmpeg_enabled = False
+                self.uvcFfmpegEnabledCard.setChecked(False)
+        self._updateDshowControlsVisibility(self.uvcCaptureMethodCombo.currentText())
+        self._startUvcProbeDelayed()
+
+    def _onUvcFfmpegEnabledChanged(self, checked):
+        if self._config:
+            self._config.uvc_ffmpeg_enabled = bool(checked)
+        self._updateDshowControlsVisibility(self.uvcCaptureMethodCombo.currentText())
+        self._startUvcProbeDelayed()
 
     def _onUvcVideoFormatChanged(self, text):
         if self._config:
@@ -1058,11 +1094,20 @@ class CapturePage(BasePage):
         # it doesn't just re-show the stale pre-change value.
         QTimer.singleShot(700, self._queryUvcHwInfo)
 
-    def _updateFfmpegControlsVisibility(self, capture_method_text: str):
-        # uvcCropModeCard applies to every capture method and stays visible;
-        # only the ffmpeg.exe path override is ffmpeg-specific.
-        is_ffmpeg = str(capture_method_text).strip().lower() == 'ffmpeg'
-        self.uvcFfmpegPathCard.setVisible(is_ffmpeg)
+    def _updateDshowControlsVisibility(self, capture_method_text: str):
+        # uvcCropModeCard applies to every capture method and stays visible.
+        # The DirectShow-version toggle only makes sense under 'dshow'; the
+        # FFmpeg toggle (and its path override) only under 'dshow' + V1 —
+        # ffmpeg has no MSMF demuxer on Windows, and V2 already owns the
+        # graph directly, so neither MSMF nor V2 exposes it. See
+        # uvc_ffmpeg_enabled's docstring in config.py.
+        is_dshow = str(capture_method_text).strip().lower() == 'dshow'
+        is_v1 = str(getattr(self._config, 'uvc_dshow_backend', 'v1')).lower() == 'v1' if self._config else True
+        ffmpeg_on = bool(getattr(self._config, 'uvc_ffmpeg_enabled', False)) if self._config else False
+
+        self.uvcDshowV2Card.setVisible(is_dshow)
+        self.uvcFfmpegEnabledCard.setVisible(is_dshow and is_v1)
+        self.uvcFfmpegPathCard.setVisible(is_dshow and is_v1 and ffmpeg_on)
 
     def _onUvcPreviewChanged(self, checked):
         if self._config:
@@ -1079,11 +1124,6 @@ class CapturePage(BasePage):
             self._config.preview_crop_to_detection = bool(checked)
         print(f"[Capture][Preview] Crop-to-detection {'ENABLED' if checked else 'DISABLED'}; "
               f"preview window resizes live.")
-
-    def _onUvcPreviewScaleModeChanged(self, text):
-        if self._config:
-            self._config.uvc_preview_scale_mode = str(text)
-        print(f"[Capture][Preview] Scale mode set to '{text}'.")
 
     def _onAlwaysOnTopChanged(self, checked):
         if self._config:
@@ -1311,11 +1351,25 @@ class CapturePage(BasePage):
         self.uvcGroup.titleLabel.setText("UVC Camera")
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
         self.uvcCaptureMethodCard.contentLabel.setText(
-            "msmf recommended for 1080p60 on Windows 10/11. If MJPEG "
-            "negotiation fails despite the device working fine in other "
-            "DirectShow apps (e.g. OBS), try 'dshow' instead. 'ffmpeg' uses "
-            "an external ffmpeg.exe subprocess instead of OpenCV — see the "
-            "FFmpeg options below."
+            "msmf recommended for 1080p60 on Windows 10/11. If negotiation "
+            "fails despite the device working fine in other DirectShow apps "
+            "(e.g. OBS), try 'dshow' — it unlocks the DirectShow Version and "
+            "FFmpeg options below. 'any' lets OpenCV auto-pick a backend."
+        )
+        self.uvcDshowV2Card.titleLabel.setText("Use Native DirectShow DLL (V2)")
+        self.uvcDshowV2Card.contentLabel.setText(
+            "Off = OpenCV's DirectShow wrapper (V1, default). On = the native "
+            "directshow_capture.dll — owns the capture graph directly for "
+            "lower, OBS-like latency. NV12 only in this build. Requires "
+            "directshow_capture.dll to be present (see FFmpeg Path card's "
+            "location convention)."
+        )
+        self.uvcFfmpegEnabledCard.titleLabel.setText("Use FFmpeg Subprocess")
+        self.uvcFfmpegEnabledCard.contentLabel.setText(
+            "Captures via an external ffmpeg.exe process instead of OpenCV. "
+            "ffmpeg's dshow demuxer negotiates directly and fails loudly "
+            "instead of silently substituting something else — useful when "
+            "OpenCV's DirectShow wrapper lies about negotiated state."
         )
         self.uvcDeviceCard.titleLabel.setText("Device")
         self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
@@ -1341,11 +1395,10 @@ class CapturePage(BasePage):
             "Dynamic: Axiom crops per-frame to the live Detection Range. "
             "Fixed: the crop rectangle is frozen (centered) at capture-start "
             "instead — a Detection Range change then needs a capture restart "
-            "to take effect. With 'ffmpeg' capture method, the crop also "
+            "to take effect. With the FFmpeg toggle on, the crop also "
             "happens inside ffmpeg itself before the frame is piped back, "
-            "so far less data crosses the subprocess pipe; with 'dshow'/"
-            "'msmf' this only freezes which region is used, no throughput "
-            "difference."
+            "so far less data crosses the subprocess pipe; otherwise this "
+            "only freezes which region is used, no throughput difference."
         )
         self.uvcHwInfoCard.titleLabel.setText("Device Resolution & FPS")
         self.uvcHwInfoCard.contentLabel.setText("Actual values reported by the driver")
@@ -1381,7 +1434,6 @@ class CapturePage(BasePage):
         self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
         self.previewCropCard.titleLabel.setText(t("preview_crop_label"))
         self.previewCropCard.contentLabel.setText(t("preview_crop_desc"))
-        self.uvcPreviewScaleCard.titleLabel.setText("Capture Preview Scale Mode")
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")
         self.previewFpsCapCard.titleLabel.setText("Preview FPS Cap")
         self.ocrGroup.titleLabel.setText(t("ocr_inferred_text", "Active Weapon"))

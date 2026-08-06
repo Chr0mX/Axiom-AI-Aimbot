@@ -1,0 +1,70 @@
+### Fire and Forget
+
+Send commands without waiting for responses
+
+By default, every command waits for the device to respond with the `>>>` prompt before returning. Fire-and-forget mode skips this wait -- the command is written to the transport and the method returns immediately.
+
+This is useful for high-frequency operations like continuous mouse movement where latency matters more than confirmation.
+
+`FireAndForget` is an RAII guard that derefs to [`Device`](/library/types#core-types). Every method on `Device` is available through the guard -- including [extras](/library/features/extras) methods like [`click()`](/library/features/extras#click) and [`move_smooth()`](/library/features/extras#move-smooth).
+
+Query methods ([`button_state()`](/library/buttons#button-state), [`lock_state()`](/library/locks#lock-state), [`version()`](/library/info#version), etc.) always wait for a response regardless of fire-and-forget mode, since they must return a value. Both `ff()` and `DeviceConfig` fire-and-forget behave identically in this regard.
+
+### ff()
+
+#### Get the fire-and-forget guard
+
+```rust
+fn ff(&self) -> FireAndForget<'_>
+
+
+Returns a FireAndForget guard that derefs to Device. While the guard is alive, all write commands sent on the current thread skip waiting for responses. The guard borrows the Device, so it cannot outlive it.
+
+Example
+
+// Single fire-and-forget command
+device.ff().move_xy(10, 0)?;
+
+// Multiple commands in sequence
+let ff = device.ff();
+ff.move_xy(100, 0)?;
+ff.move_xy(0, 100)?;
+ff.wheel(3)?;
+
+// Extras work too
+ff.click(Button::Left, Duration::from_millis(50))?;
+ff.move_smooth(200, 0, 20, Duration::from_millis(5))?;
+
+How It Works
+
+The guard sets a thread-local flag when created and clears it on drop. All device methods check this flag – if set, write commands skip waiting for the device response. This means:
+
+Behaviour	Detail
+All Device methods available	Including extras and catch – via Deref<Target=Device>.
+Thread-safe	The flag is thread-local. Other threads sharing the same Device are unaffected.
+Queries always confirm	Methods that return values (version(), button_state(), etc.) always wait for a response.
+Nestable	Extras methods that internally call button_down(), move_xy(), etc. all inherit fire-and-forget from the guard.
+Global Fire-and-Forget
+
+Set fire_and_forget: true in DeviceConfig to make all commands fire-and-forget by default. This is equivalent to wrapping every call in ff(). Query methods still wait for responses.
+
+use makcu::{Device, DeviceConfig};
+
+let config = DeviceConfig {
+    fire_and_forget: true,
+    ..Default::default()
+};
+let device = Device::with_config(config)?;
+
+// These are now fire-and-forget automatically
+device.move_xy(100, 0)?;
+device.button_down(Button::Left)?;
+
+// This still waits for a response (it needs the return value)
+let version = device.version()?;
+
+Raw Commands in FF Mode
+
+send_raw() respects fire-and-forget mode. When active, the command is sent without waiting and an empty Vec is returned.
+
+device.ff().send_raw(b"km.left(1)\r\n")?;  // returns immediately

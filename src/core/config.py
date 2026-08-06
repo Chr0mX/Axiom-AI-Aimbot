@@ -30,9 +30,9 @@ STATE_FIELDS = ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_on
 # Single source of truth for the grouped (v2) schema: maps each flat Config
 # attribute to its dotted path in the nested JSON. Drives to_dict() and from_dict().
 # Fields intentionally absent (never persisted): runtime-derived (current_provider),
-# auto-detected (model_input_size), derived (uvc_resolution), constants
-# (uvc_window_name, latency_stats_alpha), state (see STATE_FIELDS), and the
-# specially-handled crosshair color triplet + humanization dataclass.
+# auto-detected (model_input_size), constants (latency_stats_alpha), state (see
+# STATE_FIELDS), and the specially-handled crosshair color triplet + humanization
+# dataclass.
 _FIELD_MAP = {
     # --- model ---
     'model_path':                 'model.path',
@@ -47,6 +47,8 @@ _FIELD_MAP = {
     'uvc_height':                 'capture.uvc.height',
     'uvc_fps':                    'capture.uvc.fps',
     'uvc_capture_method':         'capture.uvc.capture_method',
+    'uvc_dshow_backend':          'capture.uvc.dshow_backend',
+    'uvc_ffmpeg_enabled':         'capture.uvc.ffmpeg_enabled',
     'uvc_video_format':           'capture.uvc.video_format',
     'uvc_ffmpeg_path':            'capture.uvc.ffmpeg_path',
     'uvc_crop_mode':              'capture.uvc.crop_mode',
@@ -57,7 +59,6 @@ _FIELD_MAP = {
     'udp_recv_buffer_size':       'capture.udp.recv_buffer_size',
     'udp_frame_timeout':          'capture.udp.frame_timeout',
     'uvc_show_window':            'capture.preview.enabled',
-    'uvc_preview_scale_mode':     'capture.preview.scale_mode',
     'uvc_always_on_top':          'capture.preview.always_on_top',
     'preview_crop_to_detection':  'capture.preview.crop_to_detection',
     'preview_fps_cap':            'capture.preview.fps_cap',
@@ -95,12 +96,8 @@ _FIELD_MAP = {
     'kalman_enabled':             'aim.kalman.enabled',
     'kalman_process_noise':       'aim.kalman.process_noise',
     'kalman_measurement_noise':   'aim.kalman.measurement_noise',
-    'ema_enabled':                'aim.ema.enabled',
-    'ema_alpha':                  'aim.ema.alpha',
     'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
     'cam_motion_comp_size':       'aim.cam_motion_comp.size',
-    'jitter_enabled':             'aim.jitter.enabled',
-    'jitter_strength':            'aim.jitter.strength',
     'smart_jitter_enabled':       'aim.smart_jitter.enabled',
     'smart_jitter_strength':      'aim.smart_jitter.strength',
     'smart_jitter_box_threshold_pct': 'aim.smart_jitter.box_threshold_pct',
@@ -110,11 +107,6 @@ _FIELD_MAP = {
     'aim_deadzone_enabled':       'aim.deadzone.enabled',
     'aim_deadzone_min_px':        'aim.deadzone.min_px',
     'aim_deadzone_close_px':      'aim.deadzone.close_px',
-    'aim_lateral_brake_enabled':  'aim.lateral_brake.enabled',
-    'aim_lateral_brake_strength': 'aim.lateral_brake.strength',
-    'aim_lateral_brake_dom_trigger': 'aim.lateral_brake.dom_trigger',
-    'aim_lateral_brake_dom_max':  'aim.lateral_brake.dom_max',
-    'aim_lateral_brake_min_scale': 'aim.lateral_brake.min_scale',
     'head_width_ratio':           'aim.target_area.head_width_ratio',
     'head_height_ratio':          'aim.target_area.head_height_ratio',
     'body_width_ratio':           'aim.target_area.body_width_ratio',
@@ -141,9 +133,6 @@ _FIELD_MAP = {
     'lock_decay_frames':          'tracking.sticky_lock.decay_frames',
     'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
     'sticky_adaptive_iou':        'tracking.sticky_lock.adaptive_iou',
-    'box_ema_enabled':            'tracking.box_ema.enabled',
-    'box_ema_alpha_x':            'tracking.box_ema.alpha_x',
-    'box_ema_alpha_y':            'tracking.box_ema.alpha_y',
     'target_priority_mode':       'tracking.target_priority.mode',
     'target_priority_confidence_weight': 'tracking.target_priority.confidence_weight',
 
@@ -198,7 +187,6 @@ _FIELD_MAP = {
     'makcu_disengage_delay':      'hardware.makcu.disengage_delay',
     'xbox_sensitivity':           'hardware.xbox.sensitivity',
     'xbox_deadzone':              'hardware.xbox.deadzone',
-    'xbox_auto_connect':          'hardware.xbox.auto_connect',
 
     # --- ui ---
     'dark_mode':                  'ui.dark_mode',
@@ -257,18 +245,29 @@ class Config:
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
 
-        # Not read anywhere in src/ today, but tests/test_config.py asserts
-        # these as part of Config's default contract — keep them until that
-        # test is revisited rather than silently breaking it.
-        self.capture_width: int = self.width
-        self.capture_height: int = self.height
-
         self.screenshot_method: str = "dxcam"  # 螢幕截圖方式
         self.uvc_device_index: int = 0
         self.uvc_width: int = self.width
         self.uvc_height: int = self.height
         self.uvc_fps: int = 60
         self.uvc_capture_method: str = "msmf"
+        # DirectShow implementation to use when uvc_capture_method == 'dshow':
+        #   'v1' = cv2.VideoCapture(CAP_DSHOW) — OpenCV's generic DirectShow
+        #     wrapper. No control over the driver's internal buffer/allocator
+        #     depth, which is why capture through this path can lag behind
+        #     a purpose-built app like OBS on the same device/settings.
+        #   'v2' = the native DirectShow-Capture-DLL — owns the filter graph
+        #     and allocator directly (see the DirectShow Capture DLL roadmap),
+        #     closing that gap. NV12-only in this build. Irrelevant/ignored
+        #     for 'msmf' or 'any'.
+        self.uvc_dshow_backend: str = "v1"
+        # FFmpeg subprocess capture, only meaningful for capture_method ==
+        # 'dshow' + dshow_backend == 'v1' — ffmpeg has no MSMF demuxer on
+        # Windows (its capture input is DirectShow only), and v2 already
+        # owns the DirectShow graph directly, so routing v2 through an
+        # ffmpeg subprocess would defeat the point of using it. Silently
+        # ignored outside that one combination.
+        self.uvc_ffmpeg_enabled: bool = False
         # Requested pixel/codec format: 'mjpeg' (compressed, highest FPS
         # headroom over USB), 'yuy2' or 'nv12' (raw, uncompressed).
         self.uvc_video_format: str = "mjpeg"
@@ -280,10 +279,10 @@ class Config:
         #     capture-start (only makes sense centered — matches
         #     FOV-follow-mouse already being forced off for UVC) and reused
         #     every frame; a live Detection Range change needs a capture
-        #     restart to take effect. For 'ffmpeg', the crop itself also
-        #     happens inside the ffmpeg subprocess before the frame is piped
-        #     back — far less data crosses the subprocess pipe. For 'dshow'/
-        #     'msmf' (in-process cv2 capture, no pipe), this only freezes
+        #     restart to take effect. With uvc_ffmpeg_enabled on, the crop
+        #     itself also happens inside the ffmpeg subprocess before the
+        #     frame is piped back — far less data crosses the subprocess
+        #     pipe. Otherwise (in-process cv2/native-DLL capture, no pipe), this only freezes
         #     which region grab() slices — no measurable throughput/CPU
         #     difference from 'dynamic', since the crop already happens
         #     in-process either way.
@@ -292,10 +291,9 @@ class Config:
         self.uvc_ffmpeg_path: str = ""
         self.uvc_crop_mode: str = "dynamic"
         self.uvc_show_window: bool = True
-        self.uvc_preview_scale_mode: str = "scale_to_fit"
         self.uvc_always_on_top: bool = True
         self.preview_crop_to_detection: bool = False
-        self.preview_fps_cap: int = 0
+        self.preview_fps_cap: int = 60
         self.ndi_source_name: str = ""
         self.ndi_bandwidth: str = "highest"
         self.ndi_force_reconnect: bool = False
@@ -423,7 +421,6 @@ class Config:
         # Xbox 360 虛擬手把設定
         self.xbox_sensitivity: float = 1.0          # 手把靈敏度 (0.1~5.0)
         self.xbox_deadzone: float = 0.05            # 手把死區 (0.0~0.5)
-        self.xbox_auto_connect: bool = True          # 選擇 xbox 時自動連線
 
         # 檢測設定
         # 偵測節流：
@@ -491,10 +488,6 @@ class Config:
         self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
         self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier
 
-        # Basic jitter
-        self.jitter_enabled: bool = False
-        self.jitter_strength: float = 1.5          # pixel offset radius
-
         # Frame skip gate
         self.frame_skip_enabled: bool = False
         self.frame_skip_threshold: float = 2.0     # avg pixel diff below this → skip
@@ -506,10 +499,6 @@ class Config:
         self.smart_jitter_lmb_gate: bool = True             # only jitter while aim key is held
         self.jitter_pattern_file: str = ""
         self.jitter_speed_multiplier: int = 1
-
-        # EMA 瞄準點平滑（在 PID 前平滑目標座標）
-        self.ema_enabled: bool = False
-        self.ema_alpha: float = 0.7  # 1.0=原始，0.3=強平滑
 
         # Camera motion compensation — subtract per-frame global scene shift before PID
         self.cam_motion_comp_enabled: bool = False
@@ -526,9 +515,6 @@ class Config:
         self.lock_decay_frames: int = 15
         self.lock_iou_threshold: float = 0.3
         self.sticky_adaptive_iou: bool = True
-        self.box_ema_enabled: bool = True
-        self.box_ema_alpha_x: float = 0.55
-        self.box_ema_alpha_y: float = 0.45
 
         # FOV filter mode
         self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square
@@ -543,11 +529,6 @@ class Config:
         self.aim_deadzone_enabled: bool = False
         self.aim_deadzone_min_px: float = 0.4
         self.aim_deadzone_close_px: float = 0.2
-        self.aim_lateral_brake_enabled: bool = False
-        self.aim_lateral_brake_strength: float = 0.75
-        self.aim_lateral_brake_dom_trigger: float = 1.12
-        self.aim_lateral_brake_dom_max: float = 3.0
-        self.aim_lateral_brake_min_scale: float = 0.26
         self.max_move_per_frame_px: float = 85.0
 
         # Semantic false-positive filter (ported from Someone_idea)
@@ -568,7 +549,6 @@ class Config:
         self.latency_stats_interval: float = 1.0  # 秒
 
         # 供統計使用的時間戳（由不同線程更新）
-        self.last_screenshot_time: float = 0.0
         self.last_detection_time: float = 0.0
         self.last_overlay_update_time: float = 0.0
 
@@ -602,7 +582,7 @@ class Config:
 
         # Humanization post-processing layer (operates only on final dx/dy output)
         self.humanization: HumanizationConfig = HumanizationConfig()
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize persisted config into the grouped (v2) JSON schema.
 
@@ -651,17 +631,17 @@ class Config:
                 if k in data:
                     setattr(self, k, data[k])
 
-        # Legacy flat state fields (back-compat; canonical source is state.json).
-        for f in STATE_FIELDS:
-            if f in data and hasattr(self, f):
-                setattr(self, f, data[f])
-
         # Humanization dataclass — update in place, ignore unknown keys.
         hud = data.get('humanization')
         if isinstance(hud, dict):
             for hk, hv in hud.items():
                 if hasattr(self.humanization, hk):
                     setattr(self.humanization, hk, hv)
+
+        # Legacy flat state fields (back-compat; canonical source is state.json).
+        for f in STATE_FIELDS:
+            if f in data and hasattr(self, f):
+                setattr(self, f, data[f])
 
 
 def _state_path_for(config_path: str) -> str:
@@ -842,16 +822,23 @@ def _validate_screenshot_method(config: Config) -> None:
     valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi', 'udp')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
-    if getattr(config, 'uvc_capture_method', 'dshow') not in ('dshow', 'msmf', 'any', 'ffmpeg'):
+    # Legacy migration: 'ffmpeg' used to be its own top-level capture_method
+    # value. It was always DirectShow under the hood (ffmpeg's Windows
+    # capture input has no MSMF demuxer) — fold it into the new
+    # dshow + v1 + ffmpeg_enabled shape instead of a bare 4th method.
+    if getattr(config, 'uvc_capture_method', 'msmf') == 'ffmpeg':
         config.uvc_capture_method = 'dshow'
+        config.uvc_dshow_backend = 'v1'
+        config.uvc_ffmpeg_enabled = True
+    if getattr(config, 'uvc_capture_method', 'msmf') not in ('dshow', 'msmf', 'any'):
+        config.uvc_capture_method = 'msmf'
+    if getattr(config, 'uvc_dshow_backend', 'v1') not in ('v1', 'v2'):
+        config.uvc_dshow_backend = 'v1'
+    config.uvc_ffmpeg_enabled = bool(getattr(config, 'uvc_ffmpeg_enabled', False))
     if getattr(config, 'uvc_video_format', 'mjpeg') not in ('mjpeg', 'yuy2', 'nv12', 'yuv420p'):
         config.uvc_video_format = 'mjpeg'
     if getattr(config, 'uvc_crop_mode', 'dynamic') not in ('dynamic', 'fixed'):
         config.uvc_crop_mode = 'dynamic'
-    if getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit') not in (
-        'scale_to_fit', 'scale_to_canvas', 'fit_to_screen'
-    ):
-        config.uvc_preview_scale_mode = 'scale_to_fit'
     config.ndi_source_name = str(getattr(config, 'ndi_source_name', '') or '').strip()
 
 

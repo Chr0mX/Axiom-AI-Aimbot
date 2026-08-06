@@ -1,0 +1,85 @@
+### Buttons
+
+Press, release, and query mouse button states
+
+Button operations use the [`Button`](https://docs.makcu.k4tech.net/library/types#enums) enum to identify which button to control. Five buttons are available.
+
+#### Button Enum
+
+```rust
+pub enum Button
+
+Variant	Description
+Button::Left	Left mouse button.
+Button::Right	Right mouse button.
+Button::Middle	Middle mouse button.
+Button::Side1	Side button 1 (back).
+Button::Side2	Side button 2 (forward).
+button_down
+
+Press and hold a button
+
+fn button_down(&self, button: Button) -> Result<>()
+
+
+Forces the specified button into the pressed state. The button remains held until explicitly released. Overrides the physical button state. Maps to km.<button>(1).
+
+Example
+use makcu::Button;
+
+device.button_down(Button::Left)?;
+
+button_up
+
+Soft release a button
+
+fn button_up(&self, button: Button) -> Result<>()
+
+
+Releases the button. This is a soft release – if the user is physically holding the button, it remains pressed. Maps to km.<button>(0).
+
+Example
+device.button_up(Button::Left)?;
+
+button_up_force
+
+Force release a button
+
+fn button_up_force(&self, button: Button) -> Result<>()
+
+
+Forces the button into the released state regardless of physical state. Use this when you need to guarantee the button is released. Maps to km.<button>(2).
+
+Example
+device.button_up_force(Button::Left)?;
+
+
+The difference between button_up and button_up_force: soft release (button_up) respects an active physical press, while force release (button_up_force) overrides it.
+
+button_state
+
+Query current button state
+
+fn button_state(&self, button: Button) -> Result<bool>
+
+
+Returns true if the button is currently pressed, false if released. Reflects the combined physical and software state. Maps to km.<button>().
+
+Example
+let pressed = device.button_state(Button::Left)?;
+println!("Left button: {}", if pressed { "pressed" } else { "released" });
+
+
+This is a query, not an action. It does not produce any input on the host.
+
+Click Pattern
+
+Press and release sequence
+
+There is no single-command click in the base API. All button write methods support fire-and-forget mode and batch sequences. Send a press followed by a release:
+
+device.button_down(Button::Left)?;
+device.button_up(Button::Left)?;
+
+
+For controlled click timing, use the extras feature which provides device.click() with configurable hold duration.

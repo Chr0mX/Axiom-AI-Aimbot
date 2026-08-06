@@ -6,7 +6,7 @@ import random
 import time
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from win_utils import send_mouse_move, is_makcu_connected
+from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
 from .humanization import apply_humanization
@@ -27,7 +27,7 @@ def _box_iou(a: List[float], b: List[float]) -> float:
     return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
 
 
-# Module-level singletons — shared across process_aiming calls.
+# Module-level singleton — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
 
 # Jitter pattern iterator cache: reloaded whenever jitter_pattern_file changes.
@@ -173,34 +173,6 @@ def _apply_adaptive_deadzone(
         return error_x, error_y
 
 
-def _apply_lateral_overshoot_brake(
-    error_x: float, error_y: float, box: list, config
-) -> tuple:
-    # Slows horizontal correction when vertical error dominates, mimicking the human
-    # tendency to settle onto a target rather than diagonal-snapping.
-    # Ported from Someone_idea/ai_aiming.py.
-    try:
-        if not getattr(config, 'aim_lateral_brake_enabled', False):
-            return error_x, error_y
-        ex = abs(error_x)
-        ey = abs(error_y)
-        if ey < 1e-6:
-            return error_x, error_y
-        dom_trigger = float(getattr(config, 'aim_lateral_brake_dom_trigger', 1.12))
-        dominance = ex / max(ey, 1e-6)
-        if dominance < dom_trigger:
-            return error_x, error_y
-        dom_max = float(getattr(config, 'aim_lateral_brake_dom_max', 3.0))
-        strength = float(getattr(config, 'aim_lateral_brake_strength', 0.75))
-        min_scale = float(getattr(config, 'aim_lateral_brake_min_scale', 0.26))
-        t = min(1.0, (dominance - dom_trigger) / max(dom_max - dom_trigger, 0.1))
-        brake_raw = 1.0 - (1.0 - min_scale) * (t ** 0.9) * strength
-        x_scale = max(min_scale, min(1.0, brake_raw))
-        return error_x * x_scale, error_y
-    except Exception:
-        return error_x, error_y
-
-
 def _apply_per_frame_cap(move_x: float, move_y: float, config) -> tuple:
     # Hard cap on pixels-per-frame to prevent instant lock-on snaps.
     # A mouse travelling 300+ px in a single 16ms frame is physically implausible for a human.
@@ -236,10 +208,9 @@ def process_aiming(
 
     aim_part = config.aim_part
     head_height_ratio = config.head_height_ratio
-    config._current_confidences = confidences or []
+    confidences = confidences or []
 
     valid_targets = []
-    confidences = getattr(config, '_current_confidences', [])
     for i, box in enumerate(boxes):
         target_x, target_y = calculate_aim_target(box, aim_part, head_height_ratio, config)
         moveX = target_x - crosshair_x
@@ -277,6 +248,7 @@ def process_aiming(
                     best_iou, best_item = iou, item
             if best_iou >= iou_thresh and best_item is not None:
                 selected = best_item
+        _prev_locked_box = state.locked_box
         _, _conf, target_x, target_y, selected_box = selected
         # Always record what got selected — independent of sticky_lock_enabled —
         # so callers (e.g. single_target_mode's box-list reduction in ai_loop.py)
@@ -284,35 +256,36 @@ def process_aiming(
         # one, which is what let single_target_mode silently defeat sticky lock.
         state.locked_box = selected_box
         state.locked_confidence = _conf
+
+        # The Y-recoil-suppression velocity-restore gate (below) computes how
+        # fast the CURRENT target is moving vertically frame-to-frame. If the
+        # top pick swaps to a physically different target this same frame
+        # (boxes stayed non-empty, so the full target-loss reset in
+        # ai_loop.py never runs), the stale last-target Y/timestamp belongs
+        # to the old target — dividing a cross-target Y jump by one frame's
+        # dt can produce a huge spurious velocity that wrongly disables Y
+        # suppression right when it's needed. Reset the gate's timestamp
+        # whenever the selected box isn't a continuation of the previous one.
+        _iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
+        if _prev_locked_box is None or _box_iou(_prev_locked_box, selected_box) < _iou_thresh:
+            state.aim_y_last_target_t = 0.0
+
         if sticky:
             state.no_detection_frames = 0
             config.display_locked_box = list(selected_box)
             config.display_locked_box_is_decaying = False
 
-        # --- Box EMA — smooth raw box coords to suppress size-jitter wobble ---
-        # Runs after sticky lock (which needs the raw box for IOU matching) but
-        # before aim-point computation so that frame-to-frame box size variance
-        # doesn't propagate into target_x / target_y.
-        if getattr(config, 'box_ema_enabled', False):
-            raw_box = list(selected_box)
-            if state.smoothed_box is None:
-                state.smoothed_box = raw_box[:]
-            else:
-                ax = float(getattr(config, 'box_ema_alpha_x', 0.8))
-                ay = float(getattr(config, 'box_ema_alpha_y', 0.5))
-                sb = state.smoothed_box
-                state.smoothed_box = [
-                    ax * raw_box[0] + (1.0 - ax) * sb[0],
-                    ay * raw_box[1] + (1.0 - ay) * sb[1],
-                    ax * raw_box[2] + (1.0 - ax) * sb[2],
-                    ay * raw_box[3] + (1.0 - ay) * sb[3],
-                ]
-            target_x, target_y = calculate_aim_target(state.smoothed_box, aim_part, head_height_ratio, config)
-            selected_box = state.smoothed_box
-        else:
-            state.smoothed_box = list(selected_box)
-
         # --- Velocity prediction (optional) ---
+        # Extrapolates the aim point forward by prediction_horizon_ms to
+        # compensate for capture->inference->move pipeline latency — this is
+        # a genuinely different job from Kalman's below (anticipating motion
+        # vs. denoising the point), not a duplicate of it. Restored after
+        # being merged away: on a PID with Kd=0 on both axes (no derivative
+        # term of its own), this was the *only* thing in the whole pipeline
+        # compensating for target motion during that latency window — with
+        # Kalman off (as it commonly is), removing this left literally
+        # nothing anticipating a moving target, which read as the aimbot
+        # feeling permanently a step behind.
         if getattr(config, 'prediction_enabled', False):
             predictor = _get_predictor(config)
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
@@ -321,30 +294,13 @@ def process_aiming(
             if _predictor is not None:
                 _predictor.reset()
 
-        # --- Kalman filter aim-point smoothing (optional, UI-exclusive with EMA) ---
+        # --- Kalman filter aim-point smoothing (optional) ---
         if getattr(config, 'kalman_enabled', False):
             kf = _get_kalman(config)
             target_x, target_y = kf.update(target_x, target_y)
         else:
             if _kalman is not None:
                 _kalman.reset()
-
-        # --- EMA aim-point smoothing (optional) ---
-        # Smooths the target coordinate before feeding to PID, reducing jitter
-        # without introducing the drift risk of full Kalman filtering.
-        if getattr(config, 'ema_enabled', False):
-            alpha = float(getattr(config, 'ema_alpha', 0.7))
-            if state.smooth_x == 0.0 and state.smooth_y == 0.0:
-                # Bootstrap on first frame so the aim doesn't spring from (0, 0).
-                state.smooth_x = target_x
-                state.smooth_y = target_y
-            else:
-                state.smooth_x = alpha * target_x + (1.0 - alpha) * state.smooth_x
-                state.smooth_y = alpha * target_y + (1.0 - alpha) * state.smooth_y
-            target_x, target_y = state.smooth_x, state.smooth_y
-        else:
-            state.smooth_x = 0.0
-            state.smooth_y = 0.0
 
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
@@ -358,15 +314,18 @@ def process_aiming(
         if getattr(config, 'aim_deadzone_enabled', False):
             errorX, errorY = _apply_adaptive_deadzone(errorX, errorY, selected_box[3] - selected_box[1], config)
             if errorX == 0.0 and errorY == 0.0:
+                # Keep previous_error current even while suppressed by the
+                # deadzone, so the derivative term doesn't see a multi-frame-
+                # stale error (and produce a one-frame Kd kick) the moment
+                # the target exits the deadzone. Outputs discarded — no
+                # movement is intended this frame.
+                pid_x.update(0.0)
+                pid_y.update(0.0)
                 return
-
-        # --- Lateral overshoot brake (new feature from Someone_idea) ---
-        if getattr(config, 'aim_lateral_brake_enabled', False):
-            errorX, errorY = _apply_lateral_overshoot_brake(errorX, errorY, selected_box, config)
 
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
 
-        # Track target Y velocity for the velocity-restore gate (independent of prediction_enabled)
+        # Track target Y velocity for the velocity-restore gate
         if state.aim_y_last_target_t > 0:
             _y_dt = current_time - state.aim_y_last_target_t
             _vy = (target_y - state.aim_y_last_target_y) / _y_dt if _y_dt > 0 else 0.0
@@ -427,20 +386,19 @@ def process_aiming(
             _mx, _my = _apply_per_frame_cap(float(move_x), float(move_y), config)
             move_x, move_y = int(round(_mx)), int(round(_my))
 
-        if getattr(config, 'jitter_enabled', False) and (move_x != 0 or move_y != 0):
-            j = float(getattr(config, 'jitter_strength', 1.5))
-            move_x += int(random.uniform(-j, j))
-            move_y += int(random.uniform(-j, j))
-
         # --- Smart jitter: fires when box is small (far target) ---
         if getattr(config, 'smart_jitter_enabled', False):
             lmb_gate = getattr(config, 'smart_jitter_lmb_gate', True)
             if not lmb_gate:
                 is_shooting = True
-            elif getattr(config, 'mouse_move_method', '') == 'makcu' and is_makcu_connected():
-                from win_utils.makcu_mouse import makcu_mouse as _mm
-                is_shooting = _mm.lmb_held
             else:
+                # aiming_start_time already reflects the fully-resolved
+                # aim-active state computed once in ai_loop.py — including
+                # MAKCU's configured makcu_aim_button (lmb/rmb), toggle mode,
+                # and the disengage delay. Re-deriving MAKCU's physical LMB
+                # state here separately ignored a non-LMB makcu_aim_button
+                # setting entirely, so this now shares the same signal every
+                # other backend already uses instead of a second, narrower one.
                 is_shooting = state.aiming_start_time > 0
             if is_shooting:
                 box_h = selected_box[3] - selected_box[1]
@@ -460,6 +418,13 @@ def process_aiming(
                                 cache["iter"] = None
                                 cache["file"] = None
                         if cache["iter"]:
+                            # Only the recorded (dx, dy) shape is replayed — the
+                            # recording's own dt_ms per frame (~1ms, see
+                            # jitter_recorder.py) is intentionally not honored
+                            # here; playback cadence instead follows this
+                            # detection loop's own tick rate, tunable via
+                            # jitter_speed_multiplier. See "Recorded Pattern"'s
+                            # tooltip for the same note.
                             _mult = max(1, int(getattr(config, 'jitter_speed_multiplier', 1)))
                             for _ in range(_mult):
                                 f = next(cache["iter"])

@@ -63,6 +63,34 @@ class TestFindClosestTarget:
         assert picked_confs == [0.5]
 
 
+class TestCalculateDetectionRegion:
+    """detection_size must be clamped against both capture dimensions, not
+    just height — a capture source narrower than tall (portrait UVC/NDI/UDP
+    feed) would otherwise let detection_size exceed capture_width, and
+    region_width (independently clamped to capture_width) would then come
+    out smaller than region_height, silently producing a non-square region
+    and defeating the square fast-preprocess path."""
+
+    def test_clamps_against_narrower_dimension_for_portrait_source(self, ai_loop_utils):
+        from types import SimpleNamespace
+        config = SimpleNamespace(
+            screenshot_method='mss', width=400, height=800,
+            fov_size=100, detect_range_size=600,
+        )
+        region = ai_loop_utils.calculate_detection_region(config, crosshair_x=200, crosshair_y=400)
+        assert region['width'] == region['height'], f"non-square region for a portrait source: {region}"
+        assert region['width'] == 400
+
+    def test_square_landscape_source_unaffected(self, ai_loop_utils):
+        from types import SimpleNamespace
+        config = SimpleNamespace(
+            screenshot_method='mss', width=1920, height=1080,
+            fov_size=100, detect_range_size=320,
+        )
+        region = ai_loop_utils.calculate_detection_region(config, crosshair_x=960, crosshair_y=540)
+        assert region['width'] == region['height'] == 320
+
+
 class TestReduceBoxesForSingleTarget:
     """Regression coverage for the single_target_mode / sticky_lock_enabled
     interaction fix: single_target_mode's box-list reduction must only trust
