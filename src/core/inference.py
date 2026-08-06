@@ -277,26 +277,44 @@ def postprocess_outputs(
 
 
 def non_max_suppression(
-    boxes: List[List[float]], 
-    confidences: List[float], 
-    iou_threshold: float = 0.4
-) -> Tuple[List[List[float]], List[float]]:
-    """
-    非極大值抑制
-    
+    boxes: List[List[float]],
+    confidences: List[float],
+    iou_threshold: float = 0.4,
+    class_ids: List[int] | None = None,
+) -> Tuple[List[List[float]], List[float], List[int]]:
+    """非極大值抑制 (non-maximum suppression).
+
+    Returns ``(boxes, confidences, class_ids)``.
+
+    ``class_ids`` is threaded through rather than left to the caller
+    because NMS both **drops** boxes and **reorders** the survivors into
+    descending-confidence order — so a class-id list produced alongside the
+    input boxes no longer lines up with the output positionally. Callers
+    previously kept using the pre-NMS list, which meant every downstream
+    consumer indexing ``class_ids[i]`` by box index (notably
+    ``detection_semantics.filter_detections_by_semantic_class``) read the
+    class of an unrelated detection. That is invisible for single-class
+    models — every id is 0 — and wrong for exactly the multi-class models
+    the semantic class-name filter exists to serve.
+
+    Passing ``class_ids=None`` yields a zero-filled list of the correct
+    output length, so the return shape is uniform either way.
+
     Args:
         boxes: 邊界框列表
         confidences: 置信度列表
         iou_threshold: IoU 閾值
-        
+        class_ids: per-box class ids, same order/length as ``boxes``
+
     Returns:
-        (filtered_boxes, filtered_confidences) 元組
+        (filtered_boxes, filtered_confidences, filtered_class_ids)
     """
     if len(boxes) == 0:
-        return [], []
+        return [], [], []
 
     if len(boxes) == 1:
-        return boxes, confidences
+        single_ids = [int(class_ids[0])] if class_ids else [0]
+        return boxes, confidences, single_ids
 
     boxes_arr = np.array(boxes)
     confidences_arr = np.array(confidences)
@@ -322,5 +340,13 @@ def non_max_suppression(
         iou = intersection / np.maximum(union, 1e-6)  # 防止除零
         
         order = order[1:][iou <= iou_threshold]
-        
-    return boxes_arr[keep].tolist(), confidences_arr[keep].tolist()
+
+    # `keep` holds original indices in descending-confidence order — reindex
+    # class_ids by exactly the same list so element i of every returned list
+    # describes the same detection.
+    if class_ids:
+        kept_class_ids = [int(class_ids[i]) if i < len(class_ids) else 0 for i in keep]
+    else:
+        kept_class_ids = [0] * len(keep)
+
+    return boxes_arr[keep].tolist(), confidences_arr[keep].tolist(), kept_class_ids

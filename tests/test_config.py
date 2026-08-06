@@ -562,3 +562,53 @@ class TestValidateScreenshotInterval:
         c.screenshot_interval = 0.5
         _validate_screenshot_interval(c)
         assert c.screenshot_interval == 0.1
+
+
+# ============================================================
+# 10. _validate_udp_recv_buffer_size 測試
+# ============================================================
+
+class TestValidateUdpRecvBufferSize:
+    """A recv buffer smaller than the sender's largest datagram makes
+    recvfrom() silently truncate frames — the truncated payload still passes
+    the receiver's chunk-count completeness check, so corruption reaches
+    cv2.imdecode with nothing pointing back at this setting."""
+
+    def test_default_is_unchanged(self):
+        from core.config import _validate_udp_recv_buffer_size
+        c = _make_config()
+        c.udp_recv_buffer_size = 65536
+        _validate_udp_recv_buffer_size(c)
+        assert c.udp_recv_buffer_size == 65536
+
+    def test_larger_value_is_kept(self):
+        from core.config import _validate_udp_recv_buffer_size
+        c = _make_config()
+        c.udp_recv_buffer_size = 262144
+        _validate_udp_recv_buffer_size(c)
+        assert c.udp_recv_buffer_size == 262144
+
+    def test_below_max_datagram_is_raised(self):
+        from core.config import _validate_udp_recv_buffer_size
+        c = _make_config()
+        # 32 KiB: smaller than the sender's 14 + 60000 byte ceiling, so
+        # multi-chunk frames would arrive truncated.
+        c.udp_recv_buffer_size = 32768
+        _validate_udp_recv_buffer_size(c)
+        assert c.udp_recv_buffer_size == 65536
+
+    def test_covers_senders_max_datagram(self):
+        """Must be at least UDP_HEADER_SIZE + UDP_MAX_PAYLOAD from
+        udp_stream_filter.cpp (14 + 60000)."""
+        from core.config import _validate_udp_recv_buffer_size
+        c = _make_config()
+        c.udp_recv_buffer_size = 1
+        _validate_udp_recv_buffer_size(c)
+        assert c.udp_recv_buffer_size >= 14 + 60000
+
+    def test_garbage_value_falls_back_to_minimum(self):
+        from core.config import _validate_udp_recv_buffer_size
+        c = _make_config()
+        c.udp_recv_buffer_size = "not-a-number"
+        _validate_udp_recv_buffer_size(c)
+        assert c.udp_recv_buffer_size == 65536

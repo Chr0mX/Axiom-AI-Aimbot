@@ -75,6 +75,12 @@ class UdpJpegReceiver:
         self._new_frame_event = threading.Event()
         self.recv_fps: float = 0.0     # assembled frames/sec from sender
         self.dropped_fps: float = 0.0  # incomplete frames evicted/sec (packet loss)
+        # Frames that assembled successfully but arrived after a newer frame
+        # had already been published, so they were discarded rather than
+        # rewinding the consumer to older content. Monotonic; a steadily
+        # climbing value means chunks are being reordered or delayed enough
+        # that frames finish out of order.
+        self.stale_frames_dropped: int = 0
         self._dfps_count = 0
         self._dfps_t0 = time.time()
 
@@ -177,13 +183,39 @@ class UdpJpegReceiver:
                     # packet) — drop this frame instead of crashing the thread.
                     del self._partial_frames[frame_id]
                     continue
-                with self._lock:
-                    self._latest_frame = jpeg_bytes
-                    self._latest_frame_id = frame_id
-                self._new_frame_event.set()
+                # Only publish if this frame is actually newer than what's
+                # already there. Frames don't necessarily complete in order:
+                # if frame N is missing a chunk, N+1 can assemble first, and
+                # then N's straggler arrives and completes N — publishing it
+                # unconditionally would hand the consumer an *older* frame
+                # than the one it already has, i.e. visible backwards jitter.
+                #
+                # frame_id is a uint32 that wraps (~414 days at 120fps, but
+                # also immediately whenever the OBS sender restarts and its
+                # counter resets to 0). Compare as a signed 32-bit difference
+                # so wraparound reads as "newer" rather than stranding the
+                # receiver until it catches back up.
+                if self._latest_frame_id is None:
+                    is_newer = True
+                else:
+                    delta = (frame_id - self._latest_frame_id) & 0xFFFFFFFF
+                    if delta >= 0x80000000:
+                        delta -= 0x100000000
+                    is_newer = delta > 0
+
                 del self._partial_frames[frame_id]
 
-                # Count fully assembled frames for sender-side FPS
+                if is_newer:
+                    with self._lock:
+                        self._latest_frame = jpeg_bytes
+                        self._latest_frame_id = frame_id
+                    self._new_frame_event.set()
+                else:
+                    self.stale_frames_dropped += 1
+
+                # Counts assembly rate, which is what recv_fps claims to
+                # measure — so a late-but-complete frame still counts here
+                # even though it was too old to publish.
                 _rfps_count += 1
                 _now = time.time()
                 _elapsed = _now - _rfps_t0

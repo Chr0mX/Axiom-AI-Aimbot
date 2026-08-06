@@ -139,3 +139,70 @@ class TestMalformedChunkRecovery:
             assert jpeg == b"ok"
         finally:
             client.close()
+
+
+class TestFrameOrdering:
+    """A frame that assembles late must not rewind the consumer to older
+    content than it already has."""
+
+    def test_late_completing_older_frame_does_not_replace_newer(self, receiver):
+        addr = ("127.0.0.1", receiver.sock.getsockname()[1])
+        client = _client_socket()
+        try:
+            # Frame 100 arrives incomplete: chunk 0 of 2, no chunk 1 yet.
+            client.sendto(_make_packet(100, 8, 0, 2, b"OLD-"), addr)
+
+            # Frame 101 arrives complete and is published.
+            _send_frame(client, addr, frame_id=101, chunks=[b"NEW"])
+            jpeg, fid = receiver.get_latest_frame_with_id(block=True, timeout=2.0)
+            assert fid == 101 and jpeg == b"NEW"
+
+            # Frame 100's straggler now lands, completing the OLDER frame.
+            client.sendto(_make_packet(100, 8, 1, 2, b"DATA"), addr)
+            time.sleep(0.3)
+
+            # The consumer must still see frame 101, not the stale 100.
+            jpeg, fid = receiver.get_latest_frame_with_id()
+            assert fid == 101, "stale frame 100 replaced newer frame 101"
+            assert jpeg == b"NEW"
+            assert receiver.stale_frames_dropped == 1
+        finally:
+            client.close()
+
+    def test_sender_restart_frame_id_reset_is_accepted(self, receiver):
+        """A restarted OBS sender resets frame_id to 0. Treating that as
+        'older' would strand the receiver on the last pre-restart frame, so
+        the wraparound-aware comparison must accept it."""
+        addr = ("127.0.0.1", receiver.sock.getsockname()[1])
+        client = _client_socket()
+        try:
+            _send_frame(client, addr, frame_id=4_000_000_000, chunks=[b"before"])
+            jpeg, fid = receiver.get_latest_frame_with_id(block=True, timeout=2.0)
+            assert fid == 4_000_000_000
+
+            # Sender restarts, counter back to 0. Unsigned delta would be a
+            # huge positive number; the signed-32-bit reading makes it a
+            # forward step, which is what we want.
+            _send_frame(client, addr, frame_id=0, chunks=[b"after"])
+            jpeg, fid = receiver.get_latest_frame_with_id(block=True, timeout=2.0)
+            assert fid == 0
+            assert jpeg == b"after"
+        finally:
+            client.close()
+
+    def test_duplicate_frame_id_is_not_republished(self, receiver):
+        addr = ("127.0.0.1", receiver.sock.getsockname()[1])
+        client = _client_socket()
+        try:
+            _send_frame(client, addr, frame_id=7, chunks=[b"first"])
+            jpeg, fid = receiver.get_latest_frame_with_id(block=True, timeout=2.0)
+            assert fid == 7 and jpeg == b"first"
+
+            # Same id again with different content — equal is not newer.
+            _send_frame(client, addr, frame_id=7, chunks=[b"again"])
+            time.sleep(0.3)
+            jpeg, fid = receiver.get_latest_frame_with_id()
+            assert jpeg == b"first"
+            assert receiver.stale_frames_dropped == 1
+        finally:
+            client.close()
