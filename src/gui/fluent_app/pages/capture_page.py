@@ -187,7 +187,7 @@ class CapturePage(BasePage):
             "lower, OBS-like latency. NV12 only in this build. Requires "
             "directshow_capture.dll to be present (see FFmpeg Path card's "
             "location convention).",
-            self.uvcGroup
+            parent=self.uvcGroup
         )
 
         # FFmpeg is DirectShow-only (no MSMF demuxer on Windows) and only
@@ -200,7 +200,7 @@ class CapturePage(BasePage):
             "ffmpeg's dshow demuxer negotiates directly and fails loudly "
             "instead of silently substituting something else — useful when "
             "OpenCV's DirectShow wrapper lies about negotiated state.",
-            self.uvcGroup
+            parent=self.uvcGroup
         )
 
         self.uvcDeviceCombo = ComboBox()
