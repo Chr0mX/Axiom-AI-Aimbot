@@ -452,20 +452,31 @@ def test_compute_fixed_uvc_crop_region_clamped_to_capture_size():
     assert region == {'left': 420, 'top': 0, 'width': 1080, 'height': 1080}
 
 
-def test_native_dll_fixed_crop_requests_upstream_crop_size(monkeypatch):
-    """Fixed crop mode on the native DLL (v2) should ask the DLL to open at
-    the crop resolution directly (e.g. 640x640), not the full requested
-    resolution — a real reduction in what the device/driver captures, not
-    just what Axiom crops afterward. On success this makes _fixed_region a
-    no-op (full-frame) rect, since the frame arriving IS already the crop
-    size."""
+def _wait_until(predicate, timeout=2.0, interval=0.01):
+    import time
+    deadline = time.perf_counter() + timeout
+    while time.perf_counter() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
+def test_native_dll_fixed_crop_requests_native_crop_not_a_resolution_swap(monkeypatch):
+    """Fixed crop mode on the native DLL (v2, NV12) must open at the FULL
+    requested resolution — device negotiation is unaffected — and pass the
+    centered crop rect via the DLL's native crop_x/y/width/height fields
+    instead. This is deliberately not "open at 640x640 instead of
+    1920x1080": that resolution-swap trick (a prior version of this method)
+    isn't a real crop guarantee — a device accepting a smaller mode carries
+    no promise it's a spatial crop of the same framing."""
     from core import screen_capture as sc
 
     opened_with = []
 
     class FakeNative:
-        def __init__(self, device_index, w, h, fps, pixel_format=0, buffer_count=4):
-            opened_with.append((w, h))
+        def __init__(self, device_index, w, h, fps, pixel_format=0, buffer_count=4, crop=None):
+            opened_with.append((w, h, crop))
 
         def start(self):
             pass
@@ -477,7 +488,7 @@ def test_native_dll_fixed_crop_requests_upstream_crop_size(monkeypatch):
 
     config = SimpleNamespace(
         uvc_device_index=0, uvc_width=1920, uvc_height=1080, uvc_fps=60,
-        uvc_show_window=False, uvc_video_format='mjpeg', uvc_crop_mode='fixed',
+        uvc_show_window=False, uvc_video_format='nv12', uvc_crop_mode='fixed',
         detect_range_size=640, source_nominal_fps=0.0, uvc_actual_width=0,
         uvc_actual_height=0, uvc_actual_fps=0.0,
     )
@@ -487,28 +498,119 @@ def test_native_dll_fixed_crop_requests_upstream_crop_size(monkeypatch):
     capture.show_window = False
     capture._init_native_dll(0, 1920, 1080, 60)
     try:
-        assert opened_with == [(640, 640)]
-        assert capture.preview_width == 640 and capture.preview_height == 640
-        assert capture._fixed_region == {'left': 0, 'top': 0, 'width': 640, 'height': 640}
+        assert opened_with == [(1920, 1080, (640, 220, 640, 640))]
+        assert capture.preview_width == 1920 and capture.preview_height == 1080
+        # Optimistic default pending the reader thread's first-frame
+        # confirmation — no frame has arrived yet in this test (FakeNative
+        # returns None), so _fixed_region stays at its "assume it worked"
+        # starting value.
+        assert capture._fixed_region is None
     finally:
         capture._reader_stop.set()
 
 
-def test_native_dll_fixed_crop_falls_back_to_software_crop_when_device_rejects_size(monkeypatch):
-    """Not every UVC device advertises an arbitrary small resolution like
-    640x640 as a supported mode. If the upstream-crop open() attempt fails,
-    _init_native_dll must retry at the full requested resolution and fall
-    back to the pre-existing software-crop behavior (centered rect within
-    the full frame) rather than letting the whole backend fail (→ MSS)."""
+def test_native_dll_fixed_crop_self_heals_when_dll_silently_ignores_crop(monkeypatch):
+    """A DLL build that predates the native crop ABI addition doesn't
+    reject the trailing crop_x/y/width/height fields — it just never reads
+    them, so capture_open() succeeds and frames keep arriving at the full
+    negotiated resolution. capture_open() returning OK is therefore not
+    proof the crop actually happened; only the first real frame's actual
+    dimensions are. This must self-heal to a software crop rather than
+    silently feeding the full frame to detection as if it were the crop."""
+    from core import screen_capture as sc
+
+    class FakeNative:
+        def __init__(self, device_index, w, h, fps, pixel_format=0, buffer_count=4, crop=None):
+            pass
+
+        def start(self):
+            pass
+
+        def get_latest_frame(self):
+            # Full negotiated resolution, NOT the requested 640x640 crop —
+            # simulates a DLL that silently ignored the crop request.
+            h, w = 1080, 1920
+            raw = bytes(h * 3 // 2 * w)
+            return raw, w, h, 1
+
+    monkeypatch.setattr('core.dshow_capture_native.NativeDshowCapture', FakeNative)
+
+    config = SimpleNamespace(
+        uvc_device_index=0, uvc_width=1920, uvc_height=1080, uvc_fps=60,
+        uvc_show_window=False, uvc_video_format='nv12', uvc_crop_mode='fixed',
+        detect_range_size=640, source_nominal_fps=0.0, uvc_actual_width=0,
+        uvc_actual_height=0, uvc_actual_fps=0.0,
+    )
+
+    capture = object.__new__(sc.UVCCapture)
+    capture.config = config
+    capture.show_window = False
+    capture._init_native_dll(0, 1920, 1080, 60)
+    try:
+        assert _wait_until(lambda: capture._native_crop_confirmed)
+        assert capture._fixed_region == {'left': 640, 'top': 220, 'width': 640, 'height': 640}
+        assert capture.preview_width == 1920 and capture.preview_height == 1080
+    finally:
+        capture._reader_stop.set()
+
+
+def test_native_dll_fixed_crop_falls_back_to_software_crop_when_open_rejects_crop(monkeypatch):
+    """If capture_open() itself rejects the crop request (e.g.
+    DSC_ERR_INVALID_ARG/DSC_ERR_CROP_NOT_SUPPORTED), _init_native_dll must
+    retry without a crop request (still at the full resolution — never a
+    different size) and fall back to the pre-existing software-crop
+    behavior rather than letting the whole backend fail (→ MSS)."""
     from core import screen_capture as sc
 
     opened_with = []
 
     class FakeNative:
-        def __init__(self, device_index, w, h, fps, pixel_format=0, buffer_count=4):
-            opened_with.append((w, h))
-            if (w, h) == (640, 640):
-                raise RuntimeError('device does not support the requested resolution for this format')
+        def __init__(self, device_index, w, h, fps, pixel_format=0, buffer_count=4, crop=None):
+            opened_with.append((w, h, crop))
+            if crop is not None:
+                raise RuntimeError('native crop is not supported for this session')
+
+        def start(self):
+            pass
+
+        def get_latest_frame(self):
+            return None
+
+    monkeypatch.setattr('core.dshow_capture_native.NativeDshowCapture', FakeNative)
+
+    config = SimpleNamespace(
+        uvc_device_index=0, uvc_width=1920, uvc_height=1080, uvc_fps=60,
+        uvc_show_window=False, uvc_video_format='nv12', uvc_crop_mode='fixed',
+        detect_range_size=640, source_nominal_fps=0.0, uvc_actual_width=0,
+        uvc_actual_height=0, uvc_actual_fps=0.0,
+    )
+
+    capture = object.__new__(sc.UVCCapture)
+    capture.config = config
+    capture.show_window = False
+    capture._init_native_dll(0, 1920, 1080, 60)
+    try:
+        # Crop attempt first (still at the full resolution), then the
+        # no-crop retry — never a smaller-resolution open at any point.
+        assert opened_with == [(1920, 1080, (640, 220, 640, 640)), (1920, 1080, None)]
+        assert capture.preview_width == 1920 and capture.preview_height == 1080
+        assert capture._fixed_region == {'left': 640, 'top': 220, 'width': 640, 'height': 640}
+    finally:
+        capture._reader_stop.set()
+
+
+def test_native_dll_fixed_crop_skips_native_crop_for_mjpeg(monkeypatch):
+    """Native crop is NV12-only — for MJPEG, _init_native_dll must not even
+    attempt it (the DLL's own contract rejects that combination with
+    DSC_ERR_CROP_NOT_SUPPORTED), going straight to the pre-existing
+    software crop-after-decode path instead."""
+    from core import screen_capture as sc
+
+    opened_with = []
+
+    class FakeNative:
+        def __init__(self, device_index, w, h, fps, pixel_format=0, buffer_count=4, crop=None):
+            opened_with.append((w, h, crop))
 
         def start(self):
             pass
@@ -530,8 +632,7 @@ def test_native_dll_fixed_crop_falls_back_to_software_crop_when_device_rejects_s
     capture.show_window = False
     capture._init_native_dll(0, 1920, 1080, 60)
     try:
-        assert opened_with == [(640, 640), (1920, 1080)]  # small attempt first, then the fallback
-        assert capture.preview_width == 1920 and capture.preview_height == 1080
+        assert opened_with == [(1920, 1080, None)]
         assert capture._fixed_region == {'left': 640, 'top': 220, 'width': 640, 'height': 640}
     finally:
         capture._reader_stop.set()
