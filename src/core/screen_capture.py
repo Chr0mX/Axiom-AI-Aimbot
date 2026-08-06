@@ -1732,6 +1732,45 @@ class UVCCapture:
         self.preview_width = width
         self.preview_height = height
         self.preview_fps = max(1, fps)
+
+        # Publish what the device ACTUALLY negotiated, not what we asked
+        # for. These fields feed the GUI's "actual" readout, and on this
+        # backend they used to be the request echoed straight back — so a
+        # device that quietly negotiated something else reported the
+        # request as fact, which is exactly the class of confusion the
+        # cv2 path avoids by reading its values back from the driver.
+        negotiated = None
+        try:
+            negotiated = self._native.negotiated_format()
+        except Exception:
+            negotiated = None
+
+        if negotiated is not None:
+            nw, nh, nfps, nbufs, neg_supported = negotiated
+            if nw > 0 and nh > 0:
+                self.preview_width, self.preview_height = nw, nh
+            if nfps > 0:
+                self.preview_fps = max(1, int(round(nfps)))
+            if not neg_supported:
+                _warn_once(
+                    'native_dll_no_buffer_negotiation',
+                    "[UVC][NativeDLL] This device does not implement "
+                    "IAMBufferNegotiation — the allocator buffer count is whatever "
+                    "the driver chose, and buffer-count tuning has no effect here.",
+                )
+            elif nbufs > 0 and nbufs != 4:
+                logging.getLogger(__name__).info(
+                    "[UVC][NativeDLL] Driver committed %d allocator buffers "
+                    "(requested 4).", nbufs,
+                )
+        else:
+            _warn_once(
+                'native_dll_no_negotiated_format',
+                "[UVC][NativeDLL] DLL predates capture_get_negotiated_format — "
+                "reporting requested resolution/fps as 'actual'. Rebuild the DLL "
+                "for real negotiated values.",
+            )
+
         self.config.source_nominal_fps = float(self.preview_fps)
         self.config.uvc_actual_width = self.preview_width
         self.config.uvc_actual_height = self.preview_height

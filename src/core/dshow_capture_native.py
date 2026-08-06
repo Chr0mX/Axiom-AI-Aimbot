@@ -195,6 +195,19 @@ def _load_dll() -> ctypes.WinDLL:
     ]
     dll.capture_set_crop.restype = ctypes.c_int32
 
+    # Newer than the original ABI — an older DLL simply won't export it, so
+    # bind defensively and let callers fall back (see negotiated_format()).
+    if hasattr(dll, 'capture_get_negotiated_format'):
+        dll.capture_get_negotiated_format.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_int32),
+            ctypes.POINTER(ctypes.c_int32),
+            ctypes.POINTER(ctypes.c_double),
+            ctypes.POINTER(ctypes.c_int32),
+            ctypes.POINTER(ctypes.c_int32),
+        ]
+        dll.capture_get_negotiated_format.restype = ctypes.c_int32
+
     dll.capture_get_qpc_frequency.argtypes = []
     dll.capture_get_qpc_frequency.restype = ctypes.c_int64
 
@@ -319,6 +332,34 @@ class NativeDshowCapture:
         self._handle = ctypes.c_void_p(handle)
         logger.info("[dshow_capture_native] capture_open ok, handle=%s", self._handle)
         self._started = False
+
+    def negotiated_format(self):
+        """Returns ``(width, height, fps, buffer_count, negotiation_supported)``
+        as actually negotiated by the device/graph, or None if this DLL build
+        predates the call.
+
+        Worth calling rather than echoing back the request: a driver can
+        hand back a different frame rate than its capability advertised, and
+        can ignore the allocator buffer-count suggestion entirely — which
+        matters because that count is the one variable this DLL exists to
+        control. ``buffer_count`` of 0 means the driver doesn't implement
+        IAMBufferNegotiation (``negotiation_supported`` will be False) or the
+        readback failed.
+        """
+        if not hasattr(self._dll, 'capture_get_negotiated_format'):
+            return None
+        w = ctypes.c_int32(0)
+        h = ctypes.c_int32(0)
+        fps = ctypes.c_double(0.0)
+        bufs = ctypes.c_int32(0)
+        supported = ctypes.c_int32(0)
+        rc = self._dll.capture_get_negotiated_format(
+            self._handle, ctypes.byref(w), ctypes.byref(h), ctypes.byref(fps),
+            ctypes.byref(bufs), ctypes.byref(supported),
+        )
+        if rc != DSC_OK:
+            return None
+        return w.value, h.value, fps.value, bufs.value, bool(supported.value)
 
     def start(self) -> None:
         _check(self._dll, self._dll.capture_start(self._handle), self._handle)

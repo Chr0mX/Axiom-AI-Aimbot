@@ -536,7 +536,46 @@ def main():
     if config.model_path:
         if not start_threads_callback(config.model_path):
             logger.warning("AI 偵測線程啟動失敗，請檢查模型路徑")
-    
+
+    def _shutdown() -> None:
+        """Release everything the OS won't clean up for us, before exit.
+
+        Without this, quitting relied entirely on daemon threads being
+        killed mid-step and the OS reclaiming the process. That left the
+        capture worker's `finally` block — which calls `_cleanup_capture()`
+        and restores the 1 ms multimedia timer resolution — unreachable, so
+        an open UVC device was never released cleanly: on the native-DLL
+        path `capture_stop`/`capture_close` never ran, meaning
+        `IMediaControl::Stop()` was never issued and the DirectShow graph
+        was torn down by process death rather than by us. Some UVC bridges
+        need a re-plug to recover from that.
+
+        Every step is independently guarded: shutdown must not be the thing
+        that throws, and one subsystem failing to stop must not prevent the
+        rest from trying.
+        """
+        logger.info("Shutting down…")
+        try:
+            stop_ai_threads(config)
+        except Exception:
+            logger.exception("Error stopping AI threads during shutdown")
+        try:
+            from core import esp_server
+            if esp_server.is_running():
+                esp_server.stop()
+        except Exception:
+            logger.exception("Error stopping Web ESP server during shutdown")
+        try:
+            save_config(config)
+        except Exception:
+            logger.exception("Error saving config during shutdown")
+        logger.info("Shutdown complete")
+
+    # aboutToQuit fires while the event loop is still alive, so Qt objects
+    # are still usable here — unlike code after app.exec() returns, which
+    # would run too late to stop anything cleanly.
+    app.aboutToQuit.connect(_shutdown)
+
     # 啟動 PyQt 應用程式事件循環，這會管理所有 PyQt 視窗
     sys.exit(app.exec())
 

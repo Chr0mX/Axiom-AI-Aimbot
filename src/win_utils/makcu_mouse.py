@@ -21,7 +21,6 @@ _deps_dir = os.path.join(_python_dir, 'dependencies')
 if _deps_dir not in sys.path:
     sys.path.insert(0, _deps_dir)
 
-import queue
 
 import serial
 import serial.tools.list_ports
@@ -64,9 +63,17 @@ class MakcuMouse:
         self._stream_stop  = threading.Event()
         self._stream_thread: Optional[threading.Thread] = None
 
-        # Async write thread — inference thread enqueues commands; write thread
-        # drains the queue and flushes to serial so inference is never blocked.
-        self._cmd_queue: queue.Queue = queue.Queue(maxsize=1)
+        # Async write thread — inference thread accumulates movement; write
+        # thread drains it and flushes to serial so inference is never blocked.
+        # Pending relative movement, accumulated by move() and drained by
+        # _write_worker. Deliberately a running total rather than a queue of
+        # commands: these deltas are relative, so a dropped one is travel
+        # permanently lost, not merely delayed. Guarded by _pending_lock;
+        # _pending_event signals the writer that there is something to send.
+        self._pending_dx: int = 0
+        self._pending_dy: int = 0
+        self._pending_lock = threading.Lock()
+        self._pending_event = threading.Event()
         self._write_stop = threading.Event()
         self._write_thread: Optional[threading.Thread] = None
 
@@ -149,6 +156,16 @@ class MakcuMouse:
             with self._lock:
                 self._close_locked()
             return False
+
+        # Discard any movement accumulated before this connection came up.
+        # Coalescing preserves displacement across a slow writer, which is
+        # the point — but NOT across a disconnect: replaying deltas that
+        # piled up during a USB glitch would fire them as one large jump
+        # long after the target they were computed for has moved on.
+        with self._pending_lock:
+            self._pending_dx = 0
+            self._pending_dy = 0
+            self._pending_event.clear()
 
         # Start threads outside the lock
         self._start_stream()
@@ -283,20 +300,35 @@ class MakcuMouse:
         self._reconnect_thread.start()
 
     def _write_worker(self):
-        """Drain the command queue and write+flush to serial.
+        """Drain the pending relative movement and write+flush to serial.
 
         Runs on its own thread so the inference thread (which calls move())
         is never blocked waiting on the serial port.
+
+        Takes the accumulated delta and zeroes it in one locked step. That
+        atomicity is what makes coalescing correct: anything move() adds
+        while this write is in flight lands in a freshly-zeroed accumulator
+        and is sent on the next pass, so no displacement is either lost or
+        counted twice. (The previous design queued pre-formatted command
+        strings and dropped unsent ones — which, for *relative* deltas,
+        silently discarded travel whenever the writer fell behind.)
         """
         while not self._write_stop.is_set():
+            if not self._pending_event.wait(0.01):
+                continue
+            with self._pending_lock:
+                dx, dy = self._pending_dx, self._pending_dy
+                self._pending_dx = 0
+                self._pending_dy = 0
+                self._pending_event.clear()
+            if dx == 0 and dy == 0:
+                continue
+            cmd = self.CMD_MOVE.format(dx=dx, dy=dy)
             try:
-                cmd = self._cmd_queue.get(timeout=0.01)
                 with self._lock:
                     if self._serial and self._serial.is_open:
                         self._serial.write(cmd.encode('ascii'))
                         self._serial.flush()
-            except queue.Empty:
-                continue
             except serial.SerialException:
                 self._connected = False
             except Exception:
@@ -469,25 +501,29 @@ class MakcuMouse:
     # ------------------------------------------------------------------
 
     def move(self, dx: int, dy: int):
-        """Relative mouse move. Enqueues command for async write thread.
+        """Relative mouse move. Handed to the async write thread.
 
-        Latest-only: if a previous move hasn't been sent yet it is replaced,
-        so the inference thread never blocks on serial I/O.
+        Coalescing, not latest-only: if a previous move hasn't been written
+        yet, this one is *added* to it rather than replacing it.
+
+        That distinction is the whole point. These are **relative** deltas —
+        dropping a pending (+5, +0) and sending (+5, +0) moves the cursor 5
+        px, not 10, so every dropped command is travel silently lost. The
+        aiming path can't compensate either: its sub-pixel carry assumes
+        each move it hands over is actually delivered. Coalescing preserves
+        the total displacement no matter how far behind the serial writer
+        falls; the cursor simply arrives in one larger step.
         """
         if not self.is_connected():
             return
-        dx = max(-32768, min(32767, int(dx)))
-        dy = max(-32768, min(32767, int(dy)))
-        cmd = self.CMD_MOVE.format(dx=dx, dy=dy)
-        # Drop stale command if queue is full, then enqueue the latest.
-        try:
-            self._cmd_queue.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            self._cmd_queue.put_nowait(cmd)
-        except queue.Full:
-            pass
+        with self._pending_lock:
+            self._pending_dx += int(dx)
+            self._pending_dy += int(dy)
+            # Clamp the accumulator, not just this call's delta — an
+            # unbounded backlog would otherwise overflow the wire format.
+            self._pending_dx = max(-32768, min(32767, self._pending_dx))
+            self._pending_dy = max(-32768, min(32767, self._pending_dy))
+        self._pending_event.set()
 
     def click(self, action: int = 1):
         """Left mouse click. action: 1=click, 2=press, 3=release."""
