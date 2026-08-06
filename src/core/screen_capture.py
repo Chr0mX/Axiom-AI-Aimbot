@@ -229,6 +229,31 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
     )
 
 
+def _compute_fixed_uvc_crop_region(
+    config: Config, capture_width: int, capture_height: int,
+) -> dict[str, int] | None:
+    """Compute the centered crop rect for uvc_crop_mode == 'fixed', shared by
+    every in-process UVC capture path (cv2 dshow/msmf and the native DLL).
+
+    Returns None when crop_mode isn't 'fixed' or detect_range_size doesn't
+    fit inside the capture resolution — callers should leave _fixed_region
+    unset in that case, which makes grab() fall back to the live (dynamic)
+    region instead.
+    """
+    if str(getattr(config, 'uvc_crop_mode', 'dynamic')).lower() != 'fixed':
+        return None
+    crop_size = int(getattr(config, 'detect_range_size', 0) or 0) & ~1
+    crop_size = max(0, min(crop_size, capture_width, capture_height))
+    if crop_size <= 0:
+        return None
+    return {
+        'left': (capture_width - crop_size) // 2,
+        'top': (capture_height - crop_size) // 2,
+        'width': crop_size,
+        'height': crop_size,
+    }
+
+
 def _resolve_native_dll_pixel_format(config: Config) -> tuple[int, str]:
     """Map uvc_video_format to the native DLL's dsc_pixel_format for the
     uvc_dshow_backend == 'v2' path.
@@ -1491,16 +1516,7 @@ class UVCCapture:
         # exactly like ffmpeg's fixed mode (see uvc_crop_mode's docstring
         # in config.py). Preview still renders the full frame either way —
         # only grab()'s AI-pipeline output is restricted to the fixed square.
-        if str(getattr(config, 'uvc_crop_mode', 'dynamic')).lower() == 'fixed':
-            crop_size = int(getattr(config, 'detect_range_size', 0) or 0) & ~1
-            crop_size = max(0, min(crop_size, self.preview_width, self.preview_height))
-            if crop_size > 0:
-                self._fixed_region = {
-                    'left': (self.preview_width - crop_size) // 2,
-                    'top': (self.preview_height - crop_size) // 2,
-                    'width': crop_size,
-                    'height': crop_size,
-                }
+        self._fixed_region = _compute_fixed_uvc_crop_region(config, self.preview_width, self.preview_height)
         # Seed with the driver-probed capability so the status panel shows
         # something before the first live measurement below completes; the
         # reader worker overwrites this every second with the actual received rate.
@@ -1644,6 +1660,18 @@ class UVCCapture:
         self.config.uvc_actual_height = self.preview_height
         self.config.uvc_actual_fps = float(self.preview_fps)
         self.is_expected_format = True
+        # __init__ sets self._fixed_region = None unconditionally before
+        # dispatching to this method (see its early-return) — compute it
+        # here too, using the requested width/height (the DLL fails open()
+        # outright on an unsupported resolution rather than silently
+        # substituting one, so requested == negotiated in the success case).
+        # Without this, 'fixed' crop mode silently behaved like 'dynamic'
+        # for this backend, and worse: get_capture_dimensions() (ai_loop_
+        # utils.py) still reported the frozen crop_size as the capture
+        # canvas while grab() kept using the live region against the full
+        # frame — cropping whatever the live region's top-left corner
+        # happened to be instead of a centered square.
+        self._fixed_region = _compute_fixed_uvc_crop_region(self.config, width, height)
         # Gates grab()'s shared raw-NV12 crop-before-convert path (same one
         # the cv2 CAP_PROP_CONVERT_RGB path uses) — only meaningful for NV12;
         # MJPEG frames are already decoded to BGR by the reader thread below.
@@ -1683,6 +1711,17 @@ class UVCCapture:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
         _warned_broken_read = False
+        # capture_get_latest_frame() is "give me whatever the latest sample
+        # is" — it keeps returning the SAME frame (and DSC_OK, not
+        # DSC_ERR_NO_FRAME_YET) if this loop polls faster than the device
+        # actually delivers new samples, which it does (no blocking wait
+        # here, unlike cap.read() on the cv2 path). Without deduplicating on
+        # the DLL's own per-sample QPC timestamp, every poll of an unchanged
+        # frame got counted as a fresh one — inflating source_nominal_fps to
+        # whatever this loop's own polling rate happened to be (e.g. ~400
+        # Hz) instead of the device's real ~120 Hz, and wastefully re-
+        # decoding/re-reshaping the same buffer each time.
+        _last_ts_qpc: int | None = None
         while not self._reader_stop.is_set():
             try:
                 result = self._native.get_latest_frame()
@@ -1706,7 +1745,16 @@ class UVCCapture:
                 time.sleep(0.005)
                 continue
 
-            raw, w, h, _ts_qpc = result
+            raw, w, h, ts_qpc = result
+            if ts_qpc == _last_ts_qpc:
+                # Same sample as last poll — nothing new to decode, publish,
+                # or count towards fps. Sleep briefly so this loop doesn't
+                # spin the CPU polling the DLL faster than it can possibly
+                # produce new frames.
+                time.sleep(0.001)
+                continue
+            _last_ts_qpc = ts_qpc
+
             if self._native_is_compressed:
                 # MJPEG: decode to BGR here (same place UdpCapture's reader
                 # thread decodes its JPEG chunks) so grab()'s generic

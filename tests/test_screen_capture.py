@@ -418,6 +418,80 @@ def test_resolve_native_dll_pixel_format_falls_back_for_unsupported_format():
     assert name == 'MJPEG'
 
 
+def test_compute_fixed_uvc_crop_region_centers_the_crop():
+    from core import screen_capture as sc
+
+    config = SimpleNamespace(uvc_crop_mode='fixed', detect_range_size=640)
+    region = sc._compute_fixed_uvc_crop_region(config, capture_width=1920, capture_height=1080)
+
+    assert region == {'left': 640, 'top': 220, 'width': 640, 'height': 640}
+
+
+def test_compute_fixed_uvc_crop_region_none_when_dynamic():
+    from core import screen_capture as sc
+
+    config = SimpleNamespace(uvc_crop_mode='dynamic', detect_range_size=640)
+    assert sc._compute_fixed_uvc_crop_region(config, 1920, 1080) is None
+
+
+def test_compute_fixed_uvc_crop_region_none_when_detect_range_size_missing():
+    from core import screen_capture as sc
+
+    config = SimpleNamespace(uvc_crop_mode='fixed', detect_range_size=0)
+    assert sc._compute_fixed_uvc_crop_region(config, 1920, 1080) is None
+
+
+def test_compute_fixed_uvc_crop_region_clamped_to_capture_size():
+    """detect_range_size larger than the actual capture resolution must be
+    clamped, not produce a crop rect that doesn't fit inside the frame."""
+    from core import screen_capture as sc
+
+    config = SimpleNamespace(uvc_crop_mode='fixed', detect_range_size=4000)
+    region = sc._compute_fixed_uvc_crop_region(config, capture_width=1920, capture_height=1080)
+
+    assert region == {'left': 420, 'top': 0, 'width': 1080, 'height': 1080}
+
+
+def test_native_dll_fixed_crop_region_is_set_on_init(monkeypatch):
+    """Regression test: uvc_dshow_backend == 'v2' must apply the same
+    centered fixed-crop rect the cv2 (v1) path does — it used to stay None
+    for this backend (early-return skipped the computation entirely),
+    silently behaving like 'dynamic' and letting grab() crop whatever the
+    live region's top-left corner happened to be instead of a centered
+    square."""
+    from core import screen_capture as sc
+
+    class FakeNative:
+        def __init__(self, *a, **kw):
+            pass
+
+        def start(self):
+            pass
+
+        def get_latest_frame(self):
+            return None  # keeps the reader thread quiet for this test's brief lifetime
+
+    monkeypatch.setattr(
+        'core.dshow_capture_native.NativeDshowCapture', lambda *a, **kw: FakeNative()
+    )
+
+    config = SimpleNamespace(
+        uvc_device_index=0, uvc_width=1920, uvc_height=1080, uvc_fps=60,
+        uvc_show_window=False, uvc_video_format='mjpeg', uvc_crop_mode='fixed',
+        detect_range_size=640, source_nominal_fps=0.0, uvc_actual_width=0,
+        uvc_actual_height=0, uvc_actual_fps=0.0,
+    )
+
+    capture = object.__new__(sc.UVCCapture)
+    capture.config = config
+    capture.show_window = False
+    capture._init_native_dll(0, 1920, 1080, 60)
+    try:
+        assert capture._fixed_region == {'left': 640, 'top': 220, 'width': 640, 'height': 640}
+    finally:
+        capture._reader_stop.set()
+
+
 def test_wait_for_receiver_connection_succeeds_after_connect(monkeypatch):
     from core import screen_capture as sc
 
