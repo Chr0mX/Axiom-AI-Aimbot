@@ -385,6 +385,39 @@ def test_uvc_grab_dynamic_mode_uses_live_region():
     assert capture._region_ref[0] == live_region
 
 
+def test_resolve_native_dll_pixel_format_maps_nv12():
+    from core import screen_capture as sc
+    from core import dshow_capture_native as dsn
+
+    config = SimpleNamespace(uvc_video_format='nv12')
+    fmt, name = sc._resolve_native_dll_pixel_format(config)
+    assert fmt == dsn.PIXEL_FORMAT_NV12
+    assert name == 'NV12'
+
+
+def test_resolve_native_dll_pixel_format_maps_mjpeg():
+    from core import screen_capture as sc
+    from core import dshow_capture_native as dsn
+
+    config = SimpleNamespace(uvc_video_format='mjpeg')
+    fmt, name = sc._resolve_native_dll_pixel_format(config)
+    assert fmt == dsn.PIXEL_FORMAT_MJPEG
+    assert name == 'MJPEG'
+
+
+def test_resolve_native_dll_pixel_format_falls_back_for_unsupported_format():
+    """yuy2/yuv420p are valid for the cv2 (v1) path but the native DLL only
+    implements NV12/MJPEG — must fall back rather than silently misconfigure
+    the DLL open call with a format it doesn't have."""
+    from core import screen_capture as sc
+    from core import dshow_capture_native as dsn
+
+    config = SimpleNamespace(uvc_video_format='yuy2')
+    fmt, name = sc._resolve_native_dll_pixel_format(config)
+    assert fmt == dsn.PIXEL_FORMAT_MJPEG
+    assert name == 'MJPEG'
+
+
 def test_wait_for_receiver_connection_succeeds_after_connect(monkeypatch):
     from core import screen_capture as sc
 
