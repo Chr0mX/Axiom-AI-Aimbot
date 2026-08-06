@@ -86,7 +86,25 @@ def _load_dll() -> ctypes.WinDLL:
             f"{_DLL_FILENAME} not found — expected at src/python/dependencies/{_DLL_FILENAME}."
         )
 
-    dll = ctypes.WinDLL(path)
+    try:
+        dll = ctypes.WinDLL(path)
+    except OSError as exc:
+        # The single most likely cause for a freshly-shipped native DLL
+        # failing to load on an arbitrary machine: this build links against
+        # MSVCP140.dll/VCRUNTIME140.dll/VCRUNTIME140_1.dll (confirmed via
+        # its PE import table) — those ship with the Visual C++ 2015-2022
+        # x64 Redistributable, not with Windows itself. ctypes.WinDLL()'s
+        # own error ("WinError 126 / module not found") doesn't say which
+        # dependency is missing, so spell it out here instead of leaving
+        # the user to guess from a cryptic OSError.
+        raise RuntimeError(
+            f"directshow_capture.dll failed to load ({exc}). This almost "
+            "always means a required runtime DLL is missing — install the "
+            "\"Microsoft Visual C++ 2015-2022 Redistributable (x64)\" from "
+            "https://aka.ms/vs/17/release/vc_redist.x64.exe and retry. If "
+            "that doesn't fix it, run `where directshow_capture.dll` and "
+            "confirm nothing else on PATH is shadowing the vendored copy."
+        ) from exc
 
     dll.capture_default_params.argtypes = [ctypes.POINTER(CaptureParams)]
     dll.capture_default_params.restype = ctypes.c_int
@@ -133,13 +151,31 @@ def _load_dll() -> ctypes.WinDLL:
     return dll
 
 
-def _check(dll: ctypes.WinDLL, code: int) -> None:
+def _last_error_detail(dll: ctypes.WinDLL, handle: ctypes.c_void_p | None) -> str:
+    """Best-effort extra detail via capture_get_last_error(), on top of the
+    generic capture_result_to_string() code→string mapping. Never raises —
+    a wrong assumption about this call's exact behavior (e.g. whether it
+    accepts a NULL handle) shouldn't hide the original error.
+    """
+    try:
+        raw = dll.capture_get_last_error(handle if handle is not None else ctypes.c_void_p(None))
+        if raw:
+            return raw.decode('utf-8', errors='replace')
+    except Exception:
+        pass
+    return ""
+
+
+def _check(dll: ctypes.WinDLL, code: int, handle: ctypes.c_void_p | None = None) -> None:
     if code == 0:
         return
     try:
         msg = dll.capture_result_to_string(code).decode('utf-8', errors='replace')
     except Exception:
         msg = "(capture_result_to_string call itself failed)"
+    detail = _last_error_detail(dll, handle)
+    if detail and detail != msg:
+        msg = f"{msg} — {detail}"
     raise CaptureError(code, msg)
 
 
@@ -169,6 +205,8 @@ class NativeDshowCapture:
 
     def __init__(self, device_index: int, width: int, height: int, fps: int):
         self._dll = _load_dll()
+        logger.info("[dshow_capture_native] DLL loaded, requesting device=%d %dx%d@%dfps (NV12)",
+                    device_index, width, height, fps)
         self._handle = ctypes.c_void_p(None)
 
         params = CaptureParams()
@@ -178,13 +216,16 @@ class NativeDshowCapture:
         params.height = height
         params.fps = fps
         params.pixel_format = 0  # NV12 — the only format this build implements
+        logger.info("[dshow_capture_native] capture_default_params ok, calling capture_open...")
 
         _check(self._dll, self._dll.capture_open(ctypes.byref(params), ctypes.byref(self._handle)))
+        logger.info("[dshow_capture_native] capture_open ok, handle=%s", self._handle)
         self._started = False
 
     def start(self) -> None:
-        _check(self._dll, self._dll.capture_start(self._handle))
+        _check(self._dll, self._dll.capture_start(self._handle), self._handle)
         self._started = True
+        logger.info("[dshow_capture_native] capture_start ok")
 
     def get_latest_frame(self):
         """Returns (nv12_ndarray_view, width, height, timestamp_qpc) or None
@@ -222,7 +263,7 @@ class NativeDshowCapture:
 
     def stop(self) -> None:
         if self._started:
-            _check(self._dll, self._dll.capture_stop(self._handle))
+            _check(self._dll, self._dll.capture_stop(self._handle), self._handle)
             self._started = False
 
     def close(self) -> None:
