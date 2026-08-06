@@ -1594,7 +1594,14 @@ class UVCCapture:
         # grab() can return the newest frame without blocking the inference loop.
         self._latest_frame_lock = threading.Lock()
         self._latest_frame_ref: list = [None]   # list[np.ndarray | None]
-        self._region_ref: list = [None]         # list[dict | None]
+        # Seeded with the frozen fixed-crop rect (None in dynamic mode) rather
+        # than always None — the preview thread reads this independently of
+        # grab(), and grab() (the only other writer) doesn't run until the
+        # main AI loop's target_region is populated. Without this seed,
+        # "Crop preview to detection" stayed a no-op (showing the full frame)
+        # for however long that takes, or indefinitely if inference never runs
+        # while the preview panel is open.
+        self._region_ref: list = [self._fixed_region]  # list[dict | None]
         self._reader_stop = threading.Event()
         # Seeded to "now" (not None) so a device that opens but never delivers
         # a single frame within the stale timeout is caught by the same check
@@ -1637,41 +1644,80 @@ class UVCCapture:
         hands back is identical — 2-D, luma+UV rows stacked); MJPEG is
         decoded to BGR in the reader thread below, same as UdpCapture's
         JPEG-over-UDP path.
+
+        Fixed-crop upstream negotiation: when uvc_crop_mode == 'fixed', this
+        asks the DLL to capture the crop square directly (e.g. 320x320)
+        instead of the full requested resolution — a genuine reduction in
+        what the device/driver actually captures and delivers, not just what
+        Axiom processes afterward (that's what makes this different from
+        cv2's fixed-crop path, and from this DLL's own dynamic mode: the
+        USB/DirectShow-graph bandwidth itself shrinks, the same category of
+        win ffmpeg's own '-vf crop' gets by cropping before the subprocess
+        pipe — except here it's before the *device* delivers pixels at all).
+        Not every UVC device advertises an arbitrary small resolution like
+        320x320 as one of its supported modes, so a rejected open() at the
+        crop size falls back to the full requested resolution with the
+        crop applied in software afterward (the pre-existing behavior) —
+        same visual result, just without the upstream bandwidth win on
+        devices that can't negotiate the small size directly.
         """
         from .dshow_capture_native import NativeDshowCapture, PIXEL_FORMAT_NV12
 
         self.cap = None
         pixel_format, format_name = _resolve_native_dll_pixel_format(self.config)
         self._native_is_compressed = (pixel_format != PIXEL_FORMAT_NV12)
-        try:
-            self._native = NativeDshowCapture(
-                device_index, width, height, fps,
+
+        crop_mode = str(getattr(self.config, 'uvc_crop_mode', 'dynamic')).lower()
+        upstream_crop_size = 0
+        if crop_mode == 'fixed':
+            upstream_crop_size = int(getattr(self.config, 'detect_range_size', 0) or 0) & ~1
+            upstream_crop_size = max(0, min(upstream_crop_size, width, height))
+        open_width, open_height = (
+            (upstream_crop_size, upstream_crop_size) if upstream_crop_size > 0 else (width, height)
+        )
+
+        def _try_open(w: int, h: int) -> "NativeDshowCapture":
+            native = NativeDshowCapture(
+                device_index, w, h, fps,
                 pixel_format=pixel_format, buffer_count=4,
             )
-            self._native.start()
-        except Exception as exc:
-            raise RuntimeError(f'Native DirectShow-Capture-DLL open failed: {exc}') from exc
+            native.start()
+            return native
 
-        self.preview_width = width
-        self.preview_height = height
+        opened_width, opened_height = open_width, open_height
+        try:
+            self._native = _try_open(open_width, open_height)
+        except Exception as exc:
+            if upstream_crop_size > 0:
+                logging.getLogger(__name__).warning(
+                    "[UVC][NativeDLL] Upstream fixed-crop open at %dx%d failed (%s) — "
+                    "this device likely doesn't advertise that exact resolution. "
+                    "Falling back to full-resolution capture (%dx%d) with the crop "
+                    "applied in software instead.",
+                    open_width, open_height, exc, width, height,
+                )
+                try:
+                    self._native = _try_open(width, height)
+                    opened_width, opened_height = width, height
+                except Exception as exc2:
+                    raise RuntimeError(f'Native DirectShow-Capture-DLL open failed: {exc2}') from exc2
+            else:
+                raise RuntimeError(f'Native DirectShow-Capture-DLL open failed: {exc}') from exc
+
+        self.preview_width = opened_width
+        self.preview_height = opened_height
         self.preview_fps = max(1, fps)
         self.config.source_nominal_fps = float(self.preview_fps)
         self.config.uvc_actual_width = self.preview_width
         self.config.uvc_actual_height = self.preview_height
         self.config.uvc_actual_fps = float(self.preview_fps)
         self.is_expected_format = True
-        # __init__ sets self._fixed_region = None unconditionally before
-        # dispatching to this method (see its early-return) — compute it
-        # here too, using the requested width/height (the DLL fails open()
-        # outright on an unsupported resolution rather than silently
-        # substituting one, so requested == negotiated in the success case).
-        # Without this, 'fixed' crop mode silently behaved like 'dynamic'
-        # for this backend, and worse: get_capture_dimensions() (ai_loop_
-        # utils.py) still reported the frozen crop_size as the capture
-        # canvas while grab() kept using the live region against the full
-        # frame — cropping whatever the live region's top-left corner
-        # happened to be instead of a centered square.
-        self._fixed_region = _compute_fixed_uvc_crop_region(self.config, width, height)
+        # Computed against whichever resolution actually got negotiated
+        # above — a no-op (full-frame) region when the upstream crop
+        # succeeded (opened_width/height already equal the crop size), or
+        # the real centered-crop rect when it fell back to full resolution.
+        # Either way grab() below applies the same math uniformly.
+        self._fixed_region = _compute_fixed_uvc_crop_region(self.config, opened_width, opened_height)
         # Gates grab()'s shared raw-NV12 crop-before-convert path (same one
         # the cv2 CAP_PROP_CONVERT_RGB path uses) — only meaningful for NV12;
         # MJPEG frames are already decoded to BGR by the reader thread below.
@@ -1679,14 +1725,19 @@ class UVCCapture:
 
         logging.getLogger(__name__).info(
             "[UVC][NativeDLL] Opened device index=%d via directshow_capture.dll "
-            "at %dx%d @ %d fps (%s, requested — driver may negotiate "
-            "differently, reader thread updates preview_width/height per frame).",
-            device_index, width, height, fps, format_name,
+            "at %dx%d @ %d fps (%s%s, driver may still negotiate differently — "
+            "reader thread updates preview_width/height per frame).",
+            device_index, opened_width, opened_height, fps, format_name,
+            ", upstream fixed-crop" if opened_width == upstream_crop_size and upstream_crop_size > 0 else "",
         )
 
         self._latest_frame_lock = threading.Lock()
         self._latest_frame_ref: list = [None]
-        self._region_ref: list = [None]
+        # Seeded with the frozen fixed-crop rect, not always None — see the
+        # matching cv2-path comment above self._region_ref for why (the
+        # preview thread reads this independently of grab(), which only
+        # writes it once the main AI loop's target_region is populated).
+        self._region_ref: list = [self._fixed_region]
         self._reader_stop = threading.Event()
         self._last_frame_perf_time = time.perf_counter()
         self._reader_thread = threading.Thread(
@@ -2465,6 +2516,19 @@ def initialize_screen_capture(config: Config) -> Any:
             logger.info('[Capture] UVC backend initialized via OpenCV VideoCapture.')
             return uvc_capture
         except Exception as exc:
+            # logger.exception() (not just str(exc)) — a wrapped RuntimeError
+            # message alone hasn't been enough to actually diagnose the last
+            # two "falls back to MSS" reports; the full traceback pinpoints
+            # which line in UVCCapture.__init__/_init_native_dll/
+            # _init_ffmpeg actually raised, not just the outermost re-raise's
+            # message. Only on the first occurrence (paired with the
+            # warn-once below) so a persistent failure doesn't spam the log
+            # every 0.5s hot-swap-check cycle.
+            if 'uvc_fallback_mss' not in _WARNED_MESSAGES:
+                logger.exception(
+                    '[Capture] UVC initialization raised — full traceback above. '
+                    'Falling back to MSS backend.'
+                )
             _warn_once(
                 'uvc_fallback_mss',
                 f'[Capture] UVC initialization failed with "{exc}". Falling back to MSS backend.',

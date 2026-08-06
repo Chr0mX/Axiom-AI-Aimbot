@@ -452,18 +452,20 @@ def test_compute_fixed_uvc_crop_region_clamped_to_capture_size():
     assert region == {'left': 420, 'top': 0, 'width': 1080, 'height': 1080}
 
 
-def test_native_dll_fixed_crop_region_is_set_on_init(monkeypatch):
-    """Regression test: uvc_dshow_backend == 'v2' must apply the same
-    centered fixed-crop rect the cv2 (v1) path does — it used to stay None
-    for this backend (early-return skipped the computation entirely),
-    silently behaving like 'dynamic' and letting grab() crop whatever the
-    live region's top-left corner happened to be instead of a centered
-    square."""
+def test_native_dll_fixed_crop_requests_upstream_crop_size(monkeypatch):
+    """Fixed crop mode on the native DLL (v2) should ask the DLL to open at
+    the crop resolution directly (e.g. 640x640), not the full requested
+    resolution — a real reduction in what the device/driver captures, not
+    just what Axiom crops afterward. On success this makes _fixed_region a
+    no-op (full-frame) rect, since the frame arriving IS already the crop
+    size."""
     from core import screen_capture as sc
 
+    opened_with = []
+
     class FakeNative:
-        def __init__(self, *a, **kw):
-            pass
+        def __init__(self, device_index, w, h, fps, pixel_format=0, buffer_count=4):
+            opened_with.append((w, h))
 
         def start(self):
             pass
@@ -471,9 +473,7 @@ def test_native_dll_fixed_crop_region_is_set_on_init(monkeypatch):
         def get_latest_frame(self):
             return None  # keeps the reader thread quiet for this test's brief lifetime
 
-    monkeypatch.setattr(
-        'core.dshow_capture_native.NativeDshowCapture', lambda *a, **kw: FakeNative()
-    )
+    monkeypatch.setattr('core.dshow_capture_native.NativeDshowCapture', FakeNative)
 
     config = SimpleNamespace(
         uvc_device_index=0, uvc_width=1920, uvc_height=1080, uvc_fps=60,
@@ -487,6 +487,51 @@ def test_native_dll_fixed_crop_region_is_set_on_init(monkeypatch):
     capture.show_window = False
     capture._init_native_dll(0, 1920, 1080, 60)
     try:
+        assert opened_with == [(640, 640)]
+        assert capture.preview_width == 640 and capture.preview_height == 640
+        assert capture._fixed_region == {'left': 0, 'top': 0, 'width': 640, 'height': 640}
+    finally:
+        capture._reader_stop.set()
+
+
+def test_native_dll_fixed_crop_falls_back_to_software_crop_when_device_rejects_size(monkeypatch):
+    """Not every UVC device advertises an arbitrary small resolution like
+    640x640 as a supported mode. If the upstream-crop open() attempt fails,
+    _init_native_dll must retry at the full requested resolution and fall
+    back to the pre-existing software-crop behavior (centered rect within
+    the full frame) rather than letting the whole backend fail (→ MSS)."""
+    from core import screen_capture as sc
+
+    opened_with = []
+
+    class FakeNative:
+        def __init__(self, device_index, w, h, fps, pixel_format=0, buffer_count=4):
+            opened_with.append((w, h))
+            if (w, h) == (640, 640):
+                raise RuntimeError('device does not support the requested resolution for this format')
+
+        def start(self):
+            pass
+
+        def get_latest_frame(self):
+            return None
+
+    monkeypatch.setattr('core.dshow_capture_native.NativeDshowCapture', FakeNative)
+
+    config = SimpleNamespace(
+        uvc_device_index=0, uvc_width=1920, uvc_height=1080, uvc_fps=60,
+        uvc_show_window=False, uvc_video_format='mjpeg', uvc_crop_mode='fixed',
+        detect_range_size=640, source_nominal_fps=0.0, uvc_actual_width=0,
+        uvc_actual_height=0, uvc_actual_fps=0.0,
+    )
+
+    capture = object.__new__(sc.UVCCapture)
+    capture.config = config
+    capture.show_window = False
+    capture._init_native_dll(0, 1920, 1080, 60)
+    try:
+        assert opened_with == [(640, 640), (1920, 1080)]  # small attempt first, then the fallback
+        assert capture.preview_width == 1920 and capture.preview_height == 1080
         assert capture._fixed_region == {'left': 640, 'top': 220, 'width': 640, 'height': 640}
     finally:
         capture._reader_stop.set()
