@@ -205,7 +205,7 @@ def _load_cyndilib_symbols() -> dict[str, Any]:
     }
 
 
-def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, str, int]:
+def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, str, bool, str, str, int]:
     crop_mode = str(getattr(config, 'uvc_crop_mode', 'dynamic')).lower()
     return (
         int(getattr(config, 'uvc_device_index', 0)),
@@ -214,7 +214,9 @@ def _uvc_signature(config: Config) -> tuple[int, int, int, int, bool, str, str, 
         int(getattr(config, 'uvc_fps', 0)),
         bool(getattr(config, 'uvc_show_window', False)),
         str(getattr(config, 'uvc_capture_method', 'msmf')).lower(),
+        str(getattr(config, 'uvc_dshow_backend', 'v1')).lower(),
         str(getattr(config, 'uvc_video_format', 'mjpeg')).lower(),
+        bool(getattr(config, 'uvc_ffmpeg_enabled', False)),
         str(getattr(config, 'uvc_ffmpeg_path', '') or ''),
         crop_mode,
         # Only fixed-crop mode bakes detect_range_size into the frozen crop
@@ -1281,7 +1283,7 @@ def _resolve_dshow_device_name(config: Config, device_index: int) -> str:
 
 
 def _resolve_ffmpeg_path(config: Config) -> str:
-    """Locate an ffmpeg executable for the 'ffmpeg' capture method.
+    """Locate an ffmpeg executable for uvc_ffmpeg_enabled mode.
 
     Checked in order: an explicit ``uvc_ffmpeg_path`` override, a bundled
     copy at ``<project root>/ffmpeg/ffmpeg.exe`` (drop a build there,
@@ -1374,12 +1376,27 @@ class UVCCapture:
         self.config_signature = _uvc_signature(config)
 
         capture_method = str(getattr(config, 'uvc_capture_method', 'msmf')).lower()
-        self.is_ffmpeg = (capture_method == 'ffmpeg')
+        dshow_backend = str(getattr(config, 'uvc_dshow_backend', 'v1')).lower()
+        # FFmpeg and the native DLL are both DirectShow-only — 'ffmpeg' used
+        # to be its own top-level capture_method value, but ffmpeg has no
+        # MSMF demuxer on Windows, and the native DLL (v2) already owns the
+        # DirectShow graph directly, so routing v2 through an ffmpeg
+        # subprocess would defeat the point of it. Both are gated to
+        # dshow + v1 only — see uvc_ffmpeg_enabled's docstring in config.py.
+        self.is_native_dll = (capture_method == 'dshow' and dshow_backend == 'v2')
+        self.is_ffmpeg = (
+            capture_method == 'dshow' and dshow_backend == 'v1'
+            and bool(getattr(config, 'uvc_ffmpeg_enabled', False))
+        )
         # Only the cv2 (dshow/msmf) path below ever sets this — ffmpeg mode
         # does its own crop via -vf before Axiom ever sees a frame, so grab()
         # just uses whatever region get_capture_dimensions()'s fixed-mode
         # reporting already resolves to a no-op crop.
         self._fixed_region: dict[str, int] | None = None
+
+        if self.is_native_dll:
+            self._init_native_dll(device_index, width, height, fps)
+            return
 
         if self.is_ffmpeg:
             self._init_ffmpeg(device_index, width, height, fps)
@@ -1563,6 +1580,110 @@ class UVCCapture:
                 config=self.config,
             )
             self._preview_thread.start()
+
+    def _init_native_dll(self, device_index: int, width: int, height: int, fps: int) -> None:
+        """Open a UVC device via the native DirectShow-Capture-DLL
+        (uvc_dshow_backend == 'v2') instead of cv2.VideoCapture.
+
+        Unlike cv2's generic DirectShow wrapper, this DLL owns the filter
+        graph and allocator directly — the whole point of it existing (see
+        the DirectShow Capture DLL roadmap / this file's Capture Pipeline
+        Audit artifact for the "why v2" writeup). NV12-only in this build —
+        reuses the exact same raw-NV12 crop-before-convert path in grab()
+        that the cv2 path's CAP_PROP_CONVERT_RGB optimization already uses,
+        since the frame shape this hands back is identical (2-D, luma+UV
+        rows stacked, one row = preview_width bytes).
+        """
+        from .dshow_capture_native import NativeDshowCapture
+
+        self.cap = None
+        try:
+            self._native = NativeDshowCapture(device_index, width, height, fps)
+            self._native.start()
+        except Exception as exc:
+            raise RuntimeError(f'Native DirectShow-Capture-DLL open failed: {exc}') from exc
+
+        self.preview_width = width
+        self.preview_height = height
+        self.preview_fps = max(1, fps)
+        self.config.source_nominal_fps = float(self.preview_fps)
+        self.config.uvc_actual_width = self.preview_width
+        self.config.uvc_actual_height = self.preview_height
+        self.config.uvc_actual_fps = float(self.preview_fps)
+        self.is_expected_format = True
+        self.is_raw_nv12 = True  # only pixel format this DLL build implements
+
+        logging.getLogger(__name__).info(
+            "[UVC][NativeDLL] Opened device index=%d via directshow_capture.dll "
+            "at %dx%d @ %d fps (requested — driver may negotiate differently, "
+            "reader thread updates preview_width/height per frame).",
+            device_index, width, height, fps,
+        )
+
+        self._latest_frame_lock = threading.Lock()
+        self._latest_frame_ref: list = [None]
+        self._region_ref: list = [None]
+        self._reader_stop = threading.Event()
+        self._last_frame_perf_time = time.perf_counter()
+        self._reader_thread = threading.Thread(
+            target=self._reader_worker_native_dll, name='UVCReaderNativeDLL', daemon=True
+        )
+        self._reader_thread.start()
+
+        self._preview_thread: _UVCPreviewThread | None = None
+        if self.show_window:
+            self._preview_thread = _UVCPreviewThread(
+                frame_lock=self._latest_frame_lock,
+                frame_ref=self._latest_frame_ref,
+                stop_event=self._reader_stop,
+                draw_overlay_fn=self._draw_overlay,
+                region_ref=self._region_ref,
+                target_fps=self.preview_fps,
+                config=self.config,
+            )
+            self._preview_thread.start()
+
+    def _reader_worker_native_dll(self) -> None:
+        _fps_count = 0
+        _fps_t0 = time.perf_counter()
+        _warned_broken_read = False
+        while not self._reader_stop.is_set():
+            try:
+                result = self._native.get_latest_frame()
+            except Exception as exc:
+                if not _warned_broken_read:
+                    _warned_broken_read = True
+                    logging.getLogger(__name__).error(
+                        "[UVC][NativeDLL] get_latest_frame() raised %s — "
+                        "retrying. If this persists, the DLL's ABI may not "
+                        "match this wrapper's inferred struct layout (see "
+                        "dshow_capture_native.py's module docstring).",
+                        exc,
+                    )
+                time.sleep(0.05)
+                continue
+
+            if result is None:
+                # No frame captured yet — expected for the first poll or two
+                # after start(), same as every other backend's grab()
+                # returning None rather than raising.
+                time.sleep(0.005)
+                continue
+
+            frame_nv12, w, h, _ts_qpc = result
+            with self._latest_frame_lock:
+                self._latest_frame_ref[0] = frame_nv12
+            self._last_frame_perf_time = time.perf_counter()
+            self.preview_width = w
+            self.preview_height = h
+
+            _fps_count += 1
+            _now = time.perf_counter()
+            _elapsed = _now - _fps_t0
+            if _elapsed >= 1.0:
+                self.config.source_nominal_fps = _fps_count / _elapsed
+                _fps_count = 0
+                _fps_t0 = _now
 
     def _init_ffmpeg(self, device_index: int, width: int, height: int, fps: int) -> None:
         """Open a UVC device via an external ffmpeg.exe subprocess instead of
@@ -1919,6 +2040,7 @@ class UVCCapture:
 
     def close(self) -> None:
         self._reader_stop.set()
+        is_native_dll = getattr(self, 'is_native_dll', False)
         is_ffmpeg = getattr(self, 'is_ffmpeg', False)
         proc = getattr(self, '_ffmpeg_proc', None) if is_ffmpeg else None
         if is_ffmpeg and proc is not None:
@@ -1945,7 +2067,18 @@ class UVCCapture:
         if self._reader_thread.is_alive():
             self._reader_thread.join(timeout=1.0)
 
-        if is_ffmpeg:
+        if is_native_dll:
+            native = getattr(self, '_native', None)
+            if native is not None:
+                try:
+                    native.stop()
+                except Exception:
+                    pass
+                try:
+                    native.close()
+                except Exception:
+                    pass
+        elif is_ffmpeg:
             if proc is not None:
                 for pipe in (proc.stdout, proc.stderr):
                     try:

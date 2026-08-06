@@ -47,6 +47,8 @@ _FIELD_MAP = {
     'uvc_height':                 'capture.uvc.height',
     'uvc_fps':                    'capture.uvc.fps',
     'uvc_capture_method':         'capture.uvc.capture_method',
+    'uvc_dshow_backend':          'capture.uvc.dshow_backend',
+    'uvc_ffmpeg_enabled':         'capture.uvc.ffmpeg_enabled',
     'uvc_video_format':           'capture.uvc.video_format',
     'uvc_ffmpeg_path':            'capture.uvc.ffmpeg_path',
     'uvc_crop_mode':              'capture.uvc.crop_mode',
@@ -249,6 +251,23 @@ class Config:
         self.uvc_height: int = self.height
         self.uvc_fps: int = 60
         self.uvc_capture_method: str = "msmf"
+        # DirectShow implementation to use when uvc_capture_method == 'dshow':
+        #   'v1' = cv2.VideoCapture(CAP_DSHOW) — OpenCV's generic DirectShow
+        #     wrapper. No control over the driver's internal buffer/allocator
+        #     depth, which is why capture through this path can lag behind
+        #     a purpose-built app like OBS on the same device/settings.
+        #   'v2' = the native DirectShow-Capture-DLL — owns the filter graph
+        #     and allocator directly (see the DirectShow Capture DLL roadmap),
+        #     closing that gap. NV12-only in this build. Irrelevant/ignored
+        #     for 'msmf' or 'any'.
+        self.uvc_dshow_backend: str = "v1"
+        # FFmpeg subprocess capture, only meaningful for capture_method ==
+        # 'dshow' + dshow_backend == 'v1' — ffmpeg has no MSMF demuxer on
+        # Windows (its capture input is DirectShow only), and v2 already
+        # owns the DirectShow graph directly, so routing v2 through an
+        # ffmpeg subprocess would defeat the point of using it. Silently
+        # ignored outside that one combination.
+        self.uvc_ffmpeg_enabled: bool = False
         # Requested pixel/codec format: 'mjpeg' (compressed, highest FPS
         # headroom over USB), 'yuy2' or 'nv12' (raw, uncompressed).
         self.uvc_video_format: str = "mjpeg"
@@ -260,10 +279,10 @@ class Config:
         #     capture-start (only makes sense centered — matches
         #     FOV-follow-mouse already being forced off for UVC) and reused
         #     every frame; a live Detection Range change needs a capture
-        #     restart to take effect. For 'ffmpeg', the crop itself also
-        #     happens inside the ffmpeg subprocess before the frame is piped
-        #     back — far less data crosses the subprocess pipe. For 'dshow'/
-        #     'msmf' (in-process cv2 capture, no pipe), this only freezes
+        #     restart to take effect. With uvc_ffmpeg_enabled on, the crop
+        #     itself also happens inside the ffmpeg subprocess before the
+        #     frame is piped back — far less data crosses the subprocess
+        #     pipe. Otherwise (in-process cv2/native-DLL capture, no pipe), this only freezes
         #     which region grab() slices — no measurable throughput/CPU
         #     difference from 'dynamic', since the crop already happens
         #     in-process either way.
@@ -803,8 +822,19 @@ def _validate_screenshot_method(config: Config) -> None:
     valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi', 'udp')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
-    if getattr(config, 'uvc_capture_method', 'msmf') not in ('dshow', 'msmf', 'any', 'ffmpeg'):
+    # Legacy migration: 'ffmpeg' used to be its own top-level capture_method
+    # value. It was always DirectShow under the hood (ffmpeg's Windows
+    # capture input has no MSMF demuxer) — fold it into the new
+    # dshow + v1 + ffmpeg_enabled shape instead of a bare 4th method.
+    if getattr(config, 'uvc_capture_method', 'msmf') == 'ffmpeg':
+        config.uvc_capture_method = 'dshow'
+        config.uvc_dshow_backend = 'v1'
+        config.uvc_ffmpeg_enabled = True
+    if getattr(config, 'uvc_capture_method', 'msmf') not in ('dshow', 'msmf', 'any'):
         config.uvc_capture_method = 'msmf'
+    if getattr(config, 'uvc_dshow_backend', 'v1') not in ('v1', 'v2'):
+        config.uvc_dshow_backend = 'v1'
+    config.uvc_ffmpeg_enabled = bool(getattr(config, 'uvc_ffmpeg_enabled', False))
     if getattr(config, 'uvc_video_format', 'mjpeg') not in ('mjpeg', 'yuy2', 'nv12', 'yuv420p'):
         config.uvc_video_format = 'mjpeg'
     if getattr(config, 'uvc_crop_mode', 'dynamic') not in ('dynamic', 'fixed'):
