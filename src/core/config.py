@@ -77,6 +77,8 @@ _FIELD_MAP = {
     'fov_follow_mouse':           'aim.fov_follow_mouse',
     'fov_circle_filter_enabled':  'aim.fov_circle_filter_enabled',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
+    'model_box_format':           'model.box_format',
+    'model_has_objectness':       'model.has_objectness',
     'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
     'detect_min_bbox_area_px':    'aim.semantic_filter.min_bbox_area_px',
     'detect_min_bbox_short_side_px': 'aim.semantic_filter.min_bbox_short_side_px',
@@ -378,6 +380,15 @@ class Config:
         self.aim_custom_y_pct: float = 30.0  # Custom aim Y as % of box height (0=top, 100=bottom)
         
         # PID 控制器參數 (分離 X 和 Y 軸)
+        # ONNX output interpretation. 'auto' matches the historical
+        # inference and is safe to leave alone; the explicit values exist
+        # because both inferences are genuinely ambiguous from tensor shape
+        # alone, and a wrong guess corrupts silently rather than erroring.
+        #   model_box_format:     'auto' | 'cxcywh' | 'xyxy'
+        #   model_has_objectness: 'auto' | 'yes' (YOLOv5-family) | 'no' (YOLOv8-family)
+        self.model_box_format: str = 'auto'
+        self.model_has_objectness: str = 'auto'
+
         self.pid_kp_x: float = 0.26      # 水平 P: 比例 - 主要影響反應速度
         self.pid_ki_x: float = 0.0       # 水平 I: 積分 - 修正靜態誤差
         self.pid_kd_x: float = 0.12      # 水平 D: 微分 - 抑制抖動與過衝
@@ -760,6 +771,9 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
 
         # 向後兼容：確保 UDP 接收緩衝區大於單一資料包最大值
         _validate_udp_recv_buffer_size(config_instance)
+
+        # 向後兼容：修正 ONNX 輸出格式選項
+        _validate_model_output_format(config_instance)
         
         logger.info("Config loaded")
         return True
@@ -807,6 +821,28 @@ def _validate_screenshot_interval(config: Config) -> None:
     elif screenshot_interval_ms > 100:
         config.screenshot_interval = 0.1  # 100ms
         logger.warning("[Config] screenshot_interval too large, clamped to 100ms")
+
+
+def _validate_model_output_format(config: Config) -> None:
+    """Clamp the ONNX output-interpretation overrides to known values.
+
+    Both default to 'auto'. A typo silently falling through to a wrong
+    branch would corrupt every box or every class id without erroring,
+    which is the whole reason these settings exist — so an unrecognized
+    value falls back to 'auto' loudly rather than quietly.
+    """
+    for attr, valid in (
+        ('model_box_format', ('auto', 'cxcywh', 'xyxy')),
+        ('model_has_objectness', ('auto', 'yes', 'no')),
+    ):
+        value = str(getattr(config, attr, 'auto')).lower()
+        if value not in valid:
+            logger.warning(
+                "[Config] %s=%r is not one of %s — falling back to 'auto'.",
+                attr, getattr(config, attr, None), valid,
+            )
+            value = 'auto'
+        setattr(config, attr, value)
 
 
 def _validate_udp_recv_buffer_size(config: Config) -> None:
