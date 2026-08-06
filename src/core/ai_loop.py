@@ -275,8 +275,8 @@ def ai_logic_loop(
     current_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
 
     ema_total = 0.0
-    ema_capture = 0.0
-    ema_pre = 0.0
+    ema_overhead = 0.0   # this loop's per-iteration work before the tensor wait
+    ema_qwait = 0.0      # time blocked waiting for _preprocess_worker's output
     ema_inf = 0.0
     ema_post = 0.0
     last_stats_print = time.perf_counter()
@@ -773,23 +773,35 @@ def ai_logic_loop(
                 if getattr(config, 'enable_latency_stats', False):
                     alpha = _LATENCY_STATS_ALPHA
                     total_ms = (time.perf_counter() - loop_start) * 1000.0
-                    cap_ms = (t0 - loop_start) * 1000.0
-                    pre_ms = (t1 - t0) * 1000.0
+                    # Named for what they actually measure. These were
+                    # previously logged as "cap" and "pre", which they never
+                    # were: capture runs on _capture_worker and preprocessing
+                    # on _preprocess_worker, so neither is timed on this
+                    # thread at all. What t0 and t1 actually bracket is this
+                    # loop's own per-iteration overhead (hot-swap check, PID
+                    # refresh, aim-key polling, region math) and the wait for
+                    # a tensor to appear. Mislabelling them sent anyone
+                    # reading these numbers looking for a capture problem
+                    # that the numbers could not have shown.
+                    overhead_ms = (t0 - loop_start) * 1000.0
+                    qwait_ms = (t1 - t0) * 1000.0
                     inf_ms = (t3 - t2) * 1000.0 if t3 is not None and t2 is not None else 0.0
                     post_ms = (t4 - t3) * 1000.0 if t4 is not None and t3 is not None else 0.0
 
                     ema_total = ema_total * (1 - alpha) + total_ms * alpha
-                    ema_capture = ema_capture * (1 - alpha) + cap_ms * alpha
-                    ema_pre = ema_pre * (1 - alpha) + pre_ms * alpha
+                    ema_overhead = ema_overhead * (1 - alpha) + overhead_ms * alpha
+                    ema_qwait = ema_qwait * (1 - alpha) + qwait_ms * alpha
                     ema_inf = ema_inf * (1 - alpha) + inf_ms * alpha
                     ema_post = ema_post * (1 - alpha) + post_ms * alpha
 
                     now = time.perf_counter()
                     if now - last_stats_print >= float(getattr(config, 'latency_stats_interval', 1.0)):
                         logger.debug(
-                            "[Latency EMA] total=%.1fms cap=%.1fms pre=%.1fms "
-                            "inf=%.1fms post=%.1fms interval=%.0fms",
-                            ema_total, ema_capture, ema_pre,
+                            "[Latency EMA] total=%.1fms loop_overhead=%.1fms "
+                            "tensor_wait=%.1fms infer=%.1fms postproc=%.1fms "
+                            "interval=%.0fms (capture/preprocess run on their "
+                            "own threads and are not timed here)",
+                            ema_total, ema_overhead, ema_qwait,
                             ema_inf, ema_post, desired_interval * 1000,
                         )
                         last_stats_print = now

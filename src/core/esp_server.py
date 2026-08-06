@@ -52,6 +52,14 @@ _broadcast_thread: Optional[threading.Thread] = None
 _clients: Set[socket.socket] = set()
 _clients_lock = threading.Lock()
 
+# Per-client send deadline for the shared broadcast thread. Generous relative
+# to a broadcast tick (typically 16 ms at 60 Hz) so an ordinary scheduling
+# hiccup never drops a healthy client, but short enough that one wedged
+# client can't hold the whole feed hostage. A client that can't absorb a
+# state snapshot within this window is not keeping up with the stream
+# anyway.
+_BROADCAST_SEND_TIMEOUT = 2.0
+
 _actual_ws_port: int = 0
 
 _capture_fps: float = 0.0
@@ -288,7 +296,14 @@ def _ws_handshake(conn: socket.socket) -> bool:
         conn.sendall(resp.encode())
     except Exception:
         return False
-    conn.settimeout(None)
+    # Deliberately NOT settimeout(None). The broadcast loop sends to every
+    # client from a single thread, so a blocking sendall to one stalled
+    # client blocks the feed for all of them — and "stalled" is an ordinary
+    # state, not a failure: a backgrounded browser tab stops draining its
+    # TCP window within seconds. With a timeout the slow client trips
+    # _BROADCAST_SEND_TIMEOUT, gets dropped, and everyone else keeps their
+    # frame rate.
+    conn.settimeout(_BROADCAST_SEND_TIMEOUT)
     return True
 
 
@@ -351,9 +366,12 @@ def _accept_loop(port: int):
 
 
 def _broadcast_loop():
-    fps = max(1, int(getattr(_config, "web_esp_fps", 60)))
-    interval = 1.0 / fps
     while not _stop.is_set():
+        # Re-read every tick rather than once at thread start: web_esp_fps is
+        # a live GUI setting like every other, and caching it here meant
+        # changing it silently did nothing until the server was restarted.
+        fps = max(1, int(getattr(_config, "web_esp_fps", 60)))
+        interval = 1.0 / fps
         start = time.monotonic()
         with _clients_lock:
             targets = list(_clients)
@@ -367,6 +385,13 @@ def _broadcast_loop():
                 for conn in targets:
                     try:
                         conn.sendall(frame)
+                    except socket.timeout:
+                        # Client isn't draining its TCP window (backgrounded
+                        # tab, wedged connection). Drop it rather than let it
+                        # throttle the broadcast for everyone else — the
+                        # client can simply reconnect.
+                        logger.info("[WebESP] dropping client that stalled for >%.0fs", _BROADCAST_SEND_TIMEOUT)
+                        dead.append(conn)
                     except Exception:
                         dead.append(conn)
                 if dead:

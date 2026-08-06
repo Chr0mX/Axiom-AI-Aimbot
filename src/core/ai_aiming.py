@@ -426,10 +426,29 @@ def process_aiming(
                             # jitter_speed_multiplier. See "Recorded Pattern"'s
                             # tooltip for the same note.
                             _mult = max(1, int(getattr(config, 'jitter_speed_multiplier', 1)))
+                            # Accumulate in float and carry the fraction
+                            # across frames. Recorded patterns are normalized
+                            # to zero net displacement (jitter_recorder's
+                            # _normalize_frames appends a correction frame so
+                            # each cycle returns to origin), but truncating
+                            # every frame independently destroys that: the sum
+                            # of int(dx) is not int(sum of dx), so the residue
+                            # accumulated and walked the crosshair steadily
+                            # off-target over a long burst. Carrying it makes
+                            # playback preserve the invariant the recorder
+                            # went out of its way to establish.
+                            _jx = state.jitter_carry_x
+                            _jy = state.jitter_carry_y
                             for _ in range(_mult):
                                 f = next(cache["iter"])
-                                move_x += int(f["dx"])
-                                move_y += int(f["dy"])
+                                _jx += float(f["dx"])
+                                _jy += float(f["dy"])
+                            _step_x = int(_jx)
+                            _step_y = int(_jy)
+                            state.jitter_carry_x = _jx - _step_x
+                            state.jitter_carry_y = _jy - _step_y
+                            move_x += _step_x
+                            move_y += _step_y
                         else:
                             angle = random.uniform(0, math.tau)
                             r = random.uniform(0, sj)

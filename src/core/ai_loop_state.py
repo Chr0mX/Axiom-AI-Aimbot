@@ -41,3 +41,11 @@ class LoopState:
     # crosshair converges exactly onto the aim point. Applies to all mouse backends.
     aim_carry_x: float = 0.0
     aim_carry_y: float = 0.0
+
+    # Recorded-jitter-pattern carry — same idea as aim_carry_*, but for
+    # replayed pattern frames. Patterns are normalized to zero net
+    # displacement; truncating each frame's dx/dy independently breaks that
+    # (sum of int(x) != int(sum of x)) and walks the crosshair off-target
+    # over a long burst. Carrying the fraction preserves the invariant.
+    jitter_carry_x: float = 0.0
+    jitter_carry_y: float = 0.0
