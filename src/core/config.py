@@ -56,6 +56,13 @@ _FIELD_MAP = {
     'udp_bind_port':              'capture.udp.bind_port',
     'udp_recv_buffer_size':       'capture.udp.recv_buffer_size',
     'udp_frame_timeout':          'capture.udp.frame_timeout',
+    'directshow_device_index':   'capture.directshow.device_index',
+    'directshow_device_substr':  'capture.directshow.device_substr',
+    'directshow_pixel_format':   'capture.directshow.pixel_format',
+    'directshow_width':          'capture.directshow.width',
+    'directshow_height':         'capture.directshow.height',
+    'directshow_fps':            'capture.directshow.fps',
+    'directshow_buffer_count':   'capture.directshow.buffer_count',
     'uvc_show_window':            'capture.preview.enabled',
     'uvc_preview_scale_mode':     'capture.preview.scale_mode',
     'uvc_always_on_top':          'capture.preview.always_on_top',
@@ -306,6 +313,25 @@ class Config:
         self.udp_recv_buffer_size: int = 65536
         self.udp_frame_timeout: float = 1.0
         self.udp_force_restart: bool = False
+        # DirectShow backend (src/core/directshow_capture.py +
+        # DirectShowCapture in screen_capture.py), via the vendored
+        # directshow_capture.dll (chr0mx/DirectShow-Capture-DLL) — an
+        # alternative to 'uvc' that owns the DirectShow capture graph's
+        # allocator/buffer count directly instead of going through
+        # cv2.VideoCapture. -1 = use the first enumerated device;
+        # device_substr (case-insensitive friendly-name substring) takes
+        # priority over device_index when both are set.
+        self.directshow_device_index: int = -1
+        self.directshow_device_substr: str = ""
+        # 'mjpeg' (compressed, far lower USB bandwidth, more latency) or
+        # 'nv12' (raw, lowest latency, can saturate USB bandwidth at higher
+        # res/fps) — no universal default, see that repo's benchmark/ Phase
+        # 0 sweep findings; 'mjpeg' matches uvc_video_format's default.
+        self.directshow_pixel_format: str = "mjpeg"
+        self.directshow_width: int = 0   # 0 = device default
+        self.directshow_height: int = 0  # 0 = device default
+        self.directshow_fps: int = 0     # 0 = device default
+        self.directshow_buffer_count: int = 4
         # Actual live stream resolution, updated continuously by
         # UdpCapture._reader_worker from the real decoded frame size — not a
         # user-configured value, since the sender can crop/resize at any
@@ -324,6 +350,13 @@ class Config:
         self.uvc_actual_width: int = 0
         self.uvc_actual_height: int = 0
         self.uvc_actual_fps: float = 0.0
+        # Actual negotiated resolution of the live DirectShow device,
+        # published by DirectShowCapture.grab() the first time frame
+        # dimensions are seen (mirrors uvc_actual_width/height above; not
+        # user-configured, not persisted). 0 = not yet opened as the live
+        # backend.
+        self.directshow_actual_width: int = 0
+        self.directshow_actual_height: int = 0
         self.crosshairX: int = self.width // 2
         self.crosshairY: int = self.height // 2
 
@@ -839,7 +872,7 @@ def _validate_mouse_method(config: Config) -> None:
 
 def _validate_screenshot_method(config: Config) -> None:
     """驗證並修正螢幕截圖方式"""
-    valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi', 'udp')
+    valid_screenshot_methods = ('mss', 'dxcam', 'uvc', 'ndi', 'udp', 'directshow')
     if getattr(config, 'screenshot_method', 'mss') not in valid_screenshot_methods:
         config.screenshot_method = 'mss'
     if getattr(config, 'uvc_capture_method', 'dshow') not in ('dshow', 'msmf', 'any', 'ffmpeg'):
@@ -853,6 +886,9 @@ def _validate_screenshot_method(config: Config) -> None:
     ):
         config.uvc_preview_scale_mode = 'scale_to_fit'
     config.ndi_source_name = str(getattr(config, 'ndi_source_name', '') or '').strip()
+    if getattr(config, 'directshow_pixel_format', 'mjpeg') not in ('mjpeg', 'nv12'):
+        config.directshow_pixel_format = 'mjpeg'
+    config.directshow_device_substr = str(getattr(config, 'directshow_device_substr', '') or '').strip()
 
 
 def _validate_detect_range_size(config: Config) -> None:

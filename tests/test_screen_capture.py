@@ -371,6 +371,179 @@ def test_uvc_grab_dynamic_mode_uses_live_region():
     assert capture._region_ref[0] == live_region
 
 
+def test_directshow_signature_reflects_config_fields():
+    from core import screen_capture as sc
+
+    config = SimpleNamespace(
+        directshow_device_index=2, directshow_device_substr='Cam',
+        directshow_pixel_format='NV12', directshow_width=1280,
+        directshow_height=720, directshow_fps=60, directshow_buffer_count=6,
+    )
+    assert sc._directshow_signature(config) == (2, 'Cam', 'nv12', 1280, 720, 60, 6)
+
+
+def test_detect_active_capture_method_identifies_directshow():
+    from core import screen_capture as sc
+
+    backend = object.__new__(sc.DirectShowCapture)
+    assert sc._detect_active_capture_method(backend, 'mss') == 'directshow'
+
+
+def _directshow_test_config(**overrides):
+    base = dict(
+        screenshot_method='directshow', directshow_device_index=-1,
+        directshow_device_substr='', directshow_pixel_format='mjpeg',
+        directshow_width=0, directshow_height=0, directshow_fps=0,
+        directshow_buffer_count=4,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_reinitialize_if_method_changed_recovers_stalled_directshow_backend(monkeypatch):
+    from core import screen_capture as sc
+    import time
+
+    config = _directshow_test_config()
+    stale_backend = object.__new__(sc.DirectShowCapture)
+    stale_backend.config_signature = sc._directshow_signature(config)
+    stale_backend._last_frame_perf_time = time.perf_counter() - (sc._CAPTURE_STALE_TIMEOUT_SECONDS + 1.0)
+
+    fresh_backend = object()
+    calls = {'count': 0}
+
+    def fake_initialize(cfg):
+        calls['count'] += 1
+        return fresh_backend
+
+    monkeypatch.setattr(sc, 'initialize_screen_capture', fake_initialize)
+    monkeypatch.setattr(sc, '_cleanup_capture', lambda backend: None)
+
+    backend, active = sc.reinitialize_if_method_changed(config, stale_backend, 'directshow')
+
+    assert calls['count'] == 1
+    assert backend is fresh_backend
+    assert active == 'directshow'
+
+
+def test_reinitialize_if_method_changed_leaves_healthy_directshow_backend_alone(monkeypatch):
+    from core import screen_capture as sc
+    import time
+
+    config = _directshow_test_config()
+    healthy_backend = object.__new__(sc.DirectShowCapture)
+    healthy_backend.config_signature = sc._directshow_signature(config)
+    healthy_backend._last_frame_perf_time = time.perf_counter()
+
+    calls = {'count': 0}
+    monkeypatch.setattr(sc, 'initialize_screen_capture', lambda cfg: calls.__setitem__('count', calls['count'] + 1) or object())
+
+    backend, active = sc.reinitialize_if_method_changed(config, healthy_backend, 'directshow')
+
+    assert calls['count'] == 0
+    assert backend is healthy_backend
+    assert active == 'directshow'
+
+
+def test_directshow_grab_returns_none_when_no_frame_yet():
+    from core import screen_capture as sc
+
+    class FakeSession:
+        def get_latest_frame(self):
+            return None
+
+    capture = object.__new__(sc.DirectShowCapture)
+    capture._session = FakeSession()
+    capture._is_compressed = True
+    capture.preview_width = 0
+    capture.preview_height = 0
+    capture.config = SimpleNamespace()
+
+    assert capture.grab() is None
+
+
+def test_directshow_grab_mjpeg_decodes_to_bgra_and_crops():
+    import cv2
+
+    from core import screen_capture as sc
+
+    raw_bgr = np.zeros((20, 20, 3), dtype=np.uint8)
+    raw_bgr[:, :, 1] = 255  # solid green, easy to eyeball corruption on
+    ok, encoded = cv2.imencode('.jpg', raw_bgr)
+    assert ok
+    jpeg_bytes = encoded.tobytes()
+
+    class FakeSession:
+        def get_latest_frame(self):
+            return jpeg_bytes, 20, 20, 0, 12345
+
+    capture = object.__new__(sc.DirectShowCapture)
+    capture._session = FakeSession()
+    capture._is_compressed = True
+    capture.preview_width = 20
+    capture.preview_height = 20
+    capture.config = SimpleNamespace()
+    capture._last_frame_perf_time = 0.0
+
+    region = {'left': 2, 'top': 2, 'width': 10, 'height': 10}
+    frame = capture.grab(region)
+
+    assert frame is not None
+    assert frame.shape == (10, 10, 4)
+    assert frame.dtype == np.uint8
+
+
+def test_directshow_grab_nv12_crops_before_convert():
+    from core import screen_capture as sc
+
+    w, h = 8, 8
+    yuv = np.zeros((h * 3 // 2, w), dtype=np.uint8)
+    yuv[:h, :] = 235  # bright luma plane
+    yuv[h:, :] = 128  # neutral chroma plane
+
+    class FakeSession:
+        def get_latest_frame(self):
+            return yuv.tobytes(), w, h, w, 999
+
+    capture = object.__new__(sc.DirectShowCapture)
+    capture._session = FakeSession()
+    capture._is_compressed = False
+    capture.preview_width = w
+    capture.preview_height = h
+    capture.config = SimpleNamespace()
+    capture._last_frame_perf_time = 0.0
+
+    region = {'left': 0, 'top': 0, 'width': 4, 'height': 4}
+    frame = capture.grab(region)
+
+    assert frame is not None
+    assert frame.shape == (4, 4, 4)
+    assert frame.dtype == np.uint8
+
+
+def test_directshow_grab_nv12_rejects_size_mismatch():
+    """A device that pads NV12 rows (buffer longer/shorter than
+    width*height*3//2) must be dropped, not fed into a reshape() that would
+    either raise or silently misinterpret the buffer."""
+    from core import screen_capture as sc
+
+    w, h = 8, 8
+    short_buffer = bytes(w * h)  # missing the chroma plane entirely
+
+    class FakeSession:
+        def get_latest_frame(self):
+            return short_buffer, w, h, w, 111
+
+    capture = object.__new__(sc.DirectShowCapture)
+    capture._session = FakeSession()
+    capture._is_compressed = False
+    capture.preview_width = w
+    capture.preview_height = h
+    capture.config = SimpleNamespace()
+
+    assert capture.grab() is None
+
+
 def test_wait_for_receiver_connection_succeeds_after_connect(monkeypatch):
     from core import screen_capture as sc
 

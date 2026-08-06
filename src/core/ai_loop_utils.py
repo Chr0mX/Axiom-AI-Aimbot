@@ -50,6 +50,24 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
         cap_h = int(getattr(config, 'udp_height', 0) or 0)
         if cap_w > 0 and cap_h > 0:
             return cap_w, cap_h
+    elif screenshot_method == 'directshow':
+        # directshow_width/height of 0 mean "device default" (see
+        # dsc_open_params in DirectShow-Capture-DLL) — the actually
+        # negotiated size is only known once DirectShowCapture.grab() sees
+        # its first frame, published to directshow_actual_width/height the
+        # same way UVCCapture publishes uvc_actual_width/height (there from
+        # __init__ instead, since cv2.VideoCapture negotiates synchronously
+        # at open time; the DLL's frame dimensions are only surfaced via
+        # capture_get_latest_frame(), not capture_open()). Preferring the
+        # actual value (falling back to the requested one only before the
+        # first frame arrives) keeps this correct in the common
+        # auto-negotiate case, not just when width/height are pinned.
+        cap_w = int(getattr(config, 'directshow_actual_width', 0) or 0) \
+            or int(getattr(config, 'directshow_width', 0) or 0)
+        cap_h = int(getattr(config, 'directshow_actual_height', 0) or 0) \
+            or int(getattr(config, 'directshow_height', 0) or 0)
+        if cap_w > 0 and cap_h > 0:
+            return cap_w, cap_h
     # getattr (not direct attribute access) so this stays safe against
     # partial/stub config objects — e.g. esp_server.py's test suite
     # deliberately calls this against a bare `class Empty: pass` to prove

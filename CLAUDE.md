@@ -23,7 +23,7 @@ pytest tests/test_config.py::TestConfigInit::test_screen_dimensions
 
 Tests add `src/` to `sys.path` via `tests/conftest.py` — no install step needed.
 
-**On non-Windows (e.g. this sandbox)**: this is fundamentally a Windows app — `pytest tests/` currently reports a stable baseline of 160 failed / 183 passed, all environment-only (missing `win32api`/PyQt6/pywin32, not code bugs). When verifying a change doesn't regress anything, compare the failed/passed counts against this baseline rather than expecting a clean run. Any module with a top-level `import win32api` (or that transitively imports one, e.g. anything importing `win_utils`) fails at **collection**, not just at test-run time, which aborts the whole suite unless the import is deferred — the established pattern here is a pytest fixture (or an in-test `from ... import ...`) that does the import lazily, so a missing `win32api` fails just that file's tests individually instead of blocking every other test file's collection. `ai_loop_utils.py`, `ai_loop.py`, and `ai_aiming.py` (via `win_utils`) all hit this; `detection_semantics.py`, `udp_receiver.py`, and `esp_server.py` don't and are fully testable here.
+**On non-Windows (e.g. this sandbox)**: this is fundamentally a Windows app — `pytest tests/` currently reports a stable baseline of 160 failed / 183 passed, all environment-only (missing `win32api`/PyQt6/pywin32, not code bugs). When verifying a change doesn't regress anything, compare the failed/passed counts against this baseline rather than expecting a clean run. Any module with a top-level `import win32api` (or that transitively imports one, e.g. anything importing `win_utils`) fails at **collection**, not just at test-run time, which aborts the whole suite unless the import is deferred — the established pattern here is a pytest fixture (or an in-test `from ... import ...`) that does the import lazily, so a missing `win32api` fails just that file's tests individually instead of blocking every other test file's collection. `ai_loop_utils.py`, `ai_loop.py`, and `ai_aiming.py` (via `win_utils`) all hit this; `detection_semantics.py`, `udp_receiver.py`, `esp_server.py`, and `directshow_capture.py` don't and are fully testable here — the latter only touches `ctypes.WinDLL` lazily inside `_Lib.__init__`/`DscSession.__init__`, never at import time, so importing it on Linux is safe and it raises a clean `RuntimeError` the first time a DLL call is actually attempted.
 
 ## Architecture
 
@@ -42,12 +42,13 @@ The main loop (`src/core/ai_loop.py`, `ai_logic_loop()`) runs three concurrent w
 Frame capture and inference are fully decoupled — capture backends must return `(H, W, 4)` uint8 BGRA.
 
 ### Screen Capture Backends (`src/core/screen_capture.py`)
-Five backends share a common `grab(region) → np.ndarray | None` interface:
+Six backends share a common `grab(region) → np.ndarray | None` interface:
 - **MSS** — GDI32, cross-platform fallback
 - **dxcam** — Desktop Duplication API (GPU, lowest latency; returns `None` on no-change — caller reuses last valid frame)
 - **UVCCapture** — OpenCV `VideoCapture` with a dedicated `_reader_thread` so `grab()` never blocks; supports probed FPS, MSMF/V4L2 backends, always-on-top pop-out preview
 - **NDICapture** — cyndilib frame-sync path (UYVY → BGRA via `cv2.COLOR_YUV2BGRA_UYVY`); uses buffer protocol (`np.frombuffer`) for zero-copy frame access; auto-reconnects on source loss
 - **UdpCapture** — receives an MJPEG-over-UDP stream matching OBS's `udp_stream_filter` plugin wire format (`src/core/udp_receiver.py`: 14-byte chunk header, frame reassembly, stale-frame timeout); decodes JPEG chunks into BGRA frames
+- **DirectShowCapture** — UVC capture card/camera feed via the vendored `directshow_capture.dll` (`chr0mx/DirectShow-Capture-DLL`, `src/core/native/`), an alternative to UVCCapture that owns the DirectShow capture graph's allocator/buffer count directly instead of going through `cv2.VideoCapture`. `src/core/directshow_capture.py` is the low-level ctypes C ABI binding (mirrors that repo's own Python reference binding); `DirectShowCapture` in `screen_capture.py` decodes/crops/converts to BGRA — MJPEG via `cv2.imdecode`, NV12 via the same `_crop_nv12` crop-before-convert helper UVCCapture's raw-NV12 path uses. No dedicated reader thread needed: `capture_get_latest_frame()` is a fast non-blocking call backed by the DLL's own push-based delivery thread. `scripts/test_directshow_capture.py` is a launchable smoke test against the real backend (not just the raw DLL) for confirming a build/device combination actually works before enabling it in production — Windows-only, needs a real UVC device.
 
 The module also owns the **live preview cell**: `set_preview_frame()` / `get_preview_frame()` / `set_preview_region()` / `get_preview_region()` expose the current detection-region frame to the GUI preview panel under a single `_preview_lock`.
 
@@ -150,8 +151,12 @@ Models go in `Model/` (`Model_Hud/` for the secondary weapon-detector model). Th
 
 | Field | JSON path | Purpose |
 |---|---|---|
-| `screenshot_method` | `capture.screenshot_method` | `'mss'` / `'dxcam'` / `'uvc'` / `'ndi'` / `'udp'` |
+| `screenshot_method` | `capture.screenshot_method` | `'mss'` / `'dxcam'` / `'uvc'` / `'ndi'` / `'udp'` / `'directshow'` |
 | `udp_bind_ip` / `udp_bind_port` | `capture.udp.bind_ip` / `.bind_port` | Listen address for the OBS `udp_stream_filter` MJPEG stream |
+| `directshow_device_index` / `directshow_device_substr` | `capture.directshow.device_index` / `.device_substr` | Device selection for the DirectShow backend (substring takes priority when both are set; -1 index = first available) |
+| `directshow_pixel_format` | `capture.directshow.pixel_format` | `'mjpeg'` (compressed, lower bandwidth) / `'nv12'` (raw, lowest latency) — see `DirectShow-Capture-DLL`'s `benchmark/` Phase 0 sweep to pick per device |
+| `directshow_width` / `directshow_height` / `directshow_fps` | `capture.directshow.width` / `.height` / `.fps` | 0 = device default |
+| `directshow_buffer_count` | `capture.directshow.buffer_count` | Allocator buffer count (default 4); 0 = driver default, not recommended |
 | `mouse_move_method` | `hardware.mouse_move_method` | `'sendinput'` / `'makcu'` / `'arduino'` / `'ddxoft'` / `'xbox'` |
 | `inference_backend` | `model.backend` | `'auto'` / `'cuda'` / `'directml'` / `'tensorrt'` / `'cpu'` |
 | `cuda_io_binding_enabled` | `performance.cuda_io_binding_enabled` | Zero-copy CUDA inference |

@@ -93,6 +93,27 @@ class _UvcProbeWorker(QThread):
         self.resultReady.emit(self._generation, resolutions, fps_list, device_names)
 
 
+class _DirectShowProbeWorker(QThread):
+    """Enumerates connected DirectShow devices off the Qt main thread.
+
+    directshow_capture.dll's device enumeration (EnumerateVideoDevices, a
+    plain COM moniker walk) is lighter than pygrabber's full filter-graph
+    queries, but still real device I/O on first call — runs on its own
+    thread for the same reason _UvcProbeWorker does, so the Capture page
+    never freezes waiting on it.
+    """
+
+    resultReady = pyqtSignal(list)
+
+    def run(self):
+        from core.screen_capture import list_directshow_device_names
+        try:
+            names = list_directshow_device_names()
+        except Exception:
+            names = []
+        self.resultReady.emit(names)
+
+
 class CapturePage(BasePage):
     """Capture Settings Page — Screenshot Method, UVC, NDI, Preview"""
 
@@ -103,6 +124,7 @@ class CapturePage(BasePage):
         self._scan_started: float = 0.0
         self._uvc_probe_generation = 0
         self._uvc_probe_worker = None
+        self._directshow_probe_worker = None
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -131,7 +153,7 @@ class CapturePage(BasePage):
         self.captureGroup = SettingCardGroup(t("capture_method_group", "Capture"), self.scrollWidget)
 
         self.screenshotMethodCombo = ComboBox()
-        self.screenshotMethodCombo.addItems(["mss", "dxcam", "uvc", "ndi", "udp"])
+        self.screenshotMethodCombo.addItems(["mss", "dxcam", "uvc", "ndi", "udp", "directshow"])
         self.screenshotMethodCombo.setMinimumWidth(150)
         self.screenshotMethodCard = SettingCard(
             FluentIcon.CAMERA,
@@ -400,6 +422,113 @@ class CapturePage(BasePage):
         self.udpRefreshCard.hBoxLayout.addWidget(self.udpRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.udpRefreshCard.hBoxLayout.addSpacing(16)
 
+        # === DirectShow ===
+        # V1 of directshow_capture.dll (chr0mx/DirectShow-Capture-DLL) has no
+        # format/capability enumeration yet (that's V2 scope upstream), so
+        # unlike uvcResolutionCombo there's no live-probed resolution
+        # dropdown here — width/height/fps are plain numeric fields, 0
+        # meaning "device default". Device *names* are still enumerable
+        # (EnumerateVideoDevices, a lighter COM query than pygrabber's full
+        # capability walk), so the device combo works the same way UVC's does.
+        self.directshowGroup = SettingCardGroup("DirectShow", self.scrollWidget)
+
+        self.directshowDeviceCombo = ComboBox()
+        self.directshowDeviceCombo.setMinimumWidth(260)
+        self.directshowDeviceCard = SettingCard(
+            FluentIcon.CAMERA,
+            "Device",
+            "Select the DirectShow capture device (ignored if Device Substring below is set)",
+            self.directshowGroup
+        )
+        self.directshowDeviceCard.hBoxLayout.addWidget(self.directshowDeviceCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.directshowDeviceCard.hBoxLayout.addSpacing(16)
+
+        self.directshowScanBtn = PushButton(t("refresh"))
+        self.directshowScanBtn.setFixedWidth(80)
+        self.directshowScanCard = SettingCard(
+            FluentIcon.SYNC,
+            "Scan Devices",
+            "Re-enumerate connected DirectShow capture devices",
+            self.directshowGroup
+        )
+        self.directshowScanCard.hBoxLayout.addWidget(self.directshowScanBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.directshowScanCard.hBoxLayout.addSpacing(16)
+
+        self.directshowDeviceSubstrEdit = LineEdit()
+        self.directshowDeviceSubstrEdit.setPlaceholderText("optional — case-insensitive name substring")
+        self.directshowDeviceSubstrEdit.setMinimumWidth(220)
+        self.directshowDeviceSubstrCard = SettingCard(
+            FluentIcon.FONT,
+            "Device Substring",
+            "Overrides the Device dropdown above when non-empty",
+            self.directshowGroup
+        )
+        self.directshowDeviceSubstrCard.hBoxLayout.addWidget(self.directshowDeviceSubstrEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.directshowDeviceSubstrCard.hBoxLayout.addSpacing(16)
+
+        self.directshowPixelFormatCombo = ComboBox()
+        self.directshowPixelFormatCombo.addItems(["MJPEG", "NV12"])
+        self.directshowPixelFormatCombo.setMinimumWidth(120)
+        self.directshowPixelFormatCard = SettingCard(
+            FluentIcon.VIDEO,
+            "Pixel Format",
+            "MJPEG (compressed, far lower USB bandwidth) or NV12 (raw, "
+            "lowest latency but can saturate USB bandwidth at higher "
+            "res/fps) — no universal default, see DirectShow-Capture-DLL's "
+            "benchmark/ Phase 0 sweep to pick per device.",
+            self.directshowGroup
+        )
+        self.directshowPixelFormatCard.hBoxLayout.addWidget(self.directshowPixelFormatCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.directshowPixelFormatCard.hBoxLayout.addSpacing(16)
+
+        self.directshowWidthCard = SliderSpinCard(
+            FluentIcon.FULL_SCREEN,
+            "Width",
+            0, 7680,
+            suffix="px",
+            description="0 = device default",
+            parent=self.directshowGroup
+        )
+        self.directshowHeightCard = SliderSpinCard(
+            FluentIcon.FULL_SCREEN,
+            "Height",
+            0, 4320,
+            suffix="px",
+            description="0 = device default",
+            parent=self.directshowGroup
+        )
+        self.directshowFpsCard = SliderSpinCard(
+            FluentIcon.SPEED_MEDIUM,
+            "FPS",
+            0, 240,
+            suffix="fps",
+            description="0 = device default",
+            parent=self.directshowGroup
+        )
+        self.directshowBufferCountCard = SliderSpinCard(
+            FluentIcon.SPEED_HIGH,
+            "Buffer Count",
+            0, 16,
+            suffix="",
+            description="Allocator buffer count — 0 = driver default (not "
+                        "recommended; run DirectShow-Capture-DLL's benchmark/ "
+                        "Phase 0 sweep to pick a value per device)",
+            parent=self.directshowGroup
+        )
+
+        self.directshowHwInfoLabel = BodyLabel("—")
+        self.directshowQueryBtn = PushButton("Query")
+        self.directshowQueryBtn.setFixedWidth(90)
+        self.directshowHwInfoCard = SettingCard(
+            FluentIcon.INFO,
+            "Device Resolution",
+            "Actual negotiated resolution reported by the driver",
+            self.directshowGroup
+        )
+        self.directshowHwInfoCard.hBoxLayout.addWidget(self.directshowHwInfoLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.directshowHwInfoCard.hBoxLayout.addWidget(self.directshowQueryBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.directshowHwInfoCard.hBoxLayout.addSpacing(16)
+
         # === Preview ===
         self.previewGroup = SettingCardGroup(t("preview_group", "Preview"), self.scrollWidget)
 
@@ -555,6 +684,18 @@ class CapturePage(BasePage):
         self.addContent(self.udpGroup)
         self.udpGroup.setVisible(False)
 
+        self.directshowGroup.addSettingCard(self.directshowDeviceCard)
+        self.directshowGroup.addSettingCard(self.directshowScanCard)
+        self.directshowGroup.addSettingCard(self.directshowDeviceSubstrCard)
+        self.directshowGroup.addSettingCard(self.directshowPixelFormatCard)
+        self.directshowGroup.addSettingCard(self.directshowWidthCard)
+        self.directshowGroup.addSettingCard(self.directshowHeightCard)
+        self.directshowGroup.addSettingCard(self.directshowFpsCard)
+        self.directshowGroup.addSettingCard(self.directshowBufferCountCard)
+        self.directshowGroup.addSettingCard(self.directshowHwInfoCard)
+        self.addContent(self.directshowGroup)
+        self.directshowGroup.setVisible(False)
+
         self.previewGroup.addSettingCard(self.uvcPreviewCard)
         self.previewGroup.addSettingCard(self.previewCropCard)
         self.previewGroup.addSettingCard(self.uvcPreviewScaleCard)
@@ -599,6 +740,15 @@ class CapturePage(BasePage):
         self.udpBindIpCombo.currentTextChanged.connect(self._onUdpBindIpChanged)
         self.udpPortCard.valueChanged.connect(self._onUdpPortChanged)
         self.udpRefreshBtn.clicked.connect(self._onUdpRefreshClicked)
+        self.directshowDeviceCombo.currentTextChanged.connect(self._onDirectshowDeviceChanged)
+        self.directshowScanBtn.clicked.connect(self._startDirectshowProbe)
+        self.directshowDeviceSubstrEdit.editingFinished.connect(self._onDirectshowDeviceSubstrChanged)
+        self.directshowPixelFormatCombo.currentTextChanged.connect(self._onDirectshowPixelFormatChanged)
+        self.directshowWidthCard.valueChanged.connect(self._onDirectshowWidthChanged)
+        self.directshowHeightCard.valueChanged.connect(self._onDirectshowHeightChanged)
+        self.directshowFpsCard.valueChanged.connect(self._onDirectshowFpsChanged)
+        self.directshowBufferCountCard.valueChanged.connect(self._onDirectshowBufferCountChanged)
+        self.directshowQueryBtn.clicked.connect(self._queryDirectshowHwInfo)
         self.ocrFpsCard.valueChanged.connect(self._onOcrFpsChanged)
         self.ocrScanBtn.clicked.connect(self._onOcrScanClicked)
 
@@ -611,7 +761,7 @@ class CapturePage(BasePage):
             return
         self._isLoadingConfig = True
         try:
-            screenshot_methods = ["mss", "dxcam", "uvc", "ndi", "udp"]
+            screenshot_methods = ["mss", "dxcam", "uvc", "ndi", "udp", "directshow"]
             screenshot_method = getattr(self._config, 'screenshot_method', 'mss')
             if screenshot_method in screenshot_methods:
                 self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
@@ -696,6 +846,30 @@ class CapturePage(BasePage):
                 self.udpBindIpCombo.setCurrentIndex(idx)
             self.udpPortCard.setValue(int(getattr(self._config, 'udp_bind_port', 5600)))
 
+            _ds_index = int(getattr(self._config, 'directshow_device_index', -1))
+            # Seed synchronously with the configured value, same pattern as
+            # uvcDeviceCombo above; _startDirectshowProbeDelayed() (below,
+            # for screenshot_method == 'directshow') enriches it with the
+            # full enumerated device list in the background.
+            self.directshowDeviceCombo.blockSignals(True)
+            self.directshowDeviceCombo.clear()
+            self.directshowDeviceCombo.addItem(
+                "(first available)" if _ds_index < 0 else f"Device {_ds_index}",
+                userData=_ds_index,
+            )
+            self.directshowDeviceCombo.blockSignals(False)
+            self.directshowDeviceSubstrEdit.setText(str(getattr(self._config, 'directshow_device_substr', '') or ''))
+            self.directshowPixelFormatCombo.setCurrentText(
+                str(getattr(self._config, 'directshow_pixel_format', 'mjpeg')).upper()
+            )
+            self.directshowWidthCard.setValue(int(getattr(self._config, 'directshow_width', 0)))
+            self.directshowHeightCard.setValue(int(getattr(self._config, 'directshow_height', 0)))
+            self.directshowFpsCard.setValue(int(getattr(self._config, 'directshow_fps', 0)))
+            self.directshowBufferCountCard.setValue(int(getattr(self._config, 'directshow_buffer_count', 4)))
+            if screenshot_method == 'directshow':
+                self._startDirectshowProbeDelayed()
+            self._queryDirectshowHwInfo()
+
             self.ocrFpsCard.setValue(int(getattr(self._config, 'second_inference_fps', 2)))
 
             self._updateCaptureControlsVisibility(screenshot_method)
@@ -721,9 +895,16 @@ class CapturePage(BasePage):
         is_uvc = (screenshot_method == "uvc")
         is_ndi = (screenshot_method == "ndi")
         is_udp = (screenshot_method == "udp")
+        is_directshow = (screenshot_method == "directshow")
         self.uvcGroup.setVisible(is_uvc)
         self.ndiGroup.setVisible(is_ndi)
         self.udpGroup.setVisible(is_udp)
+        self.directshowGroup.setVisible(is_directshow)
+        # DirectShowCapture doesn't feed the live preview cell yet (V1 scope
+        # cut, matching the upstream DLL's own "core capture only" V1 scope
+        # — see screen_capture.py's DirectShowCapture docstring) — leave the
+        # shared Preview group out of its visibility set so it doesn't offer
+        # a preview toggle that would just stay blank.
         self.previewGroup.setVisible(is_uvc or is_ndi or is_udp)
         self._notifyInferenceFovFollow(screenshot_method)
 
@@ -984,6 +1165,8 @@ class CapturePage(BasePage):
             self._config.screenshot_method = text
         if str(text).strip().lower() == 'uvc' and not self._isLoadingConfig:
             self._startUvcProbeDelayed()
+        if str(text).strip().lower() == 'directshow' and not self._isLoadingConfig:
+            self._startDirectshowProbeDelayed()
         if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
             has_ran = bool(getattr(self._config, "ndi_installer_ran_once", False))
             if not has_ran:
@@ -1185,6 +1368,92 @@ class CapturePage(BasePage):
         if self._config:
             self._config.udp_force_restart = True
             print('[Capture][UDP] Restart requested — receiver will reinitialize within ~0.5s.')
+
+    def _startDirectshowProbeDelayed(self, delay_ms: int = 1500):
+        """Same reasoning as _startUvcProbeDelayed(): switching TO directshow
+        (or changing a field _directshow_signature() watches) also makes the
+        AI loop's _capture_worker reinitialize DirectShowCapture and open its
+        own device handle around the same moment — delaying this probe's own
+        enumeration call past that ~0.5s reinit window avoids two competing
+        opens racing the same device."""
+        QTimer.singleShot(delay_ms, self._startDirectshowProbe)
+
+    def _startDirectshowProbe(self):
+        if not self._config:
+            return
+        if str(getattr(self._config, 'screenshot_method', '')).lower() != 'directshow':
+            return
+        if self._directshow_probe_worker is not None and self._directshow_probe_worker.isRunning():
+            return
+        self._directshow_probe_worker = _DirectShowProbeWorker(parent=self)
+        self._directshow_probe_worker.resultReady.connect(self._onDirectshowProbeResult)
+        self._directshow_probe_worker.start()
+
+    def _onDirectshowProbeResult(self, device_names):
+        device_names = device_names or []
+        configured_index = int(getattr(self._config, 'directshow_device_index', -1)) if self._config else -1
+        self.directshowDeviceCombo.blockSignals(True)
+        self.directshowDeviceCombo.clear()
+        self.directshowDeviceCombo.addItem("(first available)", userData=-1)
+        for i, name in enumerate(device_names):
+            self.directshowDeviceCombo.addItem(name, userData=i)
+        select_idx = 0
+        for i in range(self.directshowDeviceCombo.count()):
+            if self.directshowDeviceCombo.itemData(i) == configured_index:
+                select_idx = i
+                break
+        self.directshowDeviceCombo.setCurrentIndex(select_idx)
+        self.directshowDeviceCombo.blockSignals(False)
+
+    def _onDirectshowDeviceChanged(self, text):
+        if self._isLoadingConfig or not self._config:
+            return
+        data = self.directshowDeviceCombo.currentData()
+        self._config.directshow_device_index = int(data) if data is not None else -1
+        QTimer.singleShot(700, self._queryDirectshowHwInfo)
+
+    def _onDirectshowDeviceSubstrChanged(self):
+        if self._config:
+            self._config.directshow_device_substr = str(self.directshowDeviceSubstrEdit.text()).strip()
+
+    def _onDirectshowPixelFormatChanged(self, text):
+        if self._config:
+            self._config.directshow_pixel_format = str(text).strip().lower()
+        QTimer.singleShot(700, self._queryDirectshowHwInfo)
+
+    def _onDirectshowWidthChanged(self, value):
+        if self._config:
+            self._config.directshow_width = int(value)
+
+    def _onDirectshowHeightChanged(self, value):
+        if self._config:
+            self._config.directshow_height = int(value)
+
+    def _onDirectshowFpsChanged(self, value):
+        if self._config:
+            self._config.directshow_fps = int(value)
+
+    def _onDirectshowBufferCountChanged(self, value):
+        if self._config:
+            self._config.directshow_buffer_count = int(value)
+
+    def _queryDirectshowHwInfo(self):
+        """Read the live DirectShow device's actual negotiated resolution.
+
+        Reads config.directshow_actual_* (published by DirectShowCapture.grab()
+        from its own already-open handle) rather than opening a second
+        competing handle to the same device — same reasoning as
+        _queryUvcHwInfo().
+        """
+        if not self._config:
+            self.directshowHwInfoLabel.setText("—")
+            return
+        w = int(getattr(self._config, 'directshow_actual_width', 0) or 0)
+        h = int(getattr(self._config, 'directshow_actual_height', 0) or 0)
+        if w <= 0 or h <= 0:
+            self.directshowHwInfoLabel.setText("—  (device not available)")
+            return
+        self.directshowHwInfoLabel.setText(f"{w} × {h}")
 
     def _onOcrFpsChanged(self, value: int):
         if self._isLoadingConfig or not self._config:

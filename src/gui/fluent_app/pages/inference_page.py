@@ -330,7 +330,7 @@ class InferencePage(BasePage):
 
     def _applyScreenshotMethodEffect(self, method: str):
         """Called by capture page (and on load) to sync fov_follow visibility."""
-        is_external = method in ('uvc', 'ndi')
+        is_external = method in ('uvc', 'ndi', 'directshow')
         self.fovFollowCard.setVisible(not is_external)
         if is_external and self._config:
             self._config.fov_follow_mouse = False

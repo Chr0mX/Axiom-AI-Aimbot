@@ -115,6 +115,8 @@ def _detect_active_capture_method(screen_capture: Any, fallback_method: str = 'm
         return 'uvc'
     if isinstance(screen_capture, UdpCapture):
         return 'udp'
+    if isinstance(screen_capture, DirectShowCapture):
+        return 'directshow'
 
     module_name = str(getattr(type(screen_capture), '__module__', '')).lower()
     if module_name.startswith('mss') or '.mss' in module_name:
@@ -249,6 +251,18 @@ def _ndi_signature(config: Config) -> tuple[str, bool, str, str, bool]:
         str(getattr(config, 'uvc_preview_scale_mode', 'scale_to_fit')).lower(),
         str(getattr(config, 'ndi_bandwidth', 'highest')).lower(),
         bool(getattr(config, 'ndi_force_reconnect', False)),
+    )
+
+
+def _directshow_signature(config: Config) -> tuple[int, str, str, int, int, int, int]:
+    return (
+        int(getattr(config, 'directshow_device_index', -1)),
+        str(getattr(config, 'directshow_device_substr', '') or ''),
+        str(getattr(config, 'directshow_pixel_format', 'mjpeg')).lower(),
+        int(getattr(config, 'directshow_width', 0)),
+        int(getattr(config, 'directshow_height', 0)),
+        int(getattr(config, 'directshow_fps', 0)),
+        int(getattr(config, 'directshow_buffer_count', 4)),
     )
 
 
@@ -1460,6 +1474,22 @@ def list_uvc_device_names() -> list[str]:
     return _list_pygrabber_device_names()
 
 
+def list_directshow_device_names() -> list[str]:
+    """Enumerate connected DirectShow capture devices via the vendored
+    directshow_capture.dll (chr0mx/DirectShow-Capture-DLL), for the
+    'directshow' backend's device combo — parallel to
+    list_uvc_device_names() above, which enumerates the same category via
+    pygrabber for the 'uvc' backend instead. Returns an empty list on any
+    failure (non-Windows, DLL missing, no devices) rather than raising —
+    callers treat empty as "nothing to show", not an error.
+    """
+    try:
+        from . import directshow_capture as dsc
+        return dsc.list_devices()
+    except Exception:
+        return []
+
+
 def _resolve_dshow_device_name(config: Config, device_index: int) -> str:
     """Resolve a DirectShow device *name* string from config.
 
@@ -2344,6 +2374,139 @@ class UdpCapture:
             self._reader_thread.join(timeout=1.0)
 
 
+class DirectShowCapture:
+    """DirectShow UVC capture backend, via the vendored
+    ``directshow_capture.dll`` (`chr0mx/DirectShow-Capture-DLL
+    <https://github.com/chr0mx/DirectShow-Capture-DLL>`_ — see
+    ``src/core/native/README.md`` for provenance).
+
+    Exists for the same reason UVCCapture does — a UVC capture card/camera
+    feed — but owns the DirectShow capture graph's allocator/buffer count
+    directly instead of going through OpenCV's ``cv2.VideoCapture``, which
+    gives no control over either. That repo's ``benchmark/`` (Phase 0)
+    harness found buffer-count ownership closes a real frame-drop gap on
+    some UVC bridges, but that the *pixel format* choice matters just as
+    much: NV12 (raw) gives the lowest latency but can saturate USB
+    bandwidth and drop frames at higher resolutions/fps, while MJPEG
+    (compressed) stays clean at every buffer count tested but costs more
+    latency from on-device encode. There's no universal default — run that
+    repo's benchmark sweep per device before picking one in production.
+
+    Unlike UVCCapture, no dedicated reader thread is needed here:
+    ``capture_get_latest_frame()`` is a fast, non-blocking call backed by
+    the DLL's own push-based delivery thread (a background native thread
+    inside the DLL keeps a single latest-frame buffer up to date), so
+    ``grab()`` itself is already safe to call at whatever rate
+    ``_capture_worker`` wants without blocking on device I/O.
+    """
+
+    def __init__(self, config: Config) -> None:
+        from . import directshow_capture as dsc
+
+        self.config = config
+        self.config_signature = _directshow_signature(config)
+
+        device_index = int(getattr(config, 'directshow_device_index', -1))
+        device_substr = str(getattr(config, 'directshow_device_substr', '') or '') or None
+        pixel_format_name = str(getattr(config, 'directshow_pixel_format', 'mjpeg')).lower()
+        pixel_format = dsc.PIXEL_FORMAT_NV12 if pixel_format_name == 'nv12' else dsc.PIXEL_FORMAT_MJPEG
+        width = int(getattr(config, 'directshow_width', 0))
+        height = int(getattr(config, 'directshow_height', 0))
+        fps = int(getattr(config, 'directshow_fps', 0))
+        buffer_count = int(getattr(config, 'directshow_buffer_count', 4))
+
+        self._is_compressed = (pixel_format == dsc.PIXEL_FORMAT_MJPEG)
+        self._session = dsc.DscSession(
+            device_substr=device_substr, device_index=device_index,
+            width=width, height=height, fps=fps,
+            pixel_format=pixel_format, buffer_count=buffer_count,
+        )
+
+        self.preview_width = width
+        self.preview_height = height
+        # Seeded to "now" (not None), same reasoning as UVCCapture/UdpCapture's
+        # identical field: catches a device that opens but never delivers a
+        # single frame within the stale timeout, not just one that goes
+        # silent after initially working. Updated at the end of every
+        # successful grab() below instead of from a background reader
+        # thread, since there isn't one here (see class docstring).
+        self._last_frame_perf_time = time.perf_counter()
+        config.source_nominal_fps = float(fps) if fps > 0 else 0.0
+
+        logger.info(
+            "[Capture][DirectShow] Opened device %s — format=%s, res=%s, buffers=%d.",
+            device_substr or (f'index {device_index}' if device_index >= 0 else '(first available)'),
+            pixel_format_name.upper(),
+            f"{width or 'auto'}x{height or 'auto'}", buffer_count,
+        )
+
+    def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
+        raw = self._session.get_latest_frame()
+        if raw is None:
+            return None
+        data, width, height, _stride, _ts_qpc = raw
+
+        if width != self.preview_width or height != self.preview_height:
+            self.preview_width = width
+            self.preview_height = height
+            self.config.directshow_actual_width = width
+            self.config.directshow_actual_height = height
+
+        if self._is_compressed:
+            arr = np.frombuffer(data, dtype=np.uint8)
+            frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if frame_bgr is None:
+                return None
+            if region is not None:
+                frame_h, frame_w = frame_bgr.shape[:2]
+                left = max(0, int(region.get('left', 0)))
+                top = max(0, int(region.get('top', 0)))
+                rw = max(0, int(region.get('width', frame_w)))
+                rh = max(0, int(region.get('height', frame_h)))
+                right = min(frame_w, left + rw)
+                bottom = min(frame_h, top + rh)
+                if right <= left or bottom <= top:
+                    return None
+                frame_bgr = frame_bgr[top:bottom, left:right]
+            frame = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2BGRA)
+        else:
+            # NV12: h*3//2 rows (Y plane + interleaved UV plane) at w
+            # columns - the same layout _crop_nv12 (shared with UVCCapture's
+            # raw-NV12 crop-before-convert path) expects, so the crop runs
+            # before the comparatively expensive colorspace conversion
+            # instead of after it.
+            expected_len = height * 3 // 2 * width
+            if len(data) != expected_len:
+                _warn_once(
+                    'directshow_nv12_size_mismatch',
+                    f"[Capture][DirectShow] NV12 frame size {len(data)} != expected "
+                    f"{expected_len} for {width}x{height} — device may be padding rows; "
+                    "dropping this frame.",
+                )
+                return None
+            yuv = np.frombuffer(data, dtype=np.uint8).reshape((height * 3 // 2, width))
+            if region is not None:
+                left = max(0, int(region.get('left', 0)))
+                top = max(0, int(region.get('top', 0)))
+                rw = max(0, int(region.get('width', width)))
+                rh = max(0, int(region.get('height', height)))
+                rw = min(rw, width - left)
+                rh = min(rh, height - top)
+                cropped = _crop_nv12(yuv, height, left, top, rw, rh)
+                if cropped is None:
+                    return None
+                yuv = cropped
+            frame = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGRA_NV12)
+
+        self._last_frame_perf_time = time.perf_counter()
+        return frame
+
+    def close(self) -> None:
+        session = getattr(self, '_session', None)
+        if session is not None:
+            session.close()
+
+
 def _get_monitor_refresh_rate() -> int:
     """Return the primary monitor refresh rate in Hz, or 0 on failure."""
     try:
@@ -2462,6 +2625,16 @@ def initialize_screen_capture(config: Config) -> Any:
             return udp_capture
         except Exception as exc:
             logger.error('[Capture][UDP] Initialization failed with "%s". Falling back to MSS backend.', exc)
+    elif screenshot_method == 'directshow':
+        try:
+            directshow_capture = DirectShowCapture(config)
+            logger.info('[Capture] DirectShow backend initialized via directshow_capture.dll.')
+            return directshow_capture
+        except Exception as exc:
+            _warn_once(
+                'directshow_fallback_mss',
+                f'[Capture][DirectShow] Initialization failed with "{exc}". Falling back to MSS backend.',
+            )
     elif screenshot_method != 'mss':
         _warn_once(
             'invalid_screenshot_method',
@@ -2542,6 +2715,16 @@ def reinitialize_if_method_changed(
             reinit_log_fn = logger.warning
             reinit_log_msg = (
                 '[Capture][UDP] UDP backend has produced no frames for over %.0fs '
+                '— treating it as dead and reinitializing...'
+            )
+            reinit_log_args = (_CAPTURE_STALE_TIMEOUT_SECONDS,)
+    elif desired == 'directshow' and hasattr(current_capture, 'config_signature'):
+        if getattr(current_capture, 'config_signature', None) != _directshow_signature(config):
+            reinit_log_msg = '[Capture][DirectShow] DirectShow configuration changed. Reinitializing backend...'
+        elif _capture_backend_is_stale(current_capture):
+            reinit_log_fn = logger.warning
+            reinit_log_msg = (
+                '[Capture][DirectShow] Backend has produced no frames for over %.0fs '
                 '— treating it as dead and reinitializing...'
             )
             reinit_log_args = (_CAPTURE_STALE_TIMEOUT_SECONDS,)
