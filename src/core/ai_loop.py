@@ -435,10 +435,27 @@ def ai_logic_loop(
                 tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
                     frame, config.model_input_size, fast_resize=_frame_is_square
                 )
+                # Drop-oldest, never block. The previous version used a
+                # blocking put(timeout=0.05), which under back-pressure
+                # meant this thread stalled up to 50 ms holding a tensor
+                # that kept getting staler, then handed that stale tensor
+                # over the moment a slot freed — the worst of both, since
+                # it neither preserved throughput nor freshness. The queue
+                # is maxsize=1 and the pipeline is latest-wins, so if a
+                # tensor is still sitting there the inference thread hasn't
+                # taken it and it is by definition older than this one.
+                item = (tensor, lb_scale, lb_pad_x, lb_pad_y, region)
                 try:
-                    _tensor_queue.put((tensor, lb_scale, lb_pad_x, lb_pad_y, region), timeout=0.05)
+                    _tensor_queue.put_nowait(item)
                 except queue.Full:
-                    pass
+                    try:
+                        _tensor_queue.get_nowait()
+                    except queue.Empty:
+                        pass  # consumer took it in between; the slot is free now
+                    try:
+                        _tensor_queue.put_nowait(item)
+                    except queue.Full:
+                        pass  # consumer refilled it; next loop builds a fresher one anyway
             except Exception:
                 time.sleep(0.001)
 
@@ -565,6 +582,15 @@ def ai_logic_loop(
 
                 if not config.AimToggle or (not config.keep_detecting and not is_aiming):
                     clear_queues(overlay_boxes_queue, overlay_confidences_queue)
+                    # Park the capture worker too. target_region is what gates
+                    # it (see _capture_worker), and it was previously left
+                    # set forever once aiming had happened even once — so
+                    # switching AimToggle off stopped inference but left the
+                    # backend grabbing frames at full rate indefinitely,
+                    # burning capture bandwidth and GPU for output nothing
+                    # consumed.
+                    with region_lock:
+                        capture_state['target_region'] = None
                     time.sleep(0.05)
                     continue
 
