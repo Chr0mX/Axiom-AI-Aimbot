@@ -258,6 +258,18 @@ from gui.disclaimer_dialog import DisclaimerDialog
 ai_thread: Optional[threading.Thread] = None
 auto_fire_thread: Optional[threading.Thread] = None
 
+# Serializes every read-check-join-reassign sequence that touches ai_thread/
+# auto_fire_thread. Without it, a GUI "reload model" call (start_ai_threads)
+# racing a concurrent stop_ai_threads() call (e.g. from an installer worker
+# thread) — or two rapid reloads — could interleave: one caller's join()
+# could observe a thread object the other had already replaced, leaving a
+# stale handle abandoned without ever being joined, or briefly running two
+# inference threads at once. Held across the whole lifecycle transition
+# (including model load in start_ai_threads) rather than split into smaller
+# critical sections — these calls are infrequent GUI-triggered actions, not
+# hot-path code, so serializing the full transition is the correct trade.
+_ai_threads_lock = threading.Lock()
+
 # Shared inference controller — lets the GUI pause/stop inference without
 # killing the UI or closing the application.
 from core.session_utils import inference_controller as _inference_controller
@@ -280,13 +292,14 @@ def stop_ai_threads(config: "Config", join_timeout: float = 3.0) -> None:
     config.Running = False
     _inference_controller.request_stop()
 
-    if ai_thread is not None and ai_thread.is_alive():
-        ai_thread.join(timeout=join_timeout)
-        if ai_thread.is_alive():
-            logger.warning("AI thread did not stop within %.1fs", join_timeout)
+    with _ai_threads_lock:
+        if ai_thread is not None and ai_thread.is_alive():
+            ai_thread.join(timeout=join_timeout)
+            if ai_thread.is_alive():
+                logger.warning("AI thread did not stop within %.1fs", join_timeout)
 
-    if auto_fire_thread is not None and auto_fire_thread.is_alive():
-        auto_fire_thread.join(timeout=join_timeout)
+        if auto_fire_thread is not None and auto_fire_thread.is_alive():
+            auto_fire_thread.join(timeout=join_timeout)
 
     _inference_controller.clear_stop()
 
@@ -327,81 +340,82 @@ def start_ai_threads(
         是否成功啟動
     """
     global ai_thread, auto_fire_thread
-    
-    # 停止現有線程
-    if ai_thread is not None and ai_thread.is_alive():
-        config.Running = False
-        ai_thread.join(timeout=3.0)
-        if auto_fire_thread is not None:
-            auto_fire_thread.join(timeout=3.0)
-        # 確認舊執行緒已結束
-        if ai_thread.is_alive():
-            logger.warning("AI 執行緒在 3 秒內未停止，強制繼續")
 
-    config.Running = True
-    
-    # 僅支持 ONNX 模型
-    if not model_path.endswith('.onnx'):
-        logger.error("僅支援 .onnx 模型格式: %s", model_path)
-        return False
-    
-    # 將相對路徑轉換為絕對路徑（相對於項目根目錄）
-    if not os.path.isabs(model_path):
-        model_path = os.path.join(project_root, model_path)
-    
-    # 檢查文件是否存在
-    if not os.path.exists(model_path):
-        logger.error("模型文件不存在: %s", model_path)
-        return False
-    
-    model = None
-    try:
-        providers = build_provider_list(config)
-        logger.info("嘗試載入 ONNX providers: %s", providers)
+    with _ai_threads_lock:
+        # 停止現有線程
+        if ai_thread is not None and ai_thread.is_alive():
+            config.Running = False
+            ai_thread.join(timeout=3.0)
+            if auto_fire_thread is not None and auto_fire_thread.is_alive():
+                auto_fire_thread.join(timeout=3.0)
+            # 確認舊執行緒已結束
+            if ai_thread.is_alive():
+                logger.warning("AI 執行緒在 3 秒內未停止，強制繼續")
 
-        # 獲取優化的會話選項
-        session_options = optimize_onnx_session(config)
-        if session_options:
-            model = ort.InferenceSession(model_path, providers=providers, sess_options=session_options)
-        else:
-            model = ort.InferenceSession(model_path, providers=providers)
+        config.Running = True
 
-        # 獲取實際使用的提供者
-        actual_providers = model.get_providers()
-        if actual_providers:
-            config.current_provider = actual_providers[0]
-            logger.info("模型載入使用提供者: %s", actual_providers[0])
-            logger.info("最終啟用 ONNX provider: %s", config.current_provider)
+        # 僅支持 ONNX 模型
+        if not model_path.endswith('.onnx'):
+            logger.error("僅支援 .onnx 模型格式: %s", model_path)
+            return False
 
-            requested_backend = getattr(config, "inference_backend", "auto")
-            if requested_backend == "cuda" and config.current_provider != "CUDAExecutionProvider":
-                logger.warning(
-                    "已選擇 CUDA 後端，但實際 provider 為 %s。請檢查 onnxruntime-gpu、NVIDIA Driver、CUDA/cuDNN 相容性。",
-                    config.current_provider,
-                )
-        else:
-            logger.warning("無法獲取提供者資訊")
-            config.current_provider = providers[0] if providers else 'CPUExecutionProvider'
-            logger.info("最終啟用 ONNX provider: %s", config.current_provider)
-    except Exception as e:
-        logger.error("載入 ONNX 模型失敗: %s", e)
-        logger.error("請確認已安裝對應 ONNX Runtime 後端（CUDA/DirectML/CPU）")
-        return False
+        # 將相對路徑轉換為絕對路徑（相對於項目根目錄）
+        if not os.path.isabs(model_path):
+            model_path = os.path.join(project_root, model_path)
 
-    ai_thread = threading.Thread(
-        target=ai_logic_loop,
-        args=(config, model, 'onnx', overlay_boxes_queue, overlay_confidences_queue, auto_fire_boxes_queue),
-        daemon=True
-    )
-    auto_fire_thread = threading.Thread(
-        target=auto_fire_loop,
-        args=(config, auto_fire_boxes_queue),
-        daemon=True
-    )
-    
-    ai_thread.start()
-    auto_fire_thread.start()
-    return True
+        # 檢查文件是否存在
+        if not os.path.exists(model_path):
+            logger.error("模型文件不存在: %s", model_path)
+            return False
+
+        model = None
+        try:
+            providers = build_provider_list(config)
+            logger.info("嘗試載入 ONNX providers: %s", providers)
+
+            # 獲取優化的會話選項
+            session_options = optimize_onnx_session(config)
+            if session_options:
+                model = ort.InferenceSession(model_path, providers=providers, sess_options=session_options)
+            else:
+                model = ort.InferenceSession(model_path, providers=providers)
+
+            # 獲取實際使用的提供者
+            actual_providers = model.get_providers()
+            if actual_providers:
+                config.current_provider = actual_providers[0]
+                logger.info("模型載入使用提供者: %s", actual_providers[0])
+                logger.info("最終啟用 ONNX provider: %s", config.current_provider)
+
+                requested_backend = getattr(config, "inference_backend", "auto")
+                if requested_backend == "cuda" and config.current_provider != "CUDAExecutionProvider":
+                    logger.warning(
+                        "已選擇 CUDA 後端，但實際 provider 為 %s。請檢查 onnxruntime-gpu、NVIDIA Driver、CUDA/cuDNN 相容性。",
+                        config.current_provider,
+                    )
+            else:
+                logger.warning("無法獲取提供者資訊")
+                config.current_provider = providers[0] if providers else 'CPUExecutionProvider'
+                logger.info("最終啟用 ONNX provider: %s", config.current_provider)
+        except Exception as e:
+            logger.error("載入 ONNX 模型失敗: %s", e)
+            logger.error("請確認已安裝對應 ONNX Runtime 後端（CUDA/DirectML/CPU）")
+            return False
+
+        ai_thread = threading.Thread(
+            target=ai_logic_loop,
+            args=(config, model, 'onnx', overlay_boxes_queue, overlay_confidences_queue, auto_fire_boxes_queue),
+            daemon=True
+        )
+        auto_fire_thread = threading.Thread(
+            target=auto_fire_loop,
+            args=(config, auto_fire_boxes_queue),
+            daemon=True
+        )
+
+        ai_thread.start()
+        auto_fire_thread.start()
+        return True
 
 
 def main():

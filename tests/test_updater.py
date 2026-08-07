@@ -60,6 +60,18 @@ class TestParseVersion:
         assert parse_version("v1.0.0") == parse_version("1.0.0")
         assert parse_version("6.1") == parse_version("v6.1.0")
 
+    def test_pre_release_suffix_keeps_leading_digits(self):
+        """Regression: a non-numeric suffix on a field used to zero the
+        *whole* field (int("4-beta") raises ValueError), so "6.4-beta"
+        parsed to (6, 0, 0) — comparing as older than a plain "6.3" release
+        and misreporting an available update as up to date. The leading
+        digit run should still be extracted."""
+        from core.updater import parse_version
+        assert parse_version("6.4-beta") == (6, 4, 0)
+        assert parse_version("6.4rc1") == (6, 4, 0)
+        assert parse_version("6.4-beta") > parse_version("6.3")
+        assert parse_version("v6.10") > parse_version("6.4")
+
 
 # ============================================================
 # 2. open_update_url 測試
