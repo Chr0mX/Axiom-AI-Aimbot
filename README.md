@@ -1,6 +1,6 @@
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-6.3-green.svg)
+![Version](https://img.shields.io/badge/Version-6.4-green.svg)
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
 ![License](https://img.shields.io/badge/License-PolyForm--Noncommercial%201.0.0-blueviolet.svg)
 ![GitHub last commit](https://img.shields.io/github/last-commit/Chr0mX/Axiom-AI-Aimbot)
