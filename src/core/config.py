@@ -27,29 +27,6 @@ _MISSING = object()
 # One-time app state — persisted to state.json, NOT config.json.
 STATE_FIELDS = ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_once')
 
-_TRUE_STRINGS = frozenset({'1', 'true', 'yes', 'on'})
-_FALSE_STRINGS = frozenset({'0', 'false', 'no', 'off'})
-
-
-def _coerce_bool(val: Any) -> bool:
-    """Coerce a persisted value to bool, handling string-typed booleans.
-
-    ``bool(val)`` alone is wrong here: ``bool("false")`` is ``True`` (any
-    non-empty string is truthy), so a hand-edited, legacy, or imported
-    config.json storing a *string* for a bool field (``"false"``, ``"0"``)
-    silently flips the value to its opposite on load. Recognized bool-like
-    strings are parsed explicitly first; anything else falls back to normal
-    Python truthiness, which is only reached for values that were never a
-    stringified bool in the first place (e.g. already a real bool/int).
-    """
-    if isinstance(val, str):
-        low = val.strip().lower()
-        if low in _TRUE_STRINGS:
-            return True
-        if low in _FALSE_STRINGS:
-            return False
-    return bool(val)
-
 # Single source of truth for the grouped (v2) schema: maps each flat Config
 # attribute to its dotted path in the nested JSON. Drives to_dict() and from_dict().
 # Fields intentionally absent (never persisted): runtime-derived (current_provider),
@@ -656,7 +633,7 @@ class Config:
                 expected = type(getattr(self, attr))
                 if expected in (int, float, bool, str) and not isinstance(val, expected):
                     try:
-                        val = _coerce_bool(val) if expected is bool else expected(val)
+                        val = bool(val) if expected is bool else expected(val)
                     except (ValueError, TypeError):
                         logger.warning("Config field '%s': could not coerce %r to %s, using default",
                                        attr, val, expected.__name__)
@@ -962,13 +939,6 @@ def _validate_detect_range_size(config: Config) -> None:
     max_size = int(getattr(config, 'height', raw) or raw)
     if max_size <= 0:
         max_size = raw if raw > 0 else 1
-    # fov_size is itself user-configured and isn't validated against the
-    # screen height anywhere else, so a config with fov_size > height would
-    # otherwise make min_size > max_size below — max(min_size, min(max_size,
-    # raw)) then evaluates to min_size, violating the documented "must not
-    # be larger than screen height" invariant. Clamp the lower bound to the
-    # upper bound first so that can't happen.
-    min_size = min(min_size, max_size)
 
     clamped = max(min_size, min(max_size, raw))
     config.detect_range_size = clamped
