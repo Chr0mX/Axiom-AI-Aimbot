@@ -1833,76 +1833,6 @@ class UVCCapture:
             )
             self._preview_thread.start()
 
-    def try_live_reconfigure(self, config: Config) -> bool:
-        """Apply a config change in place instead of tearing the device down.
-
-        Returns True if the whole delta was handled live (and updates
-        ``config_signature`` to match), False if the caller must reinitialize.
-
-        Today this covers exactly one case: a Detection Range change while
-        ``uvc_crop_mode == 'fixed'`` on the native-DLL backend with a native
-        crop actually in effect. That is worth special-casing because it is
-        the one UVC setting a user *drags* — every intermediate value of a
-        slider drag used to close and reopen the capture device, re-running
-        DirectShow graph construction, format negotiation and allocator
-        setup for each tick. The DLL exposes ``capture_set_crop()`` precisely
-        so the rectangle can move without a graph rebuild.
-
-        Everything else (resolution, fps, format, backend, device index)
-        genuinely requires renegotiation, so it falls through to False.
-        """
-        new_sig = _uvc_signature(config)
-        old_sig = getattr(self, 'config_signature', None)
-        if old_sig is None or new_sig == old_sig:
-            return False
-
-        # Only the trailing detect_range_size slot may differ — anything
-        # else in the tuple means a real renegotiation is required.
-        if len(new_sig) != len(old_sig) or new_sig[:-1] != old_sig[:-1]:
-            return False
-
-        # Native crop must actually be in force: on the cv2 path, the ffmpeg
-        # path, or MJPEG (where the DLL refuses to crop), the crop is applied
-        # in software downstream and there is no device-side rect to move.
-        native = getattr(self, '_native', None)
-        if native is None or getattr(self, '_native_crop_requested', None) is None:
-            return False
-        # If the first-frame check already found the DLL ignoring our crop,
-        # a set_crop() call would be ignored too.
-        if getattr(self, '_native_crop_confirmed', False) and self._fixed_region is not None:
-            return False
-
-        region = _compute_fixed_uvc_crop_region(config, self.preview_width, self.preview_height)
-        if region is None:
-            return False
-
-        try:
-            native.set_crop(region['left'], region['top'], region['width'], region['height'])
-        except Exception as exc:
-            logging.getLogger(__name__).warning(
-                "[UVC][NativeDLL] Live crop update to %s failed (%s) — falling back "
-                "to a full backend reinitialization.", region, exc,
-            )
-            return False
-
-        self._native_crop_requested = (
-            region['left'], region['top'], region['width'], region['height'],
-        )
-        # Re-arm the first-frame verification: the DLL accepted the call, but
-        # the same "did it really take effect?" question applies to a live
-        # change as to the open-time one, and the answer is only visible in
-        # the next frame's delivered dimensions.
-        self._native_crop_confirmed = False
-        self._fixed_region = None
-        self._region_ref[0] = None
-        self.config = config
-        self.config_signature = new_sig
-        logging.getLogger(__name__).info(
-            "[UVC][NativeDLL] Detection Range changed — applied native crop %s live "
-            "(no device reinitialization).", region,
-        )
-        return True
-
     def _reader_worker_native_dll(self) -> None:
         _fps_count = 0
         _fps_t0 = time.perf_counter()
@@ -2484,32 +2414,21 @@ class UdpCapture:
         self._preview_thread.start()
 
     def _reader_worker(self) -> None:
-        # Blocks on the receiver's own new-frame Event rather than spinning.
-        #
-        # This used to poll non-blocking and call time.sleep(0) between
-        # attempts, on the stated grounds that Event.wait() would incur a
-        # ~15 ms scheduler-quantum penalty. That reasoning doesn't hold:
-        # the 15.6 ms granularity applies to *timed* sleeps, not to
-        # condition-variable signalling — threading.Event.wait() is woken
-        # directly by set() and returns in microseconds. What the spin
-        # actually bought was nothing, at the cost of one CPU core pinned at
-        # 100% for the entire session, competing with the very inference
-        # threads whose latency it was meant to protect.
-        #
-        # The timeout is a liveness backstop, not a poll interval: it only
-        # matters if the sender stops entirely, in which case the loop still
-        # needs to notice self._stop.
+        # Non-blocking poll with time.sleep(0) between frames.
+        # On Windows, Sleep(0) yields to other runnable threads then returns
+        # in < 1 ms — no 15 ms scheduler-quantum penalty that Event.wait() incurs
+        # when used as a blocking wait. This allows the loop to react to a new
+        # frame within microseconds of it being assembled by _recv_loop.
         _fps_count = 0
         _fps_t0 = time.perf_counter()
         _seen_id = None
         _logged_stream_dims = None
 
         while not self._stop.is_set():
-            jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id(
-                block=True, timeout=0.1,
-            )
+            jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id()
 
             if jpeg_bytes is None or frame_id == _seen_id:
+                time.sleep(0)  # GIL-releasing yield, no scheduler-quantum penalty
                 continue
 
             _seen_id = frame_id
@@ -2795,15 +2714,6 @@ def reinitialize_if_method_changed(
         reinit_log_args = (current_active, desired)
     elif desired == 'uvc' and hasattr(current_capture, 'config_signature'):
         if getattr(current_capture, 'config_signature', None) != _uvc_signature(config):
-            # Some changes can be applied to the live backend without a
-            # teardown — notably a Detection Range drag in fixed-crop mode
-            # on the native DLL, which can just move the crop rectangle.
-            # Ask first; only reinitialize if the backend can't absorb it.
-            try:
-                if current_capture.try_live_reconfigure(config):
-                    return current_capture, current_active
-            except AttributeError:
-                pass  # backend predates live reconfigure; fall through to reinit
             reinit_log_msg = '[Capture] UVC configuration changed. Reinitializing UVC backend...'
         elif _capture_backend_is_stale(current_capture):
             reinit_log_fn = logger.warning
