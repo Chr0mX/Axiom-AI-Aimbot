@@ -657,8 +657,6 @@ def ai_logic_loop(
                         letterbox_scale=lb_scale,
                         letterbox_pad_x=lb_pad_x,
                         letterbox_pad_y=lb_pad_y,
-                        box_format=getattr(config, 'model_box_format', 'auto'),
-                        has_objectness=getattr(config, 'model_has_objectness', 'auto'),
                     )
                     # class_ids must go through NMS with the boxes: NMS drops
                     # detections and reorders the survivors by confidence, so
@@ -739,13 +737,6 @@ def ai_logic_loop(
                     if not holding_lock:
                         pid_x.reset()
                         pid_y.reset()
-                        # Clear the PID's dt reference too. Without this, the
-                        # first frame after re-acquiring a target would hand
-                        # the controller a dt spanning the entire gap since
-                        # the last aiming frame — which the clamp would blunt
-                        # but not eliminate, and which describes no real
-                        # control interval anyway.
-                        state.pid_last_update_t = 0.0
                         state.aim_y_last_target_y = 0.0
                         state.aim_y_last_target_t = 0.0
                         state.locked_box = None
