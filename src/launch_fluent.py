@@ -1,8 +1,3 @@
-"""DEVELOPER ENTRY POINT — launches the Fluent GUI alone, bypassing main.py's
-DPI/DLL/provider bootstrap. Useful for GUI-only iteration; not the
-supported way to run the app (that is main.py).
-"""
-
 
 import sys
 import os

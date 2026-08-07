@@ -18,10 +18,6 @@ Usage:
 
 If you don't know your OBS WebSocket password: OBS > Tools > WebSocket
 Server Settings > Show Connect Info.
-
-DEVELOPER TOOL — run directly, not imported.
-Dumps an OBS instance's filter graph over obs-websocket to confirm the
-udp_stream_filter plugin is loaded and configured as expected.
 """
 from __future__ import annotations
 
