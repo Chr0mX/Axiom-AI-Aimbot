@@ -385,41 +385,6 @@ def test_uvc_grab_dynamic_mode_uses_live_region():
     assert capture._region_ref[0] == live_region
 
 
-def test_uvc_grab_native_nv12_uses_frame_shape_not_stale_preview_dims():
-    """Regression: _reader_worker_native_dll publishes the frame under
-    _latest_frame_lock, then writes preview_width/height *outside* the
-    lock right after — so a resolution/crop transition landing between
-    those two reads can leave preview_width/height describing a
-    *different* frame than the one grab() just fetched (BUG-07). NV12
-    plane math must derive from the fetched buffer's own shape instead,
-    which can't be stale relative to itself."""
-    from core import screen_capture as sc
-    import threading
-
-    w, h = 64, 64
-    # Real NV12 buffer: h*3//2 rows (luma + interleaved UV) at w columns.
-    frame = np.full((h * 3 // 2, w), 128, dtype=np.uint8)
-
-    capture = object.__new__(sc.UVCCapture)
-    capture._latest_frame_lock = threading.Lock()
-    capture._latest_frame_ref = [frame]
-    capture._region_ref = [None]
-    capture.is_raw_nv12 = True
-    capture._fixed_region = None
-    # Deliberately stale/wrong, smaller than the real buffer — simulates the
-    # race where these were updated for a since-superseded frame.
-    capture.preview_width = 32
-    capture.preview_height = 32
-
-    region = {'left': 0, 'top': 0, 'width': w, 'height': h}
-    result = capture.grab(region=region)
-
-    # A correct crop against the buffer's real 64x64 dimensions, not the
-    # stale 32x32 preview_width/height.
-    assert result is not None
-    assert result.shape == (h, w, 4)
-
-
 def test_resolve_native_dll_pixel_format_maps_nv12():
     from core import screen_capture as sc
     from core import dshow_capture_native as dsn

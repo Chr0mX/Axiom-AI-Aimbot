@@ -2331,30 +2331,15 @@ class UVCCapture:
             # runs over the small detection-region crop instead of the
             # full negotiated resolution — see the CAP_PROP_CONVERT_RGB
             # setup in __init__ for why this buffer isn't BGR already.
-            #
-            # Luma height/width are derived from the fetched buffer's own
-            # shape, not from self.preview_width/height: on the native-DLL
-            # path those are written by _reader_worker_native_dll *outside*
-            # _latest_frame_lock, right after the frame itself is published
-            # inside the lock. A frame fetched here can therefore be paired
-            # with a *different* frame's dimensions if a resolution/crop
-            # transition (e.g. the one-shot native-crop self-heal) lands
-            # between the two reads — producing a wrong crop, a None
-            # result, or a cv2 shape-mismatch error. The buffer's own shape
-            # is always self-consistent with the buffer itself, so deriving
-            # from it removes the race entirely (a no-op change for the cv2
-            # path, whose preview_width/height are static after __init__).
-            luma_height = frame_bgr.shape[0] * 2 // 3
-            frame_width = frame_bgr.shape[1]
             if effective_region is None:
                 return cv2.cvtColor(frame_bgr, cv2.COLOR_YUV2BGRA_NV12)
             left = max(0, int(effective_region.get('left', 0)))
             top = max(0, int(effective_region.get('top', 0)))
-            width = max(0, int(effective_region.get('width', frame_width)))
-            height = max(0, int(effective_region.get('height', luma_height)))
-            width = min(width, frame_width - left)
-            height = min(height, luma_height - top)
-            cropped = _crop_nv12(frame_bgr, luma_height, left, top, width, height)
+            width = max(0, int(effective_region.get('width', self.preview_width)))
+            height = max(0, int(effective_region.get('height', self.preview_height)))
+            width = min(width, self.preview_width - left)
+            height = min(height, self.preview_height - top)
+            cropped = _crop_nv12(frame_bgr, self.preview_height, left, top, width, height)
             if cropped is None:
                 return None
             return cv2.cvtColor(cropped, cv2.COLOR_YUV2BGRA_NV12)

@@ -1,6 +1,5 @@
 
 import json
-import re
 import urllib.request
 import webbrowser
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -12,35 +11,23 @@ REPO_OWNER = "iishong0w0"
 REPO_NAME = "Axiom-AI-Aimbot"
 API_URL = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/releases/latest"
 
-_LEADING_INT_RE = re.compile(r'\d+')
-
 def parse_version(v_str):
-    """解析版本號字符串為元組，例如 'v1.0.2' -> (1, 0, 2)
-
-    Each dot-separated field is parsed from its leading digit run rather than
-    requiring the whole field to be numeric. A pre-release suffix on any
-    field (e.g. '6.4-beta', '6.4rc1') used to make the *entire* field fall
-    back to 0 (int('4-beta') raises ValueError), so '6.4-beta' parsed to
-    (6, 0, 0) — comparing as *older* than a plain '6.3' release and
-    misreporting an available update as "up to date". Extracting the
-    leading digits keeps the numeric part ('4-beta' -> 4) and only drops the
-    suffix, which a version tuple can't represent anyway; a pre-release tag
-    then compares equal to the same numeric release rather than lower than
-    everything.
-    """
+    """解析版本號字符串為元組，例如 'v1.0.2' -> (1, 0, 2)"""
     v_str = v_str.lower().strip()
     if v_str.startswith('v'):
         v_str = v_str[1:]
-
+    
     parts = []
     for part in v_str.split('.'):
-        match = _LEADING_INT_RE.match(part.strip())
-        parts.append(int(match.group()) if match else 0)
-
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    
     # 補齊至少三位
     while len(parts) < 3:
         parts.append(0)
-
+        
     return tuple(parts)
 
 class UpdateChecker(QThread):
