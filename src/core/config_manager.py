@@ -250,18 +250,6 @@ class ConfigManager:
             # 讀取匯入的配置
             with open(import_path, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
-
-            # A JSON file whose top level isn't an object (a bare list, or a
-            # string) is valid JSON and so survives json.load — but every
-            # access below assumes a dict, and the AttributeError from
-            # .get() would escape the OSError/JSONDecodeError handler and
-            # propagate out of what is documented to return None on failure.
-            if not isinstance(config_data, dict):
-                logger.error(
-                    "Preset import from '%s' failed: top-level JSON is %s, expected an object",
-                    import_path, type(config_data).__name__,
-                )
-                return None
             
             # 獲取配置名稱 (untrusted — comes from the imported file's own content)
             config_name = _sanitize_config_name(config_data.get('name', 'imported_config'))

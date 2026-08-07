@@ -5,10 +5,6 @@ Run directly:
     python src/makcu_debug_binary.py [COM_PORT] [BAUD]
 
 If no COM port is given the highest-numbered available port is auto-selected.
-
-DEVELOPER TOOL — run directly, not imported.
-Binary-protocol counterpart to makcu_debug.py; exercises the RESERVED
-makcu_mouse_binary.py path.
 """
 
 import os

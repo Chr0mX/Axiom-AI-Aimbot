@@ -2,8 +2,6 @@ import os
 import sys
 from ctypes import byref, c_int, WinDLL
 from ctypes.wintypes import DWORD
-import logging
-
 from PyQt6.QtCore import QUrl, QTimer
 from PyQt6.QtGui import QIcon, QDesktopServices, QColor
 from qfluentwidgets import (FluentWindow, NavigationItemPosition, FluentIcon,
@@ -864,9 +862,6 @@ class AxiomWindow(FluentWindow):
             try:
                 from core.config import save_config
                 save_config(self._config)
-            except Exception:
-                # logger, not print: this is a save failure at shutdown, so
-                # it needs to reach the log file the user will actually send
-                # when reporting "my settings didn't stick".
-                logging.getLogger(__name__).exception("Failed to save config on close")
+            except Exception as e:
+                print(f"關閉時保存配置失敗: {e}")
         super().closeEvent(event)
