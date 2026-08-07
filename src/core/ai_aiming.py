@@ -323,18 +323,7 @@ def process_aiming(
                 pid_y.update(0.0)
                 return
 
-        # Elapsed time since the previous aiming frame, so the PID's I/D
-        # terms don't silently change strength with the loop rate — which
-        # varies both by configuration (detect_interval) and at runtime
-        # (idle_detect_interval applies whenever not aiming). None on the
-        # first frame after a reset, which keeps the historical fixed-step
-        # behaviour for that one frame rather than inventing a dt.
-        _pid_dt = None
-        if state.pid_last_update_t > 0.0:
-            _pid_dt = current_time - state.pid_last_update_t
-        state.pid_last_update_t = current_time
-
-        dx, dy = pid_x.update(errorX, _pid_dt), pid_y.update(errorY, _pid_dt)
+        dx, dy = pid_x.update(errorX), pid_y.update(errorY)
 
         # Track target Y velocity for the velocity-restore gate
         if state.aim_y_last_target_t > 0:
