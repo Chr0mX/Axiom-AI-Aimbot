@@ -27,7 +27,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import List, Optional, Set
 from urllib.parse import urlparse
 
-from .ai_loop_utils import get_capture_dimensions
+from .ai_loop_utils import get_capture_dimensions, get_effective_detect_range_size
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,14 @@ def _build_snapshot() -> dict:
         },
         "settings": {
             "fov_size": int(getattr(c, "fov_size", 200)),
-            "detect_range_size": int(getattr(c, "detect_range_size", 320)),
+            # Effective size (clamped to the active capture method's own live
+            # dimensions), not the raw config field — for 'uvc'/'ndi'/'udp',
+            # the raw field is only validated against the full desktop
+            # height and can hold a value far bigger than the actual live
+            # capture frame (e.g. a small UDP crop), which would otherwise
+            # draw a detect-range box that dwarfs the frame it's supposed to
+            # outline. See get_effective_detect_range_size()'s docstring.
+            "detect_range_size": get_effective_detect_range_size(c, (cap_w, cap_h)),
             "fov_circle_filter_enabled": bool(getattr(c, "fov_circle_filter_enabled", False)),
             "show_fov": bool(getattr(c, "show_fov", True)),
             "show_boxes": bool(getattr(c, "show_boxes", True)),

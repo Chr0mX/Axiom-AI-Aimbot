@@ -130,6 +130,36 @@ def test_snapshot_udp_boxes_shifted_to_desktop_coordinates():
     assert snap["locked_box"] == [850, 440, 890, 520]
 
 
+def test_snapshot_udp_detect_range_clamped_to_live_crop_not_raw_config():
+    """Regression guard: the detect-range box must never be drawn bigger
+    than the frame it's supposed to outline.
+
+    config.detect_range_size is only validated against the full desktop
+    height (config.py's _validate_detect_range_size) — for a 'udp' stream,
+    the live capture frame (udp_width/udp_height) can be far smaller than
+    that, e.g. a 320x320 crop while detect_range_size was left at a value
+    that made sense for a previous 1920x1080 desktop capture. Sending that
+    raw value verbatim drew a detect-range box that dwarfed the actual
+    320x320 crop — reported as the box being "stretched to the full
+    screen instead of the AI detection range size". The snapshot must
+    report the same effective (clamped) size calculate_detection_region()
+    actually uses for detection, via get_effective_detect_range_size().
+    """
+    class UdpOversizedRangeConfig(_FakeConfig):
+        screenshot_method = "udp"
+        udp_width = 320
+        udp_height = 320
+        detect_range_size = 900  # only valid relative to the full 1080-tall desktop
+        fov_size = 100
+        crosshairX = 160
+        crosshairY = 160
+
+    esp_server._config = UdpOversizedRangeConfig()
+    snap = esp_server._build_snapshot()
+    # Clamped to the live 320x320 crop, not the raw 900.
+    assert snap["settings"]["detect_range_size"] == 320
+
+
 def test_snapshot_udp_no_offset_before_first_frame():
     """Before any UDP frame has arrived, udp_width/udp_height are 0
     (unset) — get_capture_dimensions() falls back to the desktop

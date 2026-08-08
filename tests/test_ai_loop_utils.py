@@ -91,6 +91,51 @@ class TestCalculateDetectionRegion:
         assert region['width'] == region['height'] == 320
 
 
+class TestGetEffectiveDetectRangeSize:
+    """config.detect_range_size is only validated against the full desktop
+    height, not the active capture method's own live dimensions — for
+    'uvc'/'ndi'/'udp', where the live frame can be much smaller than the
+    desktop, this leaves it free to hold a value the actual capture frame
+    can't satisfy. get_effective_detect_range_size() must clamp it down to
+    match what calculate_detection_region() actually uses, so any other
+    consumer (e.g. the Web ESP snapshot) can't report a bigger, wrong size."""
+
+    def test_clamps_raw_value_to_small_udp_crop(self, ai_loop_utils):
+        from types import SimpleNamespace
+        config = SimpleNamespace(
+            screenshot_method='udp', width=1920, height=1080,
+            udp_width=320, udp_height=320,
+            fov_size=100, detect_range_size=900,  # valid only against the 1080-tall desktop
+        )
+        assert ai_loop_utils.get_effective_detect_range_size(config) == 320
+
+    def test_matches_calculate_detection_region(self, ai_loop_utils):
+        """Must agree with calculate_detection_region()'s own effective size —
+        it's the same clamp, factored out."""
+        from types import SimpleNamespace
+        config = SimpleNamespace(
+            screenshot_method='udp', width=1920, height=1080,
+            udp_width=320, udp_height=320,
+            fov_size=100, detect_range_size=900,
+        )
+        region = ai_loop_utils.calculate_detection_region(config, crosshair_x=160, crosshair_y=160)
+        assert ai_loop_utils.get_effective_detect_range_size(config) == region['width'] == region['height']
+
+    def test_accepts_precomputed_capture_dims(self, ai_loop_utils):
+        """Passing capture_dims skips the internal get_capture_dimensions()
+        call — must still clamp the same way."""
+        from types import SimpleNamespace
+        config = SimpleNamespace(fov_size=100, detect_range_size=900)
+        assert ai_loop_utils.get_effective_detect_range_size(config, (320, 320)) == 320
+
+    def test_tolerates_missing_fov_size(self, ai_loop_utils):
+        """Must not crash on a stub config missing fov_size entirely —
+        esp_server.py's snapshot builder calls this against partial configs."""
+        from types import SimpleNamespace
+        config = SimpleNamespace(detect_range_size=900)
+        assert ai_loop_utils.get_effective_detect_range_size(config, (320, 320)) == 320
+
+
 class TestReduceBoxesForSingleTarget:
     """Regression coverage for the single_target_mode / sticky_lock_enabled
     interaction fix: single_target_mode's box-list reduction must only trust
