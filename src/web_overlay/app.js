@@ -99,11 +99,26 @@
   window.addEventListener("resize", resize);
   resize();
 
-  // Map backend screen-space coords → canvas coords
+  // Map backend screen-space coords → canvas coords.
+  //
+  // Uses a single uniform scale, not independent per-axis sx/sy — the
+  // browser viewport's aspect ratio essentially never matches the
+  // captured screen/game resolution's (window.innerWidth/innerHeight can
+  // be any shape the user's browser happens to be), so scaling each axis
+  // separately to fill the canvas stretches every square shape (the FOV
+  // box, the detect-range box, roughly-square target boxes) into a
+  // rectangle, and inflates them disproportionately along whichever axis
+  // the mismatch favors. A uniform scale — the smaller of the two
+  // per-axis ratios, i.e. "contain" — keeps every shape's real aspect
+  // ratio intact; offX/offY letterbox (center) the result within the
+  // canvas instead of stretching it to fill.
   function scaler(s) {
-    const sx = canvas.width / (s.screen.w || canvas.width);
-    const sy = canvas.height / (s.screen.h || canvas.height);
-    return { sx, sy };
+    const screenW = s.screen.w || canvas.width;
+    const screenH = s.screen.h || canvas.height;
+    const scale = Math.min(canvas.width / screenW, canvas.height / screenH) || 1;
+    const offX = (canvas.width  - screenW * scale) / 2;
+    const offY = (canvas.height - screenH * scale) / 2;
+    return { sx: scale, sy: scale, offX, offY };
   }
 
   // ── Colors ─────────────────────────────────────────────────────
@@ -220,13 +235,12 @@
 
     if (state) {
       const st = state.settings;
-      const { sx, sy } = scaler(state);
-      const X = (v) => v * sx, Y = (v) => v * sy;
+      const { sx, sy, offX, offY } = scaler(state);
+      const X = (v) => v * sx + offX, Y = (v) => v * sy + offY;
       const cx = X(state.center.x), cy = Y(state.center.y);
 
-      // Detect range — sx/sy scaled independently, since screen.w/h (e.g. a
-      // square UDP stream) rarely matches the canvas's own aspect ratio
-      // (the browser viewport); a single scalar stretches this into an oval.
+      // Detect range — sx === sy (see scaler()), so this stays a true
+      // square/circle regardless of the browser window's own aspect ratio.
       if (st.show_detect_range) {
         const rsx = st.detect_range_size * sx, rsy = st.detect_range_size * sy;
         ctx.strokeStyle = "rgba(120,120,120,0.7)";

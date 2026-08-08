@@ -85,17 +85,49 @@ def clear_queues(boxes_queue: queue.Queue, confidences_queue: queue.Queue) -> No
     confidences_queue.put([])
 
 
-def calculate_detection_region(config: Config, crosshair_x: int, crosshair_y: int) -> Dict[str, int]:
-    """Calculate detection region"""
+def get_effective_detect_range_size(
+    config: Config, capture_dims: Tuple[int, int] | None = None,
+) -> int:
+    """detect_range_size actually usable for detection, clamped to the
+    active capture method's own live dimensions.
 
-    capture_width, capture_height = get_capture_dimensions(config)
+    config.detect_range_size is only validated (config.py's
+    _validate_detect_range_size) against config.height — the full desktop
+    height. For 'uvc'/'ndi'/'udp', where the live capture frame can be far
+    smaller than the desktop (e.g. a small UDP crop), that leaves the raw
+    field free to hold a value the actual capture frame can't satisfy.
+    calculate_detection_region() has always clamped it down further, per
+    frame, against get_capture_dimensions() — this factors that same
+    clamp out so any other consumer (e.g. the Web ESP snapshot) reports
+    the same effective size instead of the raw, potentially-too-large one.
+
+    capture_dims lets a caller that already has (capture_width,
+    capture_height) pass them through instead of triggering a second
+    get_capture_dimensions() call for the same frame.
+    """
+    capture_width, capture_height = (
+        capture_dims if capture_dims is not None else get_capture_dimensions(config)
+    )
     detection_size = int(getattr(config, 'detect_range_size', capture_height))
+    # getattr (not direct attribute access) — unlike calculate_detection_region()'s
+    # original inline version of this formula (only ever called with a real,
+    # fully-populated Config from ai_loop.py), this helper is also called from
+    # esp_server.py's snapshot builder, which must tolerate a bare/incomplete
+    # config object (see test_snapshot_handles_empty_and_missing).
+    fov_size = int(getattr(config, 'fov_size', 0) or 0)
     # Clamp against both dimensions, not just height — a capture source
     # narrower than tall (portrait UVC/NDI/UDP feed) would otherwise let
     # detection_size exceed capture_width, and region_width below would then
     # get clamped smaller than region_height, silently producing a
     # non-square region and defeating the square fast-preprocess path.
-    detection_size = max(int(config.fov_size), min(int(capture_height), int(capture_width), detection_size))
+    return max(fov_size, min(int(capture_height), int(capture_width), detection_size))
+
+
+def calculate_detection_region(config: Config, crosshair_x: int, crosshair_y: int) -> Dict[str, int]:
+    """Calculate detection region"""
+
+    capture_width, capture_height = get_capture_dimensions(config)
+    detection_size = get_effective_detect_range_size(config, (capture_width, capture_height))
     half_detection_size = detection_size // 2
 
     region_left = max(0, crosshair_x - half_detection_size)
