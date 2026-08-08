@@ -95,26 +95,20 @@ def test_snapshot_boxes_unaffected_by_single_target_mode_reduction():
     assert snap["confidences"] == [0.91, 0.4, 0.7]
 
 
-def test_snapshot_udp_boxes_use_live_crop_resolution_no_offset():
-    """Regression guard: 'udp' must report the live crop's own resolution
-    as "screen", with no offset applied to boxes/center — same treatment
-    as 'uvc'/'ndi'.
+def test_snapshot_udp_boxes_shifted_to_desktop_coordinates():
+    """Regression guard for the UDP spatial-crop offset fix.
 
-    An earlier version of this snapshot assumed a UDP stream's small crop
-    sits centered within the user's real desktop, and shifted box/center
-    coordinates by an assumed centering offset so "screen" could report
-    the full desktop resolution. That assumption doesn't hold in practice:
-    overlay.py's in-game PyQt overlay explicitly skips drawing for
-    'uvc'/'ndi'/'udp' (see its paintEvent), so the Web ESP is the *only*
-    overlay renderer for a UDP setup — there is no "look at your real
-    desktop and see boxes there" path the offset could even be aligning
-    against. What the user actually looks at is whatever their OBS scene
-    shows (commonly the small crop scaled up to fill the view, not shown
-    at native size on a black canvas), and the old offset model placed
-    boxes for a framing nobody was looking at — reported as boxes not
-    sitting on the actual target at all. Treating 'udp' like 'uvc'/'ndi'
-    (screen == the live capture frame's own resolution, no offset) aligns
-    correctly regardless of how the user scales that frame in OBS.
+    A UDP stream is fed by an OBS filter that spatially crops a small
+    sub-region out of the user's real desktop — latest_all_boxes'
+    coordinates are expressed in that small crop's own 0-udp_width /
+    0-udp_height space, not desktop space. Since there's no way to learn
+    the crop's real position on the desktop from the stream itself, the
+    snapshot assumes the crop is centered on the desktop (matching the
+    aim logic's own implicit assumption — see ai_loop.py/ai_loop_utils.py)
+    and shifts box/center coordinates by that centered offset, while
+    "screen" reports the real desktop resolution. This is what lets the
+    Web ESP overlay align with the user's actual full-screen game view
+    instead of being stretched/misaligned relative to it.
     """
     class UdpStreamConfig(_FakeConfig):
         screenshot_method = "udp"
@@ -129,10 +123,11 @@ def test_snapshot_udp_boxes_use_live_crop_resolution_no_offset():
 
     esp_server._config = UdpStreamConfig()
     snap = esp_server._build_snapshot()
-    assert snap["screen"] == {"w": 320, "h": 320}
-    assert snap["center"] == {"x": 160, "y": 160}
-    assert snap["boxes"] == [[50, 60, 90, 140]]
-    assert snap["locked_box"] == [50, 60, 90, 140]
+    # offset = ((1920-320)/2, (1080-320)/2) = (800, 380)
+    assert snap["screen"] == {"w": 1920, "h": 1080}
+    assert snap["center"] == {"x": 960, "y": 540}
+    assert snap["boxes"] == [[850, 440, 890, 520]]
+    assert snap["locked_box"] == [850, 440, 890, 520]
 
 
 def test_snapshot_udp_detect_range_clamped_to_live_crop_not_raw_config():
@@ -165,11 +160,12 @@ def test_snapshot_udp_detect_range_clamped_to_live_crop_not_raw_config():
     assert snap["settings"]["detect_range_size"] == 320
 
 
-def test_snapshot_udp_falls_back_to_desktop_resolution_before_first_frame():
+def test_snapshot_udp_no_offset_before_first_frame():
     """Before any UDP frame has arrived, udp_width/udp_height are 0
     (unset) — get_capture_dimensions() falls back to the desktop
-    resolution itself (config.width/height), so "screen" is that
-    fallback, not a bogus 0x0."""
+    resolution itself, so the computed offset is exactly 0 (no shift)
+    and "screen" is the desktop resolution, not a bogus 0x0 or a
+    stale/wrong offset applied to boxes that don't exist yet anyway."""
     class UdpStreamNoFrameYetConfig(_FakeConfig):
         screenshot_method = "udp"
         udp_width = 0
@@ -184,10 +180,10 @@ def test_snapshot_udp_falls_back_to_desktop_resolution_before_first_frame():
 
 
 def test_snapshot_non_udp_backends_get_no_offset():
-    """uvc/ndi/udp/mss/dxcam backends have no separate 'real desktop the
-    crop was taken from' concept — the captured frame IS what's being
-    viewed — so none of them get an offset applied, even if their own
-    capture resolution differs from the desktop."""
+    """uvc/ndi/mss/dxcam backends have no separate 'real desktop the crop
+    was taken from' concept — the captured frame IS what's being viewed —
+    so they must never get an offset applied, even if their own capture
+    resolution differs from the desktop."""
     class UvcConfig(_FakeConfig):
         screenshot_method = "uvc"
         uvc_width = 1280
