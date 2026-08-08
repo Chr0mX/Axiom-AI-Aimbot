@@ -63,13 +63,24 @@ class MakcuMouse:
         self._stream_stop  = threading.Event()
         self._stream_thread: Optional[threading.Thread] = None
 
-        # Async write thread — inference thread accumulates movement; write
-        # thread drains it and flushes to serial so inference is never blocked.
-        # Pending relative movement, accumulated by move() and drained by
-        # _write_worker. Deliberately a running total rather than a queue of
-        # commands: these deltas are relative, so a dropped one is travel
-        # permanently lost, not merely delayed. Guarded by _pending_lock;
-        # _pending_event signals the writer that there is something to send.
+        # Async write thread — inference thread hands off the latest move;
+        # write thread drains it and flushes to serial so inference is never
+        # blocked. Pending relative movement, SET (not accumulated) by move()
+        # and drained by _write_worker: every move() call already carries the
+        # complete, freshly-recomputed correction for the current frame (PID
+        # + humanization + sub-pixel carry + jitter are all folded in before
+        # ai_aiming.py ever calls send_mouse_move()), so a still-pending
+        # value here is by definition superseded, not merely "not yet sent
+        # on top of". Summing them (an earlier version of this code did)
+        # double- and triple-counts the same not-yet-visually-applied error:
+        # the aim loop's detect_interval is routinely faster than the real
+        # USB-injection + game-frame + capture round trip, so several
+        # consecutive PID cycles recompute a full correction against a
+        # target that hasn't moved on screen yet, and summing all of them
+        # into one write overshoots by however many cycles piled up —
+        # exactly the systemic Y-axis overshoot ("aiming snaps past the
+        # target") this replaced. Guarded by _pending_lock; _pending_event
+        # signals the writer that there is something to send.
         self._pending_dx: int = 0
         self._pending_dy: int = 0
         self._pending_lock = threading.Lock()
@@ -157,11 +168,9 @@ class MakcuMouse:
                 self._close_locked()
             return False
 
-        # Discard any movement accumulated before this connection came up.
-        # Coalescing preserves displacement across a slow writer, which is
-        # the point — but NOT across a disconnect: replaying deltas that
-        # piled up during a USB glitch would fire them as one large jump
-        # long after the target they were computed for has moved on.
+        # Discard any move left pending from before this connection came up
+        # — it describes a target position from a session that's over, and
+        # sending it now would fire a stale jump for no reason.
         with self._pending_lock:
             self._pending_dx = 0
             self._pending_dy = 0
@@ -305,13 +314,13 @@ class MakcuMouse:
         Runs on its own thread so the inference thread (which calls move())
         is never blocked waiting on the serial port.
 
-        Takes the accumulated delta and zeroes it in one locked step. That
-        atomicity is what makes coalescing correct: anything move() adds
-        while this write is in flight lands in a freshly-zeroed accumulator
-        and is sent on the next pass, so no displacement is either lost or
-        counted twice. (The previous design queued pre-formatted command
-        strings and dropped unsent ones — which, for *relative* deltas,
-        silently discarded travel whenever the writer fell behind.)
+        Takes the latest pending delta and zeroes it in one locked step, so
+        a move() landing while this write is in flight goes into a freshly-
+        zeroed slot rather than being lost or merged into what's about to be
+        sent. If two or more move() calls land before this loop gets back
+        around to draining, only the newest survives — see move()'s
+        docstring for why replacing (not summing) the stale one is correct
+        here, not a regression.
         """
         while not self._write_stop.is_set():
             if not self._pending_event.wait(0.01):
@@ -503,26 +512,31 @@ class MakcuMouse:
     def move(self, dx: int, dy: int):
         """Relative mouse move. Handed to the async write thread.
 
-        Coalescing, not latest-only: if a previous move hasn't been written
-        yet, this one is *added* to it rather than replacing it.
+        Latest-only: if a previous move hasn't been written yet, this one
+        *replaces* it rather than adding to it.
 
-        That distinction is the whole point. These are **relative** deltas —
-        dropping a pending (+5, +0) and sending (+5, +0) moves the cursor 5
-        px, not 10, so every dropped command is travel silently lost. The
-        aiming path can't compensate either: its sub-pixel carry assumes
-        each move it hands over is actually delivered. Coalescing preserves
-        the total displacement no matter how far behind the serial writer
-        falls; the cursor simply arrives in one larger step.
+        dx/dy arrive here as the single, complete correction ai_aiming.py
+        computed for the CURRENT frame — PID output, humanization, sub-pixel
+        carry and jitter are all already folded in before send_mouse_move()
+        is ever called. A pending value that hasn't reached the wire yet
+        doesn't describe "movement still owed on top of the next frame's" —
+        it describes an error the next frame's fresh PID output already
+        re-measures and re-corrects for, because the aim loop is a closed
+        feedback loop, not a source of independent deltas. Summing them
+        (an earlier version of this code did, to avoid losing displacement)
+        double-counts that same not-yet-visually-applied error every time
+        the real USB-injection + game-frame + capture round trip is slower
+        than detect_interval — which is routinely true — so N queued-up
+        PID cycles land as one N-times-too-large jump. That's the systemic
+        Y-axis overshoot ("aim snaps past the target") this fixes: replacing
+        the stale pending value with the fresh one is what keeps each
+        physical move sized to exactly one frame's correction.
         """
         if not self.is_connected():
             return
         with self._pending_lock:
-            self._pending_dx += int(dx)
-            self._pending_dy += int(dy)
-            # Clamp the accumulator, not just this call's delta — an
-            # unbounded backlog would otherwise overflow the wire format.
-            self._pending_dx = max(-32768, min(32767, self._pending_dx))
-            self._pending_dy = max(-32768, min(32767, self._pending_dy))
+            self._pending_dx = max(-32768, min(32767, int(dx)))
+            self._pending_dy = max(-32768, min(32767, int(dy)))
         self._pending_event.set()
 
     def click(self, action: int = 1):

@@ -194,6 +194,23 @@ class TestConfigSerialization:
         c.from_dict({'nonexistent_key': 'value'})
         assert not hasattr(c, 'nonexistent_key') or getattr(c, 'nonexistent_key', None) != 'value'
 
+    def test_from_dict_string_bool_false_coerced_correctly(self):
+        """Regression: bool("false") is True (any non-empty string is
+        truthy), so a hand-edited/legacy config.json storing the *string*
+        "false" for a bool field used to silently flip it to True on load."""
+        c = _make_config()
+        c.from_dict({'dark_mode': 'false', 'show_fov': '0', 'show_boxes': 'no'})
+        assert c.dark_mode is False
+        assert c.show_fov is False
+        assert c.show_boxes is False
+
+    def test_from_dict_string_bool_true_coerced_correctly(self):
+        c = _make_config()
+        c.from_dict({'dark_mode': 'true', 'show_fov': '1', 'show_boxes': 'yes'})
+        assert c.dark_mode is True
+        assert c.show_fov is True
+        assert c.show_boxes is True
+
     def test_roundtrip_serialization(self):
         """to_dict -> from_dict 來回應保持值不變"""
         c1 = _make_config()
@@ -509,6 +526,27 @@ class TestValidateDetectRangeSize:
         from core.config import _validate_detect_range_size
         c = _make_config()
         c.detect_range_size = 1080
+        _validate_detect_range_size(c)
+        assert c.detect_range_size == 1080
+
+    def test_fov_larger_than_height_still_clamped_to_height(self):
+        """Regression: fov_size > height used to make min_size > max_size,
+        so max(min_size, min(max_size, raw)) evaluated to min_size (=
+        fov_size) — violating the "must not be larger than screen height"
+        invariant. The lower bound must be clamped to the upper bound
+        first."""
+        from core.config import _validate_detect_range_size
+        c = _make_config()
+        c.fov_size = 2000  # larger than height (1080)
+        c.detect_range_size = 1080
+        _validate_detect_range_size(c)
+        assert c.detect_range_size <= 1080
+
+    def test_fov_larger_than_height_with_small_raw_clamped_to_height(self):
+        from core.config import _validate_detect_range_size
+        c = _make_config()
+        c.fov_size = 2000  # larger than height (1080)
+        c.detect_range_size = 50  # smaller than both fov_size and height
         _validate_detect_range_size(c)
         assert c.detect_range_size == 1080
 
