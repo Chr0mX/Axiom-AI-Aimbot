@@ -17,7 +17,7 @@ Compatibility:
   cuDNN 9.x              (bundled in nvidia-cudnn-cu12)
   TensorRT 10.x DLLs     (tensorrt_cu12_libs < 11)
   TensorRT Python API    (tensorrt_cu12_bindings < 11, Python ≤ 3.12 only)
-  onnxruntime-gpu        >= 1.19
+  onnxruntime-gpu        == 1.26.0 (pinned — see ONNXRUNTIME_GPU_PACKAGES note)
 
 Note on Python 3.13+:
   NVIDIA does not ship tensorrt_cu12_bindings wheels for Python ≥ 3.13.
@@ -66,8 +66,18 @@ else:
         "Only the TensorRT DLLs will be installed (ORT TRT EP still works)."
     )
 
+# Pinned, not left floating: starting with onnxruntime-gpu 1.27.0, the default
+# PyPI build switched from CUDA 12.x to CUDA 13.0 and dropped CUDA 12 support.
+# An unversioned "onnxruntime-gpu" here would install that newer build on top
+# of the CUDA-12 nvidia-*-cu12 wheels below, and its provider DLLs would then
+# look for cublas64_13.dll / cublasLt64_13.dll, which nvidia-cublas-cu12
+# doesn't ship — fails with "Error 126: The specified module could not be
+# found" and ORT silently falls back to CPUExecutionProvider. 1.26.0 is the
+# last release built against CUDA 12. Keep in sync with _REQUIRED_ORT_VERSION.
+_REQUIRED_ORT_VERSION = "1.26.0"
+
 ONNXRUNTIME_GPU_PACKAGES = [
-    "onnxruntime-gpu",
+    f"onnxruntime-gpu=={_REQUIRED_ORT_VERSION}",
     "nvidia-cuda-runtime-cu12",  # cudart64_12.dll
     "nvidia-cublas-cu12",         # cublas64_12.dll, cublasLt64_12.dll (cuDNN dep)
     "nvidia-cufft-cu12",          # cufft64_11.dll — required by onnxruntime_providers_cuda.dll and nvinfer
@@ -187,6 +197,25 @@ def is_tensorrt_importable() -> bool:
     return bool(out)
 
 
+def needs_onnxruntime_reinstall() -> bool:
+    """True if onnxruntime-gpu isn't installed, or isn't the pinned version.
+
+    is_cuda_available() / is_tensorrt_available() aren't enough to catch a
+    stale/wrong onnxruntime-gpu install: ort.get_available_providers() lists a
+    provider as long as its DLL *file* is present next to the package, whether
+    or not it can actually load at runtime. A CUDA-13-built onnxruntime-gpu
+    (>= 1.27.0, the current PyPI default) still reports CUDA/TensorRT as
+    available even though their provider DLLs fail to load against the CUDA-12
+    wheels installed below ("Error 126: The specified module could not be
+    found"), silently falling back to CPUExecutionProvider. Comparing the
+    installed version directly against the pin catches that case so re-running
+    this installer actually fixes it instead of no-op'ing on the false
+    "already available" reading.
+    """
+    installed = _run_check("import onnxruntime as ort; print(ort.__version__)")
+    return installed != _REQUIRED_ORT_VERSION
+
+
 # ── Installation ──────────────────────────────────────────────────────────────
 
 def _pip(packages: list, upgrade: bool = True) -> None:
@@ -282,6 +311,17 @@ def main() -> None:
     ensure_packages_dir()
     log(f"Python          : {sys.executable}")
     log("")
+
+    if needs_onnxruntime_reinstall():
+        log(
+            f"onnxruntime-gpu is missing or not the pinned {_REQUIRED_ORT_VERSION} "
+            "— installing the correct CUDA-12 build (see ONNXRUNTIME_GPU_PACKAGES note)."
+        )
+        install_onnxruntime_gpu()
+        install_tensorrt()
+        verify_installation()
+        print_next_steps()
+        return
 
     if is_tensorrt_available():
         if _BINDINGS_SUPPORTED and not is_tensorrt_importable():

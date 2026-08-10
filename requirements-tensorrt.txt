@@ -17,13 +17,22 @@
 # CUDA toolkit : 12.x  (driver >= 525.x)
 # cuDNN        : 9.x   (bundled in nvidia-cudnn-cu12)
 # TensorRT     : 10.x  (tensorrt_cu12_libs < 11)
-# ORT          : >= 1.19 (required for TRT 10 EP)
+# ORT          : 1.19 – 1.26 (required for TRT 10 EP; pinned below — see note)
 # Python       : 3.10 – 3.14  (bindings only on 3.10–3.12; DLLs work on all)
 # OS           : Windows 10/11 x64
 # ─────────────────────────────────────────────────────────────────────────────
+#
+# onnxruntime-gpu is pinned, not left floating: starting with 1.27.0, the
+# default PyPI onnxruntime-gpu build switched from CUDA 12.x to CUDA 13.0 and
+# dropped CUDA 12 support entirely — an unpinned install pulls that newer
+# build on top of the CUDA-12 nvidia-*-cu12 wheels below, and the DLL names
+# no longer match (onnxruntime_providers_{cuda,tensorrt}.dll require
+# cublas{,Lt}64_13.dll, which nvidia-cublas-cu12 doesn't provide — surfaces as
+# "Error 126: The specified module could not be found" and a silent fallback
+# to CPUExecutionProvider). 1.26.0 is the last release built against CUDA 12.
 
 # ── ONNX Runtime (CUDA + TensorRT execution providers) ───────────────────────
-onnxruntime-gpu
+onnxruntime-gpu==1.26.0
 
 # ── NVIDIA CUDA runtime wheels (from standard PyPI) ──────────────────────────
 nvidia-cublas-cu12
