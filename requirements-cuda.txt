@@ -1,7 +1,15 @@
 # Core runtime dependencies
+#
+# onnxruntime-gpu is pinned to 1.26.0, not left floating: starting with
+# 1.27.0 the default PyPI build switched from CUDA 12.x to CUDA 13.0 and
+# dropped CUDA 12 support — an unpinned install silently pulls that newer
+# build, which then can't find its CUDA-13-named DLLs (cublas64_13.dll /
+# cublasLt64_13.dll) against a CUDA 12 Toolkit/driver, surfacing as "Error
+# 126: The specified module could not be found" and falling back to
+# CPUExecutionProvider. See requirements-tensorrt.txt for the same note.
 numpy
 opencv-python
-onnxruntime-gpu
+onnxruntime-gpu==1.26.0
 mss
 dxcam; platform_system == "Windows"
 pygrabber; platform_system == "Windows"
