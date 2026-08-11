@@ -61,6 +61,7 @@ from .makcu_mouse import (
     makcu_mouse,
     send_mouse_move_makcu,
     send_mouse_click_makcu,
+    send_mouse_button_makcu,
     connect_makcu,
     disconnect_makcu,
     is_makcu_connected,
@@ -93,6 +94,9 @@ from .arduino_mouse import send_mouse_click_arduino
 
 # Key detection
 from .key_utils import is_key_pressed
+
+# Auto Un-ADS — synthetic aim-key release/press
+from .aim_input import set_aim_key_state
 
 # Gamepad button reading
 from .gamepad_input import (
@@ -201,7 +205,8 @@ __all__ = [
     'disconnect_makcu',
     'is_makcu_connected',
     'send_mouse_click_makcu',
-    
+    'send_mouse_button_makcu',
+
     # Xbox 360 虛擬手把
     'connect_xbox',
     'disconnect_xbox',
@@ -223,7 +228,10 @@ __all__ = [
     
     # 按鍵檢測
     'is_key_pressed',
-    
+
+    # Auto Un-ADS
+    'set_aim_key_state',
+
     # 手柄按鍵
     'is_gamepad_vk',
     'is_gamepad_button_pressed',

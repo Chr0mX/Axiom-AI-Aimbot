@@ -50,6 +50,19 @@ class MakcuMouse:
     CMD_VERSION   = "km.version()\r\n"
     CMD_INFO      = "km.info()\r\n"
 
+    # Right/middle/side button state commands — firmware supports all five
+    # buttons identically (docs/MAKCU_Native_API.md: left([0|1|2]) / right() /
+    # middle() / side1() / side2(), state 0=release 1=down 2=silent_release).
+    # Only left was wired up historically; auto-unads needs at least right.
+    CMD_RIGHT_DOWN  = "km.right(1)\r\n"
+    CMD_RIGHT_UP    = "km.right(0)\r\n"
+    CMD_MIDDLE_DOWN = "km.middle(1)\r\n"
+    CMD_MIDDLE_UP   = "km.middle(0)\r\n"
+    CMD_SIDE1_DOWN  = "km.side1(1)\r\n"
+    CMD_SIDE1_UP    = "km.side1(0)\r\n"
+    CMD_SIDE2_DOWN  = "km.side2(1)\r\n"
+    CMD_SIDE2_UP    = "km.side2(0)\r\n"
+
     def __init__(self):
         self._serial: Optional[serial.Serial] = None
         self._lock = threading.Lock()
@@ -539,21 +552,47 @@ class MakcuMouse:
             self._pending_dy = max(-32768, min(32767, int(dy)))
         self._pending_event.set()
 
+    # button name -> (down_cmd, up_cmd), used by press_button()
+    _BUTTON_CMDS = {
+        'left':   (CMD_LEFT_DOWN, CMD_LEFT_UP),
+        'right':  (CMD_RIGHT_DOWN, CMD_RIGHT_UP),
+        'middle': (CMD_MIDDLE_DOWN, CMD_MIDDLE_UP),
+        'side1':  (CMD_SIDE1_DOWN, CMD_SIDE1_UP),
+        'side2':  (CMD_SIDE2_DOWN, CMD_SIDE2_UP),
+    }
+
     def click(self, action: int = 1):
         """Left mouse click. action: 1=click, 2=press, 3=release."""
+        self.press_button('left', action)
+
+    def press_button(self, button: str, action: int = 2):
+        """Press/release/click an arbitrary MAKCU button.
+
+        button: 'left' | 'right' | 'middle' | 'side1' | 'side2'
+        action: 1=click (down, 30ms, up), 2=press (down only), 3=release (up only)
+
+        Same lock-never-held-across-sleep discipline as click() (see
+        CLAUDE.md's MAKCU note) — the down-write, sleep, and up-write are
+        three separate `with self._lock:` blocks, not one held across
+        `time.sleep()`.
+        """
         if not self.is_connected():
             return
+        cmds = self._BUTTON_CMDS.get(button)
+        if not cmds:
+            return
+        down_cmd, up_cmd = cmds
         try:
             if action == 1:
                 with self._lock:
                     if self._serial and self._serial.is_open:
-                        self._serial.write(self.CMD_LEFT_DOWN.encode('ascii'))
+                        self._serial.write(down_cmd.encode('ascii'))
                 time.sleep(0.03)
                 with self._lock:
                     if self._serial and self._serial.is_open:
-                        self._serial.write(self.CMD_LEFT_UP.encode('ascii'))
+                        self._serial.write(up_cmd.encode('ascii'))
                 return
-            cmd = self.CMD_LEFT_DOWN if action == 2 else self.CMD_LEFT_UP if action == 3 else None
+            cmd = down_cmd if action == 2 else up_cmd if action == 3 else None
             if cmd:
                 with self._lock:
                     if self._serial and self._serial.is_open:
@@ -599,6 +638,11 @@ def send_mouse_move_makcu(dx: int, dy: int):
 
 def send_mouse_click_makcu(action: int = 1):
     makcu_mouse.click(action)
+    return True
+
+
+def send_mouse_button_makcu(button: str, action: int = 2):
+    makcu_mouse.press_button(button, action)
     return True
 
 

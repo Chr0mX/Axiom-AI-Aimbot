@@ -231,3 +231,236 @@ class TestDeadzonePreviousErrorFreshness:
         assert sent_moves == []  # deadzone early-return, no movement sent
         assert pid_x.previous_error == 0.0
         assert pid_y.previous_error == 0.0
+
+
+class TestAutoUnAds:
+    """Auto Un-ADS decision logic in process_aiming(): too-close/too-fast
+    detection, release/reengage hysteresis, and movement suppression while
+    a release is active. The actual synthetic press/release send lives in
+    ai_loop_utils.apply_unads_transition() (integration, not unit-tested
+    here) — process_aiming() only ever sets state.unads_pending_transition."""
+
+    def test_box_ratio_trigger_sets_release(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(
+            auto_unads_enabled=True, auto_unads_box_threshold_pct=65.0,
+            detect_range_size=350.0,
+        )
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        # height 300 / detect_range_size 350 * 100 ~= 85.7% > 65% threshold
+        box = [400.0, 350.0, 600.0, 650.0]
+        process_aiming(config, [box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        assert state.unads_pending_transition == 'release'
+
+    def test_small_box_does_not_trigger_release(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(
+            auto_unads_enabled=True, auto_unads_box_threshold_pct=65.0,
+            detect_range_size=350.0,
+        )
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        box = [480.0, 480.0, 520.0, 520.0]  # height 40 -> well under threshold
+        process_aiming(config, [box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        assert state.unads_pending_transition == ''
+
+    def test_velocity_trigger_sets_release_even_across_a_target_swap(self, sent_moves):
+        """A same-frame target swap (low IOU) that also represents a big
+        displacement must still register as 'too fast' — unlike the
+        Y-reduce gate (TestYRecoilTargetSwapReset above), this gate must
+        NOT reset its velocity timestamp on an IOU-based swap, since a
+        target moving fast enough to need releasing will, by definition,
+        have low frame-to-frame IOU. See the comment in ai_aiming.py."""
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(
+            auto_unads_enabled=True, auto_unads_box_threshold_pct=65.0,
+            auto_unads_velocity_threshold_px_s=2000.0, detect_range_size=350.0,
+        )
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        box_a = [480.0, 480.0, 520.0, 520.0]  # center (500, 500), small
+        process_aiming(config, [box_a], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+        assert state.unads_pending_transition == ''  # first frame only seeds the tracker
+
+        # 50ms later, jumped 400px in X (IOU with box_a is 0) -> 8000 px/s
+        box_b = [880.0, 480.0, 920.0, 520.0]
+        process_aiming(config, [box_b], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.05, confidences=[0.9])
+
+        assert state.unads_pending_transition == 'release'
+
+    def test_slow_target_does_not_trigger_release(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(
+            auto_unads_enabled=True, auto_unads_box_threshold_pct=65.0,
+            auto_unads_velocity_threshold_px_s=2000.0, detect_range_size=350.0,
+        )
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        box_a = [480.0, 480.0, 520.0, 520.0]
+        process_aiming(config, [box_a], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+        box_b = [490.0, 480.0, 530.0, 520.0]  # only 10px over 50ms -> 200 px/s
+        process_aiming(config, [box_b], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.05, confidences=[0.9])
+
+        assert state.unads_pending_transition == ''
+
+    def test_zero_velocity_threshold_disables_the_velocity_trigger(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(
+            auto_unads_enabled=True, auto_unads_box_threshold_pct=65.0,
+            auto_unads_velocity_threshold_px_s=0.0, detect_range_size=350.0,
+        )
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        box_a = [480.0, 480.0, 520.0, 520.0]
+        process_aiming(config, [box_a], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+        box_b = [880.0, 480.0, 920.0, 520.0]  # would be 8000 px/s if the trigger were live
+        process_aiming(config, [box_b], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.05, confidences=[0.9])
+
+        assert state.unads_pending_transition == ''
+
+    def test_movement_suppressed_while_release_active(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(detect_range_size=350.0)  # auto_unads_enabled not required for the gate itself
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        state.unads_release_active = True
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        box = [480.0, 480.0, 520.0, 520.0]  # centered at (500,500) -> zero error anyway
+        far_box = [880.0, 880.0, 920.0, 920.0]  # far from crosshair -> would move if not suppressed
+        process_aiming(config, [far_box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        assert sent_moves == [], "send_mouse_move must not be called while unads_release_active"
+
+    def test_reengage_requires_debounce_hold(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(
+            auto_unads_enabled=True, auto_unads_box_threshold_pct=65.0,
+            auto_unads_reengage_debounce_s=0.2, auto_unads_max_release_s=0.0,
+            detect_range_size=350.0,
+        )
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        state.unads_release_active = True
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        clear_box = [480.0, 480.0, 520.0, 520.0]  # small, stationary -> "clear"
+
+        process_aiming(config, [clear_box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+        assert state.unads_clear_hold_start == 1000.0
+        assert state.unads_pending_transition == ''
+
+        process_aiming(config, [clear_box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.1, confidences=[0.9])  # 0.1s < 0.2s debounce
+        assert state.unads_pending_transition == ''
+
+        process_aiming(config, [clear_box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.25, confidences=[0.9])  # 0.25s >= 0.2s debounce
+        assert state.unads_pending_transition == 'reengage'
+
+    def test_reengage_debounce_resets_if_condition_reappears(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(
+            auto_unads_enabled=True, auto_unads_box_threshold_pct=65.0,
+            auto_unads_reengage_debounce_s=0.2, auto_unads_max_release_s=0.0,
+            detect_range_size=350.0,
+        )
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        state.unads_release_active = True
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        clear_box = [480.0, 480.0, 520.0, 520.0]
+        close_box = [400.0, 350.0, 600.0, 650.0]  # still too close
+
+        process_aiming(config, [clear_box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+        assert state.unads_clear_hold_start == 1000.0
+
+        # Target closes in again before the debounce window elapses.
+        process_aiming(config, [close_box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.1, confidences=[0.9])
+        assert state.unads_clear_hold_start == 0.0
+        assert state.unads_pending_transition == ''
+
+    def test_safety_cap_forces_reengage_despite_still_too_close(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(
+            auto_unads_enabled=True, auto_unads_box_threshold_pct=65.0,
+            auto_unads_max_release_s=1.0, detect_range_size=350.0,
+        )
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        state.unads_release_active = True
+        state.unads_release_start_time = 1000.0
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        close_box = [400.0, 350.0, 600.0, 650.0]  # still too close the whole time
+
+        process_aiming(config, [close_box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1001.5, confidences=[0.9])  # 1.5s > 1.0s cap
+
+        assert state.unads_pending_transition == 'reengage'
+
+    def test_disabled_feature_never_sets_a_transition(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(auto_unads_enabled=False, detect_range_size=350.0)
+        state = LoopState()
+        state.aiming_start_time = 999.0
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        close_box = [400.0, 350.0, 600.0, 650.0]
+
+        process_aiming(config, [close_box], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        assert state.unads_pending_transition == ''

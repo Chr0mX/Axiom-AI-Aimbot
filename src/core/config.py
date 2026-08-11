@@ -127,6 +127,11 @@ _FIELD_MAP = {
     'smart_jitter_lmb_gate':      'aim.smart_jitter.lmb_gate',
     'jitter_pattern_file':        'aim.smart_jitter.pattern_file',
     'jitter_speed_multiplier':    'aim.smart_jitter.speed_multiplier',
+    'auto_unads_enabled':                 'aim.auto_unads.enabled',
+    'auto_unads_box_threshold_pct':       'aim.auto_unads.box_threshold_pct',
+    'auto_unads_velocity_threshold_px_s': 'aim.auto_unads.velocity_threshold_px_s',
+    'auto_unads_reengage_debounce_s':     'aim.auto_unads.reengage_debounce_s',
+    'auto_unads_max_release_s':           'aim.auto_unads.max_release_s',
     'aim_deadzone_enabled':       'aim.deadzone.enabled',
     'aim_deadzone_min_px':        'aim.deadzone.min_px',
     'aim_deadzone_close_px':      'aim.deadzone.close_px',
@@ -524,6 +529,24 @@ class Config:
         self.smart_jitter_lmb_gate: bool = True             # only jitter while aim key is held
         self.jitter_pattern_file: str = ""
         self.jitter_speed_multiplier: int = 1
+
+        # Auto Un-ADS — release the configured aim button/key (config.AimKeys /
+        # makcu_aim_button — no separate keybind) when a target gets too close
+        # (box fills too much of the detect range) or moves too fast to track,
+        # then re-press it once the target clears or a safety timeout elapses.
+        # See ai_loop.py/ai_aiming.py for the MAKCU-vs-generic-backend split:
+        # MAKCU's own rmb_held/lmb_held telemetry is raw-physical and unaffected
+        # by our own release/press commands (docs/MAKCU_Native_API.md), so it
+        # behaves reliably even if the user lets go mid-release-window; the
+        # generic GetAsyncKeyState-based backends (sendinput/mouse_event) can't
+        # tell "we released it" apart from "the user released it", so a real
+        # release during the window can leave the key reading held until one
+        # more physical press+release cycle.
+        self.auto_unads_enabled: bool = False
+        self.auto_unads_box_threshold_pct: float = 65.0     # box_h / detect_range_size > this % -> release
+        self.auto_unads_velocity_threshold_px_s: float = 0.0  # target px/s above which to release; 0 = disabled
+        self.auto_unads_reengage_debounce_s: float = 0.2    # clear condition must hold this long before re-press
+        self.auto_unads_max_release_s: float = 3.0          # safety cap forcing re-engage; 0 = no cap
 
         # Camera motion compensation — subtract per-frame global scene shift before PID
         self.cam_motion_comp_enabled: bool = False

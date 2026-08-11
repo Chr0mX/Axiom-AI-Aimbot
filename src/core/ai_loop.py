@@ -23,6 +23,7 @@ from . import ai_aiming
 from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
 from .ai_loop_utils import (
+    apply_unads_transition,
     calculate_detection_region,
     clear_queues,
     filter_boxes_by_fov,
@@ -523,8 +524,16 @@ def ai_logic_loop(
                     # that AimKeys (which may include other mouse buttons) cannot
                     # bleed through and fire aim on the wrong button.
                     is_aiming = bool(getattr(config, 'always_aim', False))
+                    _held_generic_vks = []
                 else:
-                    is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
+                    # Snapshot which AimKeys are genuinely held *before* any
+                    # auto-unads synthetic event this same iteration could taint
+                    # the read (see win_utils/aim_input.py's module docstring) —
+                    # apply_unads_transition() below needs to know exactly which
+                    # VKs to release/re-press, and re-deriving "currently held"
+                    # later in the release window is unreliable.
+                    _held_generic_vks = [k for k in config.AimKeys if is_key_pressed(k)]
+                    is_aiming = bool(getattr(config, 'always_aim', False)) or bool(_held_generic_vks)
                 if _use_makcu:
                     try:
                         from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
@@ -556,6 +565,21 @@ def ai_logic_loop(
                         _disengage_time[0] = 0.0  # delay expired
                 _was_aiming[0] = is_aiming
 
+                # Auto Un-ADS: while our own synthetic release is in effect,
+                # keep the aiming pipeline (process_aiming -> sticky lock / PID
+                # / prediction) running regardless of what the now-released
+                # physical input reads as. For MAKCU this is a no-op (rmb_held/
+                # lmb_held read raw physical telemetry, unaffected by our own
+                # right()/left() commands — is_aiming was already True). For
+                # the generic GetAsyncKeyState-based path, injecting the
+                # release genuinely flips is_key_pressed() to False on the
+                # very next read, same as a real release would — this override
+                # restores what MAKCU already gets for free, so tracking state
+                # stays warm through the whole release window instead of being
+                # torn down and rebuilt once the target clears.
+                if state.unads_release_active:
+                    is_aiming = True
+
                 config.makcu_aim_active = is_aiming
                 if is_aiming:
                     if state.aiming_start_time == 0.0:
@@ -564,6 +588,17 @@ def ai_logic_loop(
                     state.aiming_start_time = 0.0
 
                 if not config.AimToggle or (not config.keep_detecting and not is_aiming):
+                    # Don't let AimToggle being switched off skip past an
+                    # active auto-unads release — the loop body below (where
+                    # apply_unads_transition() normally runs) is about to be
+                    # skipped via `continue`, so give the real aim button
+                    # back right here instead of leaving it stuck released.
+                    if state.unads_release_active:
+                        state.unads_pending_transition = 'reengage'
+                        apply_unads_transition(
+                            config, state, current_time,
+                            _use_makcu, _makcu_btn, _held_generic_vks,
+                        )
                     clear_queues(overlay_boxes_queue, overlay_confidences_queue)
                     time.sleep(0.05)
                     continue
@@ -719,12 +754,32 @@ def ai_logic_loop(
                         state.aim_carry_y = 0.0
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
+                        state.unads_last_target_t = 0.0
+                        # Target confirmed fully gone (not just a sticky-lock
+                        # decay grace window) — give the aim button back right
+                        # away instead of waiting out auto_unads_max_release_s;
+                        # there's nothing left to track that release was
+                        # protecting against.
+                        if state.unads_release_active:
+                            state.unads_pending_transition = 'reengage'
                         # Target lost — clear stale prediction/Kalman state so a
                         # newly-acquired target isn't corrupted by the old one's history.
                         if ai_aiming._predictor is not None:
                             ai_aiming._predictor.reset()
                         if ai_aiming._kalman is not None:
                             ai_aiming._kalman.reset()
+
+                # Auto Un-ADS: apply any pending release/re-engage transition
+                # and enforce the safety-cap timeout. Called unconditionally
+                # every iteration — not only when aimed_this_frame was True —
+                # because a full target loss stops process_aiming() (where the
+                # transition is *decided*) from running at all, and that's
+                # exactly when the safety cap most needs to still fire.
+                if getattr(config, 'auto_unads_enabled', False) or state.unads_release_active:
+                    apply_unads_transition(
+                        config, state, current_time,
+                        _use_makcu, _makcu_btn, _held_generic_vks,
+                    )
 
                 if config.single_target_mode:
                     config.latest_boxes, config.latest_confidences = reduce_boxes_for_single_target(

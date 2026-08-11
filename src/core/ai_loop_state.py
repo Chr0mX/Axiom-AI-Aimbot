@@ -49,3 +49,18 @@ class LoopState:
     # over a long burst. Carrying the fraction preserves the invariant.
     jitter_carry_x: float = 0.0
     jitter_carry_y: float = 0.0
+
+    # Auto Un-ADS — forced-release window bookkeeping. unads_release_active
+    # gates both the ai_loop.py is_aiming override (keeps process_aiming()
+    # running through the release window) and ai_aiming.py's movement-send
+    # skip. unads_pending_transition is a one-shot signal set by
+    # process_aiming()'s decision logic and consumed+cleared by
+    # ai_loop_utils.apply_unads_transition() the same iteration.
+    unads_release_active: bool = False
+    unads_release_start_time: float = 0.0
+    unads_clear_hold_start: float = 0.0     # when the reengage clear condition started holding; 0 = not holding
+    unads_pending_transition: str = ''      # '' | 'release' | 'reengage'
+    unads_active_vks: List[int] = field(default_factory=list)  # generic-path snapshot of held AimKeys at release time
+    unads_last_target_x: float = 0.0
+    unads_last_target_y: float = 0.0
+    unads_last_target_t: float = 0.0

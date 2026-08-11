@@ -4,6 +4,7 @@ import queue
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
 if TYPE_CHECKING:
+    from .ai_loop_state import LoopState
     from .config import Config
 
 
@@ -278,6 +279,81 @@ def reduce_boxes_for_single_target(
             priority_mode=priority_mode, confidence_weight=confidence_weight,
         )
     return [], []
+
+
+def apply_unads_transition(
+    config: Config,
+    state: LoopState,
+    current_time: float,
+    use_makcu: bool,
+    makcu_btn: str,
+    held_generic_vks: List[int],
+) -> None:
+    """Carry out a pending Auto Un-ADS release/re-engage transition decided by
+    process_aiming() (state.unads_pending_transition), and independently
+    enforce the safety-cap timeout.
+
+    Must be called unconditionally once per ai_loop.py iteration — not only
+    on frames where process_aiming() ran. A full target loss (boxes empty)
+    stops process_aiming() from running at all, which is exactly the
+    scenario most likely to need the safety cap to still fire; relying on
+    process_aiming() alone to enforce it would leave the real aim button
+    permanently released with no code path left to give it back.
+
+    held_generic_vks is a snapshot of which config.AimKeys VKs were
+    genuinely held at the moment ai_loop.py computed is_aiming this
+    iteration — taken there (not re-derived here) because by the time a
+    release is active, our own synthetic events may already have made
+    is_key_pressed() unable to tell "still physically held" from "we
+    released it" (see win_utils/aim_input.py's module docstring).
+    """
+    # Lazy import: mirrors update_crosshair_position()'s local `import
+    # win32api` above — keeps this module importable (and its other
+    # functions collectible/testable) on non-Windows without win32api,
+    # per CLAUDE.md's testing notes.
+    from win_utils.aim_input import set_aim_key_state
+    from win_utils.makcu_mouse import makcu_mouse
+
+    transition = state.unads_pending_transition
+    state.unads_pending_transition = ''
+
+    if transition == 'release' and not state.unads_release_active:
+        if use_makcu:
+            btn_held = makcu_mouse.rmb_held if makcu_btn == 'rmb' else makcu_mouse.lmb_held
+            if not btn_held:
+                return  # nothing physically held (e.g. always_aim, no button down) — nothing to release
+            makcu_mouse.press_button('right' if makcu_btn == 'rmb' else 'left', 3)
+            state.unads_active_vks = []
+        else:
+            if not held_generic_vks:
+                return
+            state.unads_active_vks = list(held_generic_vks)
+            for vk in state.unads_active_vks:
+                set_aim_key_state(vk, down=False, mouse_move_method=config.mouse_move_method)
+        state.unads_release_active = True
+        state.unads_release_start_time = current_time
+        state.unads_clear_hold_start = 0.0
+
+    elif transition == 'reengage' and state.unads_release_active:
+        if use_makcu:
+            makcu_mouse.press_button('right' if makcu_btn == 'rmb' else 'left', 2)
+        else:
+            for vk in state.unads_active_vks:
+                set_aim_key_state(vk, down=True, mouse_move_method=config.mouse_move_method)
+        state.unads_active_vks = []
+        state.unads_release_active = False
+        state.unads_release_start_time = 0.0
+        state.unads_clear_hold_start = 0.0
+
+    # Safety-cap backstop — independent of process_aiming() having run this
+    # iteration (see docstring). Reuses the 'reengage' branch above via one
+    # bounded recursive call rather than duplicating it; terminates after
+    # exactly one extra call since unads_release_active is False by then.
+    if state.unads_release_active:
+        max_release_s = float(getattr(config, 'auto_unads_max_release_s', 3.0))
+        if max_release_s > 0 and current_time - state.unads_release_start_time > max_release_s:
+            state.unads_pending_transition = 'reengage'
+            apply_unads_transition(config, state, current_time, use_makcu, makcu_btn, held_generic_vks)
 
 
 def update_queues(

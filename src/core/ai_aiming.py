@@ -269,11 +269,75 @@ def process_aiming(
         _iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
         if _prev_locked_box is None or _box_iou(_prev_locked_box, selected_box) < _iou_thresh:
             state.aim_y_last_target_t = 0.0
+            # NOTE: deliberately NOT resetting state.unads_last_target_t here.
+            # The Y-reduce gate resets on a same-frame target *swap* (IOU drop)
+            # to avoid a spurious cross-target Y jump wrongly disabling
+            # suppression — but a target moving fast enough that auto-unads
+            # should release IS, by definition, a large frame-to-frame
+            # displacement, which is exactly what also drops IOU below
+            # threshold. Resetting here would zero out the velocity timestamp
+            # right before computing the speed the whole gate exists to catch,
+            # making the velocity trigger nearly unreachable. A large jump —
+            # whether the same target moved fast or selection genuinely swapped
+            # to a different one — is equally valid as "aim can't keep up"
+            # for this gate's purpose. True target loss (no boxes at all for
+            # multiple frames) still resets it, in ai_loop.py.
 
         if sticky:
             state.no_detection_frames = 0
             config.display_locked_box = list(selected_box)
             config.display_locked_box_is_decaying = False
+
+        # --- Auto Un-ADS: decide release/re-engage transitions ---
+        # Uses raw pre-prediction/Kalman target_x/y and selected_box geometry —
+        # deliberately evaluated before those adjust target_x/y below, since
+        # "how big/fast is the actual detection" shouldn't be skewed by
+        # smoothing/extrapolation meant for aim-point placement, not this gate.
+        # This only ever *decides* (sets state.unads_pending_transition); the
+        # actual synthetic release/press happens in ai_loop.py's
+        # apply_unads_transition(), which runs unconditionally every loop
+        # iteration (not just frames process_aiming() reaches) so a full
+        # target loss can still force a re-engage — see ai_loop.py.
+        if getattr(config, 'auto_unads_enabled', False):
+            box_h = selected_box[3] - selected_box[1]
+            detect_size = float(getattr(config, 'detect_range_size', 350))
+            box_pct = float(getattr(config, 'auto_unads_box_threshold_pct', 65.0))
+            too_close = detect_size > 0 and (box_h / detect_size) * 100.0 > box_pct
+
+            if state.unads_last_target_t > 0:
+                _dt = current_time - state.unads_last_target_t
+                _speed = (
+                    math.hypot(target_x - state.unads_last_target_x, target_y - state.unads_last_target_y) / _dt
+                    if _dt > 0 else 0.0
+                )
+            else:
+                _speed = 0.0
+            state.unads_last_target_x = target_x
+            state.unads_last_target_y = target_y
+            state.unads_last_target_t = current_time
+            vel_thresh = float(getattr(config, 'auto_unads_velocity_threshold_px_s', 0.0))
+            too_fast = vel_thresh > 0 and _speed > vel_thresh
+
+            if not state.unads_release_active:
+                if too_close or too_fast:
+                    state.unads_pending_transition = 'release'
+                    state.unads_clear_hold_start = 0.0
+            else:
+                if too_close or too_fast:
+                    state.unads_clear_hold_start = 0.0
+                else:
+                    if state.unads_clear_hold_start == 0.0:
+                        state.unads_clear_hold_start = current_time
+                    debounce = float(getattr(config, 'auto_unads_reengage_debounce_s', 0.2))
+                    if current_time - state.unads_clear_hold_start >= debounce:
+                        state.unads_pending_transition = 'reengage'
+                max_release_s = float(getattr(config, 'auto_unads_max_release_s', 3.0))
+                if (
+                    max_release_s > 0
+                    and state.unads_release_start_time > 0
+                    and current_time - state.unads_release_start_time > max_release_s
+                ):
+                    state.unads_pending_transition = 'reengage'
 
         # --- Velocity prediction (optional) ---
         # Extrapolates the aim point forward by prediction_horizon_ms to
@@ -460,7 +524,14 @@ def process_aiming(
                         move_x += int(r * math.cos(angle))
                         move_y += int(r * math.sin(angle))
 
-        if move_x != 0 or move_y != 0:
+        # Suppressed while auto-unads has synthetically released the aim
+        # button: movement computed under ADS sensitivity/FOV would be wrong
+        # for the (now different) hipfire view, and the game itself is no
+        # longer in a state where aim assistance should be steering it.
+        # Everything above (sticky lock, prediction, Kalman, humanization,
+        # jitter, sub-pixel carry) keeps running unchanged so tracking stays
+        # warm for when the release window ends.
+        if (move_x != 0 or move_y != 0) and not state.unads_release_active:
             send_mouse_move(move_x, move_y, method=mouse_method)
     # NOTE: process_aiming() is only ever called from ai_loop.py under
     # `if is_aiming and boxes:`, so `boxes` is never empty here and

@@ -19,7 +19,7 @@ from qfluentwidgets import (
     BodyLabel, PushButton,
 )
 from ..components.no_wheel_widgets import NoWheelDoubleSpinBox as DoubleSpinBox
-from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
+from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard, SliderDoubleSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
@@ -688,6 +688,77 @@ class AimPage(BasePage):
         self.jitterSpeedCard.hBoxLayout.addWidget(self.jitterSpeedSegment, 0, Qt.AlignmentFlag.AlignRight)
         self.jitterSpeedCard.hBoxLayout.addSpacing(16)
 
+        # === Auto Un-ADS ===
+        # Reuses the aim key/MAKCU button already configured for ADS activation
+        # (config.AimKeys / makcu_aim_button, see the Keys & HW page) — no
+        # separate keybind here by design.
+        self.autoUnadsGroup = SettingCardGroup(t("auto_unads", "Auto Un-ADS"), self.scrollWidget)
+
+        self.autoUnadsEnableCard = SwitchSettingCard(
+            FluentIcon.ZOOM_OUT,
+            t("auto_unads_label", "Auto Un-ADS"),
+            t(
+                "auto_unads_desc",
+                "Automatically release your aim key/button when a target gets too "
+                "close or moves too fast to track, then re-press it once it clears. "
+                "Reuses your configured aim key — no separate bind. MAKCU is "
+                "recommended for reliable behavior; other mouse methods can "
+                "misread the key as still held if you physically release it "
+                "mid-release-window (see tooltip on Box Size Threshold)."
+            ),
+            parent=self.autoUnadsGroup
+        )
+
+        self.autoUnadsBoxThreshCard = SliderLabelCard(
+            FluentIcon.ZOOM_OUT,
+            t("auto_unads_box_threshold_label", "Box Size Threshold"),
+            1, 100,
+            format_func=lambda v: f"{v}%",
+            description=t(
+                "auto_unads_box_threshold_desc",
+                "Release when target box height exceeds this % of the detect range (target is too close)."
+            ),
+            slider_width=160,
+            parent=self.autoUnadsGroup
+        )
+
+        self.autoUnadsVelCard = SliderSpinCard(
+            FluentIcon.SPEED_HIGH,
+            t("auto_unads_velocity_label", "Velocity Threshold"),
+            0, 5000,
+            suffix="px/s",
+            description=t(
+                "auto_unads_velocity_desc",
+                "Release when the target moves faster than this (px/s). 0 = disabled."
+            ),
+            slider_width=200,
+            parent=self.autoUnadsGroup
+        )
+
+        self.autoUnadsDebounceCard = SliderDoubleSpinCard(
+            FluentIcon.STOPWATCH,
+            t("auto_unads_debounce_label", "Re-engage Debounce"),
+            0.0, 2.0,
+            decimals=2, step=0.05, suffix="s",
+            description=t(
+                "auto_unads_debounce_desc",
+                "How long the target must stay clear (not too close/fast) before re-pressing the aim key."
+            ),
+            parent=self.autoUnadsGroup
+        )
+
+        self.autoUnadsMaxReleaseCard = SliderDoubleSpinCard(
+            FluentIcon.STOPWATCH,
+            t("auto_unads_max_release_label", "Max Release Duration"),
+            0.0, 10.0,
+            decimals=1, step=0.5, suffix="s",
+            description=t(
+                "auto_unads_max_release_desc",
+                "Safety cap: re-press the aim key after this long regardless of target state. 0 = no cap (not recommended)."
+            ),
+            parent=self.autoUnadsGroup
+        )
+
         # === Humanization ===
         # Post-processing layer applied to the final PID dx/dy, right before mouse
         # injection — see ai_aiming.py's apply_humanization() call site.
@@ -1036,6 +1107,14 @@ class AimPage(BasePage):
         self.antiRecoilGroup.addSettingCard(self.jitterSpeedCard)
         self.addContent(self.antiRecoilGroup)
 
+        # Auto Un-ADS
+        self.autoUnadsGroup.addSettingCard(self.autoUnadsEnableCard)
+        self.autoUnadsGroup.addSettingCard(self.autoUnadsBoxThreshCard)
+        self.autoUnadsGroup.addSettingCard(self.autoUnadsVelCard)
+        self.autoUnadsGroup.addSettingCard(self.autoUnadsDebounceCard)
+        self.autoUnadsGroup.addSettingCard(self.autoUnadsMaxReleaseCard)
+        self.addContent(self.autoUnadsGroup)
+
         # Humanization
         self.humanizationGroup.addSettingCard(self.humanizationEnableCard)
         self.humanizationGroup.addSettingCard(self.humanizationIntensityCard)
@@ -1127,6 +1206,13 @@ class AimPage(BasePage):
         self.jitterRecordBtn.clicked.connect(self._onJitterRecordClicked)
         self.jitterPatternCombo.currentIndexChanged.connect(self._onJitterPatternChanged)
         self.jitterSpeedSegment.currentItemChanged.connect(self._onJitterSpeedChanged)
+
+        # Auto Un-ADS
+        self.autoUnadsEnableCard.checkedChanged.connect(self._onAutoUnadsEnableChanged)
+        self.autoUnadsBoxThreshCard.valueChanged.connect(self._onAutoUnadsBoxThreshChanged)
+        self.autoUnadsVelCard.valueChanged.connect(self._onAutoUnadsVelChanged)
+        self.autoUnadsDebounceCard.valueChanged.connect(self._onAutoUnadsDebounceChanged)
+        self.autoUnadsMaxReleaseCard.valueChanged.connect(self._onAutoUnadsMaxReleaseChanged)
 
         # Humanization
         self.humanizationEnableCard.checkedChanged.connect(self._onHumanizationEnableChanged)
@@ -1229,6 +1315,18 @@ class AimPage(BasePage):
             self.smartJitterLmbCard.setEnabled(sj_on)
             self.smartJitterLevelCard.setEnabled(sj_on)
             self.smartJitterThreshCard.setEnabled(sj_on)
+
+            # Auto Un-ADS
+            unads_on = bool(getattr(self._config, 'auto_unads_enabled', False))
+            self.autoUnadsEnableCard.setChecked(unads_on)
+            self.autoUnadsBoxThreshCard.setValue(int(getattr(self._config, 'auto_unads_box_threshold_pct', 65.0)))
+            self.autoUnadsVelCard.setValue(int(getattr(self._config, 'auto_unads_velocity_threshold_px_s', 0.0)))
+            self.autoUnadsDebounceCard.setValue(float(getattr(self._config, 'auto_unads_reengage_debounce_s', 0.2)))
+            self.autoUnadsMaxReleaseCard.setValue(float(getattr(self._config, 'auto_unads_max_release_s', 3.0)))
+            self.autoUnadsBoxThreshCard.setEnabled(unads_on)
+            self.autoUnadsVelCard.setEnabled(unads_on)
+            self.autoUnadsDebounceCard.setEnabled(unads_on)
+            self.autoUnadsMaxReleaseCard.setEnabled(unads_on)
 
             # Jitter pattern combo — populated fresh each load so new recordings appear
             from core.jitter_recorder import list_patterns as _list_jitter_patterns
@@ -1673,6 +1771,32 @@ class AimPage(BasePage):
         if self._config:
             self._config.smart_jitter_box_threshold_pct = float(value)
 
+    # === Auto Un-ADS Callbacks ===
+
+    def _onAutoUnadsEnableChanged(self, checked):
+        if self._config:
+            self._config.auto_unads_enabled = bool(checked)
+        self.autoUnadsBoxThreshCard.setEnabled(bool(checked))
+        self.autoUnadsVelCard.setEnabled(bool(checked))
+        self.autoUnadsDebounceCard.setEnabled(bool(checked))
+        self.autoUnadsMaxReleaseCard.setEnabled(bool(checked))
+
+    def _onAutoUnadsBoxThreshChanged(self, value):
+        if self._config:
+            self._config.auto_unads_box_threshold_pct = float(value)
+
+    def _onAutoUnadsVelChanged(self, value):
+        if self._config:
+            self._config.auto_unads_velocity_threshold_px_s = float(value)
+
+    def _onAutoUnadsDebounceChanged(self, value):
+        if self._config:
+            self._config.auto_unads_reengage_debounce_s = float(value)
+
+    def _onAutoUnadsMaxReleaseChanged(self, value):
+        if self._config:
+            self._config.auto_unads_max_release_s = float(value)
+
     def _startJitterCountdown(self) -> None:
         """Begin 3-second countdown before recording starts."""
         self._jitterCountingDown = True
@@ -1979,6 +2103,38 @@ class AimPage(BasePage):
         self.jitterPatternCard.titleLabel.setText(t("jitter_pattern_label", "Recorded Pattern"))
         self.jitterPatternCard.contentLabel.setText(t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on). Only the recorded motion's shape is replayed — playback speed follows the detection loop's own tick rate, not the recording's original timing; use the speed multiplier below to tune the feel."))
         self.jitterSpeedCard.titleLabel.setText(t("jitter_speed_label", "Playback Speed"))
+
+        self.autoUnadsGroup.titleLabel.setText(t("auto_unads", "Auto Un-ADS"))
+        self.autoUnadsEnableCard.titleLabel.setText(t("auto_unads_label", "Auto Un-ADS"))
+        self.autoUnadsEnableCard.contentLabel.setText(t(
+            "auto_unads_desc",
+            "Automatically release your aim key/button when a target gets too "
+            "close or moves too fast to track, then re-press it once it clears. "
+            "Reuses your configured aim key — no separate bind. MAKCU is "
+            "recommended for reliable behavior; other mouse methods can "
+            "misread the key as still held if you physically release it "
+            "mid-release-window (see tooltip on Box Size Threshold)."
+        ))
+        self.autoUnadsBoxThreshCard.titleLabel.setText(t("auto_unads_box_threshold_label", "Box Size Threshold"))
+        self.autoUnadsBoxThreshCard.contentLabel.setText(t(
+            "auto_unads_box_threshold_desc",
+            "Release when target box height exceeds this % of the detect range (target is too close)."
+        ))
+        self.autoUnadsVelCard.titleLabel.setText(t("auto_unads_velocity_label", "Velocity Threshold"))
+        self.autoUnadsVelCard.contentLabel.setText(t(
+            "auto_unads_velocity_desc",
+            "Release when the target moves faster than this (px/s). 0 = disabled."
+        ))
+        self.autoUnadsDebounceCard.titleLabel.setText(t("auto_unads_debounce_label", "Re-engage Debounce"))
+        self.autoUnadsDebounceCard.contentLabel.setText(t(
+            "auto_unads_debounce_desc",
+            "How long the target must stay clear (not too close/fast) before re-pressing the aim key."
+        ))
+        self.autoUnadsMaxReleaseCard.titleLabel.setText(t("auto_unads_max_release_label", "Max Release Duration"))
+        self.autoUnadsMaxReleaseCard.contentLabel.setText(t(
+            "auto_unads_max_release_desc",
+            "Safety cap: re-press the aim key after this long regardless of target state. 0 = no cap (not recommended)."
+        ))
 
         self.humanizationGroup.titleLabel.setText(t("humanization", "Humanization"))
         self.humanizationEnableCard.titleLabel.setText(t("humanization_enabled", "Humanization"))

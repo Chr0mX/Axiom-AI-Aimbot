@@ -231,6 +231,98 @@ class TestMakcuMouseClick:
         mock_ser.write.assert_not_called()
 
 
+class TestMakcuMousePressButton:
+    """press_button() — generalized button control added for Auto Un-ADS.
+    click() now delegates to press_button('left', action); TestMakcuMouseClick
+    above already covers that the left-button ASCII commands are unchanged."""
+
+    @pytest.mark.parametrize("button,down_cmd,up_cmd", [
+        ("right", b"km.right(1)\r\n", b"km.right(0)\r\n"),
+        ("middle", b"km.middle(1)\r\n", b"km.middle(0)\r\n"),
+        ("side1", b"km.side1(1)\r\n", b"km.side1(0)\r\n"),
+        ("side2", b"km.side2(1)\r\n", b"km.side2(0)\r\n"),
+    ])
+    @patch("win_utils.makcu_mouse.serial.Serial")
+    def test_press_button_action1_click(self, mock_serial_cls, button, down_cmd, up_cmd):
+        from win_utils.makcu_mouse import MakcuMouse
+        mock_ser = MagicMock()
+        mock_ser.is_open = True
+        mock_serial_cls.return_value = mock_ser
+
+        m = MakcuMouse()
+        m.connect("COM3")
+        mock_ser.write.reset_mock()
+
+        m.press_button(button, 1)
+        assert mock_ser.write.call_args_list == [call(down_cmd), call(up_cmd)]
+
+    @patch("win_utils.makcu_mouse.serial.Serial")
+    def test_press_button_action2_press_right(self, mock_serial_cls):
+        from win_utils.makcu_mouse import MakcuMouse
+        mock_ser = MagicMock()
+        mock_ser.is_open = True
+        mock_serial_cls.return_value = mock_ser
+
+        m = MakcuMouse()
+        m.connect("COM3")
+        mock_ser.write.reset_mock()
+
+        m.press_button("right", 2)
+        mock_ser.write.assert_called_once_with(b"km.right(1)\r\n")
+
+    @patch("win_utils.makcu_mouse.serial.Serial")
+    def test_press_button_action3_release_right(self, mock_serial_cls):
+        from win_utils.makcu_mouse import MakcuMouse
+        mock_ser = MagicMock()
+        mock_ser.is_open = True
+        mock_serial_cls.return_value = mock_ser
+
+        m = MakcuMouse()
+        m.connect("COM3")
+        mock_ser.write.reset_mock()
+
+        m.press_button("right", 3)
+        mock_ser.write.assert_called_once_with(b"km.right(0)\r\n")
+
+    def test_press_button_not_connected(self):
+        """Not connected — must not raise."""
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m.press_button("right", 2)
+
+    @patch("win_utils.makcu_mouse.serial.Serial")
+    def test_press_button_unknown_button_sends_nothing(self, mock_serial_cls):
+        from win_utils.makcu_mouse import MakcuMouse
+        mock_ser = MagicMock()
+        mock_ser.is_open = True
+        mock_serial_cls.return_value = mock_ser
+
+        m = MakcuMouse()
+        m.connect("COM3")
+        mock_ser.write.reset_mock()
+
+        m.press_button("nonexistent", 2)
+        mock_ser.write.assert_not_called()
+
+    @patch("win_utils.makcu_mouse.serial.Serial")
+    def test_send_mouse_button_makcu_wrapper(self, mock_serial_cls):
+        """Module-level send_mouse_button_makcu() wrapper, mirroring
+        send_mouse_click_makcu()'s existing wrapper pattern."""
+        from win_utils.makcu_mouse import makcu_mouse, send_mouse_button_makcu
+        mock_ser = MagicMock()
+        mock_ser.is_open = True
+        mock_serial_cls.return_value = mock_ser
+
+        makcu_mouse.connect("COM3")
+        try:
+            mock_ser.write.reset_mock()
+            result = send_mouse_button_makcu("right", 3)
+            assert result is True
+            mock_ser.write.assert_called_once_with(b"km.right(0)\r\n")
+        finally:
+            makcu_mouse.disconnect()
+
+
 # ============================================================
 # 1b. 按鍵事件流解析測試 (_stream_reader)
 # ============================================================
