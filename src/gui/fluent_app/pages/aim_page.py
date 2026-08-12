@@ -736,7 +736,7 @@ class AimPage(BasePage):
         )
 
         self.autoUnadsDebounceCard = SliderDoubleSpinCard(
-            FluentIcon.STOPWATCH,
+            FluentIcon.STOP_WATCH,
             t("auto_unads_debounce_label", "Re-engage Debounce"),
             0.0, 2.0,
             decimals=2, step=0.05, suffix="s",
@@ -748,7 +748,7 @@ class AimPage(BasePage):
         )
 
         self.autoUnadsMaxReleaseCard = SliderDoubleSpinCard(
-            FluentIcon.STOPWATCH,
+            FluentIcon.STOP_WATCH,
             t("auto_unads_max_release_label", "Max Release Duration"),
             0.0, 10.0,
             decimals=1, step=0.5, suffix="s",
