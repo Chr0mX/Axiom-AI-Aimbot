@@ -689,9 +689,10 @@ class AimPage(BasePage):
         self.jitterSpeedCard.hBoxLayout.addSpacing(16)
 
         # === Auto Un-ADS ===
-        # Reuses the aim key/MAKCU button already configured for ADS activation
-        # (config.AimKeys / makcu_aim_button, see the Keys & HW page) — no
-        # separate keybind here by design.
+        # Clicks a DEDICATED key/button (config.auto_unads_key / auto_unads_makcu_button,
+        # configured on the Keys & HW page — separate from the normal aim key)
+        # when a target gets too close/fast — most commonly your in-game
+        # "toggle ADS" bind, not the same key you hold to aim.
         self.autoUnadsGroup = SettingCardGroup(t("auto_unads", "Auto Un-ADS"), self.scrollWidget)
 
         self.autoUnadsEnableCard = SwitchSettingCard(
@@ -699,12 +700,11 @@ class AimPage(BasePage):
             t("auto_unads_label", "Auto Un-ADS"),
             t(
                 "auto_unads_desc",
-                "Automatically release your aim key/button when a target gets too "
-                "close or moves too fast to track, then re-press it once it clears. "
-                "Reuses your configured aim key — no separate bind. MAKCU is "
-                "recommended for reliable behavior; other mouse methods can "
-                "misread the key as still held if you physically release it "
-                "mid-release-window (see tooltip on Box Size Threshold)."
+                "Automatically click a dedicated key/button when a target gets too "
+                "close or moves too fast to track, then click it again once it "
+                "clears — set the key on the Keys & HW page (Auto Un-ADS Key). "
+                "Usually your in-game 'toggle ADS' bind, separate from your "
+                "normal aim key."
             ),
             parent=self.autoUnadsGroup
         )
@@ -2108,12 +2108,11 @@ class AimPage(BasePage):
         self.autoUnadsEnableCard.titleLabel.setText(t("auto_unads_label", "Auto Un-ADS"))
         self.autoUnadsEnableCard.contentLabel.setText(t(
             "auto_unads_desc",
-            "Automatically release your aim key/button when a target gets too "
-            "close or moves too fast to track, then re-press it once it clears. "
-            "Reuses your configured aim key — no separate bind. MAKCU is "
-            "recommended for reliable behavior; other mouse methods can "
-            "misread the key as still held if you physically release it "
-            "mid-release-window (see tooltip on Box Size Threshold)."
+            "Automatically click a dedicated key/button when a target gets too "
+            "close or moves too fast to track, then click it again once it "
+            "clears — set the key on the Keys & HW page (Auto Un-ADS Key). "
+            "Usually your in-game 'toggle ADS' bind, separate from your "
+            "normal aim key."
         ))
         self.autoUnadsBoxThreshCard.titleLabel.setText(t("auto_unads_box_threshold_label", "Box Size Threshold"))
         self.autoUnadsBoxThreshCard.contentLabel.setText(t(

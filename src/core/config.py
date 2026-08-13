@@ -128,6 +128,8 @@ _FIELD_MAP = {
     'jitter_pattern_file':        'aim.smart_jitter.pattern_file',
     'jitter_speed_multiplier':    'aim.smart_jitter.speed_multiplier',
     'auto_unads_enabled':                 'aim.auto_unads.enabled',
+    'auto_unads_key':                     'aim.auto_unads.key',
+    'auto_unads_makcu_button':            'aim.auto_unads.makcu_button',
     'auto_unads_box_threshold_pct':       'aim.auto_unads.box_threshold_pct',
     'auto_unads_velocity_threshold_px_s': 'aim.auto_unads.velocity_threshold_px_s',
     'auto_unads_reengage_debounce_s':     'aim.auto_unads.reengage_debounce_s',
@@ -530,22 +532,24 @@ class Config:
         self.jitter_pattern_file: str = ""
         self.jitter_speed_multiplier: int = 1
 
-        # Auto Un-ADS — release the configured aim button/key (config.AimKeys /
-        # makcu_aim_button — no separate keybind) when a target gets too close
-        # (box fills too much of the detect range) or moves too fast to track,
-        # then re-press it once the target clears or a safety timeout elapses.
-        # See ai_loop.py/ai_aiming.py for the MAKCU-vs-generic-backend split:
-        # MAKCU's own rmb_held/lmb_held telemetry is raw-physical and unaffected
-        # by our own release/press commands (docs/MAKCU_Native_API.md), so it
-        # behaves reliably even if the user lets go mid-release-window; the
-        # generic GetAsyncKeyState-based backends (sendinput/mouse_event) can't
-        # tell "we released it" apart from "the user released it", so a real
-        # release during the window can leave the key reading held until one
-        # more physical press+release cycle.
+        # Auto Un-ADS — single-click a DEDICATED key/button (not the regular
+        # AimKeys aim trigger) when a target gets too close (box fills too
+        # much of the detect range) or moves too fast to track, then click it
+        # again once the target clears or a safety timeout elapses. A single
+        # click (down+up), not a sustained hold, so it works whether the
+        # user's in-game ADS bind is a toggle key (click flips state) or a
+        # hold key (click leaves it released, same as letting go). The user
+        # must explicitly configure auto_unads_key (any VK) — or, when
+        # mouse_move_method == 'makcu', auto_unads_makcu_button — this
+        # deliberately does NOT default to or reuse AimKeys/makcu_aim_button:
+        # it's a separate physical control, most commonly a distinct in-game
+        # "toggle ADS" bind.
         self.auto_unads_enabled: bool = False
+        self.auto_unads_key: int = 0                        # generic VK; 0 = unbound (KeyBindButton "None")
+        self.auto_unads_makcu_button: str = "off"           # "left"/"right"/"middle"/"side1"/"side2"/"off"
         self.auto_unads_box_threshold_pct: float = 65.0     # box_h / detect_range_size > this % -> release
         self.auto_unads_velocity_threshold_px_s: float = 0.0  # target px/s above which to release; 0 = disabled
-        self.auto_unads_reengage_debounce_s: float = 0.2    # clear condition must hold this long before re-press
+        self.auto_unads_reengage_debounce_s: float = 0.2    # clear condition must hold this long before re-click
         self.auto_unads_max_release_s: float = 3.0          # safety cap forcing re-engage; 0 = no cap
 
         # Camera motion compensation — subtract per-frame global scene shift before PID

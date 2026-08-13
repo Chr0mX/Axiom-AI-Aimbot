@@ -96,7 +96,7 @@ from .arduino_mouse import send_mouse_click_arduino
 from .key_utils import is_key_pressed
 
 # Auto Un-ADS — synthetic aim-key release/press
-from .aim_input import set_aim_key_state
+from .aim_input import click_aim_key
 
 # Gamepad button reading
 from .gamepad_input import (
@@ -230,7 +230,7 @@ __all__ = [
     'is_key_pressed',
 
     # Auto Un-ADS
-    'set_aim_key_state',
+    'click_aim_key',
 
     # 手柄按鍵
     'is_gamepad_vk',

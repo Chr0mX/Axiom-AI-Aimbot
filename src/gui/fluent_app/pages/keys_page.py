@@ -45,6 +45,19 @@ _MAKCU_TRIGGER_OPTIONS = [
     ("Off",   "off"),
 ]
 
+# MAKCU Auto Un-ADS button options (label, button-name string matching
+# makcu_mouse.MakcuMouse.press_button()'s expected names — 'left'/'right'/
+# 'middle'/'side1'/'side2'). Unlike the aim trigger (lmb/rmb/off only), this
+# supports all five MAKCU buttons since it's a dedicated, separate control.
+_MAKCU_UNADS_BTN_OPTIONS = [
+    ("Left",   "left"),
+    ("Right",  "right"),
+    ("Middle", "middle"),
+    ("Side 1", "side1"),
+    ("Side 2", "side2"),
+    ("Off",    "off"),
+]
+
 
 # 虛擬鍵碼對應翻譯 key 表
 VK_CODE_TRANSLATION_MAP = {
@@ -325,6 +338,9 @@ class KeysPage(BasePage):
         # Aim key cards 1–3 hidden in MAKCU mode; toggle key always visible
         for card in (self.aimKey1Card, self.aimKey2Card, self.aimKey3Card):
             card.setVisible(not is_makcu)
+        # Auto Un-ADS key: generic KeyBindButton or MAKCU button combo, never both
+        self.autoUnadsKeyCard.setVisible(not is_makcu)
+        self.autoUnadsMakcuBtnCard.setVisible(is_makcu)
         # Fire keys group hidden in MAKCU mode
         self.fireKeysGroup.setVisible(not is_makcu)
         # MAKCU connection + keys groups visible only in MAKCU mode
@@ -391,6 +407,44 @@ class KeysPage(BasePage):
         )
         self.toggleKeyCard.hBoxLayout.addWidget(self.toggleKeyBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.toggleKeyCard.hBoxLayout.addSpacing(16)
+
+        # === Auto Un-ADS Key ===
+        # Dedicated key/button Auto Un-ADS (see Aim page) clicks — deliberately
+        # NOT AimKeys/makcu_aim_button, most commonly a separate in-game
+        # "toggle ADS" bind. Both cards always exist; visibility follows
+        # mouse_move_method in _updateMakcuVisibility(), same as the aim keys.
+        self.autoUnadsKeyGroup = SettingCardGroup(t("auto_unads_key_group", "Auto Un-ADS Key"), self.scrollWidget)
+
+        self.autoUnadsKeyBtn = KeyBindButton()
+        self.autoUnadsKeyCard = SettingCard(
+            FluentIcon.ZOOM_OUT,
+            t("auto_unads_key_label", "Un-ADS Key"),
+            t(
+                "auto_unads_key_desc",
+                "Key/button Auto Un-ADS clicks when a target gets too close/fast — "
+                "usually your in-game 'toggle ADS' bind, separate from your aim key above."
+            ),
+            self.autoUnadsKeyGroup
+        )
+        self.autoUnadsKeyCard.hBoxLayout.addWidget(self.autoUnadsKeyBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.autoUnadsKeyCard.hBoxLayout.addSpacing(16)
+
+        self.autoUnadsMakcuBtnCombo = ComboBox()
+        self.autoUnadsMakcuBtnCombo.setMinimumWidth(110)
+        for label, _ in _MAKCU_UNADS_BTN_OPTIONS:
+            self.autoUnadsMakcuBtnCombo.addItem(label)
+        self.autoUnadsMakcuBtnCard = SettingCard(
+            FluentIcon.ZOOM_OUT,
+            t("auto_unads_makcu_button_label", "Un-ADS Button"),
+            t(
+                "auto_unads_makcu_button_desc",
+                "MAKCU button Auto Un-ADS clicks when a target gets too close/fast — "
+                "usually your in-game 'toggle ADS' bind, separate from your Auto Aim Key."
+            ),
+            self.autoUnadsKeyGroup
+        )
+        self.autoUnadsMakcuBtnCard.hBoxLayout.addWidget(self.autoUnadsMakcuBtnCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.autoUnadsMakcuBtnCard.hBoxLayout.addSpacing(16)
 
         # === 自動射擊按鍵 ===
         self.fireKeysGroup = SettingCardGroup(t("keys_and_auto_fire"), self.scrollWidget)
@@ -564,6 +618,11 @@ class KeysPage(BasePage):
         self.aimKeysGroup.addSettingCard(self.toggleKeyCard)
         self.addContent(self.aimKeysGroup)
 
+        # Auto Un-ADS key
+        self.autoUnadsKeyGroup.addSettingCard(self.autoUnadsKeyCard)
+        self.autoUnadsKeyGroup.addSettingCard(self.autoUnadsMakcuBtnCard)
+        self.addContent(self.autoUnadsKeyGroup)
+
         # 自動射擊按鍵
         self.fireKeysGroup.addSettingCard(self.fireKey1Card)
         self.fireKeysGroup.addSettingCard(self.fireKey2Card)
@@ -599,6 +658,8 @@ class KeysPage(BasePage):
         self.aimKey2Btn.keyBound.connect(lambda vk: self._onAimKeyChanged(1, vk))
         self.aimKey3Btn.keyBound.connect(lambda vk: self._onAimKeyChanged(2, vk))
         self.toggleKeyBtn.keyBound.connect(self._onToggleKeyChanged)
+        self.autoUnadsKeyBtn.keyBound.connect(self._onAutoUnadsKeyChanged)
+        self.autoUnadsMakcuBtnCombo.currentIndexChanged.connect(self._onAutoUnadsMakcuBtnChanged)
         self.fireKey1Btn.keyBound.connect(self._onFireKey1Changed)
         self.fireKey2Btn.keyBound.connect(self._onFireKey2Changed)
 
@@ -633,6 +694,9 @@ class KeysPage(BasePage):
 
         # 切換鍵
         self.toggleKeyBtn.setVkCode(self._config.aim_toggle_key)
+
+        # Auto Un-ADS key (generic path)
+        self.autoUnadsKeyBtn.setVkCode(int(getattr(self._config, 'auto_unads_key', 0) or 0))
 
         # 自動射擊鍵
         self.fireKey1Btn.setVkCode(self._config.auto_fire_key)
@@ -677,6 +741,15 @@ class KeysPage(BasePage):
         delay = float(getattr(self._config, 'makcu_disengage_delay', 0.0) or 0.0)
         self.makcuDisengageDelayCard.setValue(delay)
 
+        # Auto Un-ADS button (MAKCU path)
+        unads_btn = str(getattr(self._config, 'auto_unads_makcu_button', 'off')).lower()
+        for i, (_, val) in enumerate(_MAKCU_UNADS_BTN_OPTIONS):
+            if val == unads_btn:
+                self.autoUnadsMakcuBtnCombo.blockSignals(True)
+                self.autoUnadsMakcuBtnCombo.setCurrentIndex(i)
+                self.autoUnadsMakcuBtnCombo.blockSignals(False)
+                break
+
         self._refreshMakcuVisibility()
 
     def _refreshMakcuVisibility(self):
@@ -712,6 +785,14 @@ class KeysPage(BasePage):
     def _onToggleKeyChanged(self, vk: int):
         if self._config:
             self._config.aim_toggle_key = vk
+
+    def _onAutoUnadsKeyChanged(self, vk: int):
+        if self._config:
+            self._config.auto_unads_key = vk
+
+    def _onAutoUnadsMakcuBtnChanged(self, idx: int):
+        if self._config and 0 <= idx < len(_MAKCU_UNADS_BTN_OPTIONS):
+            self._config.auto_unads_makcu_button = _MAKCU_UNADS_BTN_OPTIONS[idx][1]
 
     def _onFireKey1Changed(self, vk: int):
         if self._config:
@@ -947,6 +1028,21 @@ class KeysPage(BasePage):
         self.toggleKeyCard.titleLabel.setText(t("toggle_key"))
         self.toggleKeyCard.contentLabel.setText(t("toggle_auto_aim"))
 
+        # Auto Un-ADS key
+        self.autoUnadsKeyGroup.titleLabel.setText(t("auto_unads_key_group", "Auto Un-ADS Key"))
+        self.autoUnadsKeyCard.titleLabel.setText(t("auto_unads_key_label", "Un-ADS Key"))
+        self.autoUnadsKeyCard.contentLabel.setText(t(
+            "auto_unads_key_desc",
+            "Key/button Auto Un-ADS clicks when a target gets too close/fast — "
+            "usually your in-game 'toggle ADS' bind, separate from your aim key above."
+        ))
+        self.autoUnadsMakcuBtnCard.titleLabel.setText(t("auto_unads_makcu_button_label", "Un-ADS Button"))
+        self.autoUnadsMakcuBtnCard.contentLabel.setText(t(
+            "auto_unads_makcu_button_desc",
+            "MAKCU button Auto Un-ADS clicks when a target gets too close/fast — "
+            "usually your in-game 'toggle ADS' bind, separate from your Auto Aim Key."
+        ))
+
         # 自動射擊按鍵
         self.fireKey1Card.titleLabel.setText(t("auto_fire_key_1"))
         self.fireKey2Card.titleLabel.setText(t("auto_fire_key_2"))
@@ -977,5 +1073,6 @@ class KeysPage(BasePage):
         self.aimKey2Btn.refreshText()
         self.aimKey3Btn.refreshText()
         self.toggleKeyBtn.refreshText()
+        self.autoUnadsKeyBtn.refreshText()
         self.fireKey1Btn.refreshText()
         self.fireKey2Btn.refreshText()

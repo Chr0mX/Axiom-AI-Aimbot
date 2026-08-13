@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import queue
 from typing import TYPE_CHECKING, Dict, List, Tuple
 
 if TYPE_CHECKING:
     from .ai_loop_state import LoopState
     from .config import Config
+
+logger = logging.getLogger(__name__)
 
 
 def get_capture_dimensions(config: Config) -> Tuple[int, int]:
@@ -281,66 +284,84 @@ def reduce_boxes_for_single_target(
     return [], []
 
 
-def apply_unads_transition(
-    config: Config,
-    state: LoopState,
-    current_time: float,
-    use_makcu: bool,
-    makcu_btn: str,
-    held_generic_vks: List[int],
-) -> None:
+_unads_warned: set = set()
+
+
+def apply_unads_transition(config: Config, state: LoopState, current_time: float) -> None:
     """Carry out a pending Auto Un-ADS release/re-engage transition decided by
     process_aiming() (state.unads_pending_transition), and independently
     enforce the safety-cap timeout.
+
+    Fires a single click of the user's DEDICATED Auto Un-ADS key/button —
+    config.auto_unads_makcu_button (routed through MAKCU's own command set)
+    when mouse_move_method == 'makcu', otherwise config.auto_unads_key (any
+    VK, via win_utils.aim_input.click_aim_key). This is deliberately a
+    separate control from config.AimKeys / makcu_aim_button (the normal aim
+    trigger) — it doesn't touch that key's state at all, so is_aiming's own
+    computation in ai_loop.py is completely unaffected by this feature and
+    needs no override to keep process_aiming() running through a release
+    window.
+
+    A single click (not a sustained press/release) is fired on BOTH the
+    release and re-engage transitions, since state.unads_release_active is
+    our own belief-state about whether we've toggled the game out of ADS —
+    it doesn't track physical hold state the way the old (AimKeys-reusing)
+    design needed to.
 
     Must be called unconditionally once per ai_loop.py iteration — not only
     on frames where process_aiming() ran. A full target loss (boxes empty)
     stops process_aiming() from running at all, which is exactly the
     scenario most likely to need the safety cap to still fire; relying on
-    process_aiming() alone to enforce it would leave the real aim button
-    permanently released with no code path left to give it back.
-
-    held_generic_vks is a snapshot of which config.AimKeys VKs were
-    genuinely held at the moment ai_loop.py computed is_aiming this
-    iteration — taken there (not re-derived here) because by the time a
-    release is active, our own synthetic events may already have made
-    is_key_pressed() unable to tell "still physically held" from "we
-    released it" (see win_utils/aim_input.py's module docstring).
+    process_aiming() alone to enforce it would leave the belief-state (and
+    the game's actual ADS state, if our assumption about it is right) stuck
+    with no code path left to correct it.
     """
     # Lazy import: mirrors update_crosshair_position()'s local `import
     # win32api` above — keeps this module importable (and its other
     # functions collectible/testable) on non-Windows without win32api,
     # per CLAUDE.md's testing notes.
-    from win_utils.aim_input import set_aim_key_state
+    from win_utils.aim_input import click_aim_key
     from win_utils.makcu_mouse import makcu_mouse
 
     transition = state.unads_pending_transition
     state.unads_pending_transition = ''
 
-    if transition == 'release' and not state.unads_release_active:
+    use_makcu = getattr(config, 'mouse_move_method', '') == 'makcu'
+
+    def _fire_click() -> bool:
         if use_makcu:
-            btn_held = makcu_mouse.rmb_held if makcu_btn == 'rmb' else makcu_mouse.lmb_held
-            if not btn_held:
-                return  # nothing physically held (e.g. always_aim, no button down) — nothing to release
-            makcu_mouse.press_button('right' if makcu_btn == 'rmb' else 'left', 3)
-            state.unads_active_vks = []
+            btn = str(getattr(config, 'auto_unads_makcu_button', 'off')).lower()
+            if btn == 'off':
+                return False
+            makcu_mouse.press_button(btn, 1)
+            return True
+        vk = int(getattr(config, 'auto_unads_key', 0) or 0)
+        if vk == 0:
+            return False
+        click_aim_key(vk, str(getattr(config, 'mouse_move_method', '')))
+        return True
+
+    def _warn_unconfigured() -> None:
+        key = ('makcu', ) if use_makcu else ('generic', )
+        if key in _unads_warned:
+            return
+        _unads_warned.add(key)
+        field = 'auto_unads_makcu_button' if use_makcu else 'auto_unads_key'
+        logger.warning(
+            "[AutoUnADS] enabled but %s is unconfigured — nothing to click.",
+            field,
+        )
+
+    if transition == 'release' and not state.unads_release_active:
+        if _fire_click():
+            state.unads_release_active = True
+            state.unads_release_start_time = current_time
+            state.unads_clear_hold_start = 0.0
         else:
-            if not held_generic_vks:
-                return
-            state.unads_active_vks = list(held_generic_vks)
-            for vk in state.unads_active_vks:
-                set_aim_key_state(vk, down=False, mouse_move_method=config.mouse_move_method)
-        state.unads_release_active = True
-        state.unads_release_start_time = current_time
-        state.unads_clear_hold_start = 0.0
+            _warn_unconfigured()
 
     elif transition == 'reengage' and state.unads_release_active:
-        if use_makcu:
-            makcu_mouse.press_button('right' if makcu_btn == 'rmb' else 'left', 2)
-        else:
-            for vk in state.unads_active_vks:
-                set_aim_key_state(vk, down=True, mouse_move_method=config.mouse_move_method)
-        state.unads_active_vks = []
+        _fire_click()
         state.unads_release_active = False
         state.unads_release_start_time = 0.0
         state.unads_clear_hold_start = 0.0
@@ -353,7 +374,7 @@ def apply_unads_transition(
         max_release_s = float(getattr(config, 'auto_unads_max_release_s', 3.0))
         if max_release_s > 0 and current_time - state.unads_release_start_time > max_release_s:
             state.unads_pending_transition = 'reengage'
-            apply_unads_transition(config, state, current_time, use_makcu, makcu_btn, held_generic_vks)
+            apply_unads_transition(config, state, current_time)
 
 
 def update_queues(
