@@ -577,14 +577,6 @@ class MakcuMouse:
         """True when right mouse button is physically pressed."""
         return bool(self._btn_mask & 0x02)
 
-    def query_lmb_state(self) -> int:
-        """Return 1 if LMB pressed, 0 if released. No serial I/O."""
-        return 1 if (self._btn_mask & 0x01) else 0
-
-    def query_rmb_state(self) -> int:
-        """Return 1 if RMB pressed, 0 if released. No serial I/O."""
-        return 1 if (self._btn_mask & 0x02) else 0
-
 
 # ---------------------------------------------------------------------------
 # Module-level singleton and convenience functions

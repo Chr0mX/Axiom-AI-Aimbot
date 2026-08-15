@@ -449,7 +449,12 @@ class OtherPage(BasePage):
         return None
 
     def _checkTensorRT(self):
-        """Check whether TensorRT is installed and usable, then update the cards."""
+        """Check whether TensorRT is installed and usable, then update the cards.
+
+        Despite the name, this also refreshes the DirectML status/DLL-path/
+        embedded-path content labels (dmlStatusCard/dmlDllCard/
+        dmlEmbeddedPathCard) — the two environment checks share one method.
+        """
         # ONNX Runtime provider availability
         provider_ok = False
         try:
@@ -636,6 +641,15 @@ class OtherPage(BasePage):
         self.trtLibsCard.titleLabel.setText(t("trt_libs_path", "TensorRT DLL Path"))
         self.trtCacheCard.titleLabel.setText(t("trt_cache_path", "Engine Cache Path"))
         self.trtRecheckBtn.setText(t("trt_recheck", "Re-check"))
+
+        # DirectML — title/description labels only; content labels are
+        # refreshed by _checkTensorRT() below (it checks DML too despite
+        # the name — see that method).
+        self.dmlGroup.titleLabel.setText(t("env_dml", "DirectML"))
+        self.dmlStatusCard.titleLabel.setText(t("dml_status", "DirectML Status"))
+        self.dmlDllCard.titleLabel.setText(t("dml_dll_path", "DirectML DLL Path"))
+        self.dmlEmbeddedPathCard.titleLabel.setText(t("dml_embedded_path", "Embedded ORT-DirectML Path"))
+
         self._checkTensorRT()
 
         # 關於內容

@@ -1928,6 +1928,8 @@ class AimPage(BasePage):
 
         self.comPortCard.titleLabel.setText(t("arduino_com_port"))
         self.comRefreshBtn.setText(t("refresh"))
+        self.arduinoBaudCard.titleLabel.setText(t("arduino_baud_rate", "Baud Rate"))
+        self.arduinoBaudCard.contentLabel.setText(t("arduino_baud_rate_desc", "⚠ Must match the baud rate in your Arduino sketch"))
         self.connectionCard.titleLabel.setText(t("connected") + " / " + t("disconnected"))
         self.arduinoConnectCard.titleLabel.setText(t("arduino_connect"))
         self.arduinoConnectCard.contentLabel.setText(t("arduino_connect_desc"))
@@ -1946,6 +1948,7 @@ class AimPage(BasePage):
         self.xboxConnectionCard.titleLabel.setText(t("connected") + " / " + t("disconnected"))
         self.xboxConnectCard.titleLabel.setText(t("xbox_connect"))
         self.xboxConnectCard.contentLabel.setText(t("xbox_connect_desc"))
+        self._updateXboxConnectionStatus()
 
         self.pidGroup.titleLabel.setText(t("aim_speed_pid"))
         self.pidAxisPivot.setItemText('x', t("horizontal_x"))

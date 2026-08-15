@@ -21,8 +21,9 @@
 - `MakcuMouse.query_lmb_state()` — queries `km.left()` via the MAKCU ASCII API to detect physical button state (0=up / 1=raw physical / 2=injected / 3=both)
 - Result cached for 16 ms to keep serial traffic ≤ 60 Hz
 - `lmb_held` property exposes the physical state (bit 0) for use in aim logic
+- *(Since removed: `query_lmb_state()`/`query_rmb_state()` duplicated the `lmb_held`/`rmb_held` properties with no external callers and were deleted in a later cleanup pass — the properties themselves remain.)*
 
-#### MAKCU Debug Utility (`debug_makcu.py`)
+#### MAKCU Debug Utility (`src/makcu_debug.py`)
 - Standalone script for testing MAKCU serial communication
 - Tests all mouse button state query methods: `km.left()`, `km.right()`, `km.middle()`, `km.catch_ml()`, `km.getpos()`, `km.mo()`, `km.silent()`
 - Tests Misc API: `km.device()` (connected HID type) and `km.info()` (MAC, firmware, temperature, USB VID/PID, serial numbers, polling rates, fault flags)
@@ -41,7 +42,7 @@
 ### Fixes & Improvements
 
 - Letterbox preprocessing is now always active — fixes systematic Y-axis coordinate errors when the detection region is non-square (e.g. crosshair near screen edge)
-- `preprocess_image()` no longer accepts `fast_resize` parameter (removed dead code path)
+- `preprocess_image()` no longer accepts `fast_resize` parameter (removed dead code path) — *(since re-added: `fast_resize` came back as a legitimate fast-path for square-but-non-model-size captures, derived from the frame's own shape in `ai_loop.py`; see CLAUDE.md's ONNX/TensorRT section for the current preprocess behavior)*
 - `ai_loop.py` screenshot interval simplified — removed conditional branch that was never correctly triggered
 - All 10 language files updated with new Kalman and Smart Jitter UI strings
 

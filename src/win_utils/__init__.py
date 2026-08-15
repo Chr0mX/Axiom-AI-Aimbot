@@ -21,11 +21,10 @@ from .vk_codes import (
 )
 
 # Mouse move - Basic
+# (MOUSEINPUT/INPUT/INPUT_MOUSE/MOUSEEVENTF_MOVE are internal to mouse_move.py
+# itself — nothing outside it needs the raw SendInput ctypes structs, so they
+# aren't re-exported here.)
 from .mouse_move import (
-    MOUSEINPUT,
-    INPUT,
-    INPUT_MOUSE,
-    MOUSEEVENTF_MOVE,
     send_mouse_move_sendinput,
     send_mouse_move_mouse_event,
 )
@@ -40,7 +39,6 @@ from .ddxoft_mouse import (
     ensure_ddxoft_ready,
     test_ddxoft_functions,
     get_ddxoft_statistics,
-    print_ddxoft_statistics,
     reset_ddxoft_statistics,
 )
 
@@ -78,7 +76,6 @@ from .xbox_controller import (
     is_xbox_available,
     set_xbox_sensitivity,
     set_xbox_deadzone,
-    get_xbox_statistics,
 )
 
 # Mouse click
@@ -87,7 +84,6 @@ from .mouse_click import (
     send_mouse_click_mouse_event,
     send_mouse_click_ddxoft,
     send_mouse_click,
-    test_mouse_click_methods,
 )
 from .arduino_mouse import send_mouse_click_arduino
 
@@ -161,29 +157,22 @@ __all__ = [
     'get_vk_name',
     
     # 滑鼠移動
-    'MOUSEINPUT',
-    'INPUT',
-    'INPUT_MOUSE',
-    'MOUSEEVENTF_MOVE',
     'send_mouse_move',
     'send_mouse_move_sendinput',
     'send_mouse_move_mouse_event',
     'send_mouse_move_ddxoft',
-    'send_mouse_move_arduino',
     'send_mouse_move_makcu',
-    'send_mouse_move_xbox',
-    
+
     # 控制器類
     'DDXoftMouse',
     'XboxController',
     'xbox_controller',
     'ddxoft_mouse',
-    
+
     # ddxoft 公共接口
     'ensure_ddxoft_ready',
     'test_ddxoft_functions',
     'get_ddxoft_statistics',
-    'print_ddxoft_statistics',
     'reset_ddxoft_statistics',
     
     # Arduino 控制
@@ -209,18 +198,14 @@ __all__ = [
     'is_xbox_available',
     'set_xbox_sensitivity',
     'set_xbox_deadzone',
-    'get_xbox_statistics',
-    'send_mouse_click_xbox',
-    
+
     # 滑鼠點擊
     'send_mouse_click',
     'send_mouse_click_sendinput',
     'send_mouse_click_mouse_event',
     'send_mouse_click_ddxoft',
-    'send_mouse_click_arduino',
     'send_mouse_click_makcu',
-    'test_mouse_click_methods',
-    
+
     # 按鍵檢測
     'is_key_pressed',
     
@@ -234,7 +219,6 @@ __all__ = [
     
     # 管理員權限
     'is_admin',
-    'request_admin_privileges',
     'check_and_request_admin',
     
     # 終端控制

@@ -54,14 +54,27 @@ VK_TRANSLATIONS = {
 
 
 def get_vk_name(key_code):
-    """Get the display name of the key code (based on the current language)"""
+    """Get the display name of the key code (based on the current language).
+
+    VK_TRANSLATIONS only distinguishes Traditional Chinese from everything
+    else, while core.language_manager.LanguageManager.get_current_language()
+    returns a full language-file name (e.g. "Chinese_中文", "English_English")
+    — so the real current language is mapped down to that binary choice
+    rather than compared directly against VK_TRANSLATIONS' "zh_tw"/"en" keys.
+
+    Previously this imported a top-level `language_manager` module that
+    doesn't exist anywhere in the repo (the real modules are
+    core.language_manager and gui.fluent_app.language_manager), so the
+    import always raised and this always fell back to "zh_tw" — i.e. every
+    key name was shown in Chinese regardless of the user's actual language.
+    """
     name = VK_CODE_MAP.get(key_code, f'0x{key_code:02X}')
-    lang = None
     try:
-        from language_manager import language_manager
-        lang = language_manager.get_current_language()
+        from core.language_manager import language_manager
+        current = language_manager.get_current_language()
     except Exception:
-        lang = "zh_tw"
+        current = ""
+    lang = "zh_tw" if current == "Chinese_中文" else "en"
     if lang != "en":
         return VK_TRANSLATIONS.get(lang, {}).get(name, name)
     return name

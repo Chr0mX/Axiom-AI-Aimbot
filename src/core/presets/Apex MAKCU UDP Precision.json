@@ -49,7 +49,6 @@
 
     "inference_backend": "auto",
     "cuda_io_binding_enabled": true,
-    "performance_mode": true,
     "thread_priority": "time_critical",
     "max_queue_size": 1,
     "detect_interval": 0.006,

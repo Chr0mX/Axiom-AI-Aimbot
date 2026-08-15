@@ -148,8 +148,3 @@ language_manager = LanguageManager()
 def get_text(key: str, default: str = "") -> str:
     """便捷函數：獲取翻譯文字"""
     return language_manager.get_text(key, default)
-
-
-def set_language(language_code: str) -> bool:
-    """便捷函數：設置語言"""
-    return language_manager.set_language(language_code)

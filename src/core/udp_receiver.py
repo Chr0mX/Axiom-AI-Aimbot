@@ -104,18 +104,6 @@ class UdpJpegReceiver:
         if self._thread:
             self._thread.join(timeout=2.0)
 
-    def get_latest_frame(self, block=False, timeout=None):
-        """
-        Returns the most recently completed JPEG frame as raw bytes, or None
-        if nothing has arrived yet. If block=True, waits (up to `timeout`
-        seconds) for a *new* frame rather than returning a stale one.
-        """
-        if block:
-            if self._new_frame_event.wait(timeout):
-                self._new_frame_event.clear()
-        with self._lock:
-            return self._latest_frame
-
     def get_latest_frame_with_id(self, block=False, timeout=None):
         """Return (jpeg_bytes, frame_id) atomically. Both None if no frame yet.
 

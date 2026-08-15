@@ -23,7 +23,7 @@ pytest tests/test_config.py::TestConfigInit::test_screen_dimensions
 
 Tests add `src/` to `sys.path` via `tests/conftest.py` — no install step needed.
 
-**On non-Windows (e.g. this sandbox)**: this is fundamentally a Windows app — `pytest tests/` currently reports a stable baseline of 160 failed / 183 passed, all environment-only (missing `win32api`/PyQt6/pywin32, not code bugs). When verifying a change doesn't regress anything, compare the failed/passed counts against this baseline rather than expecting a clean run. Any module with a top-level `import win32api` (or that transitively imports one, e.g. anything importing `win_utils`) fails at **collection**, not just at test-run time, which aborts the whole suite unless the import is deferred — the established pattern here is a pytest fixture (or an in-test `from ... import ...`) that does the import lazily, so a missing `win32api` fails just that file's tests individually instead of blocking every other test file's collection. `ai_loop_utils.py`, `ai_loop.py`, and `ai_aiming.py` (via `win_utils`) all hit this; `detection_semantics.py`, `udp_receiver.py`, and `esp_server.py` don't and are fully testable here.
+**On non-Windows (e.g. this sandbox)**: this is fundamentally a Windows app — `pytest tests/` reports a large number of environment-only failures (missing `win32api`/PyQt6/pywin32, not code bugs); this baseline shifts as tests are added/removed, so when verifying a change doesn't regress anything, compare the failed/passed counts against a fresh baseline run rather than a hardcoded number. Any module with a top-level `import win32api` (or that transitively imports one, e.g. anything importing `win_utils`) fails at **collection**, not just at test-run time, which aborts the whole suite unless the import is deferred — the established pattern here is a pytest fixture (or an in-test `from ... import ...`) that does the import lazily, so a missing `win32api` fails just that file's tests individually instead of blocking every other test file's collection. `ai_loop.py`, `ai_aiming.py`, `auto_fire.py`, and `key_listener.py` all hit this (the first three via `win_utils`, `key_listener.py` directly); `ai_loop_utils.py` defers its `import win32api` inside a function, so it's collectible even though it still fails at test-run time. `detection_semantics.py`, `udp_receiver.py`, and `esp_server.py` don't hit either problem and are fully testable here.
 
 ## Architecture
 
@@ -73,7 +73,7 @@ Single `Config` class — all runtime state lives here. Persistence is driven by
 - **Y-axis recoil suppression** (`aim_y_reduce_*`) — delay, ramp, floor, settle gate, and velocity restore
 - **Smart Jitter** — when a target occupies less than `smart_jitter_box_threshold_pct` of the detect range, small random or recorded movement is applied:
   - *Procedural*: random polar coords bounded by `smart_jitter_strength`
-  - *Recorded pattern*: `jitter_pattern_file` points to a `jitter_patterns/*.json`; frames are cycled via `itertools.cycle` from `_jitter_pattern_cache`; the cache invalidates when the path changes
+  - *Recorded pattern*: `jitter_pattern_file` points to a `jitter_patterns/*.json`; frames are cycled via `itertools.cycle` from `_jitter_pattern_cache`; the cache invalidates when the path changes. Playback follows the detection loop's own tick rate, not the recording's original timing; `jitter_speed_multiplier` (1×/2×/3×/5×/10×, GUI "Playback Speed" segmented control) steps multiple recorded frames per loop iteration to tune the replay feel
 - **Humanization** — velocity-curve, Bézier smoothing, and micro-correction via `src/core/humanization.py` (`HumanizationConfig` dataclass)
 - **Lateral brake** — suppresses sideways over-travel
 - **Deadzone** — minimum pixel gap before movement fires
@@ -106,6 +106,11 @@ Public API consumed by the GUI:
 - `list_patterns() → list[{name, path, frame_count}]` — populates the pattern combo
 - `_Recorder` class — `start()` / `stop() → frames`
 - `_normalize_frames(frames)`, `_save_pattern(name, frames)`
+
+### Other Standalone Dev Tools (`src/core/`)
+Not wired into the GUI or main loop; run directly for diagnosis/tuning.
+- **`obs_inspect_filters.py`** — read-only OBS WebSocket inspector (`python src/core/obs_inspect_filters.py --source "Your Source Name"`). Connects to OBS's built-in WebSocket server (port 4455) and dumps every filter's full settings dict for a given source — used to check whether `udp_stream_filter` (or any other filter) exposes its own resolution/scale/quality setting without hunting through the OBS UI by hand. Never modifies OBS state. `--list-sources` enumerates sources if you don't know the exact name.
+- **`bench_udp.py`** / **`_bench_udp_sender.py`** — standalone UDP receive-pipeline benchmark for the `UdpCapture` backend (`python src/core/bench_udp.py decode-bench|loopback-bench ...`). Isolates whether a low observed FPS is real packet loss (`live` mode, watch `dropped_fps`), JPEG decode CPU cost (`decode-bench`, measures the `cv2.imdecode` ceiling with no networking), or raw UDP-assembly throughput (`loopback-bench`, spins up a real `UdpJpegReceiver` on `127.0.0.1` and fires synthetic frames at it from `_bench_udp_sender.py` — a genuinely separate OS process, not a thread, so it doesn't share a GIL with the receiver, matching the real deployment where the OBS sender is an independent process).
 
 ### Mouse/Device Backends (`src/win_utils/`)
 All backends expose `send_mouse_move_<method>(dx, dy)` and `send_mouse_click_<method>()`. Selected at runtime from `config.mouse_move_method`. Methods:
@@ -152,7 +157,7 @@ Models go in `Model/` (`Model_Hud/` for the secondary weapon-detector model). Th
 |---|---|---|
 | `screenshot_method` | `capture.screenshot_method` | `'mss'` / `'dxcam'` / `'uvc'` / `'ndi'` / `'udp'` |
 | `udp_bind_ip` / `udp_bind_port` | `capture.udp.bind_ip` / `.bind_port` | Listen address for the OBS `udp_stream_filter` MJPEG stream |
-| `mouse_move_method` | `hardware.mouse_move_method` | `'sendinput'` / `'makcu'` / `'arduino'` / `'ddxoft'` / `'xbox'` |
+| `mouse_move_method` | `hardware.mouse_move_method` | `'sendinput'` / `'mouse_event'` / `'makcu'` / `'arduino'` / `'ddxoft'` / `'xbox'` |
 | `inference_backend` | `model.backend` | `'auto'` / `'cuda'` / `'directml'` / `'tensorrt'` / `'cpu'` |
 | `cuda_io_binding_enabled` | `performance.cuda_io_binding_enabled` | Zero-copy CUDA inference |
 | `makcu_disengage_delay` | `hardware.makcu.disengage_delay` | Seconds aim stays active after releasing aim button (0–20 s) |
@@ -170,6 +175,7 @@ Models go in `Model/` (`Model_Hud/` for the secondary weapon-detector model). Th
 | `smart_jitter_box_threshold_pct` | `aim.smart_jitter.box_threshold_pct` | % of detect range below which jitter fires |
 | `smart_jitter_lmb_gate` | `aim.smart_jitter.lmb_gate` | Only jitter while LMB held |
 | `jitter_pattern_file` | `aim.smart_jitter.pattern_file` | Path to recorded `.json` pattern; empty = procedural |
+| `jitter_speed_multiplier` | `aim.smart_jitter.speed_multiplier` | Recorded-pattern playback speed (1×/2×/3×/5×/10×) |
 | `aim_y_reduce_enabled` | `aim.y_reduce.enabled` | Enable Y-axis recoil suppression |
 | `aim_y_reduce_floor` | `aim.y_reduce.floor` | Minimum Y reduction factor |
 | `aim_y_reduce_ramp` | `aim.y_reduce.ramp` | Frames to ramp up suppression |
