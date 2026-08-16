@@ -244,5 +244,7 @@
   "smart_jitter_threshold_desc": "Jitter fires when box height is below this % of detect range",
   "makcu_keys_group": "MAKCU Keys",
   "makcu_key_inference": "Inference",
-  "makcu_key_inference_desc": "Hold this mouse button to activate inference"
+  "makcu_key_inference_desc": "Hold this mouse button to activate inference",
+  "pid_unsafe_mode": "Unsafe Mode",
+  "pid_unsafe_mode_desc": "Let the P (reaction speed) sliders be dragged past the proven-stable 0.50 cap, up to 1.00. Higher values can cause oscillation/overshoot — tune carefully."
 }

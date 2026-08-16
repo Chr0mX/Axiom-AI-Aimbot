@@ -489,6 +489,16 @@ class AimPage(BasePage):
         self.pidGroup = SettingCardGroup(t("aim_speed_pid"), self.scrollWidget)
         self.yReduceGroup = SettingCardGroup("Y-Axis Recoil Suppression", self.scrollWidget)
 
+        # Nothing downstream actually clamps Kp — the P sliders just cap their
+        # travel at the proven-stable 0.0-0.5 band by default. This toggle
+        # re-maps that same slider travel to the full 0.0-1.0 range instead.
+        self.pidUnsafeCard = SwitchSettingCard(
+            FluentIcon.INFO,
+            t("pid_unsafe_mode", "Unsafe Mode"),
+            t("pid_unsafe_mode_desc", "Let the P (reaction speed) sliders be dragged past the proven-stable 0.50 cap, up to 1.00. Higher values can cause oscillation/overshoot — tune carefully."),
+            parent=self.pidGroup
+        )
+
         self.pidAxisPivot = SegmentedWidget()
         self.pidAxisPivot.addItem(routeKey='x', text=t("horizontal_x"))
         self.pidAxisPivot.addItem(routeKey='y', text=t("vertical_y"))
@@ -497,8 +507,10 @@ class AimPage(BasePage):
 
         self.pidStackedWidget = QStackedWidget()
 
-        # Kp slider travel 0–100 maps to config 0.0–0.5 (the proven-stable band) — see
-        # _onPidChanged / _loadFromConfig. The /200 display keeps the label honest.
+        # Kp slider travel 0–100 maps to config 0.0–0.5 (the proven-stable band) by
+        # default, or 0.0–1.0 with Unsafe Mode on — see _onPidChanged / _loadFromConfig
+        # / _onPidUnsafeChanged, which swap the /200 vs /100 divisor and format_func
+        # together so the displayed label always matches the effective gain.
         self.pidPxCard = SliderLabelCard(
             FluentIcon.SPEED_HIGH,
             t("reaction_speed_p"),
@@ -1012,6 +1024,7 @@ class AimPage(BasePage):
         self.pidStackedWidget.addWidget(self.pidXPage)
         self.pidStackedWidget.addWidget(self.pidYPage)
 
+        self.pidGroup.addSettingCard(self.pidUnsafeCard)
         self.pidGroup.vBoxLayout.addWidget(pivotWidget)
         self.pidGroup.vBoxLayout.addWidget(self.pidStackedWidget)
         self.pidGroup.addSettingCard(self.maxMovePerFrameCard)
@@ -1102,6 +1115,7 @@ class AimPage(BasePage):
         self.xboxConnectBtn.clicked.connect(self._onXboxConnectToggle)
 
         # PID
+        self.pidUnsafeCard.checkedChanged.connect(self._onPidUnsafeChanged)
         self.pidPxCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kp_x', v))
         self.pidIxCard.valueChanged.connect(lambda v: self._onPidChanged('pid_ki_x', v))
         self.pidDxCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kd_x', v))
@@ -1204,12 +1218,16 @@ class AimPage(BasePage):
             self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
             self._updateXboxConnectionStatus()
 
-            # PID — Kp sliders are scaled x200 (slider 0–100 → config 0.0–0.5), clamped
+            # PID — Kp sliders are scaled x200 normally (slider 0–100 → config
+            # 0.0–0.5) or x100 with Unsafe Mode on (→ config 0.0–1.0); clamped
             # to the slider max so a saved value keeps its exact effective gain.
-            self.pidPxCard.setValue(min(100, int(self._config.pid_kp_x * 200)))
+            self.pidUnsafeCard.setChecked(bool(getattr(self._config, 'pid_unsafe_mode', False)))
+            self._applyPidKpFormat(self.pidUnsafeCard.isChecked())
+            kp_divisor = self._pidKpDivisor()
+            self.pidPxCard.setValue(min(100, int(self._config.pid_kp_x * kp_divisor)))
             self.pidIxCard.setValue(int(self._config.pid_ki_x * 100))
             self.pidDxCard.setValue(int(self._config.pid_kd_x * 100))
-            self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * 200)))
+            self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * kp_divisor)))
             self.pidIyCard.setValue(int(self._config.pid_ki_y * 100))
             self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
             self.maxMovePerFrameCard.setValue(min(500, max(0, int(getattr(self._config, 'max_move_per_frame_px', 85.0)))))
@@ -1639,14 +1657,44 @@ class AimPage(BasePage):
     def _onPidAxisChanged(self, routeKey: str):
         self.pidStackedWidget.setCurrentIndex(0 if routeKey == 'x' else 1)
 
+    def _pidKpDivisor(self) -> float:
+        """200.0 normally (slider 0-100 -> config 0.0-0.5), 100.0 with Unsafe
+        Mode on (-> config 0.0-1.0). Both P sliders share one divisor."""
+        unsafe = bool(self._config and getattr(self._config, 'pid_unsafe_mode', False))
+        return 100.0 if unsafe else 200.0
+
+    def _applyPidKpFormat(self, unsafe: bool):
+        """Point both Kp sliders' labels at the divisor matching `unsafe`."""
+        divisor = 100.0 if unsafe else 200.0
+        self.pidPxCard.setFormatFunc(lambda v, _d=divisor: f"{v/_d:.2f}")
+        self.pidPyCard.setFormatFunc(lambda v, _d=divisor: f"{v/_d:.2f}")
+
+    def _onPidUnsafeChanged(self, checked: bool):
+        checked = bool(checked)
+        if self._config:
+            self._config.pid_unsafe_mode = checked
+        self._applyPidKpFormat(checked)
+        if not checked:
+            # Leaving Unsafe Mode: clamp any Kp that's currently above the
+            # safe 0.50 cap back down so the slider (now capped at 0.50
+            # again) and the stored config value can't silently disagree.
+            if self._config:
+                self._config.pid_kp_x = min(self._config.pid_kp_x, 0.5)
+                self._config.pid_kp_y = min(self._config.pid_kp_y, 0.5)
+        kp_divisor = self._pidKpDivisor()
+        if self._config:
+            self.pidPxCard.setValue(min(100, int(self._config.pid_kp_x * kp_divisor)))
+            self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * kp_divisor)))
+
     def _onPidChanged(self, attr, value, is_bool=False):
         if self._config:
             if is_bool:
                 setattr(self._config, attr, value)
             else:
-                # Kp sliders are scaled so full travel (0–100) spans config 0.0–0.5,
-                # keeping the whole strength slider inside the stable band. Ki/Kd use /100.
-                divisor = 200.0 if attr in ('pid_kp_x', 'pid_kp_y') else 100.0
+                # Kp sliders are scaled so full travel (0–100) spans config 0.0–0.5
+                # normally, or 0.0-1.0 with Unsafe Mode on — see _pidKpDivisor().
+                # Ki/Kd always use /100.
+                divisor = self._pidKpDivisor() if attr in ('pid_kp_x', 'pid_kp_y') else 100.0
                 setattr(self._config, attr, value / divisor)
 
     # === Smart Jitter Callbacks ===
@@ -1951,6 +1999,8 @@ class AimPage(BasePage):
         self._updateXboxConnectionStatus()
 
         self.pidGroup.titleLabel.setText(t("aim_speed_pid"))
+        self.pidUnsafeCard.titleLabel.setText(t("pid_unsafe_mode", "Unsafe Mode"))
+        self.pidUnsafeCard.contentLabel.setText(t("pid_unsafe_mode_desc", "Let the P (reaction speed) sliders be dragged past the proven-stable 0.50 cap, up to 1.00. Higher values can cause oscillation/overshoot — tune carefully."))
         self.pidAxisPivot.setItemText('x', t("horizontal_x"))
         self.pidAxisPivot.setItemText('y', t("vertical_y"))
         self.pidPxCard.titleLabel.setText(t("reaction_speed_p"))
