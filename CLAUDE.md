@@ -69,7 +69,7 @@ Single `Config` class — all runtime state lives here. Persistence is driven by
 - **`single_target_mode`** — reduces the box list Web ESP/auto-fire/preview see to just the locked target. This reduction happens **after** `process_aiming()` runs, derived from `state.locked_box`; it must never pre-filter the candidate list before sticky lock sees it, or sticky lock can never win over the frame's raw priority winner
 - **Motion prediction** (`prediction_enabled`) — `src/core/target_predictor.py` (`VelocityPredictor`) or `src/core/kalman_filter.py` (`KalmanFilter2D`, constant-velocity 2D); both `.reset()` on true target loss to avoid stale velocity carrying into a new target
 - **Semantic false-positive filter** (`detect_semantic_filter_enabled`) — `src/core/detection_semantics.py`; three layers (ONNX class-name allow/deny lists, aspect-ratio geometry heuristics, min bbox size) to drop vegetation/vehicle/sign/HUD misdetections before target selection
-- **PID controller** with separate X/Y axes (`pid_kp_x/y`, `pid_ki_x/y`, `pid_kd_x/y`)
+- **PID controller** with separate X/Y axes (`pid_kp_x/y`, `pid_ki_x/y`, `pid_kd_x/y`). Nothing downstream clamps Kp — the GUI's P sliders just cap their travel at a proven-stable 0.0–0.5 band by default; `pid_unsafe_mode` re-maps that same slider travel to the full 0.0–1.0 range ("Unsafe Mode" toggle, Aim page)
 - **Y-axis recoil suppression** (`aim_y_reduce_*`) — delay, ramp, floor, settle gate, and velocity restore
 - **Smart Jitter** — when a target occupies less than `smart_jitter_box_threshold_pct` of the detect range, small random or recorded movement is applied:
   - *Procedural*: random polar coords bounded by `smart_jitter_strength`
@@ -170,6 +170,7 @@ Models go in `Model/` (`Model_Hud/` for the secondary weapon-detector model). Th
 | `detect_semantic_filter_enabled` | `aim.detect_semantic_filter_enabled` | Filter vegetation/vehicle/sign/HUD false positives before target selection |
 | `second_inference_mode` | `ocr.mode` | `'off'` / `'v1_ocr'` / `'v2_onnx'` — secondary weapon-detection method |
 | `hud_roi_coords` | `ocr.hud_roi_coords` | ROI `"x1,y1,x2,y2"` for the ONNX weapon/attachment HUD scanner |
+| `pid_unsafe_mode` | `aim.pid.unsafe_mode` | Let the GUI's Kp ("reaction speed") sliders be dragged up to 1.00 instead of the default 0.0–0.5 safe cap |
 | `smart_jitter_enabled` | `aim.smart_jitter.enabled` | Enable Smart Jitter anti-recoil |
 | `smart_jitter_strength` | `aim.smart_jitter.strength` | Max jitter radius (px) |
 | `smart_jitter_box_threshold_pct` | `aim.smart_jitter.box_threshold_pct` | % of detect range below which jitter fires |

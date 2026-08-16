@@ -110,6 +110,7 @@ _FIELD_MAP = {
     'pid_kp_y':                   'aim.pid.y.kp',
     'pid_ki_y':                   'aim.pid.y.ki',
     'pid_kd_y':                   'aim.pid.y.kd',
+    'pid_unsafe_mode':            'aim.pid.unsafe_mode',
     'aim_y_reduce_enabled':       'aim.y_reduce.enabled',
     'aim_y_reduce_delay':         'aim.y_reduce.delay',
     'aim_y_reduce_floor':         'aim.y_reduce.floor',
@@ -406,6 +407,11 @@ class Config:
         self.pid_kp_y: float = 0.26      # 垂直 P: 比例
         self.pid_ki_y: float = 0.0       # 垂直 I: 積分
         self.pid_kd_y: float = 0.08      # 垂直 D: 微分
+        # GUI-only convenience flag: nothing downstream clamps Kp, the P
+        # sliders just cap their travel at 0.50 (the proven-stable band) by
+        # default. Enabling this lets the same slider travel span 0.0-1.0
+        # instead. Persisted so the unlocked range survives a restart.
+        self.pid_unsafe_mode: bool = False
 
         # Y軸壓槍速度逐漸歸零
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能
