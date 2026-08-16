@@ -1,7 +1,6 @@
 # mouse_click.py - Mouse Click Module
 """Mouse click related functions"""
 
-import time
 import logging
 import win32api
 import win32con
@@ -15,13 +14,21 @@ logger = logging.getLogger(__name__)
 # ===== Mouse Click Functions =====
 
 def send_mouse_click_sendinput():
-    """SendInput left click"""
+    """Left click via win32api.mouse_event.
+
+    Despite the name, this is currently byte-identical to
+    send_mouse_click_mouse_event() below — unlike mouse_move.py's
+    send_mouse_move_sendinput(), which genuinely uses the SendInput struct/
+    API, no distinct SendInput-based click has been implemented here. Kept
+    as a separate name because "sendinput"/"mouse_event" are both valid
+    mouse_click_method config values with their own dispatch entries below.
+    """
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
 
 def send_mouse_click_mouse_event():
-    """mouse_event left click"""
+    """Left click via win32api.mouse_event."""
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
@@ -48,8 +55,9 @@ def send_mouse_click(method="ddxoft"):
     """
     Unified mouse click function, supports multiple methods
     method options:
-    - "sendinput": SendInput (original method, easily detected)
-    - "mouse_event": mouse_event (very stealthy)
+    - "sendinput" / "mouse_event": win32api.mouse_event left click
+      (currently identical implementations — see
+      send_mouse_click_sendinput()'s docstring)
     - "ddxoft": ddxoft (most stealthy, requires ddxoft.dll)
     - "xbox": Xbox 360 Virtual Gamepad (RT trigger)
     """
@@ -79,26 +87,4 @@ def send_mouse_click(method="ddxoft"):
             return True
         except Exception:
             return False
-
-
-def test_mouse_click_methods():
-    """Test all mouse click methods"""
-    print("[測試] 開始測試所有滑鼠點擊方式...")
-    
-    methods = ["mouse_event", "sendinput", "ddxoft"]
-    
-    for method in methods:
-        print(f"[測試] 測試 {method} 點擊方式...")
-        try:
-            success = send_mouse_click(method)
-            if success:
-                print(f"[測試] {method} 點擊成功")
-            else:
-                print(f"[測試] ✗ {method} 點擊失敗")
-        except Exception as e:
-            print(f"[測試] ✗ {method} 點擊異常: {e}")
-        
-        time.sleep(0.5)  # 延遲0.5秒避免連點
-    
-    print("[測試] 滑鼠點擊測試完成")
 

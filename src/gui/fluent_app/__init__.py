@@ -7,12 +7,10 @@ from .theme_colors import (
     ThemeColors,
     ColorPair,
     ColorPairWithAlpha,
-    StyleSheetGenerator,
 )
 
 __all__ = [
     'ThemeColors',
     'ColorPair',
     'ColorPairWithAlpha',
-    'StyleSheetGenerator',
 ]

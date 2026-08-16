@@ -161,7 +161,6 @@ _FIELD_MAP = {
 
     # --- performance ---
     'thread_priority':            'performance.thread_priority',
-    'performance_mode':           'performance.performance_mode',
     'max_queue_size':             'performance.max_queue_size',
     'cuda_io_binding_enabled':    'performance.cuda_io_binding_enabled',
     'detect_interval':            'performance.timing.detect_interval',
@@ -499,7 +498,6 @@ class Config:
         self.acrylic_element_alpha: int = 25   # 0-255, UI 元素不透明度 (約 10%)
         
         # 優化：性能相關設置
-        self.performance_mode: bool = True  # 預設啟用性能模式
         self.max_queue_size: int = 1        # 減少隊列大小，降低延遲
 
         # TensorRT FP16 加速（需要 NVIDIA GPU 及 TensorRT 安裝）

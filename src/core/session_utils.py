@@ -8,7 +8,7 @@ import threading
 import time
 
 # ── AppData packages path ─────────────────────────────────────────────────────
-# install_tensorrt_local.py writes packages to %LOCALAPPDATA%\Packages\AxiomAI.
+# install_tensorrt_local.py writes packages to %LOCALAPPDATA%\AxiomAI\site-packages.
 # Add that directory to sys.path before any package imports so Python finds them.
 
 def _inject_axiom_packages() -> None:

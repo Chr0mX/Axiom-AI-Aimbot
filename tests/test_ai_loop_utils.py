@@ -1,12 +1,12 @@
 """Unit tests for core/ai_loop_utils.py.
 
-Note: this module imports win32api at module scope (mouse-dispatch helpers
-live alongside the pure logic tested here), so — like the rest of this
-repo's win32-dependent tests (see test_mouse_methods.py) — the import is
-deferred into a fixture instead of done at module top-level. A top-level
-import would make a missing win32api abort collection of the *entire* test
-suite; deferring it means only these tests fail individually, matching the
-existing 160-failed/183-passed environment-only baseline on non-Windows.
+Note: core.ai_loop_utils itself already defers its `import win32api` to
+inside a function body rather than importing it at module scope, so simply
+importing the module here is safe without win32api installed. The fixture
+below still routes the import through pytest rather than a bare top-level
+`import` anyway, matching the pattern used by this repo's genuinely
+win32-dependent test modules (see test_mouse_methods.py) for consistency —
+it isn't load-bearing for collection safety here the way it is there.
 """
 
 import pytest

@@ -199,11 +199,14 @@ def process_aiming(
     current_time: float,
     confidences: List[float] | None = None,
 ) -> None:
-    """Aiming logic: direct detection coordinates → PID → mouse move.
+    """Aiming logic: target selection → optional prediction/smoothing → PID → mouse move.
 
-    SmartTracker (velocity prediction) and Bezier-curve offset have been
-    removed. The cursor moves to the raw detection coordinate each frame
-    with no temporal smoothing or path interpolation.
+    Per-frame pipeline: select a target from `boxes` (sticky lock + priority
+    scoring), optionally run it through velocity prediction
+    (`target_predictor.py`) and/or Kalman smoothing (`kalman_filter.py`),
+    feed the result to the X/Y PID controllers, then apply Y-axis recoil
+    suppression, Smart Jitter, and humanization (velocity curve, Bézier
+    smoothing, micro-correction) before dispatching the mouse move.
     """
 
     aim_part = config.aim_part

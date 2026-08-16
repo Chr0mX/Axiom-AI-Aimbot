@@ -130,12 +130,12 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 
 | Model | File |
 |-------|------|
-| Apex Legends | `apex.onnx` |
-| Counter-Strike 2 | `CS2.onnx` |
-| Fortnite | `Fornite.onnx` |
-| PUBG | `Pubg.onnx` |
-| Roblox | `Roblox.onnx` |
-| Valorant | `Valorant[PURPLE].onnx` |
+| Apex Legends | multiple variants in `Model/`, e.g. `Apex_16.5k_ep100_Y26_640.onnx` (pick by epoch/resolution/architecture) |
+| Counter-Strike 2 | `CS2_8n.onnx` |
+| Fortnite | `Fornite_8n.onnx` |
+| PUBG | `Pubg_8n.onnx` |
+| Roblox | `Roblox_8n.onnx` |
+| Valorant | `Valorant[PURPLE]_8s.onnx` |
 
 > You can also train and import your own ONNX models.
 

@@ -273,11 +273,6 @@ def get_ddxoft_statistics():
     return ddxoft_mouse.get_statistics()
 
 
-def print_ddxoft_statistics():
-    """打印 ddxoft 統計信息的公共接口"""
-    return ddxoft_mouse.print_statistics()
-
-
 def reset_ddxoft_statistics():
     """重置 ddxoft 統計信息的公共接口"""
     global _ddxoft_move_count

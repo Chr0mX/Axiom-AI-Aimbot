@@ -295,18 +295,6 @@ class XboxController:
                 logger.error(f"[Xbox] 按鈕釋放失敗: {e}")
                 return False
     
-    def click_button(self, button, duration: float = 0.05) -> bool:
-        """點擊手把按鈕 (按下 + 釋放)
-        
-        Args:
-            button: 按鈕常數
-            duration: 按住時間（秒）
-        """
-        if self.press_button(button):
-            time.sleep(duration)
-            return self.release_button(button)
-        return False
-    
     def pull_right_trigger(self, value: float = 1.0) -> bool:
         """拉右扳機 (RT)
         
@@ -322,31 +310,6 @@ class XboxController:
                 return True
             except Exception as e:
                 logger.error(f"[Xbox] 右扳機失敗: {e}")
-                return False
-    
-    def pull_left_trigger(self, value: float = 1.0) -> bool:
-        """拉左扳機 (LT)"""
-        if not self.ensure_initialized():
-            return False
-        with self._lock:
-            try:
-                self._gamepad.left_trigger_float(value_float=value)
-                self._gamepad.update()
-                return True
-            except Exception as e:
-                logger.error(f"[Xbox] 左扳機失敗: {e}")
-                return False
-    
-    def reset(self) -> bool:
-        """重置所有輸入"""
-        if not self._connected or self._gamepad is None:
-            return True
-        with self._lock:
-            try:
-                self._gamepad.reset()
-                self._gamepad.update()
-                return True
-            except Exception:
                 return False
     
     def get_statistics(self) -> dict:
@@ -417,8 +380,3 @@ def set_xbox_sensitivity(value: float) -> None:
 def set_xbox_deadzone(value: float) -> None:
     """設定手把死區"""
     xbox_controller.deadzone = max(0.0, min(0.5, value))
-
-
-def get_xbox_statistics() -> dict:
-    """取得手把統計資料"""
-    return xbox_controller.get_statistics()
