@@ -570,10 +570,55 @@ class ModelPage(BasePage):
     # ──────────────────────────────────────────────
 
     def _onModelChanged(self, text):
-        if self._config and text:
-            self._config.model_path = os.path.join("Model", text)
-            self._updateModelInfo(self._config.model_path)
-            self.modelNotesCard.setModel(os.path.basename(text))
+        if not self._config or not text:
+            return
+        new_path = os.path.join("Model", text)
+        if self._redirectToConvertIfNeeded(new_path):
+            # Engine missing under the active TensorRT backend — conversion
+            # was just kicked off on the Convert tab instead of applying this
+            # model_path here, which would otherwise hang the running aim
+            # loop's hot-swap doing a blocking 1-5 min build. The Convert
+            # tab sets model_path itself once the build finishes.
+            return
+        self._config.model_path = new_path
+        self._updateModelInfo(self._config.model_path)
+        self.modelNotesCard.setModel(os.path.basename(text))
+
+    def _needsTrtConversion(self, model_path: str) -> bool:
+        if not self._config or not model_path:
+            return False
+        try:
+            from core.session_utils import needs_trt_build
+            return needs_trt_build(self._config, model_path)
+        except Exception:
+            return False
+
+    def _redirectToConvertIfNeeded(self, model_path: str) -> bool:
+        """If `model_path` would need a fresh (1-5 min) TensorRT build under
+        the currently active backend, send the user to the Convert tab and
+        start that build there (background thread, progress bar) instead of
+        ever letting config.model_path reach a combination that would hang
+        the running aim loop's hot-swap. Returns True if it redirected."""
+        if not self._needsTrtConversion(model_path):
+            return False
+        InfoBar.warning(
+            t("model_trt_engine_missing", "TensorRT engine not built yet"),
+            t("model_trt_engine_missing_desc",
+              "Redirecting to the Convert tab to build it — this can take 1-5 minutes. "
+              "The model will switch over automatically once it's done."),
+            duration=6000, isClosable=True, position=InfoBarPosition.TOP, parent=self,
+        )
+        try:
+            win = self.window()
+            convert_page = getattr(win, 'convertInterface', None)
+            if convert_page is not None:
+                if hasattr(win, 'switchTo'):
+                    win.switchTo(convert_page)
+                if hasattr(convert_page, 'startConversionFor'):
+                    convert_page.startConversionFor(model_path)
+        except Exception:
+            pass
+        return True
 
     def _onHudGameChanged(self, text):
         if not self._config or not text or self._isLoadingConfig:
@@ -613,6 +658,14 @@ class ModelPage(BasePage):
                     return
             self._startRestartCountdown()
             return
+
+        # Backend switched to (or stayed on) something that may now prefer
+        # TensorRT as its effective provider (selected_backend itself, or
+        # "auto" resolving to it) without going through the DirectML restart
+        # above — this is the live hot-swap path, so redirect to convert the
+        # current model instead of letting ai_loop.py's hot-swap hang on it.
+        if not self._isLoadingConfig and prev_backend != selected_backend:
+            self._redirectToConvertIfNeeded(self._config.model_path)
         self._updateInferenceBackendSubtitle()
 
     # ──────────────────────────────────────────────
