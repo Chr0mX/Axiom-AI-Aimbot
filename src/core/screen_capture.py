@@ -363,6 +363,24 @@ def _find_ndi_source_by_name(finder: Any, target_name: str) -> Any | None:
     return None
 
 
+_ellipse_intersects_bbox = None
+
+
+def _get_ellipse_intersects_bbox():
+    """Lazily import ai_loop_utils._ellipse_intersects_bbox so this module's
+    baked-in preview overlay (UVC/NDI/UDP) uses the exact same ellipse/AABB
+    test the real FOV filter and the Qt overlay use, instead of a fourth
+    duplicated copy of the ellipse math. Deferred to match the lazy-import
+    convention overlay.py uses for the same cross-module dependency, even
+    though ai_loop_utils.py itself doesn't require deferring (its win32api
+    import is inside a function — see CLAUDE.md)."""
+    global _ellipse_intersects_bbox
+    if _ellipse_intersects_bbox is None:
+        from .ai_loop_utils import _ellipse_intersects_bbox as _fn
+        _ellipse_intersects_bbox = _fn
+    return _ellipse_intersects_bbox
+
+
 def _draw_detection_overlay(
     frame: np.ndarray,
     region: dict | None,
@@ -370,13 +388,17 @@ def _draw_detection_overlay(
     *,
     has_alpha: bool = False,
 ) -> np.ndarray:
-    """Shared overlay renderer used by both UVCCapture and NDICapture preview threads.
+    """Shared overlay renderer used by UVCCapture, NDICapture, and UdpCapture
+    preview threads — the transparent Qt overlay (overlay.py) can't sit over
+    a captured device/stream frame the way it does over the real desktop
+    (mss/dxcam), so these three backends bake the same annotations directly
+    into the preview frame instead.
 
     Args:
         frame:     BGR or BGRA frame to draw on (modified in place).
         region:    Detection region dict with 'left', 'top', 'width', 'height'.
         config:    Live Config object.
-        has_alpha: True for BGRA frames (NDI); False for BGR frames (UVC).
+        has_alpha: True for BGRA frames (NDI); False for BGR frames (UVC/UDP).
                    Controls whether color tuples include a 4th alpha byte.
     """
     cfg = config
@@ -403,15 +425,19 @@ def _draw_detection_overlay(
         cv2.rectangle(frame, (x1, y1), (x2, y2), _c(255, 140, 0), 1, cv2.LINE_AA)
 
     if bool(getattr(cfg, 'show_fov', True)):
-        fov = int(getattr(cfg, 'fov_size', 220))
-        half = max(1, fov // 2)
-        x1, y1 = cx - half, cy - half
-        x2, y2 = cx + half, cy + half
+        fov_w = int(getattr(cfg, 'fov_size', 220))
+        fov_h = int(getattr(cfg, 'fov_height', fov_w))
+        half_x = max(1, fov_w // 2)
+        half_y = max(1, fov_h // 2)
+        x1, y1 = cx - half_x, cy - half_y
+        x2, y2 = cx + half_x, cy + half_y
         color = _c(0, 0, 255)
         if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
-            cv2.circle(frame, (cx, cy), half, color, 2, cv2.LINE_AA)
+            # cv2.ellipse's axes are already independent per axis, so this
+            # draws a plain circle for free when half_x == half_y.
+            cv2.ellipse(frame, (cx, cy), (half_x, half_y), 0, 0, 360, color, 2, cv2.LINE_AA)
         else:
-            corner = max(8, min(20, fov // 6))
+            corner = max(8, min(20, min(fov_w, fov_h) // 6))
             cv2.line(frame, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
             cv2.line(frame, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
             cv2.line(frame, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
@@ -438,7 +464,9 @@ def _draw_detection_overlay(
         r_f, g_f, b_f = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
         chroma_color = _c(int(b_f * 255), int(g_f * 255), int(r_f * 255), 220)
         use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
-        fov_half   = float(getattr(cfg, 'fov_size', 220)) / 2.0
+        fov_half_x = float(getattr(cfg, 'fov_size', 220)) / 2.0
+        fov_half_y = float(getattr(cfg, 'fov_height', getattr(cfg, 'fov_size', 220))) / 2.0
+        ellipse_intersects_bbox = _get_ellipse_intersects_bbox() if use_circle else None
         for i, box in enumerate(boxes):
             try:
                 x1, y1, x2, y2 = [int(v) for v in box]
@@ -454,12 +482,13 @@ def _draw_detection_overlay(
             thickness = max(1, min(3, 1 + round(conf * 2)))
             clen      = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
             if use_circle:
-                nx = min(max(float(cx), float(x1)), float(x2))
-                ny = min(max(float(cy), float(y1)), float(y2))
-                in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
+                # Same ellipse/AABB test as ai_loop_utils._ellipse_intersects_bbox
+                # (a circle when fov_half_x == fov_half_y, same as it always was).
+                in_fov = ellipse_intersects_bbox(
+                    float(cx), float(cy), fov_half_x, fov_half_y, float(x1), float(y1), float(x2), float(y2))
             else:
-                in_fov = (x1 < cx + fov_half and x2 > cx - fov_half and
-                          y1 < cy + fov_half and y2 > cy - fov_half)
+                in_fov = (x1 < cx + fov_half_x and x2 > cx - fov_half_x and
+                          y1 < cy + fov_half_y and y2 > cy - fov_half_y)
             dc = chroma_color if in_fov else box_color
             if getattr(cfg, 'box_full_rect', False):
                 cv2.rectangle(frame, (x1, y1), (x2, y2), dc, thickness, cv2.LINE_AA)
@@ -480,7 +509,9 @@ def _draw_detection_overlay(
 
     if bool(getattr(cfg, 'show_tracer_line', False)):
         tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
-        fov_half = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
+        tracer_use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
+        tracer_half_x = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
+        tracer_half_y = max(1, int(getattr(cfg, 'fov_height', getattr(cfg, 'fov_size', 220))) // 2)
         for box in tracer_boxes:
             try:
                 x1, y1, x2, y2 = [int(v) for v in box]
@@ -488,7 +519,11 @@ def _draw_detection_overlay(
                 continue
             bx = (x1 + x2) // 2
             by = (y1 + y2) // 2
-            if abs(bx - cx) <= fov_half and abs(by - cy) <= fov_half:
+            if tracer_use_circle:
+                in_reach = (((bx - cx) / tracer_half_x) ** 2 + ((by - cy) / tracer_half_y) ** 2) <= 1.0
+            else:
+                in_reach = abs(bx - cx) <= tracer_half_x and abs(by - cy) <= tracer_half_y
+            if in_reach:
                 cv2.line(frame, (cx, cy), (bx, by), _c(255, 255, 255), 2, cv2.LINE_AA)
 
     decay_box = getattr(cfg, 'display_locked_box', None)

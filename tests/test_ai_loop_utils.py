@@ -135,6 +135,125 @@ class TestGetEffectiveDetectRangeSize:
         config = SimpleNamespace(detect_range_size=900)
         assert ai_loop_utils.get_effective_detect_range_size(config, (320, 320)) == 320
 
+    def test_clamps_against_the_taller_fov_dimension(self, ai_loop_utils):
+        """A rectangular FOV taller than it is wide must raise the lower
+        bound to its height, not just fov_size — otherwise the square
+        detection region could be too short to contain the full FOV."""
+        from types import SimpleNamespace
+        config = SimpleNamespace(fov_size=100, fov_height=400, detect_range_size=200)
+        assert ai_loop_utils.get_effective_detect_range_size(config, (1920, 1080)) == 400
+
+    def test_tolerates_missing_fov_height(self, ai_loop_utils):
+        """A config predating fov_height must fall back to treating the FOV
+        as square (fov_height == fov_size), matching pre-rectangle behavior."""
+        from types import SimpleNamespace
+        config = SimpleNamespace(fov_size=150, detect_range_size=50)
+        assert ai_loop_utils.get_effective_detect_range_size(config, (1920, 1080)) == 150
+
+
+class TestEllipseIntersectsBbox:
+    """_ellipse_intersects_bbox is the shared in/out test behind
+    filter_boxes_by_fov's elliptical mode (and overlay.py's tracer-line /
+    box-highlight passes, via the same function) — a plain circle when
+    a == b, an ellipse otherwise."""
+
+    def test_box_containing_center_intersects(self, ai_loop_utils):
+        assert ai_loop_utils._ellipse_intersects_bbox(0, 0, 100, 50, -5, -5, 5, 5) is True
+
+    def test_box_far_outside_does_not_intersect(self, ai_loop_utils):
+        assert ai_loop_utils._ellipse_intersects_bbox(0, 0, 100, 50, 200, 200, 210, 210) is False
+
+    def test_box_touching_major_axis_boundary_intersects(self, ai_loop_utils):
+        assert ai_loop_utils._ellipse_intersects_bbox(0, 0, 100, 50, 100, -1, 102, 1) is True
+
+    def test_box_just_past_major_axis_boundary_does_not_intersect(self, ai_loop_utils):
+        assert ai_loop_utils._ellipse_intersects_bbox(0, 0, 100, 50, 101, -1, 103, 1) is False
+
+    def test_reduces_to_plain_circle_when_axes_equal(self, ai_loop_utils):
+        """a == b must reproduce the original circle-only test exactly —
+        a box just inside vs. just outside a radius-50 circle."""
+        assert ai_loop_utils._ellipse_intersects_bbox(0, 0, 50, 50, -1, 49, 1, 51) is True
+        assert ai_loop_utils._ellipse_intersects_bbox(0, 0, 50, 50, -1, 51, 1, 53) is False
+
+    def test_non_positive_semi_axis_never_intersects(self, ai_loop_utils):
+        assert ai_loop_utils._ellipse_intersects_bbox(0, 0, 0, 50, -5, -5, 5, 5) is False
+        assert ai_loop_utils._ellipse_intersects_bbox(0, 0, 100, 0, -5, -5, 5, 5) is False
+
+
+class TestFilterBoxesByFov:
+    """filter_boxes_by_fov's fov_size argument is the FOV's width;
+    config.fov_height supplies the height (defaulting to fov_size — a
+    square — when config doesn't have it, so every pre-rectangle caller
+    keeps behaving exactly as before)."""
+
+    def test_square_default_behavior_unchanged(self, ai_loop_utils):
+        """No config at all -> fov_height falls back to fov_size, so this
+        must filter exactly like the pre-rectangle square test."""
+        boxes = [[45, 45, 55, 55], [200, 200, 210, 210]]
+        confs = [0.9, 0.5]
+        kept_boxes, kept_confs = ai_loop_utils.filter_boxes_by_fov(
+            boxes, confs, crosshair_x=50, crosshair_y=50, fov_size=100, config=None)
+        assert kept_boxes == [[45, 45, 55, 55]]
+        assert kept_confs == [0.9]
+
+    def test_rectangle_keeps_box_within_extra_height_but_outside_square(self, ai_loop_utils):
+        """A box beyond what a 100x100 square would allow vertically, but
+        within a 100-wide x 300-tall rectangle, must be kept only once
+        fov_height actually supplies that extra vertical reach."""
+        from types import SimpleNamespace
+        boxes = [[45, 145, 55, 155]]  # 95-105px below crosshair on Y
+        confs = [0.9]
+
+        square_config = SimpleNamespace(fov_circle_filter_enabled=False)  # no fov_height -> square
+        kept, _ = ai_loop_utils.filter_boxes_by_fov(
+            boxes, confs, crosshair_x=50, crosshair_y=50, fov_size=100, config=square_config)
+        assert kept == [], "a 100x100 square shouldn't reach a box ~150px below crosshair"
+
+        rect_config = SimpleNamespace(fov_circle_filter_enabled=False, fov_height=300)
+        kept, _ = ai_loop_utils.filter_boxes_by_fov(
+            boxes, confs, crosshair_x=50, crosshair_y=50, fov_size=100, config=rect_config)
+        assert kept == boxes, "a 100x300 rectangle should reach the same box"
+
+    def test_rectangle_still_excludes_box_beyond_the_narrower_width(self, ai_loop_utils):
+        """The same rectangle must still reject a box that's out of reach
+        horizontally — width isn't just ignored once height grows."""
+        from types import SimpleNamespace
+        boxes = [[195, 45, 205, 55]]  # ~150-155px to the right of crosshair
+        confs = [0.9]
+        rect_config = SimpleNamespace(fov_circle_filter_enabled=False, fov_height=300)
+        kept, _ = ai_loop_utils.filter_boxes_by_fov(
+            boxes, confs, crosshair_x=50, crosshair_y=50, fov_size=100, config=rect_config)
+        assert kept == []
+
+    def test_ellipse_mode_reduces_to_circle_when_square(self, ai_loop_utils):
+        from types import SimpleNamespace
+        # fov_size=100 -> radius 50. Just inside vs. just past that boundary.
+        boxes = [[48, -2, 52, 2], [51, -2, 55, 2]]
+        confs = [0.9, 0.5]
+        config = SimpleNamespace(fov_circle_filter_enabled=True)  # no fov_height -> circle
+        kept, kept_confs = ai_loop_utils.filter_boxes_by_fov(
+            boxes, confs, crosshair_x=0, crosshair_y=0, fov_size=100, config=config)
+        assert kept == [[48, -2, 52, 2]]
+        assert kept_confs == [0.9]
+
+    def test_ellipse_mode_with_unequal_axes(self, ai_loop_utils):
+        """fov_height != fov_size under circle mode must produce a true
+        ellipse — a box that clears a radius-50 circle vertically but sits
+        well within a semi-minor-axis-25 ellipse's height must be dropped."""
+        from types import SimpleNamespace
+        box_within_circle_not_ellipse = [-2, 40, 2, 48]  # ~40-48px above crosshair
+        config_circle = SimpleNamespace(fov_circle_filter_enabled=True, fov_height=100)  # r=50
+        kept, _ = ai_loop_utils.filter_boxes_by_fov(
+            [box_within_circle_not_ellipse], [0.9],
+            crosshair_x=0, crosshair_y=0, fov_size=100, config=config_circle)
+        assert kept == [box_within_circle_not_ellipse]
+
+        config_ellipse = SimpleNamespace(fov_circle_filter_enabled=True, fov_height=50)  # b=25
+        kept, _ = ai_loop_utils.filter_boxes_by_fov(
+            [box_within_circle_not_ellipse], [0.9],
+            crosshair_x=0, crosshair_y=0, fov_size=100, config=config_ellipse)
+        assert kept == []
+
 
 class TestReduceBoxesForSingleTarget:
     """Regression coverage for the single_target_mode / sticky_lock_enabled

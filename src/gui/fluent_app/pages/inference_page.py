@@ -54,6 +54,18 @@ class InferencePage(BasePage):
             parent=self.fovGroup
         )
 
+        # Independent from fovCard/fov_size — equal by default (a square,
+        # matching pre-rectangle-support behavior), but can diverge to make
+        # the FOV a rectangle (or, with fovCircleCard on, an ellipse). See
+        # ai_loop_utils.filter_boxes_by_fov().
+        self.fovHeightCard = SliderSpinCard(
+            FluentIcon.ZOOM,
+            t("fov_height", "FOV Height"),
+            50, 500,
+            description="",
+            parent=self.fovGroup
+        )
+
         self.fovFollowCard = SwitchSettingCard(
             FluentIcon.MOVE,
             t("fov_follow_mouse"),
@@ -64,7 +76,7 @@ class InferencePage(BasePage):
         self.fovCircleCard = SwitchSettingCard(
             FluentIcon.REMOVE,
             t("fov_circle_filter", "Circular FOV Filter"),
-            t("fov_circle_filter_desc", "Only track targets inside the FOV circle, not the full square region"),
+            t("fov_circle_filter_desc", "Only track targets inside the FOV ellipse — a circle when Width equals Height — instead of the full rectangular region"),
             parent=self.fovGroup
         )
 
@@ -190,6 +202,7 @@ class InferencePage(BasePage):
 
     def _initLayout(self):
         self.fovGroup.addSettingCard(self.fovCard)
+        self.fovGroup.addSettingCard(self.fovHeightCard)
         self.fovGroup.addSettingCard(self.fovFollowCard)
         self.fovGroup.addSettingCard(self.fovCircleCard)
         self.fovGroup.addSettingCard(self.detectRangeCard)
@@ -219,6 +232,7 @@ class InferencePage(BasePage):
 
     def _connectSignals(self):
         self.fovCard.valueChanged.connect(self._onFovChanged)
+        self.fovHeightCard.valueChanged.connect(self._onFovHeightChanged)
         self.fovFollowCard.checkedChanged.connect(self._onFovFollowChanged)
         self.fovCircleCard.checkedChanged.connect(self._onFovCircleChanged)
         self.detectRangeCard.valueChanged.connect(self._onDetectRangeChanged)
@@ -248,6 +262,7 @@ class InferencePage(BasePage):
         self._isLoadingConfig = True
         try:
             self.fovCard.setValue(self._config.fov_size)
+            self.fovHeightCard.setValue(int(getattr(self._config, 'fov_height', self._config.fov_size)))
             self.fovFollowCard.setChecked(self._config.fov_follow_mouse)
             self.fovCircleCard.setChecked(bool(getattr(self._config, 'fov_circle_filter_enabled', False)))
             self.detectRangeCard.setValue(self._config.detect_range_size)
@@ -328,6 +343,10 @@ class InferencePage(BasePage):
         if self._config:
             self._config.fov_size = value
 
+    def _onFovHeightChanged(self, value):
+        if self._config:
+            self._config.fov_height = value
+
     def _onFovFollowChanged(self, checked):
         if self._config:
             self._config.fov_follow_mouse = checked
@@ -407,9 +426,10 @@ class InferencePage(BasePage):
         self.inferPerfGroup.titleLabel.setText(t("inference_performance", "Inference Performance"))
 
         self.fovCard.titleLabel.setText(t("fov_size"))
+        self.fovHeightCard.titleLabel.setText(t("fov_height", "FOV Height"))
         self.fovFollowCard.titleLabel.setText(t("fov_follow_mouse"))
         self.fovCircleCard.titleLabel.setText(t("fov_circle_filter", "Circular FOV Filter"))
-        self.fovCircleCard.contentLabel.setText(t("fov_circle_filter_desc", "Only track targets inside the FOV circle, not the full square region"))
+        self.fovCircleCard.contentLabel.setText(t("fov_circle_filter_desc", "Only track targets inside the FOV ellipse — a circle when Width equals Height — instead of the full rectangular region"))
         self.detectRangeCard.titleLabel.setText(t("detect_range_size"))
         self.detectRangeCard.contentLabel.setText(t("detect_range_note"))
 

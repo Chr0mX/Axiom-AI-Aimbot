@@ -88,6 +88,7 @@ _FIELD_MAP = {
 
     # --- aim ---
     'fov_size':                   'aim.fov_size',
+    'fov_height':                 'aim.fov_height',
     'detect_range_size':          'aim.detect_range_size',
     'min_confidence':             'aim.min_confidence',
     'aim_part':                   'aim.aim_part',
@@ -367,7 +368,12 @@ class Config:
 
         # Aiming and display settings
         self.AimKeys: List[int] = [0x01, 0x06, 0x02]  # Left Click + X2 Key + Right Click
-        self.fov_size: int = 200
+        self.fov_size: int = 200    # FOV width (px). Kept as the pre-existing name/meaning.
+        self.fov_height: int = 200  # FOV height (px). Equal to fov_size by default -> a square,
+                                     # exactly matching pre-rectangle-support behavior. Independent
+                                     # from fov_size lets the FOV become a rectangle (or, with
+                                     # fov_circle_filter_enabled, an ellipse) instead of forcing a
+                                     # square/circle — see ai_loop_utils.filter_boxes_by_fov().
 
         # AI detection range (square edge length): Separated from fov_size, but must not be smaller than fov_size, and must not be larger than screen height
         self.detect_range_size: int = 320 # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）
@@ -911,7 +917,8 @@ def _validate_detect_range_size(config: Config) -> None:
     """驗證並修正 AI 偵測範圍（正方形邊長）
 
     規則：
-    - 最小不得小於 fov_size
+    - 最小不得小於 max(fov_size, fov_height) — the square detection region
+      must be able to contain the full FOV rectangle, not just its width
     - 最大不得大於螢幕高度
     """
     try:
@@ -919,7 +926,9 @@ def _validate_detect_range_size(config: Config) -> None:
     except (TypeError, ValueError):
         raw = int(config.height)
 
-    min_size = int(getattr(config, 'fov_size', 0) or 0)
+    fov_w = int(getattr(config, 'fov_size', 0) or 0)
+    fov_h = int(getattr(config, 'fov_height', 0) or 0)
+    min_size = max(fov_w, fov_h)
     max_size = int(getattr(config, 'height', raw) or raw)
     if max_size <= 0:
         max_size = raw if raw > 0 else 1
