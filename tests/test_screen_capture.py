@@ -713,3 +713,119 @@ def test_wait_for_receiver_connection_succeeds_after_connect(monkeypatch):
     )
 
     assert ok is True
+
+
+# ── _draw_detection_overlay: rectangular / elliptical FOV ──────────────────
+#
+# The Qt in-game overlay (overlay.py) can't render over a UVC/NDI/UDP source
+# the way it does over the real desktop, so those three backends bake FOV/
+# box annotations straight into the preview frame via this shared function
+# instead. It used to only read fov_size (a square, or a plain circle) —
+# fov_height support landed everywhere else (the real filter in
+# ai_loop_utils.py, the Qt overlay, the Web ESP client) but was missed here,
+# which is exactly why a rectangular FOV only appeared to work for
+# dxcam/mss: those are the only two backends that go through overlay.py
+# instead of this function.
+
+def _make_overlay_config(**overrides):
+    base = dict(
+        AimToggle=True,
+        crosshairX=500,
+        crosshairY=500,
+        show_detect_range=False,
+        show_fov=True,
+        fov_size=200,
+        fov_height=200,
+        fov_circle_filter_enabled=False,
+        show_boxes=False,
+        latest_boxes=[],
+        latest_confidences=[],
+        show_confidence=False,
+        box_color_theme='default',
+        chroma_box_speed=0.0,
+        box_full_rect=False,
+        show_tracer_line=False,
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def test_draw_detection_overlay_fov_corners_use_independent_width_and_height(monkeypatch):
+    from core import screen_capture as sc
+
+    lines = []
+    monkeypatch.setattr(sc.cv2, 'line', lambda *a, **k: lines.append(a))
+
+    config = _make_overlay_config(fov_size=200, fov_height=400)  # width 200, height 400
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+    sc._draw_detection_overlay(frame, None, config, has_alpha=True)
+
+    xs = [pt[0] for call in lines for pt in (call[1], call[2])]
+    ys = [pt[1] for call in lines for pt in (call[1], call[2])]
+    assert min(xs) == 400 and max(xs) == 600, "width=200 -> crosshair (500) +/- 100"
+    assert min(ys) == 300 and max(ys) == 700, "height=400 -> crosshair (500) +/- 200"
+
+
+def test_draw_detection_overlay_ellipse_axes_match_width_and_height(monkeypatch):
+    """fov_circle_filter_enabled must draw a true ellipse (independent
+    semi-axes), not a circle keyed off fov_size alone."""
+    from core import screen_capture as sc
+
+    ellipse_calls = []
+    monkeypatch.setattr(sc.cv2, 'ellipse', lambda *a, **k: ellipse_calls.append(a))
+
+    config = _make_overlay_config(fov_size=200, fov_height=400, fov_circle_filter_enabled=True)
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+    sc._draw_detection_overlay(frame, None, config, has_alpha=True)
+
+    assert len(ellipse_calls) == 1
+    axes = ellipse_calls[0][2]
+    assert axes == (100, 200), "semi-axes must be half of (fov_size, fov_height)"
+
+
+def test_draw_detection_overlay_box_highlight_reaches_the_taller_dimension(monkeypatch):
+    """A box beyond a square/circle's reach vertically, but within the
+    rectangle's greater height, must still be recognized as in-FOV (drawn
+    with the chroma color) once fov_height supplies that extra reach."""
+    from core import screen_capture as sc
+
+    rects = []
+    monkeypatch.setattr(sc.cv2, 'rectangle', lambda *a, **k: rects.append(a))
+
+    # Box centered ~100px below crosshair on Y, well within +/-2px on X.
+    box = [498, 598, 502, 602]
+    config = _make_overlay_config(
+        crosshairX=500, crosshairY=500,
+        fov_size=50, fov_height=250,  # half_x=25 (misses), half_y=125 (reaches)
+        fov_circle_filter_enabled=True,
+        show_boxes=True, latest_boxes=[box], latest_confidences=[0.9],
+        chroma_box_speed=1.0, box_full_rect=True,
+    )
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+
+    sc._draw_detection_overlay(frame, None, config, has_alpha=True)
+    assert len(rects) == 1
+    drawn_color = rects[0][3]
+    # The theme default color (BGR 0,255,0 + alpha) would be drawn if the
+    # box were judged out-of-FOV; anything else means the chroma color won,
+    # i.e. the box was correctly recognized as in-FOV.
+    assert drawn_color != (0, 255, 0, 220)
+
+
+def test_draw_detection_overlay_tracer_line_respects_ellipse_height(monkeypatch):
+    from core import screen_capture as sc
+
+    lines = []
+    monkeypatch.setattr(sc.cv2, 'line', lambda *a, **k: lines.append(a))
+
+    box = [495, 595, 505, 605]  # midpoint (500, 600) -> 100px below crosshair
+    config = _make_overlay_config(
+        crosshairX=500, crosshairY=500,
+        fov_size=50, fov_height=250,  # half_x=25, half_y=125
+        fov_circle_filter_enabled=True,
+        show_fov=False, show_tracer_line=True, latest_boxes=[box],
+    )
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+    sc._draw_detection_overlay(frame, None, config, has_alpha=True)
+
+    assert len(lines) == 1, "the tracer line must reach a box within the ellipse's height, not just its width"
