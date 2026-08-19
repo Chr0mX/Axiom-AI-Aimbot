@@ -1986,24 +1986,31 @@ class AimPage(BasePage):
         self._updateHumanizationSubEnabled()
 
     def _updateHumanizationSubEnabled(self):
-        """A sub-parameter slider is enabled only while both the master
-        Humanization switch AND its own feature's toggle are on."""
+        """A sub-parameter slider is shown (and enabled) only while both the
+        master Humanization switch AND its own feature's toggle are on —
+        hidden rather than just greyed out, so an off feature doesn't leave
+        clutter behind."""
         h_on = self.humanizationEnableCard.isChecked()
         jitter_on = h_on and self.humanizationMicroJitterCard.isChecked()
-        self.humanizationJitterBaseCard.setEnabled(jitter_on)
-        self.humanizationJitterScaleCard.setEnabled(jitter_on)
+        for card in (self.humanizationJitterBaseCard, self.humanizationJitterScaleCard):
+            card.setEnabled(jitter_on)
+            card.setVisible(jitter_on)
         variation_on = h_on and self.humanizationMotionVariationCard.isChecked()
         self.humanizationMotionVariationRangeCard.setEnabled(variation_on)
+        self.humanizationMotionVariationRangeCard.setVisible(variation_on)
         shaping_on = h_on and self.humanizationSpeedShapingCard.isChecked()
-        self.humanizationSpeedShapingLowCard.setEnabled(shaping_on)
-        self.humanizationSpeedShapingHighCard.setEnabled(shaping_on)
-        self.humanizationSpeedShapingLowFactorCard.setEnabled(shaping_on)
+        for card in (self.humanizationSpeedShapingLowCard, self.humanizationSpeedShapingHighCard,
+                     self.humanizationSpeedShapingLowFactorCard):
+            card.setEnabled(shaping_on)
+            card.setVisible(shaping_on)
         stutter_on = h_on and self.humanizationMicroStutterCard.isChecked()
-        self.humanizationStutterProbCard.setEnabled(stutter_on)
-        self.humanizationStutterMinCard.setEnabled(stutter_on)
-        self.humanizationStutterMaxCard.setEnabled(stutter_on)
+        for card in (self.humanizationStutterProbCard, self.humanizationStutterMinCard,
+                     self.humanizationStutterMaxCard):
+            card.setEnabled(stutter_on)
+            card.setVisible(stutter_on)
         reaction_on = h_on and self.humanizationReactionVariabilityCard.isChecked()
         self.humanizationReactionSkipProbCard.setEnabled(reaction_on)
+        self.humanizationReactionSkipProbCard.setVisible(reaction_on)
 
     def _onHumanizationEnableChanged(self, checked):
         h_on = bool(checked)
