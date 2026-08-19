@@ -108,6 +108,26 @@ def _try_hot_swap_model(
         config.model_path = current_model_path
         return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
 
+    # A TensorRT session with no cached .engine yet compiles one synchronously
+    # inside InferenceSession(...) — a 1-5 minute call. This function runs
+    # once per frame on the main inference thread, so doing that inline would
+    # freeze the whole aim loop with zero progress feedback. The GUI's
+    # model/backend selectors (model_page.py) already check this before ever
+    # writing a combination like that to config, redirecting to the Convert
+    # tab instead — this is a safety net for paths that bypass the GUI (a
+    # loaded preset, a hand-edited config.json, a race with the Convert
+    # worker) rather than the primary UX.
+    from .session_utils import needs_trt_build
+    if needs_trt_build(config, abs_model_path):
+        logger.warning(
+            "[Model HotSwap] Skipping swap to %s — no cached TensorRT engine yet "
+            "(building one inline would block the inference loop for 1-5 min). "
+            "Convert it first via the Convert tab.",
+            os.path.basename(abs_model_path),
+        )
+        config.model_path = current_model_path
+        return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
+
     try:
         import onnxruntime as _ort
 

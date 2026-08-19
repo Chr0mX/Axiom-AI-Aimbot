@@ -1,6 +1,7 @@
 # session_utils.py
 """ONNX Runtime session optimization - inference performance configuration."""
 
+import glob
 import logging
 import os
 import sys
@@ -267,6 +268,58 @@ def build_provider_list(config) -> list:
             result.append(provider)
 
     return result or ["CPUExecutionProvider"]
+
+
+def find_trt_engine_cache(model_path: str, cache_dir: str | None = None) -> str | None:
+    """Return the newest cached .engine file for `model_path`, or None if one
+    hasn't been built yet.
+
+    Mirrors the `trt_engine_cache_prefix` convention build_provider_list()
+    sets above (the model's filename stem) — this answers exactly the
+    question ORT's TensorrtExecutionProvider asks internally when a session
+    is created: "is there already a usable engine, or will loading this
+    model trigger a fresh (1-5 minute) build?"
+    """
+    if not model_path:
+        return None
+    cache_dir = cache_dir or _TRT_CACHE_DIR
+    if not os.path.isdir(cache_dir):
+        return None
+    model_stem = os.path.splitext(os.path.basename(model_path))[0]
+    matches = glob.glob(os.path.join(cache_dir, f"{model_stem}*.engine"))
+    return sorted(matches)[-1] if matches else None
+
+
+def effective_first_provider(config) -> str:
+    """The provider build_provider_list(config) will actually try first for
+    this config — i.e. "is TensorRT the active backend right now" — without
+    duplicating build_provider_list()'s auto/backend-selection logic."""
+    providers = build_provider_list(config)
+    if not providers:
+        return "CPUExecutionProvider"
+    first = providers[0]
+    return first[0] if isinstance(first, tuple) else first
+
+
+def needs_trt_build(config, model_path: str) -> bool:
+    """True if loading `model_path` under `config`'s current backend settings
+    would require ORT's TensorrtExecutionProvider to compile a fresh engine
+    (no cached .engine yet) instead of loading an existing one from cache.
+
+    That fresh build is a synchronous, 1-5 minute call inside
+    onnxruntime.InferenceSession(...) — it must never run inline on the
+    hot-swap path (ai_loop.py's _try_hot_swap_model, called once per frame)
+    or it freezes the whole inference loop with no progress feedback. Callers
+    on the GUI side use this to redirect to the Convert tab and build the
+    engine there (background thread, progress bar) instead of ever setting
+    config.model_path to a combination that would trigger that inline build.
+    """
+    if effective_first_provider(config) != "TensorrtExecutionProvider":
+        return False
+    if not os.path.isabs(model_path):
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        model_path = os.path.join(project_root, model_path)
+    return find_trt_engine_cache(model_path) is None
 
 
 def optimize_onnx_session(config):
