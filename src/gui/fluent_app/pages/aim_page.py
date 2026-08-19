@@ -757,6 +757,121 @@ class AimPage(BasePage):
             parent=self.humanizationGroup
         )
 
+        # Fine-tuning sliders for the sub-parameters behind each feature above.
+        # Each slider is scaled like the PID Kp sliders (int travel / divisor ->
+        # float config value) — see _loadHumanizationFromConfig() / the matching
+        # _onHumanization*Changed() handler for each divisor.
+        self.humanizationJitterBaseCard = SliderLabelCard(
+            FluentIcon.MOVE,
+            t("humanization_jitter_base", "Jitter Base"),
+            0, 200,
+            format_func=lambda v: f"{v/100:.2f} px",
+            description=t("humanization_jitter_base_desc", "Minimum jitter amplitude added every frame, in pixels."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationJitterScaleCard = SliderLabelCard(
+            FluentIcon.MOVE,
+            t("humanization_jitter_scale", "Jitter Scale"),
+            0, 200,
+            format_func=lambda v: f"{v/10:.1f}%",
+            description=t("humanization_jitter_scale_desc", "Extra jitter added per pixel of movement, as % of movement size."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationMotionVariationRangeCard = SliderLabelCard(
+            FluentIcon.SYNC,
+            t("humanization_motion_variation_range", "Variation Range"),
+            0, 200,
+            format_func=lambda v: f"±{v/10:.1f}%",
+            description=t("humanization_motion_variation_range_desc", "Random output-scale range applied each frame (mean-preserving)."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationSpeedShapingLowCard = SliderLabelCard(
+            FluentIcon.ZOOM_IN,
+            t("humanization_speed_shaping_low", "Fine-Control Threshold"),
+            0, 100,
+            format_func=lambda v: f"{v/5:.1f} px",
+            description=t("humanization_speed_shaping_low_desc", "Movements below this size are compressed by the Low-Speed Factor."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationSpeedShapingHighCard = SliderLabelCard(
+            FluentIcon.ZOOM_OUT,
+            t("humanization_speed_shaping_high", "Full-Speed Threshold"),
+            0, 100,
+            format_func=lambda v: f"{v/2:.1f} px",
+            description=t("humanization_speed_shaping_high_desc", "Movements above this size pass through unmodified."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationSpeedShapingLowFactorCard = SliderLabelCard(
+            FluentIcon.ZOOM,
+            t("humanization_speed_shaping_low_factor", "Low-Speed Factor"),
+            0, 100,
+            format_func=lambda v: f"{v/100:.2f}",
+            description=t("humanization_speed_shaping_low_factor_desc", "Magnitude scale applied to movements below the Fine-Control Threshold."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationStutterProbCard = SliderLabelCard(
+            FluentIcon.PAUSE_BOLD,
+            t("humanization_stutter_prob", "Stutter Chance"),
+            0, 200,
+            format_func=lambda v: f"{v/10:.1f}%",
+            description=t("humanization_stutter_prob_desc", "Probability per frame of a brief magnitude reduction."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationStutterMinCard = SliderLabelCard(
+            FluentIcon.PAUSE_BOLD,
+            t("humanization_stutter_min", "Stutter Min"),
+            0, 100,
+            format_func=lambda v: f"{v/100:.2f}",
+            description=t("humanization_stutter_min_desc", "Lower bound of the stutter magnitude factor."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationStutterMaxCard = SliderLabelCard(
+            FluentIcon.PAUSE_BOLD,
+            t("humanization_stutter_max", "Stutter Max"),
+            0, 100,
+            format_func=lambda v: f"{v/100:.2f}",
+            description=t("humanization_stutter_max_desc", "Upper bound of the stutter magnitude factor."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationReactionSkipProbCard = SliderLabelCard(
+            FluentIcon.PAUSE_BOLD,
+            t("humanization_reaction_skip_prob", "Skip Chance"),
+            0, 100,
+            format_func=lambda v: f"{v/10:.1f}%",
+            description=t("humanization_reaction_skip_prob_desc", "Probability per frame of skipping the mouse injection entirely."),
+            slider_width=160,
+            parent=self.humanizationGroup
+        )
+
+        self.humanizationResetBtn = PushButton(t("humanization_reset", "Reset to Defaults"))
+        self.humanizationResetBtn.setFixedWidth(160)
+        self.humanizationResetCard = SettingCard(
+            FluentIcon.ROTATE,
+            t("humanization_reset", "Reset to Defaults"),
+            t("humanization_reset_desc", "Reset the whole Humanization section — Intensity, every feature toggle, and every fine-tuning slider above — back to default values."),
+            self.humanizationGroup
+        )
+        self.humanizationResetCard.hBoxLayout.addWidget(self.humanizationResetBtn, 0)
+        self.humanizationResetCard.hBoxLayout.addSpacing(16)
+
         # === Target Priority ===
         self.targetPriorityGroup = SettingCardGroup(t("target_priority", "Target Priority"), self.scrollWidget)
 
@@ -1053,10 +1168,21 @@ class AimPage(BasePage):
         self.humanizationGroup.addSettingCard(self.humanizationEnableCard)
         self.humanizationGroup.addSettingCard(self.humanizationIntensityCard)
         self.humanizationGroup.addSettingCard(self.humanizationMicroJitterCard)
+        self.humanizationGroup.addSettingCard(self.humanizationJitterBaseCard)
+        self.humanizationGroup.addSettingCard(self.humanizationJitterScaleCard)
         self.humanizationGroup.addSettingCard(self.humanizationMotionVariationCard)
+        self.humanizationGroup.addSettingCard(self.humanizationMotionVariationRangeCard)
         self.humanizationGroup.addSettingCard(self.humanizationSpeedShapingCard)
+        self.humanizationGroup.addSettingCard(self.humanizationSpeedShapingLowCard)
+        self.humanizationGroup.addSettingCard(self.humanizationSpeedShapingHighCard)
+        self.humanizationGroup.addSettingCard(self.humanizationSpeedShapingLowFactorCard)
         self.humanizationGroup.addSettingCard(self.humanizationMicroStutterCard)
+        self.humanizationGroup.addSettingCard(self.humanizationStutterProbCard)
+        self.humanizationGroup.addSettingCard(self.humanizationStutterMinCard)
+        self.humanizationGroup.addSettingCard(self.humanizationStutterMaxCard)
         self.humanizationGroup.addSettingCard(self.humanizationReactionVariabilityCard)
+        self.humanizationGroup.addSettingCard(self.humanizationReactionSkipProbCard)
+        self.humanizationGroup.addSettingCard(self.humanizationResetCard)
         self.addContent(self.humanizationGroup)
 
         # Target Priority
@@ -1150,6 +1276,17 @@ class AimPage(BasePage):
         self.humanizationSpeedShapingCard.checkedChanged.connect(self._onHumanizationSpeedShapingChanged)
         self.humanizationMicroStutterCard.checkedChanged.connect(self._onHumanizationMicroStutterChanged)
         self.humanizationReactionVariabilityCard.checkedChanged.connect(self._onHumanizationReactionVariabilityChanged)
+        self.humanizationJitterBaseCard.valueChanged.connect(self._onHumanizationJitterBaseChanged)
+        self.humanizationJitterScaleCard.valueChanged.connect(self._onHumanizationJitterScaleChanged)
+        self.humanizationMotionVariationRangeCard.valueChanged.connect(self._onHumanizationMotionVariationRangeChanged)
+        self.humanizationSpeedShapingLowCard.valueChanged.connect(self._onHumanizationSpeedShapingLowChanged)
+        self.humanizationSpeedShapingHighCard.valueChanged.connect(self._onHumanizationSpeedShapingHighChanged)
+        self.humanizationSpeedShapingLowFactorCard.valueChanged.connect(self._onHumanizationSpeedShapingLowFactorChanged)
+        self.humanizationStutterProbCard.valueChanged.connect(self._onHumanizationStutterProbChanged)
+        self.humanizationStutterMinCard.valueChanged.connect(self._onHumanizationStutterMinChanged)
+        self.humanizationStutterMaxCard.valueChanged.connect(self._onHumanizationStutterMaxChanged)
+        self.humanizationReactionSkipProbCard.valueChanged.connect(self._onHumanizationReactionSkipProbChanged)
+        self.humanizationResetBtn.clicked.connect(self._onHumanizationResetClicked)
 
         # Target Priority
         self.targetPriorityModeCombo.currentTextChanged.connect(self._onTargetPriorityModeChanged)
@@ -1267,21 +1404,7 @@ class AimPage(BasePage):
             self.jitterSpeedCard.setEnabled(sj_on)
 
             # Humanization
-            hcfg = getattr(self._config, 'humanization', None)
-            h_on = bool(getattr(hcfg, 'enabled', False))
-            self.humanizationEnableCard.setChecked(h_on)
-            self.humanizationIntensityCard.setValue(int(getattr(hcfg, 'intensity', 0.5) * 100))
-            self.humanizationMicroJitterCard.setChecked(bool(getattr(hcfg, 'micro_jitter_enabled', True)))
-            self.humanizationMotionVariationCard.setChecked(bool(getattr(hcfg, 'motion_variation_enabled', True)))
-            self.humanizationSpeedShapingCard.setChecked(bool(getattr(hcfg, 'speed_shaping_enabled', True)))
-            self.humanizationMicroStutterCard.setChecked(bool(getattr(hcfg, 'micro_stutter_enabled', False)))
-            self.humanizationReactionVariabilityCard.setChecked(bool(getattr(hcfg, 'reaction_variability_enabled', False)))
-            self.humanizationIntensityCard.setEnabled(h_on)
-            self.humanizationMicroJitterCard.setEnabled(h_on)
-            self.humanizationMotionVariationCard.setEnabled(h_on)
-            self.humanizationSpeedShapingCard.setEnabled(h_on)
-            self.humanizationMicroStutterCard.setEnabled(h_on)
-            self.humanizationReactionVariabilityCard.setEnabled(h_on)
+            self._loadHumanizationFromConfig()
 
             # Target Priority
             mode_map = {"distance": "Distance", "confidence": "Confidence", "composite": "Composite"}
@@ -1818,6 +1941,77 @@ class AimPage(BasePage):
 
     # === Humanization Callbacks ===
 
+    def _loadHumanizationFromConfig(self):
+        """Push self._config.humanization into every Humanization widget,
+        including the fine-tuning sub-parameter sliders. Shared by
+        _loadFromConfig() and the Reset to Defaults button so both stay in
+        sync with one code path."""
+        if not self._config:
+            return
+        hcfg = getattr(self._config, 'humanization', None)
+        h_on = bool(getattr(hcfg, 'enabled', False))
+        self.humanizationEnableCard.setChecked(h_on)
+        self.humanizationIntensityCard.setValue(int(getattr(hcfg, 'intensity', 0.5) * 100))
+        self.humanizationMicroJitterCard.setChecked(bool(getattr(hcfg, 'micro_jitter_enabled', True)))
+        self.humanizationJitterBaseCard.setValue(
+            min(200, max(0, int(getattr(hcfg, 'micro_jitter_base', 0.20) * 100))))
+        self.humanizationJitterScaleCard.setValue(
+            min(200, max(0, int(getattr(hcfg, 'micro_jitter_scale', 0.025) * 1000))))
+        self.humanizationMotionVariationCard.setChecked(bool(getattr(hcfg, 'motion_variation_enabled', True)))
+        self.humanizationMotionVariationRangeCard.setValue(
+            min(200, max(0, int(getattr(hcfg, 'motion_variation_range', 0.06) * 1000))))
+        self.humanizationSpeedShapingCard.setChecked(bool(getattr(hcfg, 'speed_shaping_enabled', True)))
+        self.humanizationSpeedShapingLowCard.setValue(
+            min(100, max(0, int(getattr(hcfg, 'speed_shaping_low', 4.0) * 5))))
+        self.humanizationSpeedShapingHighCard.setValue(
+            min(100, max(0, int(getattr(hcfg, 'speed_shaping_high', 22.0) * 2))))
+        self.humanizationSpeedShapingLowFactorCard.setValue(
+            min(100, max(0, int(getattr(hcfg, 'speed_shaping_low_factor', 0.88) * 100))))
+        self.humanizationMicroStutterCard.setChecked(bool(getattr(hcfg, 'micro_stutter_enabled', False)))
+        self.humanizationStutterProbCard.setValue(
+            min(200, max(0, int(getattr(hcfg, 'micro_stutter_prob', 0.03) * 1000))))
+        self.humanizationStutterMinCard.setValue(
+            min(100, max(0, int(getattr(hcfg, 'micro_stutter_min', 0.65) * 100))))
+        self.humanizationStutterMaxCard.setValue(
+            min(100, max(0, int(getattr(hcfg, 'micro_stutter_max', 0.90) * 100))))
+        self.humanizationReactionVariabilityCard.setChecked(bool(getattr(hcfg, 'reaction_variability_enabled', False)))
+        self.humanizationReactionSkipProbCard.setValue(
+            min(100, max(0, int(getattr(hcfg, 'reaction_skip_prob', 0.015) * 1000))))
+        self.humanizationIntensityCard.setEnabled(h_on)
+        self.humanizationMicroJitterCard.setEnabled(h_on)
+        self.humanizationMotionVariationCard.setEnabled(h_on)
+        self.humanizationSpeedShapingCard.setEnabled(h_on)
+        self.humanizationMicroStutterCard.setEnabled(h_on)
+        self.humanizationReactionVariabilityCard.setEnabled(h_on)
+        self._updateHumanizationSubEnabled()
+
+    def _updateHumanizationSubEnabled(self):
+        """A sub-parameter slider is shown (and enabled) only while both the
+        master Humanization switch AND its own feature's toggle are on —
+        hidden rather than just greyed out, so an off feature doesn't leave
+        clutter behind."""
+        h_on = self.humanizationEnableCard.isChecked()
+        jitter_on = h_on and self.humanizationMicroJitterCard.isChecked()
+        for card in (self.humanizationJitterBaseCard, self.humanizationJitterScaleCard):
+            card.setEnabled(jitter_on)
+            card.setVisible(jitter_on)
+        variation_on = h_on and self.humanizationMotionVariationCard.isChecked()
+        self.humanizationMotionVariationRangeCard.setEnabled(variation_on)
+        self.humanizationMotionVariationRangeCard.setVisible(variation_on)
+        shaping_on = h_on and self.humanizationSpeedShapingCard.isChecked()
+        for card in (self.humanizationSpeedShapingLowCard, self.humanizationSpeedShapingHighCard,
+                     self.humanizationSpeedShapingLowFactorCard):
+            card.setEnabled(shaping_on)
+            card.setVisible(shaping_on)
+        stutter_on = h_on and self.humanizationMicroStutterCard.isChecked()
+        for card in (self.humanizationStutterProbCard, self.humanizationStutterMinCard,
+                     self.humanizationStutterMaxCard):
+            card.setEnabled(stutter_on)
+            card.setVisible(stutter_on)
+        reaction_on = h_on and self.humanizationReactionVariabilityCard.isChecked()
+        self.humanizationReactionSkipProbCard.setEnabled(reaction_on)
+        self.humanizationReactionSkipProbCard.setVisible(reaction_on)
+
     def _onHumanizationEnableChanged(self, checked):
         h_on = bool(checked)
         if self._config and getattr(self._config, 'humanization', None) is not None:
@@ -1828,6 +2022,7 @@ class AimPage(BasePage):
         self.humanizationSpeedShapingCard.setEnabled(h_on)
         self.humanizationMicroStutterCard.setEnabled(h_on)
         self.humanizationReactionVariabilityCard.setEnabled(h_on)
+        self._updateHumanizationSubEnabled()
 
     def _onHumanizationIntensityChanged(self, value):
         if self._config and getattr(self._config, 'humanization', None) is not None:
@@ -1836,22 +2031,77 @@ class AimPage(BasePage):
     def _onHumanizationMicroJitterChanged(self, checked):
         if self._config and getattr(self._config, 'humanization', None) is not None:
             self._config.humanization.micro_jitter_enabled = bool(checked)
+        self._updateHumanizationSubEnabled()
 
     def _onHumanizationMotionVariationChanged(self, checked):
         if self._config and getattr(self._config, 'humanization', None) is not None:
             self._config.humanization.motion_variation_enabled = bool(checked)
+        self._updateHumanizationSubEnabled()
 
     def _onHumanizationSpeedShapingChanged(self, checked):
         if self._config and getattr(self._config, 'humanization', None) is not None:
             self._config.humanization.speed_shaping_enabled = bool(checked)
+        self._updateHumanizationSubEnabled()
 
     def _onHumanizationMicroStutterChanged(self, checked):
         if self._config and getattr(self._config, 'humanization', None) is not None:
             self._config.humanization.micro_stutter_enabled = bool(checked)
+        self._updateHumanizationSubEnabled()
 
     def _onHumanizationReactionVariabilityChanged(self, checked):
         if self._config and getattr(self._config, 'humanization', None) is not None:
             self._config.humanization.reaction_variability_enabled = bool(checked)
+        self._updateHumanizationSubEnabled()
+
+    def _onHumanizationJitterBaseChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.micro_jitter_base = value / 100.0
+
+    def _onHumanizationJitterScaleChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.micro_jitter_scale = value / 1000.0
+
+    def _onHumanizationMotionVariationRangeChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.motion_variation_range = value / 1000.0
+
+    def _onHumanizationSpeedShapingLowChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.speed_shaping_low = value / 5.0
+
+    def _onHumanizationSpeedShapingHighChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.speed_shaping_high = value / 2.0
+
+    def _onHumanizationSpeedShapingLowFactorChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.speed_shaping_low_factor = value / 100.0
+
+    def _onHumanizationStutterProbChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.micro_stutter_prob = value / 1000.0
+
+    def _onHumanizationStutterMinChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.micro_stutter_min = value / 100.0
+
+    def _onHumanizationStutterMaxChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.micro_stutter_max = value / 100.0
+
+    def _onHumanizationReactionSkipProbChanged(self, value):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.reaction_skip_prob = value / 1000.0
+
+    def _onHumanizationResetClicked(self):
+        """Reset the entire Humanization block (master toggle, Intensity,
+        every feature toggle, and every fine-tuning slider) back to the
+        HumanizationConfig dataclass defaults, then refresh the widgets."""
+        if not self._config:
+            return
+        from core.humanization import HumanizationConfig
+        self._config.humanization = HumanizationConfig()
+        self._loadHumanizationFromConfig()
 
     # === Target Priority Callbacks ===
 
@@ -2040,14 +2290,37 @@ class AimPage(BasePage):
         self.humanizationIntensityCard.contentLabel.setText(t("humanization_intensity_desc", "0% = robotic precision, 100% = fully human-like. Scales every effect below."))
         self.humanizationMicroJitterCard.titleLabel.setText(t("humanization_micro_jitter", "Micro-Jitter"))
         self.humanizationMicroJitterCard.contentLabel.setText(t("humanization_micro_jitter_desc", "Small zero-mean noise added to every move, scaled by movement size."))
+        self.humanizationJitterBaseCard.titleLabel.setText(t("humanization_jitter_base", "Jitter Base"))
+        self.humanizationJitterBaseCard.contentLabel.setText(t("humanization_jitter_base_desc", "Minimum jitter amplitude added every frame, in pixels."))
+        self.humanizationJitterScaleCard.titleLabel.setText(t("humanization_jitter_scale", "Jitter Scale"))
+        self.humanizationJitterScaleCard.contentLabel.setText(t("humanization_jitter_scale_desc", "Extra jitter added per pixel of movement, as % of movement size."))
         self.humanizationMotionVariationCard.titleLabel.setText(t("humanization_motion_variation", "Motion Variation"))
         self.humanizationMotionVariationCard.contentLabel.setText(t("humanization_motion_variation_desc", "Randomize output scale slightly each frame (mean-preserving, no drift)."))
+        self.humanizationMotionVariationRangeCard.titleLabel.setText(t("humanization_motion_variation_range", "Variation Range"))
+        self.humanizationMotionVariationRangeCard.contentLabel.setText(t("humanization_motion_variation_range_desc", "Random output-scale range applied each frame (mean-preserving)."))
         self.humanizationSpeedShapingCard.titleLabel.setText(t("humanization_speed_shaping", "Speed Shaping"))
         self.humanizationSpeedShapingCard.contentLabel.setText(t("humanization_speed_shaping_desc", "Compress small corrections and pass through large movements unmodified, like human fine-motor control."))
+        self.humanizationSpeedShapingLowCard.titleLabel.setText(t("humanization_speed_shaping_low", "Fine-Control Threshold"))
+        self.humanizationSpeedShapingLowCard.contentLabel.setText(t("humanization_speed_shaping_low_desc", "Movements below this size are compressed by the Low-Speed Factor."))
+        self.humanizationSpeedShapingHighCard.titleLabel.setText(t("humanization_speed_shaping_high", "Full-Speed Threshold"))
+        self.humanizationSpeedShapingHighCard.contentLabel.setText(t("humanization_speed_shaping_high_desc", "Movements above this size pass through unmodified."))
+        self.humanizationSpeedShapingLowFactorCard.titleLabel.setText(t("humanization_speed_shaping_low_factor", "Low-Speed Factor"))
+        self.humanizationSpeedShapingLowFactorCard.contentLabel.setText(t("humanization_speed_shaping_low_factor_desc", "Magnitude scale applied to movements below the Fine-Control Threshold."))
         self.humanizationMicroStutterCard.titleLabel.setText(t("humanization_micro_stutter", "Micro-Stutter"))
         self.humanizationMicroStutterCard.contentLabel.setText(t("humanization_micro_stutter_desc", "Occasional brief magnitude reduction, modeling muscle hesitation before committing to a move."))
+        self.humanizationStutterProbCard.titleLabel.setText(t("humanization_stutter_prob", "Stutter Chance"))
+        self.humanizationStutterProbCard.contentLabel.setText(t("humanization_stutter_prob_desc", "Probability per frame of a brief magnitude reduction."))
+        self.humanizationStutterMinCard.titleLabel.setText(t("humanization_stutter_min", "Stutter Min"))
+        self.humanizationStutterMinCard.contentLabel.setText(t("humanization_stutter_min_desc", "Lower bound of the stutter magnitude factor."))
+        self.humanizationStutterMaxCard.titleLabel.setText(t("humanization_stutter_max", "Stutter Max"))
+        self.humanizationStutterMaxCard.contentLabel.setText(t("humanization_stutter_max_desc", "Upper bound of the stutter magnitude factor."))
         self.humanizationReactionVariabilityCard.titleLabel.setText(t("humanization_reaction_variability", "Reaction Variability"))
         self.humanizationReactionVariabilityCard.contentLabel.setText(t("humanization_reaction_variability_desc", "Occasionally skip a frame's mouse injection to simulate human micro-hesitation. Adds real per-frame latency — off by default."))
+        self.humanizationReactionSkipProbCard.titleLabel.setText(t("humanization_reaction_skip_prob", "Skip Chance"))
+        self.humanizationReactionSkipProbCard.contentLabel.setText(t("humanization_reaction_skip_prob_desc", "Probability per frame of skipping the mouse injection entirely."))
+        self.humanizationResetCard.titleLabel.setText(t("humanization_reset", "Reset to Defaults"))
+        self.humanizationResetCard.contentLabel.setText(t("humanization_reset_desc", "Reset the whole Humanization section — Intensity, every feature toggle, and every fine-tuning slider above — back to default values."))
+        self.humanizationResetBtn.setText(t("humanization_reset", "Reset to Defaults"))
 
         self.targetPriorityGroup.titleLabel.setText(t("target_priority", "Target Priority"))
         self.targetPriorityModeCard.titleLabel.setText(t("target_priority_mode", "Priority Mode"))
