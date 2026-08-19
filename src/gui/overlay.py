@@ -39,6 +39,24 @@ def _get_calculate_aim_target():
     return _calculate_aim_target
 
 
+_ellipse_intersects_bbox = None
+
+
+def _get_ellipse_intersects_bbox():
+    """Lazily import ai_loop_utils._ellipse_intersects_bbox so the overlay's
+    in-FOV test (tracer lines, box-color highlight) matches the real filter
+    in ai_loop_utils.filter_boxes_by_fov() exactly, instead of a third
+    duplicated copy of the ellipse math. ai_loop_utils.py doesn't actually
+    need deferring (its win32api import is itself inside a function — see
+    CLAUDE.md), but this module lazy-imports every core.* dependency for
+    consistency, matching _get_calculate_aim_target() above."""
+    global _ellipse_intersects_bbox
+    if _ellipse_intersects_bbox is None:
+        from core.ai_loop_utils import _ellipse_intersects_bbox as _fn
+        _ellipse_intersects_bbox = _fn
+    return _ellipse_intersects_bbox
+
+
 class OverlayColors:
     """Overlay Color Configuration - Integrated with ThemeColors for unified management"""
     
@@ -192,22 +210,26 @@ class PyQtOverlay(QWidget):
         painter.drawLine(x2, y2, x2 - corner_len, y2)
         painter.drawLine(x2, y2, x2, y2 - corner_len)
 
-    def draw_fov_corners(self, painter, cx, cy, fov, corner_length=20):
+    def draw_fov_corners(self, painter, cx, cy, fov_w, fov_h=None, corner_length=20):
         """Draw FOV corners
-        
+
         Draws L-shaped marker lines at the corners of the FOV box rather than a full box.
         This design reduces visual clutter while still clearly indicating the FOV range.
-        
+
         Args:
             painter: QPainter drawing object
             cx, cy: FOV center coordinates
-            fov: FOV box side length (square)
+            fov_w: FOV box width
+            fov_h: FOV box height (defaults to fov_w — a square, matching every
+                caller before rectangular FOV support was added)
             corner_length: length of corner markers, default 20 pixels
         """
-        x1 = cx - fov // 2
-        y1 = cy - fov // 2
-        x2 = cx + fov // 2
-        y2 = cy + fov // 2
+        if fov_h is None:
+            fov_h = fov_w
+        x1 = cx - fov_w // 2
+        y1 = cy - fov_h // 2
+        x2 = cx + fov_w // 2
+        y2 = cy + fov_h // 2
         
         # Top-left
         painter.drawLine(x1, y1, x1 + corner_length, y1)  # Horizontal
@@ -235,22 +257,22 @@ class PyQtOverlay(QWidget):
         pen = QPen(tracer_color, 2, Qt.PenStyle.SolidLine)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        fov_half = float(self.config.fov_size) / 2.0
+        fov_half_x = float(self.config.fov_size) / 2.0
+        fov_half_y = float(getattr(self.config, 'fov_height', self.config.fov_size)) / 2.0
         use_circle = getattr(self.config, 'fov_circle_filter_enabled', False)
         aim_part     = str(getattr(self.config, 'aim_part', 'head'))
         head_h_ratio = float(getattr(self.config, 'head_height_ratio', 0.26))
         calc_target = _get_calculate_aim_target()
+        ellipse_intersects_bbox = _get_ellipse_intersects_bbox() if use_circle else None
         for box in self.boxes:
             bx1, by1, bx2, by2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
             # Same in/out-of-FOV test the box-color pass uses, so the tracer
             # respects fov_circle_filter_enabled instead of a hardcoded square test.
             if use_circle:
-                nx = min(max(cx, bx1), bx2)
-                ny = min(max(cy, by1), by2)
-                in_fov = (nx - cx) ** 2 + (ny - cy) ** 2 <= fov_half * fov_half
+                in_fov = ellipse_intersects_bbox(float(cx), float(cy), fov_half_x, fov_half_y, bx1, by1, bx2, by2)
             else:
-                in_fov = (bx1 < cx + fov_half and bx2 > cx - fov_half and
-                          by1 < cy + fov_half and by2 > cy - fov_half)
+                in_fov = (bx1 < cx + fov_half_x and bx2 > cx - fov_half_x and
+                          by1 < cy + fov_half_y and by2 > cy - fov_half_y)
             if not in_fov:
                 continue
             bx, by = calc_target(list(box), aim_part, head_h_ratio, self.config)
@@ -274,7 +296,8 @@ class PyQtOverlay(QWidget):
         if show_detect_range:
             cx, cy = self.config.crosshairX, self.config.crosshairY
             range_size = int(getattr(self.config, 'detect_range_size', self.config.height))
-            range_size = max(int(self.config.fov_size), min(int(self.config.height), range_size))
+            fov_lower_bound = max(int(self.config.fov_size), int(getattr(self.config, 'fov_height', self.config.fov_size)))
+            range_size = max(fov_lower_bound, min(int(self.config.height), range_size))
             half = range_size // 2
             x1 = int(cx - half)
             y1 = int(cy - half)
@@ -288,16 +311,18 @@ class PyQtOverlay(QWidget):
 
         # 繪製 FOV 框（只顯示四角）- 使用主題顏色
         if show_fov:
-            fov = self.config.fov_size
+            fov_w = self.config.fov_size
+            fov_h = int(getattr(self.config, 'fov_height', fov_w))
             cx, cy = self.config.crosshairX, self.config.crosshairY
             fov_color = OverlayColors.get_fov_color()
             pen = QPen(fov_color, 2)
             painter.setPen(pen)
             if getattr(self.config, 'fov_circle_filter_enabled', False):
-                half_fov = fov // 2
-                painter.drawEllipse(cx - half_fov, cy - half_fov, fov, fov)
+                # QPainter.drawEllipse(x, y, w, h) already draws a circle when
+                # w == h, so this needs no square-vs-ellipse branch of its own.
+                painter.drawEllipse(cx - fov_w // 2, cy - fov_h // 2, fov_w, fov_h)
             else:
-                self.draw_fov_corners(painter, cx, cy, fov)
+                self.draw_fov_corners(painter, cx, cy, fov_w, fov_h)
 
         # 繪製檢測框和置信度 - 使用主題顏色
         if show_boxes and self.boxes:
@@ -317,9 +342,11 @@ class PyQtOverlay(QWidget):
 
             # FOV boundary values for per-box in/out test
             use_circle = getattr(self.config, 'fov_circle_filter_enabled', False)
-            fov_half = float(self.config.fov_size) / 2.0
+            fov_half_x = float(self.config.fov_size) / 2.0
+            fov_half_y = float(getattr(self.config, 'fov_height', self.config.fov_size)) / 2.0
             ox = float(self.config.crosshairX)
             oy = float(self.config.crosshairY)
+            ellipse_intersects_bbox = _get_ellipse_intersects_bbox() if use_circle else None
 
             show_confidence = self.config.show_confidence
             if show_confidence:
@@ -343,12 +370,10 @@ class PyQtOverlay(QWidget):
                 # Determine if this box intersects the FOV region
                 bx1, by1, bx2, by2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
                 if use_circle:
-                    nx = min(max(ox, bx1), bx2)
-                    ny = min(max(oy, by1), by2)
-                    in_fov = (nx - ox) ** 2 + (ny - oy) ** 2 <= fov_half * fov_half
+                    in_fov = ellipse_intersects_bbox(ox, oy, fov_half_x, fov_half_y, bx1, by1, bx2, by2)
                 else:
-                    in_fov = (bx1 < ox + fov_half and bx2 > ox - fov_half and
-                              by1 < oy + fov_half and by2 > oy - fov_half)
+                    in_fov = (bx1 < ox + fov_half_x and bx2 > ox - fov_half_x and
+                              by1 < oy + fov_half_y and by2 > oy - fov_half_y)
 
                 painter.setPen(QPen((chroma_color if in_fov else box_color) if use_chroma else box_color, thickness))
                 if getattr(self.config, 'box_full_rect', False):

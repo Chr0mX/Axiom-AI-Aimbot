@@ -115,12 +115,18 @@ def get_effective_detect_range_size(
     # esp_server.py's snapshot builder, which must tolerate a bare/incomplete
     # config object (see test_snapshot_handles_empty_and_missing).
     fov_size = int(getattr(config, 'fov_size', 0) or 0)
+    # fov_height defaults to fov_size (not 0) so a config that predates
+    # fov_height, or a bare stub missing it, still behaves like the square
+    # FOV this clamp originally assumed.
+    fov_height = int(getattr(config, 'fov_height', fov_size) or fov_size)
     # Clamp against both dimensions, not just height — a capture source
     # narrower than tall (portrait UVC/NDI/UDP feed) would otherwise let
     # detection_size exceed capture_width, and region_width below would then
     # get clamped smaller than region_height, silently producing a
     # non-square region and defeating the square fast-preprocess path.
-    return max(fov_size, min(int(capture_height), int(capture_width), detection_size))
+    # The lower bound is max(fov_size, fov_height) — the square detection
+    # region must contain the whole FOV rectangle, not just its width.
+    return max(fov_size, fov_height, min(int(capture_height), int(capture_width), detection_size))
 
 
 def calculate_detection_region(config: Config, crosshair_x: int, crosshair_y: int) -> Dict[str, int]:
@@ -143,18 +149,29 @@ def calculate_detection_region(config: Config, crosshair_x: int, crosshair_y: in
     }
 
 
-def _circle_intersects_bbox(
-    cx: float, cy: float, r: float,
+def _ellipse_intersects_bbox(
+    cx: float, cy: float, a: float, b: float,
     x1: float, y1: float, x2: float, y2: float,
 ) -> bool:
-    # Ported from Someone_idea/fov_filter.py — true circle/AABB intersection test.
-    # Finds the closest point on the rectangle to the circle centre, then checks
-    # whether that point lies within the radius.
+    # True ellipse/AABB intersection test (semi-axes a, b — a == b is a
+    # circle of radius a, the original Someone_idea/fov_filter.py case).
+    # Scales both the ellipse centre and the box corners by (1/a, 1/b),
+    # which turns the ellipse into a unit circle while keeping the box
+    # axis-aligned (a per-axis scale can't tilt it) — then runs the same
+    # closest-point-on-box-to-centre test the plain circle case always used,
+    # just in the transformed space. That equivalence is exact: a point
+    # (x,y) satisfies ((x-cx)/a)^2 + ((y-cy)/b)^2 <= 1 iff its scaled image
+    # (x/a, y/b) lies within a unit circle centred at (cx/a, cy/b).
+    if a <= 0 or b <= 0:
+        return False
     lx, rx = (x1, x2) if x1 <= x2 else (x2, x1)
     ty, by = (y1, y2) if y1 <= y2 else (y2, y1)
-    nx = min(max(cx, lx), rx)
-    ny = min(max(cy, ty), by)
-    return (nx - cx) ** 2 + (ny - cy) ** 2 <= r * r
+    tcx, tcy = cx / a, cy / b
+    tlx, trx = lx / a, rx / a
+    tty, tby = ty / b, by / b
+    nx = min(max(tcx, tlx), trx)
+    ny = min(max(tcy, tty), tby)
+    return (nx - tcx) ** 2 + (ny - tcy) ** 2 <= 1.0
 
 
 def filter_boxes_by_fov(
@@ -167,20 +184,26 @@ def filter_boxes_by_fov(
 ) -> Tuple[List[List[float]], List[float]]:
     """FOV 過濾：只保留與 FOV 框有交集的人物框
 
-    Extended to support an optional circular FOV test (Someone_idea/fov_filter.py).
-    fov_circle_filter_enabled=False (default) keeps the original square behaviour.
+    fov_size is the FOV's width; its height comes from config.fov_height,
+    defaulting to fov_size (a square) if config doesn't have it — every
+    existing caller that only ever set a square FOV keeps behaving exactly
+    as before. Extended to support an optional elliptical FOV test
+    (Someone_idea/fov_filter.py's original circle, generalized to an
+    ellipse — a circle when fov_height == fov_size, same as it always was).
+    fov_circle_filter_enabled=False (default) keeps the rectangular test.
     """
 
     if not boxes:
         return [], []
 
     use_circle = bool(getattr(config, 'fov_circle_filter_enabled', False))
-    fov_half = fov_size // 2
-    r = float(fov_half)
-    fov_left   = crosshair_x - fov_half
-    fov_top    = crosshair_y - fov_half
-    fov_right  = crosshair_x + fov_half
-    fov_bottom = crosshair_y + fov_half
+    fov_height = int(getattr(config, 'fov_height', fov_size) or fov_size)
+    fov_half_x = fov_size / 2.0
+    fov_half_y = fov_height / 2.0
+    fov_left   = crosshair_x - fov_half_x
+    fov_top    = crosshair_y - fov_half_y
+    fov_right  = crosshair_x + fov_half_x
+    fov_bottom = crosshair_y + fov_half_y
 
     filtered_boxes = []
     filtered_confidences = []
@@ -188,7 +211,8 @@ def filter_boxes_by_fov(
     for i, box in enumerate(boxes):
         x1, y1, x2, y2 = box
         if use_circle:
-            keep = _circle_intersects_bbox(float(crosshair_x), float(crosshair_y), r, x1, y1, x2, y2)
+            keep = _ellipse_intersects_bbox(
+                float(crosshair_x), float(crosshair_y), fov_half_x, fov_half_y, x1, y1, x2, y2)
         else:
             keep = x1 < fov_right and x2 > fov_left and y1 < fov_bottom and y2 > fov_top
         if keep:

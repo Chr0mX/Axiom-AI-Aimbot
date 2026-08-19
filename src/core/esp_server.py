@@ -166,6 +166,7 @@ def _build_snapshot() -> dict:
         },
         "settings": {
             "fov_size": int(getattr(c, "fov_size", 200)),
+            "fov_height": int(getattr(c, "fov_height", getattr(c, "fov_size", 200))),
             # Effective size (clamped to the active capture method's own live
             # dimensions), not the raw config field — for 'uvc'/'ndi'/'udp',
             # the raw field is only validated against the full desktop

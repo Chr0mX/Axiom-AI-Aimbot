@@ -172,6 +172,22 @@ class TestConfigSerialization:
         assert d['aim']['fov_size'] == 333
         assert d['aim']['pid']['x']['kp'] == 0.5
 
+    def test_fov_height_round_trips_independently_of_fov_size(self):
+        """fov_height must persist as its own aim.fov_height path, not get
+        conflated with fov_size — that's what lets the FOV become a
+        rectangle instead of always tracking fov_size as a square."""
+        c = _make_config()
+        c.fov_size = 300
+        c.fov_height = 150
+        d = c.to_dict()
+        assert d['aim']['fov_size'] == 300
+        assert d['aim']['fov_height'] == 150
+
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.fov_size == 300
+        assert c2.fov_height == 150
+
     def test_from_dict_updates_attributes(self):
         c = _make_config()
         c.from_dict({
@@ -549,6 +565,28 @@ class TestValidateDetectRangeSize:
         c.detect_range_size = 50  # smaller than both fov_size and height
         _validate_detect_range_size(c)
         assert c.detect_range_size == 1080
+
+    def test_too_small_clamped_to_taller_fov_height(self):
+        """The lower bound is max(fov_size, fov_height) — a rectangular FOV
+        taller than it is wide must raise detect_range_size to its height,
+        not just fov_size, or the square detection region couldn't contain
+        the whole FOV rectangle."""
+        from core.config import _validate_detect_range_size
+        c = _make_config()
+        c.fov_size = 100
+        c.fov_height = 500
+        c.detect_range_size = 200  # < fov_height, would satisfy fov_size alone
+        _validate_detect_range_size(c)
+        assert c.detect_range_size == 500
+
+    def test_wider_fov_size_still_wins_over_shorter_height(self):
+        from core.config import _validate_detect_range_size
+        c = _make_config()
+        c.fov_size = 500
+        c.fov_height = 100
+        c.detect_range_size = 200
+        _validate_detect_range_size(c)
+        assert c.detect_range_size == 500
 
 
 # ============================================================

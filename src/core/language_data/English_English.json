@@ -52,7 +52,7 @@
   "fire_interval": "Fire Interval (s)",
   "fov_follow_mouse": "FOV Follow Mouse",
   "fov_and_detect_range": "FOV and Inference Range",
-  "fov_size": "FOV Size",
+  "fov_size": "FOV Width",
   "general_params": "General Parameters",
   "weapon_detection_method": "Weapon Detection Method",
   "weapon_detection_method_desc": "Off / OCR (PaddleOCR) / ONNX (HUD weapon detector)",
