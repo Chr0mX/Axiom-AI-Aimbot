@@ -162,6 +162,8 @@ Both `model_page.py` and `convert_page.py` pair their model `ComboBox` with a `S
 
 `session_utils.find_trt_engine_cache(model_path)` is the shared existence check (mirrors `build_provider_list()`'s `trt_engine_cache_prefix` = model filename stem convention); `effective_first_provider(config)` answers "is TensorRT actually what this config would try first" without duplicating `build_provider_list()`'s auto/backend-selection logic; `needs_trt_build()` combines both.
 
+`model_page.py`'s model combo also surfaces cache status per-entry, before the user even opens the dropdown: `_applyModelBadges()` icons each item ✓ (`FluentIcon.ACCEPT`, cached) or ⬇ (`FluentIcon.CLOUD_DOWNLOAD`, would trigger the 1-5 min build above) via `setItemIcon()` — this only changes the item's icon, never its `.text`, so it can't interfere with the plain-filename string matching the rest of the page relies on (`_onModelChanged`'s `os.path.join("Model", text)`, the search filter's basename comparisons, etc.). `_isTensorRtActive()` (reuses `effective_first_provider()`) hides the badges entirely when TensorRT isn't the active backend, since cache status is meaningless noise under any other provider — a `modelCard` subtitle legend explaining the icons is shown/hidden the same way. Cache status itself (`_model_engine_cached`, one `find_trt_engine_cache()` call per model) is recomputed by `_refreshModelList()`; badge/legend *visibility* is also re-applied on every inference-backend change (`_onInferenceBackendChanged`) and by `_onModelSearchChanged()`'s combo rebuild, without re-scanning disk.
+
 ## Key Config Fields to Know
 
 | Field | JSON path | Purpose |

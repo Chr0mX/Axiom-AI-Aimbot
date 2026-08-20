@@ -42,6 +42,7 @@
   "tab_hardware_output": "Keys & HW",
   "model_info": "Model Info",
   "model_inspecting": "Inspecting…",
+  "model_trt_badge_legend": "✓ = TensorRT engine already cached  ·  ⬇ = needs a one-time build (1-5 min)",
   "tab_inference": "Inference",
   "detect_range_size": "AI Inference Range",
   "detect_range_note": "Note: Performance usage is the same regardless of the value.",
