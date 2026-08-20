@@ -29,49 +29,35 @@ If you're looking for the original project, it's gone — this is what's activel
 
 Axiom AI is a computer vision application for real-time object detection and aim assistance. Built with Python and ONNX Runtime, it supports DirectML, CUDA, and TensorRT GPU acceleration paths with automatic fallback, and ships a modern Fluent Design UI with multi-language support and a first-run setup wizard.
 
-## What's new in 6.x
-
-Since the original project, this fork has added:
-
-- **TensorRT inference support** — build and run cached TensorRT engines for a significant inference FPS boost over DirectML/CUDA, via the **Convert** tab (`src/core/convert_to_engine.py`).
-- **DirectML ↔ TensorRT fallback** — automatic provider fallback chain, mostly for the fun of squeezing out compatibility across more hardware.
-- **Three new capture backends** — **NDI**, **UVC**, and **UDP** (JPEG stream over the OBS `udp_stream_filter` wire protocol), alongside the original dxcam/MSS. See `src/core/screen_capture.py`.
-- **MAKCU improvements** — bumped to the official **4 Mbaud** connection, added **auto-reconnect**, and added support for **reading physical mouse button state** directly from the MAKCU device (`km.left()` / `km.right()` / `km.middle()`), so aim-button and click detection can be hardware-accurate instead of relying on OS-level key state.
-- **Better aim prediction** — EMA smoothing, a 2D constant-velocity **Kalman filter**, and other smoothing options for leading moving targets, selectable in the Aim tab's Target Tracking group.
-- **Reworked aim point** — fixed inconsistent aim-point placement, and added a manual fine-tune control so you can dial in exactly where on the target box the crosshair should settle (head/body/custom % offset).
-- **Smart aim point for crouching targets** — the center-mass aim point adapts when a target's box shape indicates a crouched stance, instead of aiming at a fixed ratio that assumes standing.
-- **Sticky lock** — IOU-based target persistence across frames, so a few frames of bad/missed detections (model being unreliable) don't immediately drop the lock; it remembers recent frames and holds on briefly.
-- **Enhanced Model page** — more accurate model info display (input size, class list, provider, etc.) instead of guessed/static values.
-- **Revamped Qt UI** — reorganized Fluent Design pages, nicer layout and visual polish across the app.
-- **Detailed Other page** — expanded debugging info (MAKCU device info, TensorRT version detection, provider diagnostics, etc.).
-- **Chroma visuals** — cycling hue box colors for ESP-style overlays.
-- **Web ESP overlay** — stream the detection overlay to a browser source so OBS (or any browser) on a *second* PC/output can render ESP boxes without touching the primary game capture. See `src/web_overlay/` and `src/core/esp_server.py`.
-
 ## Beta features
 
 These are early/incomplete — used at your own risk, and feedback is welcome:
 
-- **Weapon detector (Apex Legends only, for now)**
+- **Weapon detector (Apex Legends only, for now)** — selectable in Inference settings as `second_inference_mode` (Off / OCR / ONNX), runs in its own process so it never blocks the main aim loop.
   - **PaddleOCR-based** weapon-name reader — functional but currently not reliable/useful enough to depend on; left in the codebase but effectively unused (`src/core/ocr_inference.py`).
-  - **YOLO-based** weapon HUD detector — needs a properly trained YOLO model to be useful; the inference plumbing exists (`src/core/hud_inference.py`) but no production-ready model ships yet.
-  - Goal once a reliable detector lands: automatically apply the matching recoil-control pattern for the detected weapon.
+  - **YOLO-based** weapon HUD detector — trained models now ship in `Model_Hud/`, selectable from the Model page's HUD Model dropdown; still beta because results aren't yet wired into anything downstream.
+  - Goal once this is trusted enough: automatically apply the matching recoil-control pattern for the detected weapon.
 
 Found a feature in the code that isn't listed above? Let us know rather than assuming — some things in progress aren't ready to be called a "feature" yet.
 
 ## Key Features
 
 - **Advanced Aim Control**
-  - PID controller with separate X/Y axis tuning for precise adjustments.
+  - PID controller with separate X/Y axis tuning; an **Unsafe Mode** toggle re-maps the reaction-speed (Kp) sliders from the default safe 0–0.5 range up to a full 0–1.0 for users who want to push past the normally-capped travel.
   - Bézier curve smoothing for natural, human-like mouse movement.
-  - Customizable FOV and independent detection range.
+  - Customizable FOV with independent width/height (so it can be a rectangle, not just a square) and an optional circle/ellipse shape, plus an independent detection range.
   - Single-target mode for focusing on the nearest threat.
   - FOV follows mouse cursor for dynamic aiming.
   - Configurable head/body region ratios, plus manual fine-tune for the exact aim point.
   - Aim deadzone and lateral brake to reduce over-travel.
 
+- **Humanization**
+  - Master enable + intensity slider that scales every effect at once, plus a per-feature on/off toggle and fine-tuning sub-slider for each: micro-jitter, motion variation, speed shaping, micro-stutter, and reaction-time variability.
+  - One-click **Reset to Defaults** for the whole block.
+
 - **Anti-Recoil (Smart Jitter)**
   - Smart Jitter applies subtle movement to simulate natural hand shake while on target.
-  - Choose between procedural random jitter or fully custom recorded patterns.
+  - Choose between procedural random jitter or fully custom recorded patterns, with a 1×/2×/3×/5×/10× playback speed multiplier for recorded patterns.
   - **Jitter Recorder** — record your own mouse shake pattern directly from the Aim Assist page (click anywhere in the live-preview window to finish & save — no separate button to reach for mid-pattern) or via the standalone terminal tool (`src/core/jitter_recorder.py`).
   - Patterns are zero-net-displacement: each loop cycle returns the cursor to its original position.
   - LMB gate: optionally activate jitter only while left mouse button is held.
@@ -87,6 +73,8 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
   - Sticky lock with IOU-based target persistence across frames — tolerates a few bad detection frames without dropping the target.
   - Smart center-mass aim point that adapts to crouching targets.
   - Visual prediction overlay for debugging and tuning.
+  - Weighted target-priority modes — distance-only, confidence-only, or a composite of both.
+  - Optional semantic false-positive filter (class allow/deny lists, geometry heuristics, min box size) to drop vegetation/vehicle/HUD misdetections before target selection.
 
 - **Auto Fire (Triggerbot)**
   - Adjustable delay and fire intervals.
@@ -95,31 +83,37 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 
 - **High Performance**
   - ONNX Runtime with DirectML, CUDA, TensorRT, or CPU inference, with automatic fallback across providers.
+  - **TensorRT engine caching** — models with no cached engine yet are automatically redirected to the Convert tab to build one in the background (with a progress bar) instead of freezing the aim loop on a blocking 1–5 minute compile. The Model page also shows a ✓/⬇ badge on every entry so you know which models already have a cached engine before you even pick one.
   - Zero-copy CUDA IO binding for minimal GPU↔CPU transfer overhead.
   - Low-latency three-thread pipeline: capture → preprocess → inference, fully decoupled.
-  - Performance mode with optimized queue management.
   - Idle detection throttling to reduce resource usage when not aiming.
   - **Multiple Input Methods**
     - **SendInput** (Windows API)
     - **ddxoft**
     - **Arduino Leonardo**
     - **Xbox 360 Virtual Controller**
-    - **MAKCU** (USB HID, 4 Mbaud, auto-reconnect, hardware button-state reads)
+    - **MAKCU** (USB HID, 4 Mbaud, auto-reconnect, hardware button-state reads, Hold/Toggle aim mode with a configurable disengage delay)
 
 - **Live Capture Preview**
   - Collapsible side panel shows the active capture feed in real-time with FPS counter.
   - Supports pop-out mode and optional crop to detection region.
-  - Works with all backends: dxcam, MSS, UVC, NDI, UDP.
+  - Works with all backends: dxcam, MSS, UVC (with an optional native DirectShow v2 capture path for lower, OBS-like latency), NDI, and UDP (an MJPEG-over-UDP stream matching OBS's `udp_stream_filter` plugin, for capturing from a second PC).
 
 - **Web ESP Overlay**
   - Streams live detection boxes/state to a lightweight web page over WebSocket.
   - Point an OBS Browser Source (or any browser, on any machine on the network) at it to render ESP without capturing the main game overlay.
   - HUD shows aim on/off, aim active/idle, model, capture method, capture FPS, inference FPS, target count, and network latency — draggable and stylable from the in-page settings panel.
 
+- **Model & Config Management**
+  - Searchable, filter-as-you-type model dropdown on both the Model and Convert pages.
+  - Hotkey conflict warning — flags genuinely confusing rebinds (a redundant duplicate within the same key group, or the toggle key landing on the same button as a hold key) without flagging intentional "one button does two things" setups as a problem.
+  - Loading a saved config preset shows a summary of exactly what it will change first, instead of silently overwriting your current settings.
+
 - **Modern Fluent Design UI**
   - Built with PyQt6 + QFluentWidgets for a native Windows 11 look.
   - Acrylic (frosted glass) window effect with configurable transparency.
   - Dark / Light theme toggle.
+  - Chroma visuals — cycling hue box colors for ESP-style overlays, plus named box-color theme presets.
   - First-run Setup Wizard for quick configuration.
   - Detailed Other page for debugging device/provider state.
 
@@ -301,13 +295,13 @@ Use these logs to verify which provider actually ended up active, or whether run
 
 2. **Configure Settings**
    - **Visuals Tab** — Customize overlays (FOV circle, bounding boxes, crosshair, status panel, chroma visuals, Web ESP).
-   - **Model Tab** — Select your ONNX model and view detailed model info.
+   - **Model Tab** — Select your ONNX model (searchable dropdown, with a cached-TensorRT-engine badge per entry) and view detailed model info.
    - **Capture Tab** — Choose and configure your screen capture backend (dxcam / MSS / UVC / NDI / UDP); live preview panel.
    - **Inference Tab** — Detection sensitivity, inference provider, and performance tuning.
-   - **Aim Tab** — FOV, PID tuning, prediction (EMA/Kalman), smoothing, aim-point fine-tune, Anti-Recoil (Smart Jitter + click-to-stop jitter recorder), Y-axis recoil suppression, sticky lock.
+   - **Aim Tab** — FOV, PID tuning, prediction (EMA/Kalman), smoothing, aim-point fine-tune, Humanization, Anti-Recoil (Smart Jitter + click-to-stop jitter recorder), Y-axis recoil suppression, sticky lock.
    - **Trigger Tab** — Configure auto-fire delay, interval, and target priority.
-   - **Keys Tab** — Set your preferred hotkeys for toggling aim and auto-fire.
-   - **Configs Tab** — Save / load configuration presets.
+   - **Keys Tab** — Set your preferred hotkeys for toggling aim and auto-fire, with a warning if a rebind creates a genuinely confusing conflict.
+   - **Configs Tab** — Save / load configuration presets; loading shows a summary of what will actually change first.
    - **Convert Tab** — Convert ONNX models to TensorRT engines.
    - **Other Tab** — Mouse method, Arduino, Xbox controller, MAKCU, performance options, and detailed debugging info.
 
@@ -334,13 +328,13 @@ Axiom/
 ├── 啟動Launcher.bat              # Quick-start launcher
 ├── Install TensorRT.bat          # One-time TensorRT pip-package installer
 ├── Install PaddleOCR.bat         # One-time PaddleOCR installer (secondary weapon-name OCR)
-├── requirements-tensorrt.txt     # Extra deps for the TensorRT inference path
+├── requirements.txt / requirements-directml.txt / requirements-cuda.txt / requirements-tensorrt.txt
 ├── CHANGELOG.md                  # Version history
 ├── docs/
 │   └── MAKCU_Native_API.md       # MAKCU serial wire-protocol reference
 ├── config/                       # Saved configuration presets
-├── Model/                        # ONNX model files
-├── Model_Hud/                    # Secondary weapon/attachment HUD detector model
+├── Model/                        # ONNX detection model files
+├── Model_Hud/                    # Beta: YOLO weapon/attachment HUD detector models
 ├── trt_cache/                    # Built TensorRT engines (auto-created)
 ├── config.json                   # Runtime settings (v2 grouped schema)
 ├── state.json                    # One-time app state (disclaimer, first-run)
@@ -348,18 +342,23 @@ Axiom/
 ├── src/
 │   ├── main.py                   # Application entry point
 │   ├── version.py                # Version constant — single source of truth for app version
+│   ├── model_detect.py           # Model introspection helper (shown on the Model page)
+│   ├── install_tensorrt_local.py # TensorRT pip package installer (invoked by the .bat)
+│   ├── install_paddleocr_local.py# PaddleOCR installer (invoked by the .bat)
+│   ├── install_cyndilib.py       # cyndilib (NDI) installer
 │   ├── core/                     # Core inference & control logic
 │   │   ├── ai_loop.py            # Three-thread pipeline (capture / preprocess / inference)
 │   │   ├── ai_loop_state.py      # Shared loop state
-│   │   ├── ai_loop_utils.py      # Loop utility functions
-│   │   ├── ai_aiming.py          # Aiming, PID, Smart Jitter, Y-reduce, humanization
+│   │   ├── ai_loop_utils.py      # Loop utility functions (FOV filtering, target selection)
+│   │   ├── ai_aiming.py          # Aiming, PID, Smart Jitter, Y-reduce, humanization dispatch
 │   │   ├── auto_fire.py          # Triggerbot logic
 │   │   ├── config.py             # Config class + _FIELD_MAP (v2 schema)
-│   │   ├── config_manager.py     # Load/save/preset/migration lifecycle
+│   │   ├── config_manager.py     # Load/save/preset/migration lifecycle, preset pre-load diff
 │   │   ├── detection_semantics.py# Semantic target filtering
+│   │   ├── dshow_capture_native.py # ctypes binding for the native DirectShow v2 capture DLL
 │   │   ├── esp_server.py         # Web ESP WebSocket/HTTP server
-│   │   ├── hud_inference.py      # Beta: YOLO-based weapon HUD detector
-│   │   ├── ocr_inference.py      # Beta: PaddleOCR weapon-name reader
+│   │   ├── hud_inference.py      # Beta: YOLO-based weapon HUD detector (process-isolated)
+│   │   ├── ocr_inference.py      # Beta: PaddleOCR weapon-name reader (process-isolated)
 │   │   ├── humanization.py       # Velocity curves, Bézier smoothing, micro-corrections
 │   │   ├── inference.py          # ONNX inference wrapper, NMS, postprocessing
 │   │   ├── jitter_recorder.py    # Mouse jitter recording/replay terminal tool + GUI API
@@ -368,13 +367,16 @@ Axiom/
 │   │   ├── key_listener.py       # Global hotkey listener
 │   │   ├── language_manager.py   # Multi-language runtime support
 │   │   ├── language_data/        # Per-language JSON string files
+│   │   ├── presets/              # Bundled built-in config presets
 │   │   ├── screen_capture.py     # Capture backends: dxcam / MSS / UVC / NDI / UDP + preview API
 │   │   ├── udp_receiver.py       # UDP JPEG stream receiver (OBS udp_stream_filter protocol)
-│   │   ├── session_utils.py      # Session utilities
+│   │   ├── session_utils.py      # ONNX session setup, TensorRT cache detection
 │   │   ├── target_predictor.py   # Velocity-based motion prediction
 │   │   ├── convert_to_engine.py  # ONNX → TensorRT engine builder
 │   │   ├── logging_config.py     # Logging setup
-│   │   └── updater.py            # Auto-update checker
+│   │   ├── updater.py            # Auto-update checker
+│   │   ├── obs_inspect_filters.py# Dev tool: dump OBS WebSocket filter settings
+│   │   └── bench_udp.py          # Dev tool: UDP capture pipeline benchmark
 │   ├── web_overlay/               # Web ESP static client (served to the browser)
 │   │   ├── index.html
 │   │   ├── app.js
@@ -382,16 +384,21 @@ Axiom/
 │   ├── gui/
 │   │   ├── overlay.py            # Transparent click-through PyQt overlay (FOV, boxes, tracer, crosshair)
 │   │   ├── status_panel.py       # In-game status panel
+│   │   ├── disclaimer_dialog.py  # First-run disclaimer prompt
 │   │   └── fluent_app/           # Fluent Design main window & pages
 │   │       ├── window.py         # AxiomWindow: navigation, acrylic, preview panel
+│   │       ├── base_page.py      # Shared scrollable-page base class
+│   │       ├── setup_wizard.py   # First-run Welcome/Language/Theme/Performance wizard
+│   │       ├── theme_colors.py   # Centralized light/dark color tokens
+│   │       ├── language_manager.py # Qt-signal wrapper around core's language manager
 │   │       ├── components/       # Shared widgets (sliders, capture preview panel)
 │   │       └── pages/            # One file per settings page
-│   │           ├── aim_page.py       # Aim parameters + Anti-Recoil section
+│   │           ├── aim_page.py       # Aim parameters, Humanization, Anti-Recoil
 │   │           ├── capture_page.py   # Capture backend selection
 │   │           ├── configs_page.py   # Config preset management
 │   │           ├── convert_page.py   # ONNX → TensorRT conversion
 │   │           ├── inference_page.py # Inference / model settings
-│   │           ├── keys_page.py      # Hotkey bindings
+│   │           ├── keys_page.py      # Hotkey bindings + MAKCU connection
 │   │           ├── model_page.py     # Model selection & notes
 │   │           ├── other_page.py     # Mouse method, performance, misc, debugging
 │   │           ├── trigger_page.py   # Triggerbot / auto-fire
@@ -408,15 +415,18 @@ Axiom/
 │       ├── xbox_controller.py    # ViGEmBus Xbox 360 emulation
 │       ├── key_utils.py          # Key code helpers
 │       └── vk_codes.py           # Virtual key code table
-└── tests/                        # Pytest test suite
+└── tests/                        # Pytest test suite (see CLAUDE.md for sandbox-testability notes)
     ├── conftest.py               # Adds src/ to sys.path
     ├── test_config.py
     ├── test_config_manager.py
+    ├── test_ai_aiming.py
+    ├── test_ai_loop_utils.py
     ├── test_humanization.py
     ├── test_inference.py
     ├── test_makcu_mouse.py
     ├── test_mouse_methods.py
     ├── test_screen_capture.py
+    ├── test_session_utils.py
     └── ...
 ```
 
