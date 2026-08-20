@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFileDialog
 from qfluentwidgets import (
     SettingCardGroup, SettingCard, SwitchSettingCard, ComboBox,
     FluentIcon, PrimaryPushButton, PushButton, BodyLabel, CaptionLabel,
-    TextEdit, IndeterminateProgressBar, InfoBar, InfoBarPosition,
+    TextEdit, IndeterminateProgressBar, InfoBar, InfoBarPosition, SearchLineEdit,
 )
 
 from ..base_page import BasePage
@@ -74,6 +74,7 @@ class ConvertPage(BasePage):
         self._config = None
         self._worker = None
         self._converting_onnx_path = None
+        self._all_model_files = []  # master (name, abs_path) list; modelSearchEdit filters a view of this
         # repo root: .../src/gui/fluent_app/pages/convert_page.py → up 4 → src → up 1 → root
         _src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
             os.path.dirname(os.path.abspath(__file__)))))
@@ -104,6 +105,21 @@ class ConvertPage(BasePage):
         # === Conversion settings ===
         self.convertGroup = SettingCardGroup(
             t("trt_convert_settings", "Engine Conversion"), self.scrollWidget)
+
+        # Search box — a plain filter over modelCombo's item list, not an
+        # editable combo, so there's no risk of a stray Enter press adding
+        # a phantom entry that doesn't correspond to a real .onnx file.
+        self.modelSearchEdit = SearchLineEdit()
+        self.modelSearchEdit.setPlaceholderText(t("model_search_placeholder", "Search models…"))
+        self.modelSearchEdit.setMinimumWidth(240)
+        self.modelSearchCard = SettingCard(
+            FluentIcon.SEARCH,
+            t("model_search", "Search Models"),
+            t("model_search_desc", "Filter the model list below by filename"),
+            self.convertGroup,
+        )
+        self.modelSearchCard.hBoxLayout.addWidget(self.modelSearchEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.modelSearchCard.hBoxLayout.addSpacing(16)
 
         # Model selector card (combo + browse)
         self.modelCombo = ComboBox()
@@ -178,6 +194,7 @@ class ConvertPage(BasePage):
         self.hintLabel.setWordWrap(True)
 
     def _initLayout(self):
+        self.convertGroup.addSettingCard(self.modelSearchCard)
         self.convertGroup.addSettingCard(self.modelCard)
         self.convertGroup.addSettingCard(self.fp16Card)
         self.convertGroup.addSettingCard(self.workspaceCard)
@@ -198,14 +215,50 @@ class ConvertPage(BasePage):
         self.scrollLayout.addStretch(1)
 
     def _connectSignals(self):
+        self.modelSearchEdit.textChanged.connect(self._onModelSearchChanged)
         self.browseBtn.clicked.connect(self._onBrowse)
         self.convertBtn.clicked.connect(self._onConvert)
 
     def _refreshModelList(self):
-        self.modelCombo.clear()
+        """Rebuild the master (name, abs_path) list and show all of them
+        (unfiltered) in modelCombo. _onModelSearchChanged() is the only
+        thing that narrows it to a subset afterward."""
+        self._all_model_files = []
         if os.path.isdir(self._model_dir):
-            for m in sorted(glob.glob(os.path.join(self._model_dir, "*.onnx"))):
-                self.modelCombo.addItem(os.path.basename(m), userData=m)
+            self._all_model_files = sorted(
+                ((os.path.basename(m), m) for m in glob.glob(os.path.join(self._model_dir, "*.onnx"))),
+                key=lambda pair: pair[0],
+            )
+        self.modelCombo.clear()
+        for name, path in self._all_model_files:
+            self.modelCombo.addItem(name, userData=path)
+
+    def _onModelSearchChanged(self, query: str):
+        """Live-filter modelCombo to entries matching `query` (case-
+        insensitive substring) — but never hide whatever was already
+        selected (including a file picked via Browse from outside Model/,
+        which self._all_model_files doesn't include), so typing a search
+        can only narrow what else is selectable."""
+        if not self._all_model_files:
+            return
+        query = (query or '').strip().lower()
+        current_path = self.modelCombo.currentData()
+        current_name = os.path.basename(current_path) if current_path else self.modelCombo.currentText()
+
+        self.modelCombo.blockSignals(True)
+        self.modelCombo.clear()
+        matched_current = not current_name
+        for name, path in self._all_model_files:
+            if not query or query in name.lower():
+                self.modelCombo.addItem(name, userData=path)
+                if name.lower() == current_name.lower():
+                    matched_current = True
+        if not matched_current and current_name:
+            self.modelCombo.addItem(current_name, userData=current_path)
+        idx = self.modelCombo.findText(current_name)
+        if idx >= 0:
+            self.modelCombo.setCurrentIndex(idx)
+        self.modelCombo.blockSignals(False)
 
     def _resolveModelPath(self) -> str | None:
         data = self.modelCombo.currentData()
@@ -364,6 +417,9 @@ class ConvertPage(BasePage):
     def retranslateUi(self):
         super().retranslateUi()
         self.convertGroup.titleLabel.setText(t("trt_convert_settings", "Engine Conversion"))
+        self.modelSearchCard.titleLabel.setText(t("model_search", "Search Models"))
+        self.modelSearchCard.contentLabel.setText(t("model_search_desc", "Filter the model list below by filename"))
+        self.modelSearchEdit.setPlaceholderText(t("model_search_placeholder", "Search models…"))
         self.modelCard.titleLabel.setText(t("trt_source_model", "Source ONNX Model"))
         self.modelCard.contentLabel.setText(t("trt_source_model_desc", "Select the .onnx model to compile into a TensorRT engine."))
         self.browseBtn.setText(t("trt_browse", "Browse"))

@@ -15,7 +15,7 @@ from qfluentwidgets import (
     SettingCardGroup,
     FluentIcon,
     ComboBox, PrimaryPushButton, PushButton, SettingCard,
-    InfoBar, InfoBarPosition
+    InfoBar, InfoBarPosition, SearchLineEdit,
 )
 
 from ..base_page import BasePage
@@ -165,6 +165,7 @@ class ModelPage(BasePage):
         self._isLoadingConfig = False
         self._trt_installer_launched = False
         self._inspect_worker = None
+        self._all_model_files = []  # master list; modelSearchEdit filters a view of this
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -179,6 +180,21 @@ class ModelPage(BasePage):
 
     def _initWidgets(self):
         self.modelGroup = SettingCardGroup(t("model_settings"), self.scrollWidget)
+
+        # Search box — a plain filter over modelCombo's item list rather than
+        # an editable combo, so there's no risk of a stray Enter press adding
+        # a phantom "model" that doesn't correspond to a real .onnx file.
+        self.modelSearchEdit = SearchLineEdit()
+        self.modelSearchEdit.setPlaceholderText(t("model_search_placeholder", "Search models…"))
+        self.modelSearchEdit.setMinimumWidth(220)
+        self.modelSearchCard = SettingCard(
+            FluentIcon.SEARCH,
+            t("model_search", "Search Models"),
+            t("model_search_desc", "Filter the model list below by filename"),
+            self.modelGroup
+        )
+        self.modelSearchCard.hBoxLayout.addWidget(self.modelSearchEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.modelSearchCard.hBoxLayout.addSpacing(16)
 
         self.modelCombo = ComboBox()
         self.modelCombo.setMinimumWidth(200)
@@ -254,6 +270,7 @@ class ModelPage(BasePage):
     # ──────────────────────────────────────────────
 
     def _initLayout(self):
+        self.modelGroup.addSettingCard(self.modelSearchCard)
         self.modelGroup.addSettingCard(self.modelCard)
         self.modelGroup.addSettingCard(self.modelInfoCard)
         self.modelGroup.addSettingCard(self.inferenceBackendCard)
@@ -272,6 +289,7 @@ class ModelPage(BasePage):
     # ──────────────────────────────────────────────
 
     def _connectSignals(self):
+        self.modelSearchEdit.textChanged.connect(self._onModelSearchChanged)
         self.modelCombo.currentTextChanged.connect(self._onModelChanged)
         self.inferenceBackendCombo.currentTextChanged.connect(self._onInferenceBackendChanged)
         self.openModelFolderBtn.clicked.connect(self._openModelFolder)
@@ -426,14 +444,48 @@ class ModelPage(BasePage):
     # ──────────────────────────────────────────────
 
     def _refreshModelList(self):
-        self.modelCombo.clear()
+        """Rebuild the master model file list and show all of them
+        (unfiltered) in modelCombo — callers that need to re-select the
+        active/default model (_loadFromConfig()) do that immediately after
+        this runs. _onModelSearchChanged() is the only thing that narrows
+        the combo to a subset of self._all_model_files afterward."""
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
         project_root = os.path.dirname(src_dir)
         model_dir = os.path.join(project_root, "Model")
+        self._all_model_files = []
         if os.path.exists(model_dir):
-            models = glob.glob(os.path.join(model_dir, "*.onnx"))
-            for m in models:
-                self.modelCombo.addItem(os.path.basename(m))
+            self._all_model_files = sorted(
+                os.path.basename(m) for m in glob.glob(os.path.join(model_dir, "*.onnx")))
+        self.modelCombo.clear()
+        for name in self._all_model_files:
+            self.modelCombo.addItem(name)
+
+    def _onModelSearchChanged(self, query: str):
+        """Live-filter modelCombo to entries matching `query` (case-
+        insensitive substring) as the user types — but never hide the
+        currently active model. Search only needs to help find something
+        else to switch *to*; it must never make the combo appear to show
+        the wrong "currently active" model just because the search text
+        doesn't happen to match it."""
+        if not self._all_model_files:
+            return
+        query = (query or '').strip().lower()
+        current_name = os.path.basename(getattr(self._config, 'model_path', '') or '') if self._config else ''
+
+        self.modelCombo.blockSignals(True)
+        self.modelCombo.clear()
+        matched_current = not current_name
+        for name in self._all_model_files:
+            if not query or query in name.lower():
+                self.modelCombo.addItem(name)
+                if name.lower() == current_name.lower():
+                    matched_current = True
+        if not matched_current and current_name:
+            self.modelCombo.addItem(current_name)
+        idx = self.modelCombo.findText(current_name)
+        if idx >= 0:
+            self.modelCombo.setCurrentIndex(idx)
+        self.modelCombo.blockSignals(False)
 
     def _refreshHudModelList(self):
         self.hudModelCombo.clear()
@@ -675,6 +727,9 @@ class ModelPage(BasePage):
     def retranslateUi(self):
         super().retranslateUi()
         self.modelGroup.titleLabel.setText(t("model_settings"))
+        self.modelSearchCard.titleLabel.setText(t("model_search", "Search Models"))
+        self.modelSearchCard.contentLabel.setText(t("model_search_desc", "Filter the model list below by filename"))
+        self.modelSearchEdit.setPlaceholderText(t("model_search_placeholder", "Search models…"))
         self.modelCard.titleLabel.setText(t("model"))
         self.modelInfoCard.titleLabel.setText(t("model_info", "Model Info"))
         self.inferenceBackendCard.titleLabel.setText(t("inference_backend"))
