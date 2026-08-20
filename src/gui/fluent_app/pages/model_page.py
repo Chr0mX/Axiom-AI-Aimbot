@@ -166,6 +166,7 @@ class ModelPage(BasePage):
         self._trt_installer_launched = False
         self._inspect_worker = None
         self._all_model_files = []  # master list; modelSearchEdit filters a view of this
+        self._model_engine_cached: dict = {}  # {model_basename: has_cached_.engine}, set by _refreshModelList()
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -456,9 +457,68 @@ class ModelPage(BasePage):
         if os.path.exists(model_dir):
             self._all_model_files = sorted(
                 os.path.basename(m) for m in glob.glob(os.path.join(model_dir, "*.onnx")))
+        self._model_engine_cached = self._computeEngineCacheStatus(self._all_model_files)
         self.modelCombo.clear()
         for name in self._all_model_files:
             self.modelCombo.addItem(name)
+        self._applyModelBadges()
+        self._updateModelCardLegend()
+
+    def _computeEngineCacheStatus(self, names) -> dict:
+        """{model_basename: already_has_a_cached_.engine}. Reuses
+        session_utils.find_trt_engine_cache() exactly as-is — that function
+        already only needs the model's basename (it matches against the
+        stem in trt_cache/, an absolute path independent of Model/'s
+        location), so no path resolution is needed here."""
+        try:
+            from core.session_utils import find_trt_engine_cache
+        except Exception:
+            return {}
+        return {name: find_trt_engine_cache(name) is not None for name in names}
+
+    def _isTensorRtActive(self) -> bool:
+        """True if TensorRT is what build_provider_list(config) would
+        actually try first right now — the cached-engine badges are only
+        meaningful under that condition, since picking any model under any
+        other backend never attempts a TensorRT build either way."""
+        if not self._config:
+            return False
+        try:
+            from core.session_utils import effective_first_provider
+            return effective_first_provider(self._config) == "TensorrtExecutionProvider"
+        except Exception:
+            return False
+
+    def _applyModelBadges(self):
+        """Icon each modelCombo entry ✓ (cached engine — loads instantly)
+        or ⬇ (no cached engine yet — selecting it triggers the Convert tab's
+        1-5 minute build, see _redirectToConvertIfNeeded()), before the user
+        even opens the dropdown. Hidden entirely when TensorRT isn't the
+        active backend, since cache status is irrelevant noise there."""
+        trt_active = self._isTensorRtActive()
+        for i in range(self.modelCombo.count()):
+            if not trt_active:
+                self.modelCombo.setItemIcon(i, None)
+                continue
+            cached = self._model_engine_cached.get(self.modelCombo.itemText(i), False)
+            self.modelCombo.setItemIcon(i, FluentIcon.ACCEPT if cached else FluentIcon.CLOUD_DOWNLOAD)
+
+    def _updateModelCardLegend(self):
+        """Explain the badges (only shown while they're actually visible)
+        as modelCard's subtitle — toggling the fixed height back and forth
+        the way SettingCard's own constructor would for content="" vs. a
+        real string."""
+        if self._isTensorRtActive():
+            self.modelCard.contentLabel.setText(t(
+                "model_trt_badge_legend",
+                "✓ = TensorRT engine already cached  ·  ⬇ = needs a one-time build (1-5 min)"
+            ))
+            self.modelCard.contentLabel.show()
+            self.modelCard.setFixedHeight(70)
+        else:
+            self.modelCard.contentLabel.hide()
+            self.modelCard.contentLabel.setText("")
+            self.modelCard.setFixedHeight(50)
 
     def _onModelSearchChanged(self, query: str):
         """Live-filter modelCombo to entries matching `query` (case-
@@ -486,6 +546,7 @@ class ModelPage(BasePage):
         if idx >= 0:
             self.modelCombo.setCurrentIndex(idx)
         self.modelCombo.blockSignals(False)
+        self._applyModelBadges()
 
     def _refreshHudModelList(self):
         self.hudModelCombo.clear()
@@ -719,6 +780,10 @@ class ModelPage(BasePage):
         if not self._isLoadingConfig and prev_backend != selected_backend:
             self._redirectToConvertIfNeeded(self._config.model_path)
         self._updateInferenceBackendSubtitle()
+        # Switching to/from TensorRT changes whether the cached-engine
+        # badges (and their legend) are relevant at all.
+        self._applyModelBadges()
+        self._updateModelCardLegend()
 
     # ──────────────────────────────────────────────
     # Retranslate
@@ -731,6 +796,7 @@ class ModelPage(BasePage):
         self.modelSearchCard.contentLabel.setText(t("model_search_desc", "Filter the model list below by filename"))
         self.modelSearchEdit.setPlaceholderText(t("model_search_placeholder", "Search models…"))
         self.modelCard.titleLabel.setText(t("model"))
+        self._updateModelCardLegend()
         self.modelInfoCard.titleLabel.setText(t("model_info", "Model Info"))
         self.inferenceBackendCard.titleLabel.setText(t("inference_backend"))
         self._updateInferenceBackendSubtitle()
