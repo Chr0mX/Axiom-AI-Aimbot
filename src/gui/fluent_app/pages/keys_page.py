@@ -13,6 +13,7 @@ from ..components.slider_spin_card import SliderDoubleSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
+from ..theme_colors import ThemeColors
 
 # 手柄按鍵讀取
 from win_utils.gamepad_input import (
@@ -330,6 +331,9 @@ class KeysPage(BasePage):
         # MAKCU connection + keys groups visible only in MAKCU mode
         self.makcuConnGroup.setVisible(is_makcu)
         self.makcuKeysGroup.setVisible(is_makcu)
+        # Switching mode changes which slots are reachable, so re-run the
+        # conflict scan against the newly-active set.
+        self._checkKeyConflicts()
 
     # ──────────────────────────────────────────────
     # Widget init
@@ -337,6 +341,17 @@ class KeysPage(BasePage):
 
     def _initWidgets(self):
         """初始化所有控制項"""
+
+        # === Hotkey conflict warning (hidden unless two bindable slots
+        # currently share the same non-zero VK code) ===
+        self.keyConflictCard = SettingCard(
+            FluentIcon.INFO,
+            t("key_conflict_title", "Key Conflict"),
+            " ",  # non-empty so contentLabel is created visible/sized; real text set by _checkKeyConflicts()
+            self.scrollWidget
+        )
+        self.keyConflictCard.contentLabel.setWordWrap(True)
+        self.keyConflictCard.setVisible(False)
 
         # === 瞄準按鍵 ===
         self.aimKeysGroup = SettingCardGroup(t("auto_aim"), self.scrollWidget)
@@ -556,6 +571,8 @@ class KeysPage(BasePage):
 
     def _initLayout(self):
         """排版所有控制項"""
+        self.addContent(self.keyConflictCard)
+
         # 瞄準按鍵
         self.aimKeysGroup.addSettingCard(self.alwaysAimCard)
         self.aimKeysGroup.addSettingCard(self.aimKey1Card)
@@ -691,6 +708,99 @@ class KeysPage(BasePage):
         self.makcuTriggerCard.setVisible(not always_aim)
         self.makcuAimModeCard.setVisible(not always_aim)
         self.makcuDisengageDelayCard.setVisible(not always_aim)
+        # always_aim/keep_detecting change which MAKCU slots are relevant —
+        # re-run the conflict scan against the newly-active set.
+        self._checkKeyConflicts()
+
+    # ──────────────────────────────────────────────
+    # Hotkey conflict detection
+    # ──────────────────────────────────────────────
+
+    def _collectKeySlotGroups(self):
+        """Return (toggle_slot, alt_groups) describing the currently-
+        reachable hotkey slots — reachable meaning the same set
+        _updateMakcuVisibility()/_refreshMakcuVisibility() actually show,
+        so a slot the user can't currently see is never part of a check.
+
+        toggle_slot is (label, vk_or_None) for the always-visible toggle
+        key. alt_groups is a list of same-*purpose* slot lists (the 3 Aim
+        Keys together, the 2 Auto-Fire keys together — each group is a set
+        of OR'd alternatives for one action). Groups are never compared
+        against each other: binding an Aim Key and an Auto-Fire key (or,
+        in MAKCU mode, the Inference and Auto Aim Key buttons) to the same
+        physical button is a common, often intentional "hold one button to
+        do both" setup — it's also this app's own shipped default — not a
+        conflict. Only two things are: two alternatives *within* the same
+        group sharing a VK (a redundant, likely-accidental duplicate that
+        wastes a slot), and the edge-triggered toggle key landing on the
+        same VK as any hold-based key (pressing it then also registers as
+        a "hold" for whatever else has it, and can flip the toggle back off
+        mid-hold — a genuine behavioral fight), checked in _checkKeyConflicts()."""
+        toggle_slot = (t("toggle_key"), self._config.aim_toggle_key or None) if self._config else (t("toggle_key"), None)
+        if not self._config:
+            return toggle_slot, []
+
+        is_makcu = getattr(self._config, 'mouse_move_method', '') == 'makcu'
+        alt_groups: list = []
+        if is_makcu:
+            # Mirror _refreshMakcuVisibility()'s exact conditions: a card
+            # that's hidden there means the key genuinely has no effect
+            # right now, so it shouldn't be reported as conflicting.
+            keep_detecting = bool(getattr(self._config, 'keep_detecting', True))
+            always_aim = bool(getattr(self._config, 'always_aim', False))
+            if not keep_detecting:
+                aim0 = self._config.AimKeys[0] if len(self._config.AimKeys) >= 1 else 0
+                alt_groups.append([(t("makcu_key_inference", "Inference"), aim0 or None)])
+            if not always_aim:
+                trigger_to_vk = {"lmb": 0x01, "rmb": 0x02, "off": None}
+                trigger = getattr(self._config, 'makcu_aim_button', 'lmb').lower()
+                alt_groups.append([(t("makcu_auto_aim_key", "Auto Aim Key"), trigger_to_vk.get(trigger))])
+        else:
+            aim_labels = (t("aim_key_1"), t("aim_key_2"), t("aim_key_3"))
+            aim_group = [(label, self._config.AimKeys[i] or None)
+                         for i, label in enumerate(aim_labels) if len(self._config.AimKeys) > i]
+            if aim_group:
+                alt_groups.append(aim_group)
+            alt_groups.append([
+                (t("auto_fire_key_1"), self._config.auto_fire_key or None),
+                (t("auto_fire_key_2"), self._config.auto_fire_key2 or None),
+            ])
+
+        return toggle_slot, alt_groups
+
+    def _checkKeyConflicts(self):
+        """Scan for the two kinds of hotkey setup that are actually
+        confusing in practice (see _collectKeySlotGroups()'s docstring for
+        why cross-purpose overlap is deliberately not one of them), and
+        show/hide keyConflictCard accordingly."""
+        (toggle_label, toggle_vk), alt_groups = self._collectKeySlotGroups()
+        bound_to = t("key_conflict_bound_to", "are all bound to")
+        messages = []
+
+        # Redundant duplicates within one same-purpose group.
+        for group in alt_groups:
+            by_vk: dict[int, list[str]] = {}
+            for label, vk in group:
+                if vk is not None:
+                    by_vk.setdefault(vk, []).append(label)
+            for vk, labels in by_vk.items():
+                if len(labels) > 1:
+                    messages.append(f"{' / '.join(labels)} {bound_to} {vk_to_name(vk)}")
+
+        # Toggle key (edge-triggered) landing on the same VK as any
+        # hold-based key (from any group, regardless of purpose).
+        if toggle_vk is not None:
+            colliding = [label for group in alt_groups for label, vk in group if vk == toggle_vk]
+            if colliding:
+                messages.append(f"{toggle_label} / {' / '.join(colliding)} {bound_to} {vk_to_name(toggle_vk)}")
+
+        if not messages:
+            self.keyConflictCard.setVisible(False)
+            return
+
+        self.keyConflictCard.contentLabel.setText("; ".join(messages))
+        self.keyConflictCard.titleLabel.setStyleSheet(f"color: {ThemeColors.WARNING.get()}; font-weight: bold;")
+        self.keyConflictCard.setVisible(True)
 
     # ──────────────────────────────────────────────
     # Callbacks
@@ -708,18 +818,22 @@ class KeysPage(BasePage):
             while len(self._config.AimKeys) <= index:
                 self._config.AimKeys.append(0)
             self._config.AimKeys[index] = vk
+        self._checkKeyConflicts()
 
     def _onToggleKeyChanged(self, vk: int):
         if self._config:
             self._config.aim_toggle_key = vk
+        self._checkKeyConflicts()
 
     def _onFireKey1Changed(self, vk: int):
         if self._config:
             self._config.auto_fire_key = vk
+        self._checkKeyConflicts()
 
     def _onFireKey2Changed(self, vk: int):
         if self._config:
             self._config.auto_fire_key2 = vk
+        self._checkKeyConflicts()
 
     def _onMakcuInferenceKeyChanged(self, idx: int):
         if self._config and 0 <= idx < len(_MAKCU_BTN_OPTIONS):
@@ -727,10 +841,12 @@ class KeysPage(BasePage):
             while len(self._config.AimKeys) < 1:
                 self._config.AimKeys.append(0)
             self._config.AimKeys[0] = vk
+        self._checkKeyConflicts()
 
     def _onMakcuTriggerKeyChanged(self, idx: int):
         if self._config and 0 <= idx < len(_MAKCU_TRIGGER_OPTIONS):
             self._config.makcu_aim_button = _MAKCU_TRIGGER_OPTIONS[idx][1]
+        self._checkKeyConflicts()
 
     def _onMakcuAimModeChanged(self, idx: int):
         if self._config and 0 <= idx < len(self._AIM_MODE_OPTIONS):
@@ -923,6 +1039,8 @@ class KeysPage(BasePage):
         """刷新翻譯"""
         super().retranslateUi()
 
+        self.keyConflictCard.titleLabel.setText(t("key_conflict_title", "Key Conflict"))
+
         # 群組標題
         self.aimKeysGroup.titleLabel.setText(t("auto_aim"))
         self.fireKeysGroup.titleLabel.setText(t("keys_and_auto_fire"))
@@ -979,3 +1097,6 @@ class KeysPage(BasePage):
         self.toggleKeyBtn.refreshText()
         self.fireKey1Btn.refreshText()
         self.fireKey2Btn.refreshText()
+
+        # Re-run with freshly-translated slot labels/connector text
+        self._checkKeyConflicts()
