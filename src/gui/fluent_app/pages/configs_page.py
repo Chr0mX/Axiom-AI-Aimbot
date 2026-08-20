@@ -305,17 +305,42 @@ class ConfigsPage(BasePage):
         if not name:
             self._showInfo(t("config_warning"), t("no_selection"), False)
             return
-        if self._configManager and self._config:
-            try:
-                if self._configManager.load_config(self._config, name):
-                    self._showInfo(t("config_success"), t("config_loaded"))
-                    window = self.window()
-                    if hasattr(window, '_refreshAllPages'):
-                        window._refreshAllPages()
-                else:
-                    self._showInfo(t("config_error"), t("config_load_failed"), False)
-            except Exception as e:
+        if not (self._configManager and self._config):
+            return
+
+        # Preview what applying this preset would actually change before
+        # doing it — a dry run via preview_config_changes(), never the
+        # 'config' instance the rest of the app is using live. Only prompt
+        # when something would genuinely change; a preset identical to the
+        # current settings (or one that fails to preview, e.g. a corrupt
+        # file — the same failure mode load_config() itself would hit)
+        # falls straight through to the load below, matching this
+        # button's original no-prompt behavior for those cases.
+        try:
+            changes = self._configManager.preview_config_changes(self._config, name)
+        except Exception:
+            changes = None
+
+        if changes:
+            bullet_lines = "\n".join(f"• {c}" for c in changes)
+            reply = QMessageBox.question(
+                self, t("load_config"),
+                f"{t('preset_diff_will_change', 'Loading this preset will change:')}\n\n{bullet_lines}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        try:
+            if self._configManager.load_config(self._config, name):
+                self._showInfo(t("config_success"), t("config_loaded"))
+                window = self.window()
+                if hasattr(window, '_refreshAllPages'):
+                    window._refreshAllPages()
+            else:
                 self._showInfo(t("config_error"), t("config_load_failed"), False)
+        except Exception as e:
+            self._showInfo(t("config_error"), t("config_load_failed"), False)
 
     def _onSaveConfig(self):
         name = self._getSelectedConfig()

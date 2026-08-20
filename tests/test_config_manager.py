@@ -193,6 +193,104 @@ class TestConfigManagerRename:
             assert result is False
 
 
+class TestConfigManagerPreview:
+    """測試 preview_config_changes 預覽差異（載入前不套用）"""
+
+    def test_no_changes_when_identical(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            c = _make_config()
+            cm.save_config(c, "baseline")
+            result = cm.preview_config_changes(c, "baseline")
+            assert result == []
+
+    def test_nonexistent_preset_returns_none(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            c = _make_config()
+            result = cm.preview_config_changes(c, "does_not_exist")
+            assert result is None
+
+    def test_does_not_mutate_the_passed_config(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            tuned = _make_config()
+            tuned.mouse_move_method = "sendinput"
+            cm.save_config(tuned, "tuned")
+
+            current = _make_config()
+            current.mouse_move_method = "makcu"
+            cm.preview_config_changes(current, "tuned")
+            # The dry run must never touch the instance it was asked to preview against.
+            assert current.mouse_move_method == "makcu"
+
+    def test_reports_a_single_changed_field(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            tuned = _make_config()
+            tuned.model_path = "Model/SomeOther.onnx"
+            cm.save_config(tuned, "tuned")
+
+            current = _make_config()
+            result = cm.preview_config_changes(current, "tuned")
+            assert result == ["model path"]
+
+    def test_groups_multiple_pid_changes_together(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            tuned = _make_config()
+            tuned.pid_kp_x, tuned.pid_ki_x, tuned.pid_kd_x = 0.9, 0.1, 0.05
+            tuned.pid_kp_y, tuned.pid_ki_y, tuned.pid_kd_y = 0.8, 0.2, 0.03
+            cm.save_config(tuned, "tuned")
+
+            current = _make_config()
+            result = cm.preview_config_changes(current, "tuned")
+            assert result == ["6 values in PID"]
+
+    def test_single_pid_change_names_the_group(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            tuned = _make_config()
+            tuned.pid_kp_x = 0.9
+            cm.save_config(tuned, "tuned")
+
+            current = _make_config()
+            result = cm.preview_config_changes(current, "tuned")
+            assert result == ["PID (pid kp x)"]
+
+    def test_humanization_subfield_change_is_grouped(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            tuned = _make_config()
+            tuned.humanization.enabled = not tuned.humanization.enabled
+            cm.save_config(tuned, "tuned")
+
+            current = _make_config()
+            result = cm.preview_config_changes(current, "tuned")
+            assert result == ["Humanization (enabled)"]
+
+    def test_real_load_still_applies_after_a_preview(self):
+        """The dry run must not leave any state behind that affects a real load."""
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            tuned = _make_config()
+            tuned.fov_size = 321
+            cm.save_config(tuned, "tuned")
+
+            current = _make_config()
+            cm.preview_config_changes(current, "tuned")
+            assert cm.load_config(current, "tuned") is True
+            assert current.fov_size == 321
+
+
 class TestConfigManagerExportImport:
     """測試配置匯出和匯入"""
 
