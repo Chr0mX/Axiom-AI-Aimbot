@@ -162,6 +162,8 @@
   "key_none": "None",
   "key_clear": "Clear Binding",
   "key_press_to_bind": "Press a key/button...",
+  "key_conflict_title": "Key Conflict",
+  "key_conflict_bound_to": "are all bound to",
   "appearance_options": "Appearance",
   "enable_acrylic": "Enable Acrylic Blur",
   "enable_acrylic_hint": "Only available on Windows 11",
