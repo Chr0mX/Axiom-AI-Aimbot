@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import json
 import logging
@@ -20,6 +21,82 @@ logger = logging.getLogger(__name__)
 _BUILTIN_PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'presets')
 
 _INVALID_NAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+# preview_config_changes() display helpers ─────────────────────────────────
+# Purely cosmetic: groups a handful of attrs that commonly change together
+# (e.g. all 6 PID gains) under one friendly label instead of listing every
+# attr name individually. Order matters — more specific prefixes are
+# checked first so e.g. 'aim_y_reduce_*' doesn't fall through to a generic
+# 'aim_' bucket that doesn't exist here. Missing an attr from this table
+# isn't a correctness issue, just a slightly less compact summary line —
+# it falls back to its own prettified name.
+_PRESET_DIFF_GROUPS: List[tuple] = [
+    ('humanization.', 'Humanization'),
+    ('pid_', 'PID'),
+    ('smart_jitter_', 'Smart Jitter'),
+    ('jitter_pattern_file', 'Smart Jitter'),
+    ('jitter_speed_multiplier', 'Smart Jitter'),
+    ('aim_y_reduce_', 'Y-Recoil Suppression'),
+    ('aim_y_vel_', 'Y-Recoil Suppression'),
+    ('makcu_', 'MAKCU'),
+    ('uvc_', 'UVC Capture'),
+    ('ndi_', 'NDI Capture'),
+    ('udp_', 'UDP Capture'),
+    ('web_esp_', 'Web ESP'),
+    ('hud_', 'HUD Weapon Detection'),
+    ('xbox_', 'Xbox Controller'),
+    ('arduino_', 'Arduino'),
+    ('ddxoft_', 'ddxoft'),
+    ('detect_semantic_', 'Semantic Filter'),
+    ('target_priority_', 'Target Priority'),
+    ('sticky_lock_', 'Sticky Lock'),
+    ('fov_', 'FOV'),
+    ('crosshair_color_', 'Crosshair Color'),
+]
+
+
+def _flatten_preset_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Expand the one nested value _get_config_data() produces
+    ('humanization', a dataclasses.asdict() block) into pseudo dotted keys
+    so its sub-fields diff individually like every other (already-flat)
+    attr, instead of the whole block always reporting as one opaque change."""
+    flat: Dict[str, Any] = {}
+    for k, v in data.items():
+        if k == 'humanization' and isinstance(v, dict):
+            for hk, hv in v.items():
+                flat[f'humanization.{hk}'] = hv
+        else:
+            flat[k] = v
+    return flat
+
+
+def _describe_changed_attrs(changed_attrs: List[str]) -> List[str]:
+    """Turn a list of changed flat/pseudo-dotted attr names into a short,
+    human-readable summary list — grouping attrs that share a known prefix
+    (see _PRESET_DIFF_GROUPS) into one "N values in <group>" entry, and
+    showing anything else by its own prettified name."""
+    groups: Dict[str, List[str]] = {}
+    ungrouped: List[str] = []
+    for attr in changed_attrs:
+        label = None
+        for prefix, group_label in _PRESET_DIFF_GROUPS:
+            if attr.startswith(prefix):
+                label = group_label
+                break
+        if label:
+            groups.setdefault(label, []).append(attr)
+        else:
+            ungrouped.append(attr)
+
+    parts = []
+    for label, attrs in groups.items():
+        if len(attrs) == 1:
+            parts.append(f"{label} ({attrs[0].split('.')[-1].replace('_', ' ')})")
+        else:
+            parts.append(f"{len(attrs)} values in {label}")
+    for attr in ungrouped:
+        parts.append(attr.split('.')[-1].replace('_', ' '))
+    return parts
 
 
 def _sanitize_config_name(name: str) -> str:
@@ -175,7 +252,55 @@ class ConfigManager:
         except (OSError, json.JSONDecodeError) as e:
             logger.error("Failed to load preset '%s': %s", config_name, e)
             return False
-    
+
+    def preview_config_changes(self, config_instance: Config, config_name: str) -> Optional[List[str]]:
+        """Dry-run load_config(): report what applying `config_name` would
+        actually change on `config_instance`, without mutating it — used to
+        show a pre-load diff summary instead of silently overwriting.
+
+        Simulates the load on a deep copy via the exact same
+        Config.from_dict() path load_config() itself uses (so the preview
+        can't drift from real load behavior), then diffs the two instances'
+        _get_config_data() output — the same flat, attr-keyed dict
+        save_config()/load_config() already read and write, so this needs
+        no new preset format of its own.
+
+        Returns a list of short, human-readable change descriptions (empty
+        if the preset is identical to the current config), or None if the
+        preset file couldn't be read — the same failure mode load_config()
+        itself would hit, so callers should treat it the same way (e.g.
+        fall through to calling load_config() and let its own error
+        handling report the failure) rather than showing a bogus "no
+        changes" summary for a preset that was never actually read.
+        """
+        config_name = _sanitize_config_name(config_name)
+        if not config_name:
+            return None
+        config_path = os.path.join(self.configs_dir, f"{config_name}.json")
+        if not os.path.exists(config_path):
+            return None
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            preset_data = raw.get('config', raw)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.error("Failed to read preset '%s' for preview: %s", config_name, e)
+            return None
+
+        simulated = copy.deepcopy(config_instance)
+        simulated.from_dict(preset_data)
+
+        current_flat = _flatten_preset_data(self._get_config_data(config_instance))
+        simulated_flat = _flatten_preset_data(self._get_config_data(simulated))
+
+        _unset = object()
+        changed_attrs = [
+            attr for attr, new_val in simulated_flat.items()
+            if current_flat.get(attr, _unset) != new_val
+        ]
+        return _describe_changed_attrs(changed_attrs)
+
     def delete_config(self, config_name: str) -> bool:
         """刪除參數配置"""
         config_name = _sanitize_config_name(config_name)

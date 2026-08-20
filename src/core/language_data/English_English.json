@@ -25,6 +25,7 @@
   "config_error": "Error",
   "config_load_failed": "Failed to load configuration",
   "config_loaded": "Configuration Loaded",
+  "preset_diff_will_change": "Loading this preset will change:",
   "config_management_features": "Config Management Features",
   "config_save_failed": "Failed to save configuration",
   "config_saved": "Configuration Saved",
