@@ -44,12 +44,11 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 
 - **Advanced Aim Control**
   - PID controller with separate X/Y axis tuning; an **Unsafe Mode** toggle re-maps the reaction-speed (Kp) sliders from the default safe 0–0.5 range up to a full 0–1.0 for users who want to push past the normally-capped travel.
-  - Bézier curve smoothing for natural, human-like mouse movement.
   - Customizable FOV with independent width/height (so it can be a rectangle, not just a square) and an optional circle/ellipse shape, plus an independent detection range.
   - Single-target mode for focusing on the nearest threat.
   - FOV follows mouse cursor for dynamic aiming.
-  - Configurable head/body region ratios, plus manual fine-tune for the exact aim point.
-  - Aim deadzone and lateral brake to reduce over-travel.
+  - Configurable head/body region ratios, plus manual fine-tune for the exact aim point; the head ratio can also scale automatically with target distance (box height).
+  - Aim deadzone to reduce over-travel on tiny corrections.
 
 - **Humanization**
   - Master enable + intensity slider that scales every effect at once, plus a per-feature on/off toggle and fine-tuning sub-slider for each: micro-jitter, motion variation, speed shaping, micro-stutter, and reaction-time variability.
@@ -68,11 +67,10 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 
 - **Smart Tracker (Prediction System)**
   - Velocity-based (constant-velocity extrapolation) and 2D Kalman-filter-based motion prediction for leading moving targets — independent toggles, so both can run together (prediction extrapolates ahead, Kalman then smooths the result).
-  - Adaptive smoothing with configurable prediction time.
-  - Zero-lag reset on sudden direction changes or stops.
-  - Sticky lock with IOU-based target persistence across frames — tolerates a few bad detection frames without dropping the target.
+  - Configurable prediction horizon, history length, and a velocity sanity cap that discards history and resets cleanly on a sudden detection jump (e.g. a new target acquired far from the last one) instead of extrapolating garbage.
+  - Both predictors also reset on true target loss so stale velocity never carries into whatever's acquired next.
+  - Sticky lock with IOU-based target persistence across frames — tolerates a few bad detection frames without dropping the target; the IOU threshold adapts to FOV size.
   - Smart center-mass aim point that adapts to crouching targets.
-  - Visual prediction overlay for debugging and tuning.
   - Weighted target-priority modes — distance-only, confidence-only, or a composite of both.
   - Optional semantic false-positive filter (class allow/deny lists, geometry heuristics, min box size) to drop vegetation/vehicle/HUD misdetections before target selection.
 
@@ -359,7 +357,7 @@ Axiom/
 │   │   ├── esp_server.py         # Web ESP WebSocket/HTTP server
 │   │   ├── hud_inference.py      # Beta: YOLO-based weapon HUD detector (process-isolated)
 │   │   ├── ocr_inference.py      # Beta: PaddleOCR weapon-name reader (process-isolated)
-│   │   ├── humanization.py       # Velocity curves, Bézier smoothing, micro-corrections
+│   │   ├── humanization.py       # Micro-jitter, motion variation, speed shaping, micro-stutter, reaction variability
 │   │   ├── inference.py          # ONNX inference wrapper, NMS, postprocessing
 │   │   ├── jitter_recorder.py    # Mouse jitter recording/replay terminal tool + GUI API
 │   │   ├── jitter_patterns/      # Recorded jitter pattern JSON files

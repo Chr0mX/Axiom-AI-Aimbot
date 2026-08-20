@@ -205,8 +205,9 @@ def process_aiming(
     scoring), optionally run it through velocity prediction
     (`target_predictor.py`) and/or Kalman smoothing (`kalman_filter.py`),
     feed the result to the X/Y PID controllers, then apply Y-axis recoil
-    suppression, Smart Jitter, and humanization (velocity curve, Bézier
-    smoothing, micro-correction) before dispatching the mouse move.
+    suppression, Smart Jitter, and humanization (micro-jitter, motion
+    variation, speed shaping, micro-stutter, reaction variability — see
+    `humanization.py`'s `HumanizationConfig`) before dispatching the mouse move.
     """
 
     aim_part = config.aim_part
