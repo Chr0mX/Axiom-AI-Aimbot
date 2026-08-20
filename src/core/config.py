@@ -518,7 +518,9 @@ class Config:
         # CUDA IO Binding 零拷貝推理（僅 CUDA provider 有效）
         self.cuda_io_binding_enabled: bool = False
 
-        # Kalman filter aim-point smoother (mutually exclusive with EMA in UI)
+        # Kalman filter aim-point smoother — independent toggle from
+        # prediction_enabled (VelocityPredictor); both can run together
+        # (velocity prediction extrapolates ahead, Kalman then smooths it)
         self.kalman_enabled: bool = False
         self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
         self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier

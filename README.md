@@ -67,7 +67,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
   - Automatically scales down upward correction to compensate for in-game weapon recoil.
 
 - **Smart Tracker (Prediction System)**
-  - EMA and 2D Kalman-filter-based motion prediction for leading moving targets.
+  - Velocity-based (constant-velocity extrapolation) and 2D Kalman-filter-based motion prediction for leading moving targets — independent toggles, so both can run together (prediction extrapolates ahead, Kalman then smooths the result).
   - Adaptive smoothing with configurable prediction time.
   - Zero-lag reset on sudden direction changes or stops.
   - Sticky lock with IOU-based target persistence across frames — tolerates a few bad detection frames without dropping the target.
@@ -298,7 +298,7 @@ Use these logs to verify which provider actually ended up active, or whether run
    - **Model Tab** — Select your ONNX model (searchable dropdown, with a cached-TensorRT-engine badge per entry) and view detailed model info.
    - **Capture Tab** — Choose and configure your screen capture backend (dxcam / MSS / UVC / NDI / UDP); live preview panel.
    - **Inference Tab** — Detection sensitivity, inference provider, and performance tuning.
-   - **Aim Tab** — FOV, PID tuning, prediction (EMA/Kalman), smoothing, aim-point fine-tune, Humanization, Anti-Recoil (Smart Jitter + click-to-stop jitter recorder), Y-axis recoil suppression, sticky lock.
+   - **Aim Tab** — FOV, PID tuning, prediction (Velocity/Kalman), smoothing, aim-point fine-tune, Humanization, Anti-Recoil (Smart Jitter + click-to-stop jitter recorder), Y-axis recoil suppression, sticky lock.
    - **Trigger Tab** — Configure auto-fire delay, interval, and target priority.
    - **Keys Tab** — Set your preferred hotkeys for toggling aim and auto-fire, with a warning if a rebind creates a genuinely confusing conflict.
    - **Configs Tab** — Save / load configuration presets; loading shows a summary of what will actually change first.
