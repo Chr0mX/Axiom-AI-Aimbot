@@ -165,7 +165,12 @@ def _build_snapshot() -> dict:
             "y": int(getattr(c, "crosshairY", 0)) + offset_y,
         },
         "settings": {
-            "fov_size": int(getattr(c, "fov_size", 200)),
+            # fov_effective_size, not the raw fov_size field — reflects any
+            # live shrink from "Reduce FOV on Active Target" so the web
+            # overlay's circle matches the in-game one and what target
+            # selection actually used this frame. Falls back to fov_size for
+            # any config predating this field.
+            "fov_size": int(getattr(c, "fov_effective_size", getattr(c, "fov_size", 200))),
             # Effective size (clamped to the active capture method's own live
             # dimensions), not the raw config field — for 'uvc'/'ndi'/'udp',
             # the raw field is only validated against the full desktop

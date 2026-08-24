@@ -235,7 +235,11 @@ class PyQtOverlay(QWidget):
         pen = QPen(tracer_color, 2, Qt.PenStyle.SolidLine)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        fov_half = float(self.config.fov_size) / 2.0
+        # fov_effective_size (not fov_size) — reflects any live shrink from
+        # "Reduce FOV on Active Target" so the tracer's in/out-FOV test
+        # matches what target selection actually used this frame. Falls
+        # back to fov_size for any config that predates this field.
+        fov_half = float(getattr(self.config, 'fov_effective_size', self.config.fov_size)) / 2.0
         use_circle = getattr(self.config, 'fov_circle_filter_enabled', False)
         aim_part     = str(getattr(self.config, 'aim_part', 'head'))
         head_h_ratio = float(getattr(self.config, 'head_height_ratio', 0.26))
@@ -288,7 +292,9 @@ class PyQtOverlay(QWidget):
 
         # 繪製 FOV 框（只顯示四角）- 使用主題顏色
         if show_fov:
-            fov = self.config.fov_size
+            # Live effective size — visually shrinks with "Reduce FOV on
+            # Active Target" instead of always drawing the static fov_size.
+            fov = int(getattr(self.config, 'fov_effective_size', self.config.fov_size))
             cx, cy = self.config.crosshairX, self.config.crosshairY
             fov_color = OverlayColors.get_fov_color()
             pen = QPen(fov_color, 2)
@@ -315,9 +321,11 @@ class PyQtOverlay(QWidget):
             chroma_color = QColor.fromHsvF(hue / 360.0, 1.0, 1.0)
             chroma_color.setAlpha(220)
 
-            # FOV boundary values for per-box in/out test
+            # FOV boundary values for per-box in/out test — fov_effective_size
+            # so box coloring matches the FOV actually used for target
+            # selection this frame (see draw_tracer's identical comment).
             use_circle = getattr(self.config, 'fov_circle_filter_enabled', False)
-            fov_half = float(self.config.fov_size) / 2.0
+            fov_half = float(getattr(self.config, 'fov_effective_size', self.config.fov_size)) / 2.0
             ox = float(self.config.crosshairX)
             oy = float(self.config.crosshairY)
 

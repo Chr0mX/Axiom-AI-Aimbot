@@ -694,6 +694,11 @@ def ai_logic_loop(
                             _effective_fov_size = max(1, int(config.fov_size * _pct / 100.0))
                         else:
                             state.fov_reduce_since = 0.0  # window expired — revert to full FOV until re-acquired
+                # Published every frame (not just while shrunk) so the in-game
+                # overlay, Web ESP overlay, and any other live consumer always
+                # draw/reason about the FOV actually in effect right now,
+                # rather than the static configured fov_size.
+                config.fov_effective_size = _effective_fov_size
                 boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, _effective_fov_size, config)
                 # NOTE: single_target_mode's reduction to one box used to happen
                 # here, before process_aiming() ever saw the candidate list. That

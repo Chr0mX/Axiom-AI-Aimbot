@@ -383,6 +383,15 @@ class Config:
         self.fov_reduce_on_target_enabled: bool = False
         self.fov_min_size_pct: float = 50.0     # % of fov_size to shrink to while active
         self.fov_min_size_duration: float = 1.0  # seconds the shrink holds after acquisition
+        # Runtime state — not serialized. The FOV size actually in effect
+        # THIS frame (fov_size, or the shrunk value while the reduce-on-
+        # target window is active) — written every frame by ai_loop.py so
+        # the in-game overlay, Web ESP overlay, and any other live consumer
+        # can draw/reason about the FOV that's actually being used right
+        # now, not just the static configured fov_size. Defaults to
+        # fov_size itself so anything reading this before the AI loop's
+        # first frame still gets a sane value.
+        self.fov_effective_size: float = float(self.fov_size)
 
         # AI detection range (square edge length): Separated from fov_size, but must not be smaller than fov_size, and must not be larger than screen height
         self.detect_range_size: int = 320 # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）
