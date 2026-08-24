@@ -563,6 +563,7 @@ def ai_logic_loop(
                         pass
                 # Makcu disengage-delay: keep is_aiming True for up to N seconds after release
                 _disengage_delay = float(getattr(config, 'makcu_disengage_delay', 0.0) or 0.0)
+                _raw_is_aiming = is_aiming  # pre-delay-extension value — see _was_aiming[0] below
                 if _was_aiming[0] and not is_aiming:
                     # Falling edge: user just released/toggled off aim
                     _disengage_time[0] = current_time
@@ -574,7 +575,18 @@ def ai_logic_loop(
                         is_aiming = True  # still within delay window
                     else:
                         _disengage_time[0] = 0.0  # delay expired
-                _was_aiming[0] = is_aiming
+                # Must track the RAW (pre-delay-extension) state, not the
+                # effective `is_aiming` above — storing the extended value
+                # here made every subsequent frame while still in the delay
+                # window look like a fresh falling edge (_was_aiming[0]=True
+                # from the extension, current raw is_aiming=False), which
+                # kept resetting _disengage_time[0] to "now" every single
+                # frame. That meant `current_time - _disengage_time[0]` was
+                # never more than one frame old, so the delay condition above
+                # never actually expired — the aim status stuck at "Aiming"
+                # indefinitely instead of clearing after makcu_disengage_delay
+                # seconds.
+                _was_aiming[0] = _raw_is_aiming
 
                 config.makcu_aim_active = is_aiming
                 if is_aiming:
