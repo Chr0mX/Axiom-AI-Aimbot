@@ -88,6 +88,9 @@ _FIELD_MAP = {
 
     # --- aim ---
     'fov_size':                   'aim.fov_size',
+    'fov_reduce_on_target_enabled': 'aim.fov_reduce.enabled',
+    'fov_min_size_pct':           'aim.fov_reduce.min_size_pct',
+    'fov_min_size_duration':      'aim.fov_reduce.duration',
     'detect_range_size':          'aim.detect_range_size',
     'min_confidence':             'aim.min_confidence',
     'aim_part':                   'aim.aim_part',
@@ -368,6 +371,18 @@ class Config:
         # Aiming and display settings
         self.AimKeys: List[int] = [0x01, 0x06, 0x02]  # Left Click + X2 Key + Right Click
         self.fov_size: int = 200
+
+        # Reduce FOV size while actively tracking a locked target, so a
+        # random target entering the edge of the (normally larger) FOV
+        # can't steal the lock mid-engagement. Shrinks to fov_min_size_pct%
+        # of fov_size for up to fov_min_size_duration seconds after a
+        # target is acquired, then reverts to the full fov_size — bounded
+        # rather than permanent, so the FOV widens back out to reacquire
+        # once the engagement window passes (e.g. current target moved on
+        # or died). See filter_boxes_by_fov()'s caller in ai_loop.py.
+        self.fov_reduce_on_target_enabled: bool = False
+        self.fov_min_size_pct: float = 50.0     # % of fov_size to shrink to while active
+        self.fov_min_size_duration: float = 1.0  # seconds the shrink holds after acquisition
 
         # AI detection range (square edge length): Separated from fov_size, but must not be smaller than fov_size, and must not be larger than screen height
         self.detect_range_size: int = 320 # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）

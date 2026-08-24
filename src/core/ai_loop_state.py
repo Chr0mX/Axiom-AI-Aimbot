@@ -27,6 +27,13 @@ class LoopState:
     locked_confidence: float = 0.0
     no_detection_frames: int = 0
 
+    # FOV-reduce-on-target — 0.0 means "no target currently locked" (or the
+    # shrink window already expired). Set once, on the None→non-None edge of
+    # locked_box, not every frame — see ai_loop.py's fov filtering call site
+    # for why that distinction matters (same class of continuous-reset bug
+    # already fixed once for the MAKCU disengage delay).
+    fov_reduce_since: float = 0.0
+
     # Y-reduce velocity gate — track target Y position across frames to estimate vy.
     aim_y_last_target_y: float = 0.0
     aim_y_last_target_t: float = 0.0
