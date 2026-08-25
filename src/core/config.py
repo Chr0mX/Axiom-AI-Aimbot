@@ -126,12 +126,6 @@ _FIELD_MAP = {
     'kalman_measurement_noise':   'aim.kalman.measurement_noise',
     'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
     'cam_motion_comp_size':       'aim.cam_motion_comp.size',
-    'smart_jitter_enabled':       'aim.smart_jitter.enabled',
-    'smart_jitter_strength':      'aim.smart_jitter.strength',
-    'smart_jitter_box_threshold_pct': 'aim.smart_jitter.box_threshold_pct',
-    'smart_jitter_lmb_gate':      'aim.smart_jitter.lmb_gate',
-    'jitter_pattern_file':        'aim.smart_jitter.pattern_file',
-    'jitter_speed_multiplier':    'aim.smart_jitter.speed_multiplier',
     'aim_deadzone_enabled':       'aim.deadzone.enabled',
     'aim_deadzone_min_px':        'aim.deadzone.min_px',
     'aim_deadzone_close_px':      'aim.deadzone.close_px',
@@ -558,14 +552,6 @@ class Config:
         # Frame skip gate
         self.frame_skip_enabled: bool = False
         self.frame_skip_threshold: float = 2.0     # avg pixel diff below this → skip
-
-        # Smart jitter — fires when bounding box is small (target is far away)
-        self.smart_jitter_enabled: bool = False
-        self.smart_jitter_strength: float = 6.0                # max pixel offset radius applied each frame
-        self.smart_jitter_box_threshold_pct: float = 15.0   # box_h / detect_range_size < threshold% → jitter
-        self.smart_jitter_lmb_gate: bool = True             # only jitter while aim key is held
-        self.jitter_pattern_file: str = ""
-        self.jitter_speed_multiplier: int = 1
 
         # Camera motion compensation — subtract per-frame global scene shift before PID
         self.cam_motion_comp_enabled: bool = False

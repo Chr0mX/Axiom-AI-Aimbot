@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import itertools
 import math
-import random
 import time
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
@@ -29,15 +27,6 @@ def _box_iou(a: List[float], b: List[float]) -> float:
 
 # Module-level singleton — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
-
-# Jitter pattern iterator cache: reloaded whenever jitter_pattern_file changes.
-_jitter_pattern_cache: dict = {"file": None, "iter": None}
-
-
-def _load_jitter_pattern(path_str: str) -> list:
-    from pathlib import Path
-    from core.jitter_recorder import _load_pattern
-    return _load_pattern(Path(path_str))["frames"]
 _kalman: Optional[KalmanFilter2D] = None
 
 
@@ -205,9 +194,9 @@ def process_aiming(
     scoring), optionally run it through velocity prediction
     (`target_predictor.py`) and/or Kalman smoothing (`kalman_filter.py`),
     feed the result to the X/Y PID controllers, then apply Y-axis recoil
-    suppression, Smart Jitter, and humanization (micro-jitter, motion
-    variation, speed shaping, micro-stutter, reaction variability — see
-    `humanization.py`'s `HumanizationConfig`) before dispatching the mouse move.
+    suppression and humanization (micro-jitter, motion variation, speed
+    shaping, micro-stutter, reaction variability — see `humanization.py`'s
+    `HumanizationConfig`) before dispatching the mouse move.
     """
 
     aim_part = config.aim_part
@@ -389,80 +378,6 @@ def process_aiming(
         if getattr(config, 'max_move_per_frame_px', 0) > 0:
             _mx, _my = _apply_per_frame_cap(float(move_x), float(move_y), config)
             move_x, move_y = int(round(_mx)), int(round(_my))
-
-        # --- Smart jitter: fires when box is small (far target) ---
-        if getattr(config, 'smart_jitter_enabled', False):
-            lmb_gate = getattr(config, 'smart_jitter_lmb_gate', True)
-            if not lmb_gate:
-                is_shooting = True
-            else:
-                # aiming_start_time already reflects the fully-resolved
-                # aim-active state computed once in ai_loop.py — including
-                # MAKCU's configured makcu_aim_button (lmb/rmb), toggle mode,
-                # and the disengage delay. Re-deriving MAKCU's physical LMB
-                # state here separately ignored a non-LMB makcu_aim_button
-                # setting entirely, so this now shares the same signal every
-                # other backend already uses instead of a second, narrower one.
-                is_shooting = state.aiming_start_time > 0
-            if is_shooting:
-                box_h = selected_box[3] - selected_box[1]
-                detect_size = float(getattr(config, 'detect_range_size', 350))
-                threshold_pct = float(getattr(config, 'smart_jitter_box_threshold_pct', 15.0))
-                if detect_size > 0 and (box_h / detect_size) * 100.0 < threshold_pct:
-                    sj = max(0.0, float(getattr(config, 'smart_jitter_strength', 6.0)))
-                    pattern_file = getattr(config, 'jitter_pattern_file', '')
-                    if pattern_file:
-                        cache = _jitter_pattern_cache
-                        if cache["file"] != pattern_file:
-                            try:
-                                frames = _load_jitter_pattern(pattern_file)
-                                cache["iter"] = itertools.cycle(frames)
-                                cache["file"] = pattern_file
-                            except Exception:
-                                cache["iter"] = None
-                                cache["file"] = None
-                        if cache["iter"]:
-                            # Only the recorded (dx, dy) shape is replayed — the
-                            # recording's own dt_ms per frame (~1ms, see
-                            # jitter_recorder.py) is intentionally not honored
-                            # here; playback cadence instead follows this
-                            # detection loop's own tick rate, tunable via
-                            # jitter_speed_multiplier. See "Recorded Pattern"'s
-                            # tooltip for the same note.
-                            _mult = max(1, int(getattr(config, 'jitter_speed_multiplier', 1)))
-                            # Accumulate in float and carry the fraction
-                            # across frames. Recorded patterns are normalized
-                            # to zero net displacement (jitter_recorder's
-                            # _normalize_frames appends a correction frame so
-                            # each cycle returns to origin), but truncating
-                            # every frame independently destroys that: the sum
-                            # of int(dx) is not int(sum of dx), so the residue
-                            # accumulated and walked the crosshair steadily
-                            # off-target over a long burst. Carrying it makes
-                            # playback preserve the invariant the recorder
-                            # went out of its way to establish.
-                            _jx = state.jitter_carry_x
-                            _jy = state.jitter_carry_y
-                            for _ in range(_mult):
-                                f = next(cache["iter"])
-                                _jx += float(f["dx"])
-                                _jy += float(f["dy"])
-                            _step_x = int(_jx)
-                            _step_y = int(_jy)
-                            state.jitter_carry_x = _jx - _step_x
-                            state.jitter_carry_y = _jy - _step_y
-                            move_x += _step_x
-                            move_y += _step_y
-                        else:
-                            angle = random.uniform(0, math.tau)
-                            r = random.uniform(0, sj)
-                            move_x += int(r * math.cos(angle))
-                            move_y += int(r * math.sin(angle))
-                    else:
-                        angle = random.uniform(0, math.tau)
-                        r = random.uniform(0, sj)
-                        move_x += int(r * math.cos(angle))
-                        move_y += int(r * math.sin(angle))
 
         if move_x != 0 or move_y != 0:
             send_mouse_move(move_x, move_y, method=mouse_method)

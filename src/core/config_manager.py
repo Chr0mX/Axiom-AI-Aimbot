@@ -33,9 +33,6 @@ _INVALID_NAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 _PRESET_DIFF_GROUPS: List[tuple] = [
     ('humanization.', 'Humanization'),
     ('pid_', 'PID'),
-    ('smart_jitter_', 'Smart Jitter'),
-    ('jitter_pattern_file', 'Smart Jitter'),
-    ('jitter_speed_multiplier', 'Smart Jitter'),
     ('aim_y_reduce_', 'Y-Recoil Suppression'),
     ('aim_y_vel_', 'Y-Recoil Suppression'),
     ('makcu_', 'MAKCU'),

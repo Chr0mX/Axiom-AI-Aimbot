@@ -268,7 +268,7 @@ class TestConfigSerialization:
         c1.fov_size = 555
         c1.pid_kp_x = 0.99
         c1.mouse_click_method = "xbox"
-        c1.smart_jitter_enabled = True
+        c1.aim_y_reduce_enabled = True
         d = c1.to_dict()
 
         c2 = _make_config()
@@ -276,7 +276,7 @@ class TestConfigSerialization:
         assert c2.fov_size == 555
         assert c2.pid_kp_x == 0.99
         assert c2.mouse_click_method == "xbox"
-        assert c2.smart_jitter_enabled is True
+        assert c2.aim_y_reduce_enabled is True
 
 
 # ============================================================
