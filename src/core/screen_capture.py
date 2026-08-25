@@ -425,8 +425,12 @@ def _draw_detection_overlay(
         cv2.rectangle(frame, (x1, y1), (x2, y2), _c(255, 140, 0), 1, cv2.LINE_AA)
 
     if bool(getattr(cfg, 'show_fov', True)):
-        fov_w = int(getattr(cfg, 'fov_size', 220))
-        fov_h = int(getattr(cfg, 'fov_height', fov_w))
+        # fov_effective_size/_height — reflects any live shrink from "Reduce
+        # FOV on Active Target" so this baked-in preview overlay matches the
+        # in-game/Web ESP ones. Falls back to the static fields for a config
+        # predating them.
+        fov_w = int(getattr(cfg, 'fov_effective_size', getattr(cfg, 'fov_size', 220)))
+        fov_h = int(getattr(cfg, 'fov_effective_height', getattr(cfg, 'fov_height', fov_w)))
         half_x = max(1, fov_w // 2)
         half_y = max(1, fov_h // 2)
         x1, y1 = cx - half_x, cy - half_y
@@ -464,8 +468,10 @@ def _draw_detection_overlay(
         r_f, g_f, b_f = colorsys.hsv_to_rgb(hue / 360.0, 1.0, 1.0)
         chroma_color = _c(int(b_f * 255), int(g_f * 255), int(r_f * 255), 220)
         use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
-        fov_half_x = float(getattr(cfg, 'fov_size', 220)) / 2.0
-        fov_half_y = float(getattr(cfg, 'fov_height', getattr(cfg, 'fov_size', 220))) / 2.0
+        # fov_effective_size/_height so box coloring matches the FOV actually
+        # used for target selection this frame — same reasoning as overlay.py.
+        fov_half_x = float(getattr(cfg, 'fov_effective_size', getattr(cfg, 'fov_size', 220))) / 2.0
+        fov_half_y = float(getattr(cfg, 'fov_effective_height', getattr(cfg, 'fov_height', getattr(cfg, 'fov_size', 220)))) / 2.0
         ellipse_intersects_bbox = _get_ellipse_intersects_bbox() if use_circle else None
         for i, box in enumerate(boxes):
             try:
@@ -510,8 +516,8 @@ def _draw_detection_overlay(
     if bool(getattr(cfg, 'show_tracer_line', False)):
         tracer_boxes = list(getattr(cfg, 'latest_boxes', []) or [])
         tracer_use_circle = bool(getattr(cfg, 'fov_circle_filter_enabled', False))
-        tracer_half_x = max(1, int(getattr(cfg, 'fov_size', 220)) // 2)
-        tracer_half_y = max(1, int(getattr(cfg, 'fov_height', getattr(cfg, 'fov_size', 220))) // 2)
+        tracer_half_x = max(1, int(getattr(cfg, 'fov_effective_size', getattr(cfg, 'fov_size', 220))) // 2)
+        tracer_half_y = max(1, int(getattr(cfg, 'fov_effective_height', getattr(cfg, 'fov_height', getattr(cfg, 'fov_size', 220)))) // 2)
         for box in tracer_boxes:
             try:
                 x1, y1, x2, y2 = [int(v) for v in box]
