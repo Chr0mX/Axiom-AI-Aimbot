@@ -1,16 +1,15 @@
 # aim_page.py
-"""Aim Assist Page - Move Method, Arduino, Xbox, PID, Smart Jitter, Target Priority, Target Tracking"""
+"""Aim Assist Page - Move Method, Arduino, Xbox, PID, Target Priority, Target Tracking"""
 
 import os
 import re
 import sys
 import subprocess
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox, QInputDialog,
-    QDialog, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox,
 )
-from PyQt6.QtGui import QDesktopServices, QPainter, QPixmap, QColor, QPen
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+from PyQt6.QtGui import QDesktopServices, QPainter, QColor, QPen
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon,
@@ -18,7 +17,6 @@ from qfluentwidgets import (
     SegmentedWidget,
     BodyLabel, PushButton,
 )
-from ..components.no_wheel_widgets import NoWheelDoubleSpinBox as DoubleSpinBox
 from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
 
 from ..base_page import BasePage
@@ -125,149 +123,6 @@ class _AimPointPreview(QWidget):
         p.end()
 
 
-def _render_frames_pixmap(frames, W=240, H=240):
-    """Render a jitter frames list as a path on a W×H QPixmap."""
-    positions = [(0.0, 0.0)]
-    x, y = 0.0, 0.0
-    for f in frames:
-        x += f.get("dx", 0)
-        y += f.get("dy", 0)
-        positions.append((x, y))
-
-    cx, cy = W / 2, H / 2
-    pixmap = QPixmap(W, H)
-    pixmap.fill(QColor(17, 17, 17))
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    if len(positions) > 1:
-        xs = [p[0] for p in positions]
-        ys = [p[1] for p in positions]
-        span = max(max(xs) - min(xs), max(ys) - min(ys), 1)
-        scale = 100.0 / span
-        pts = [(int(cx + p[0] * scale), int(cy + p[1] * scale)) for p in positions]
-
-        painter.setPen(QPen(QColor(0, 200, 255), 1))
-        for i in range(len(pts) - 1):
-            painter.drawLine(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 255, 80))
-        painter.drawEllipse(pts[0][0] - 4, pts[0][1] - 4, 8, 8)
-        painter.setBrush(QColor(255, 60, 60))
-        painter.drawEllipse(pts[-1][0] - 4, pts[-1][1] - 4, 8, 8)
-    else:
-        painter.setPen(QColor(120, 120, 120))
-        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "No movement")
-
-    painter.end()
-    return pixmap
-
-
-class _JitterLiveWindow(QDialog):
-    """Floating live preview of the jitter path being recorded."""
-
-    def __init__(self, stop_callback, parent=None):
-        super().__init__(parent, Qt.WindowType.Tool)
-        self.setWindowTitle("Jitter Recorder")
-        self.setFixedSize(280, 340)
-        self._recorder = None
-        self._stop_callback = stop_callback
-
-        self._canvas = QLabel()
-        self._canvas.setFixedSize(240, 240)
-        self._canvas.setPixmap(_render_frames_pixmap([]))
-
-        self._info = QLabel("Starting…")
-        self._info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._info.setStyleSheet(f"color: {ThemeColors.TEXT_TERTIARY.get()}; font-size: 10px;")
-
-        self._hint = QLabel("Click anywhere in this window to finish & save")
-        self._hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._hint.setWordWrap(True)
-        self._hint.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-size: 10px;")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-        layout.addWidget(self._canvas, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._info)
-        layout.addWidget(self._hint)
-
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._refresh)
-
-    def setCountdown(self, n):
-        self._info.setText(f"Starting in {n}…")
-
-    def setRecorder(self, recorder):
-        self._recorder = recorder
-        self._info.setText("Recording… 0 frames")
-        self._timer.start(150)
-
-    def _refresh(self):
-        frames = list(self._recorder._frames)
-        self._canvas.setPixmap(_render_frames_pixmap(frames))
-        self._info.setText(f"Recording… {len(frames)} frames")
-
-    def mousePressEvent(self, event):
-        # Clicking anywhere in the window (not a dedicated Stop button) finishes
-        # the recording — reaching for a small button would itself bake an extra
-        # cursor movement into the recorded pattern. Ignored during the
-        # countdown, before a recorder actually exists.
-        if self._recorder is not None:
-            self._timer.stop()
-            self._stop_callback()
-        else:
-            super().mousePressEvent(event)
-
-    def closeEvent(self, event):
-        self._timer.stop()
-        super().closeEvent(event)
-
-
-class _JitterPreviewDialog(QDialog):
-    """Visualises a recorded jitter path before the user names and saves it."""
-
-    def __init__(self, frames, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Jitter Pattern Preview")
-        self.setFixedSize(300, 320)
-        self.result_action = "save"
-
-        canvas = QLabel()
-        canvas.setPixmap(_render_frames_pixmap(frames))
-        canvas.setFixedSize(240, 240)
-
-        info = QLabel(f"{len(frames)} frames recorded")
-        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        info.setStyleSheet(f"color: {ThemeColors.TEXT_TERTIARY.get()}; font-size: 10px;")
-
-        save_btn = QPushButton("Save")
-        rerecord_btn = QPushButton("Re-record")
-        save_btn.clicked.connect(self._onSave)
-        rerecord_btn.clicked.connect(self._onRerecord)
-
-        btn_row = QHBoxLayout()
-        btn_row.addWidget(rerecord_btn)
-        btn_row.addWidget(save_btn)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(8)
-        layout.addWidget(canvas, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(info)
-        layout.addLayout(btn_row)
-
-    def _onSave(self):
-        self.result_action = "save"
-        self.accept()
-
-    def _onRerecord(self):
-        self.result_action = "rerecord"
-        self.reject()
-
-
 class _ArduinoConnectWorker(QThread):
     """Runs connect_arduino() off the GUI thread.
 
@@ -303,11 +158,6 @@ class AimPage(BasePage):
         self._isArduinoConnected = False
         self._arduinoConnectWorker: _ArduinoConnectWorker | None = None
         self._isXboxConnected = False
-        self._jitterRecorder = None
-        self._jitterRecording = False
-        self._jitterCountingDown = False
-        self._jitterCountdown = 0
-        self._jitterCountdownTimer = None
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -622,83 +472,6 @@ class AimPage(BasePage):
             description="Restore full Y tracking if target moves vertically faster than this (0 = off)",
             parent=self.yReduceGroup
         )
-
-        # === Anti-Detection (Smart Jitter only) ===
-        self.antiRecoilGroup = SettingCardGroup(t("anti_recoil", "Anti-Recoil"), self.scrollWidget)
-
-        self.smartJitterEnableCard = SwitchSettingCard(
-            FluentIcon.MOVE,
-            t("smart_jitter_label", "Smart Jitter"),
-            t("smart_jitter_desc", "Add jitter when target box is small (far targets). Fires while shooting."),
-            parent=self.antiRecoilGroup
-        )
-
-        self.smartJitterLmbCard = SwitchSettingCard(
-            FluentIcon.FINGERPRINT,
-            t("smart_jitter_lmb_label", "Only While Aiming"),
-            t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"),
-            parent=self.antiRecoilGroup
-        )
-
-        self.smartJitterStrengthSpin = DoubleSpinBox()
-        self.smartJitterStrengthSpin.setRange(0.1, 200.0)
-        self.smartJitterStrengthSpin.setSingleStep(0.5)
-        self.smartJitterStrengthSpin.setDecimals(1)
-        self.smartJitterStrengthSpin.setSuffix(" px")
-        self.smartJitterStrengthSpin.setMinimumWidth(110)
-        self.smartJitterLevelCard = SettingCard(
-            FluentIcon.SPEED_HIGH,
-            t("smart_jitter_level_label", "Jitter Strength"),
-            t("smart_jitter_level_desc", "Max pixel offset radius applied per frame while jitter fires"),
-            self.antiRecoilGroup
-        )
-        self.smartJitterLevelCard.hBoxLayout.addWidget(self.smartJitterStrengthSpin, 0)
-        self.smartJitterLevelCard.hBoxLayout.addSpacing(16)
-
-        self.smartJitterThreshCard = SliderLabelCard(
-            FluentIcon.ZOOM_OUT,
-            t("smart_jitter_threshold_label", "Box Size Threshold"),
-            1, 50,
-            format_func=lambda v: f"{v}%",
-            description=t("smart_jitter_threshold_desc", "Jitter fires when box height < this % of detection range"),
-            slider_width=160,
-            parent=self.antiRecoilGroup
-        )
-
-        self.jitterRecordBtn = PushButton("● Record")
-        self.jitterRecordBtn.setFixedWidth(130)
-        self.jitterRecordCard = SettingCard(
-            FluentIcon.MICROPHONE,
-            t("jitter_record_label", "Record Jitter"),
-            t("jitter_record_desc", "Record your mouse shake to create a custom jitter pattern"),
-            self.antiRecoilGroup
-        )
-        self.jitterRecordCard.hBoxLayout.addWidget(self.jitterRecordBtn, 0)
-        self.jitterRecordCard.hBoxLayout.addSpacing(16)
-
-        self.jitterPatternCombo = ComboBox()
-        self.jitterPatternCombo.setMinimumWidth(180)
-        self.jitterPatternCard = SettingCard(
-            FluentIcon.LABEL,
-            t("jitter_pattern_label", "Recorded Pattern"),
-            t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on). Only the recorded motion's shape is replayed — playback speed follows the detection loop's own tick rate, not the recording's original timing; use the speed multiplier below to tune the feel."),
-            self.antiRecoilGroup
-        )
-        self.jitterPatternCard.hBoxLayout.addWidget(self.jitterPatternCombo, 0)
-        self.jitterPatternCard.hBoxLayout.addSpacing(16)
-
-        self.jitterSpeedSegment = SegmentedWidget()
-        for _lbl, _key in [("1×", "1"), ("2×", "2"), ("3×", "3"), ("5×", "5"), ("10×", "10")]:
-            self.jitterSpeedSegment.addItem(routeKey=_key, text=_lbl)
-        self.jitterSpeedSegment.setCurrentItem("1")
-        self.jitterSpeedCard = SettingCard(
-            FluentIcon.SPEED_HIGH,
-            t("jitter_speed_label", "Playback Speed"),
-            "",
-            self.antiRecoilGroup
-        )
-        self.jitterSpeedCard.hBoxLayout.addWidget(self.jitterSpeedSegment, 0, Qt.AlignmentFlag.AlignRight)
-        self.jitterSpeedCard.hBoxLayout.addSpacing(16)
 
         # === Humanization ===
         # Post-processing layer applied to the final PID dx/dy, right before mouse
@@ -1154,16 +927,6 @@ class AimPage(BasePage):
         self.yReduceGroup.addSettingCard(self.pidYReduceVelCard)
         self.addContent(self.yReduceGroup)
 
-        # Anti-Recoil (Smart Jitter)
-        self.antiRecoilGroup.addSettingCard(self.smartJitterEnableCard)
-        self.antiRecoilGroup.addSettingCard(self.smartJitterLmbCard)
-        self.antiRecoilGroup.addSettingCard(self.smartJitterLevelCard)
-        self.antiRecoilGroup.addSettingCard(self.smartJitterThreshCard)
-        self.antiRecoilGroup.addSettingCard(self.jitterRecordCard)
-        self.antiRecoilGroup.addSettingCard(self.jitterPatternCard)
-        self.antiRecoilGroup.addSettingCard(self.jitterSpeedCard)
-        self.addContent(self.antiRecoilGroup)
-
         # Humanization
         self.humanizationGroup.addSettingCard(self.humanizationEnableCard)
         self.humanizationGroup.addSettingCard(self.humanizationIntensityCard)
@@ -1258,15 +1021,6 @@ class AimPage(BasePage):
             lambda v: setattr(self._config, 'aim_y_reduce_settle_px', float(v)) if self._config else None)
         self.pidYReduceVelCard.valueChanged.connect(
             lambda v: setattr(self._config, 'aim_y_vel_restore_px_s', float(v)) if self._config else None)
-
-        # Smart Jitter
-        self.smartJitterEnableCard.checkedChanged.connect(self._onSmartJitterEnableChanged)
-        self.smartJitterLmbCard.checkedChanged.connect(self._onSmartJitterLmbChanged)
-        self.smartJitterStrengthSpin.valueChanged.connect(self._onSmartJitterStrengthChanged)
-        self.smartJitterThreshCard.valueChanged.connect(self._onSmartJitterThreshChanged)
-        self.jitterRecordBtn.clicked.connect(self._onJitterRecordClicked)
-        self.jitterPatternCombo.currentIndexChanged.connect(self._onJitterPatternChanged)
-        self.jitterSpeedSegment.currentItemChanged.connect(self._onJitterSpeedChanged)
 
         # Humanization
         self.humanizationEnableCard.checkedChanged.connect(self._onHumanizationEnableChanged)
@@ -1374,34 +1128,6 @@ class AimPage(BasePage):
             self.pidYReduceRampCard.setValue(int(getattr(self._config, 'aim_y_reduce_ramp', 0.0) * 100))
             self.pidYReduceSettleCard.setValue(int(getattr(self._config, 'aim_y_reduce_settle_px', 0.0)))
             self.pidYReduceVelCard.setValue(int(getattr(self._config, 'aim_y_vel_restore_px_s', 0.0)))
-
-            # Smart Jitter
-            sj_on = bool(getattr(self._config, 'smart_jitter_enabled', False))
-            self.smartJitterEnableCard.setChecked(sj_on)
-            self.smartJitterLmbCard.setChecked(bool(getattr(self._config, 'smart_jitter_lmb_gate', True)))
-            self.smartJitterStrengthSpin.setValue(float(getattr(self._config, 'smart_jitter_strength', 6.0)))
-            self.smartJitterThreshCard.setValue(int(getattr(self._config, 'smart_jitter_box_threshold_pct', 15.0)))
-            self.smartJitterLmbCard.setEnabled(sj_on)
-            self.smartJitterLevelCard.setEnabled(sj_on)
-            self.smartJitterThreshCard.setEnabled(sj_on)
-
-            # Jitter pattern combo — populated fresh each load so new recordings appear
-            from core.jitter_recorder import list_patterns as _list_jitter_patterns
-            self.jitterPatternCombo.blockSignals(True)
-            self.jitterPatternCombo.clear()
-            self.jitterPatternCombo.addItem("(none — procedural)", userData="")
-            for _p in _list_jitter_patterns():
-                self.jitterPatternCombo.addItem(_p["name"], userData=_p["path"])
-            _current_pf = getattr(self._config, 'jitter_pattern_file', '')
-            _idx = self.jitterPatternCombo.findData(_current_pf)
-            self.jitterPatternCombo.setCurrentIndex(max(0, _idx))
-            self.jitterPatternCombo.blockSignals(False)
-            _mult = int(getattr(self._config, 'jitter_speed_multiplier', 1))
-            _mult_key = str(_mult) if str(_mult) in ('1', '2', '3', '5', '10') else '1'
-            self.jitterSpeedSegment.setCurrentItem(_mult_key)
-            self.jitterRecordCard.setEnabled(sj_on)
-            self.jitterPatternCard.setEnabled(sj_on)
-            self.jitterSpeedCard.setEnabled(sj_on)
 
             # Humanization
             self._loadHumanizationFromConfig()
@@ -1820,125 +1546,6 @@ class AimPage(BasePage):
                 divisor = self._pidKpDivisor() if attr in ('pid_kp_x', 'pid_kp_y') else 100.0
                 setattr(self._config, attr, value / divisor)
 
-    # === Smart Jitter Callbacks ===
-
-    def _onSmartJitterEnableChanged(self, checked):
-        if self._config:
-            self._config.smart_jitter_enabled = bool(checked)
-        self.smartJitterLmbCard.setEnabled(bool(checked))
-        self.smartJitterLevelCard.setEnabled(bool(checked))
-        self.smartJitterThreshCard.setEnabled(bool(checked))
-        self.jitterRecordCard.setEnabled(bool(checked))
-        self.jitterPatternCard.setEnabled(bool(checked))
-        self.jitterSpeedCard.setEnabled(bool(checked))
-
-    def _onSmartJitterLmbChanged(self, checked):
-        if self._config:
-            self._config.smart_jitter_lmb_gate = bool(checked)
-
-    def _onSmartJitterStrengthChanged(self, value):
-        if self._config:
-            self._config.smart_jitter_strength = float(value)
-
-    def _onSmartJitterThreshChanged(self, value):
-        if self._config:
-            self._config.smart_jitter_box_threshold_pct = float(value)
-
-    def _startJitterCountdown(self) -> None:
-        """Begin 3-second countdown before recording starts."""
-        self._jitterCountingDown = True
-        self._jitterCountdown = 3
-        self.jitterRecordBtn.setEnabled(False)
-        self.jitterRecordBtn.setText("3...")
-        self._jitterLiveWin = _JitterLiveWindow(stop_callback=self._onJitterRecordClicked, parent=self)
-        self._jitterLiveWin.setCountdown(3)
-        self._jitterLiveWin.show()
-        self._jitterCountdownTimer = QTimer(self)
-        self._jitterCountdownTimer.timeout.connect(self._onJitterCountdownTick)
-        self._jitterCountdownTimer.start(1000)
-
-    def _onJitterCountdownTick(self) -> None:
-        self._jitterCountdown -= 1
-        if self._jitterCountdown > 0:
-            self.jitterRecordBtn.setText(f"{self._jitterCountdown}...")
-            if getattr(self, '_jitterLiveWin', None):
-                self._jitterLiveWin.setCountdown(self._jitterCountdown)
-        else:
-            self._jitterCountdownTimer.stop()
-            self._jitterCountingDown = False
-            self.jitterRecordBtn.setEnabled(True)
-            from core.jitter_recorder import _Recorder
-            self._jitterRecorder = _Recorder()
-            self._jitterRecorder.start()
-            self._jitterRecording = True
-            self.jitterRecordBtn.setText("■ Stop & Save")
-            if getattr(self, '_jitterLiveWin', None):
-                self._jitterLiveWin.setRecorder(self._jitterRecorder)
-
-    def _onJitterRecordClicked(self) -> None:
-        if self._jitterCountingDown:
-            # Cancel countdown and close window if user presses the main button during countdown
-            self._jitterCountdownTimer.stop()
-            self._jitterCountingDown = False
-            self.jitterRecordBtn.setEnabled(True)
-            self.jitterRecordBtn.setText("● Record")
-            if getattr(self, '_jitterLiveWin', None):
-                self._jitterLiveWin.close()
-                self._jitterLiveWin = None
-            return
-        if not self._jitterRecording:
-            self._startJitterCountdown()
-        else:
-            from core.jitter_recorder import _normalize_frames, _save_pattern
-            frames = self._jitterRecorder.stop()
-            self._jitterRecording = False
-            self.jitterRecordBtn.setText("● Record")
-            if getattr(self, '_jitterLiveWin', None):
-                self._jitterLiveWin.close()
-                self._jitterLiveWin = None
-            if not frames:
-                QMessageBox.information(self, "Jitter Recorder", "No movement detected — nothing saved.")
-                return
-            frames = _normalize_frames(frames)
-
-            # Show preview dialog so user can verify the path before saving
-            dlg = _JitterPreviewDialog(frames, parent=self)
-            dlg.exec()
-            if dlg.result_action == "rerecord":
-                self._startJitterCountdown()
-                return
-
-            name, ok = QInputDialog.getText(self, "Save Pattern", "Pattern name:", text="jitter")
-            if not ok or not name.strip():
-                return
-            _save_pattern(name.strip(), frames)
-            self._refreshPatternCombo()
-
-    def _onJitterPatternChanged(self, _index: int) -> None:
-        if self._isLoadingConfig or not self._config:
-            return
-        path = self.jitterPatternCombo.currentData() or ""
-        self._config.jitter_pattern_file = path
-        from core.ai_aiming import _jitter_pattern_cache
-        _jitter_pattern_cache["file"] = None
-        _jitter_pattern_cache["iter"] = None
-
-    def _onJitterSpeedChanged(self, routeKey: str) -> None:
-        if self._config:
-            self._config.jitter_speed_multiplier = int(routeKey)
-
-    def _refreshPatternCombo(self) -> None:
-        from core.jitter_recorder import list_patterns as _list_jitter_patterns
-        self.jitterPatternCombo.blockSignals(True)
-        self.jitterPatternCombo.clear()
-        self.jitterPatternCombo.addItem("(none — procedural)", userData="")
-        for _p in _list_jitter_patterns():
-            self.jitterPatternCombo.addItem(_p["name"], userData=_p["path"])
-        _current_pf = getattr(self._config, 'jitter_pattern_file', '') if self._config else ''
-        _idx = self.jitterPatternCombo.findData(_current_pf)
-        self.jitterPatternCombo.setCurrentIndex(max(0, _idx))
-        self.jitterPatternCombo.blockSignals(False)
-
     # === Humanization Callbacks ===
 
     def _loadHumanizationFromConfig(self):
@@ -2267,21 +1874,6 @@ class AimPage(BasePage):
         self.pidYReduceRampCard.titleLabel.setText("Y Ramp Window")
         self.pidYReduceSettleCard.titleLabel.setText("Y Settle Threshold")
         self.pidYReduceVelCard.titleLabel.setText("Y Velocity Restore")
-
-        self.antiRecoilGroup.titleLabel.setText(t("anti_recoil", "Anti-Recoil"))
-        self.smartJitterEnableCard.titleLabel.setText(t("smart_jitter_label", "Smart Jitter"))
-        self.smartJitterEnableCard.contentLabel.setText(t("smart_jitter_desc", "Add jitter when target box is small (far targets). Fires while shooting."))
-        self.smartJitterLmbCard.titleLabel.setText(t("smart_jitter_lmb_label", "Only While Aiming"))
-        self.smartJitterLmbCard.contentLabel.setText(t("smart_jitter_lmb_desc", "Jitter only fires when an aim key is held"))
-        self.smartJitterLevelCard.titleLabel.setText(t("smart_jitter_level_label", "Jitter Strength"))
-        self.smartJitterLevelCard.contentLabel.setText(t("smart_jitter_level_desc", "Max pixel offset radius applied per frame while jitter fires"))
-        self.smartJitterThreshCard.titleLabel.setText(t("smart_jitter_threshold_label", "Box Size Threshold"))
-        self.smartJitterThreshCard.contentLabel.setText(t("smart_jitter_threshold_desc", "Jitter fires when box height < this % of detection range"))
-        self.jitterRecordCard.titleLabel.setText(t("jitter_record_label", "Record Jitter"))
-        self.jitterRecordCard.contentLabel.setText(t("jitter_record_desc", "Record your mouse shake to create a custom jitter pattern"))
-        self.jitterPatternCard.titleLabel.setText(t("jitter_pattern_label", "Recorded Pattern"))
-        self.jitterPatternCard.contentLabel.setText(t("jitter_pattern_desc", "Use a recorded jitter pattern instead of procedural (requires Smart Jitter on). Only the recorded motion's shape is replayed — playback speed follows the detection loop's own tick rate, not the recording's original timing; use the speed multiplier below to tune the feel."))
-        self.jitterSpeedCard.titleLabel.setText(t("jitter_speed_label", "Playback Speed"))
 
         self.humanizationGroup.titleLabel.setText(t("humanization", "Humanization"))
         self.humanizationEnableCard.titleLabel.setText(t("humanization_enabled", "Humanization"))

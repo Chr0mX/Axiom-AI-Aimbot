@@ -54,13 +54,6 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
   - Master enable + intensity slider that scales every effect at once, plus a per-feature on/off toggle and fine-tuning sub-slider for each: micro-jitter, motion variation, speed shaping, micro-stutter, and reaction-time variability.
   - One-click **Reset to Defaults** for the whole block.
 
-- **Anti-Recoil (Smart Jitter)**
-  - Smart Jitter applies subtle movement to simulate natural hand shake while on target.
-  - Choose between procedural random jitter or fully custom recorded patterns, with a 1×/2×/3×/5×/10× playback speed multiplier for recorded patterns.
-  - **Jitter Recorder** — record your own mouse shake pattern directly from the Aim Assist page (click anywhere in the live-preview window to finish & save — no separate button to reach for mid-pattern) or via the standalone terminal tool (`src/core/jitter_recorder.py`).
-  - Patterns are zero-net-displacement: each loop cycle returns the cursor to its original position.
-  - LMB gate: optionally activate jitter only while left mouse button is held.
-
 - **Y-Axis Recoil Suppression**
   - Dedicated Y-axis reduction with configurable delay, ramp, floor, settle threshold, and velocity-restore.
   - Automatically scales down upward correction to compensate for in-game weapon recoil.
@@ -296,7 +289,7 @@ Use these logs to verify which provider actually ended up active, or whether run
    - **Model Tab** — Select your ONNX model (searchable dropdown, with a cached-TensorRT-engine badge per entry) and view detailed model info.
    - **Capture Tab** — Choose and configure your screen capture backend (dxcam / MSS / UVC / NDI / UDP); live preview panel.
    - **Inference Tab** — Detection sensitivity, inference provider, and performance tuning.
-   - **Aim Tab** — FOV, PID tuning, prediction (Velocity/Kalman), smoothing, aim-point fine-tune, Humanization, Anti-Recoil (Smart Jitter + click-to-stop jitter recorder), Y-axis recoil suppression, sticky lock.
+   - **Aim Tab** — FOV, PID tuning, prediction (Velocity/Kalman), smoothing, aim-point fine-tune, Humanization, Y-axis recoil suppression, sticky lock.
    - **Trigger Tab** — Configure auto-fire delay, interval, and target priority.
    - **Keys Tab** — Set your preferred hotkeys for toggling aim and auto-fire, with a warning if a rebind creates a genuinely confusing conflict.
    - **Configs Tab** — Save / load configuration presets; loading shows a summary of what will actually change first.
@@ -317,7 +310,7 @@ Settings are persisted to three files in the project root:
 | `state.json` | One-time app state: disclaimer accepted, first-run complete, NDI installer flag |
 | `language.json` | Current UI language selection |
 
-You can also save/load named presets via the **Configs** tab. Recorded jitter patterns are stored as `.json` files in `src/core/jitter_patterns/`.
+You can also save/load named presets via the **Configs** tab.
 
 ## Project Structure
 
@@ -348,7 +341,7 @@ Axiom/
 │   │   ├── ai_loop.py            # Three-thread pipeline (capture / preprocess / inference)
 │   │   ├── ai_loop_state.py      # Shared loop state
 │   │   ├── ai_loop_utils.py      # Loop utility functions (FOV filtering, target selection)
-│   │   ├── ai_aiming.py          # Aiming, PID, Smart Jitter, Y-reduce, humanization dispatch
+│   │   ├── ai_aiming.py          # Aiming, PID, Y-reduce, humanization dispatch
 │   │   ├── auto_fire.py          # Triggerbot logic
 │   │   ├── config.py             # Config class + _FIELD_MAP (v2 schema)
 │   │   ├── config_manager.py     # Load/save/preset/migration lifecycle, preset pre-load diff
@@ -359,8 +352,6 @@ Axiom/
 │   │   ├── ocr_inference.py      # Beta: PaddleOCR weapon-name reader (process-isolated)
 │   │   ├── humanization.py       # Micro-jitter, motion variation, speed shaping, micro-stutter, reaction variability
 │   │   ├── inference.py          # ONNX inference wrapper, NMS, postprocessing
-│   │   ├── jitter_recorder.py    # Mouse jitter recording/replay terminal tool + GUI API
-│   │   ├── jitter_patterns/      # Recorded jitter pattern JSON files
 │   │   ├── kalman_filter.py      # Kalman filter for target smoothing
 │   │   ├── key_listener.py       # Global hotkey listener
 │   │   ├── language_manager.py   # Multi-language runtime support
@@ -391,7 +382,7 @@ Axiom/
 │   │       ├── language_manager.py # Qt-signal wrapper around core's language manager
 │   │       ├── components/       # Shared widgets (sliders, capture preview panel)
 │   │       └── pages/            # One file per settings page
-│   │           ├── aim_page.py       # Aim parameters, Humanization, Anti-Recoil
+│   │           ├── aim_page.py       # Aim parameters, Humanization
 │   │           ├── capture_page.py   # Capture backend selection
 │   │           ├── configs_page.py   # Config preset management
 │   │           ├── convert_page.py   # ONNX → TensorRT conversion

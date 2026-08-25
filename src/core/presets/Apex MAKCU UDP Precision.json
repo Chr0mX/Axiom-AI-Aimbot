@@ -59,7 +59,6 @@
     "detect_range_size": 320,
     "min_confidence": 0.50,
 
-    "jitter_enabled": false,
-    "smart_jitter_enabled": false
+    "jitter_enabled": false
   }
 }
