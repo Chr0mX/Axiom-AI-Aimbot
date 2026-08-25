@@ -685,7 +685,46 @@ def ai_logic_loop(
                         boxes, confidences, class_ids, config)
 
                 all_boxes, all_confidences = boxes, confidences
-                boxes, confidences = filter_boxes_by_fov(boxes, confidences, crosshair_x, crosshair_y, config.fov_size, config)
+                # --- Reduce FOV size while actively tracking a locked target ---
+                # state.locked_box reflects last frame's selection (process_aiming
+                # writes it further below in this same loop) — using it here to
+                # gate THIS frame's FOV is the correct causal order: "was a target
+                # already locked coming into this frame" decides whether to keep
+                # other, farther-out detections from ever reaching target
+                # selection at all this frame.
+                _effective_fov_size = config.fov_size
+                _effective_fov_height = int(getattr(config, 'fov_height', config.fov_size) or config.fov_size)
+                if getattr(config, 'fov_reduce_on_target_enabled', False):
+                    if state.locked_box is not None:
+                        if state.fov_reduce_since == 0.0:
+                            # Rising edge only — set once per acquisition, NOT
+                            # every frame the target stays locked. Setting this
+                            # unconditionally every frame a target is locked
+                            # would pin (current_time - fov_reduce_since) near
+                            # zero forever, so the duration window could never
+                            # actually expire — the same continuous-reset bug
+                            # already fixed once for the MAKCU disengage delay.
+                            state.fov_reduce_since = current_time
+                    else:
+                        state.fov_reduce_since = 0.0  # lock lost — next acquisition starts a fresh window
+
+                    if state.fov_reduce_since > 0.0:
+                        _duration = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
+                        if _duration <= 0.0 or current_time - state.fov_reduce_since < _duration:
+                            _pct = max(1.0, min(100.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0)))
+                            _effective_fov_size = max(1, int(config.fov_size * _pct / 100.0))
+                            _effective_fov_height = max(1, int(_effective_fov_height * _pct / 100.0))
+                        else:
+                            state.fov_reduce_since = 0.0  # window expired — revert to full FOV until re-acquired
+                # Published every frame (not just while shrunk) so the in-game
+                # overlay, the UVC/NDI/UDP preview's baked-in overlay, and the
+                # Web ESP overlay all draw/reason about the FOV actually in
+                # effect right now, rather than the static configured size.
+                config.fov_effective_size = _effective_fov_size
+                config.fov_effective_height = _effective_fov_height
+                boxes, confidences = filter_boxes_by_fov(
+                    boxes, confidences, crosshair_x, crosshair_y, _effective_fov_size, config,
+                    fov_height=_effective_fov_height)
                 # NOTE: single_target_mode's reduction to one box used to happen
                 # here, before process_aiming() ever saw the candidate list. That
                 # meant sticky lock's IOU search — which needs the FULL list to

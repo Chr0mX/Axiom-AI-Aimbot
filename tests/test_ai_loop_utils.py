@@ -254,6 +254,38 @@ class TestFilterBoxesByFov:
             crosshair_x=0, crosshair_y=0, fov_size=100, config=config_ellipse)
         assert kept == []
 
+    def test_fov_height_param_overrides_configs_own_fov_height(self, ai_loop_utils):
+        """The fov_height *parameter* (used by "Reduce FOV on Active Target"
+        to shrink both axes without touching config itself) must win over
+        whatever config.fov_height says — a box that only a taller FOV would
+        reach must be dropped once the override shrinks it back down."""
+        from types import SimpleNamespace
+        boxes = [[45, 145, 55, 155]]  # 95-105px below crosshair on Y
+        confs = [0.9]
+        config = SimpleNamespace(fov_circle_filter_enabled=False, fov_height=300)
+
+        # Without the override: config's own fov_height=300 reaches the box.
+        kept, _ = ai_loop_utils.filter_boxes_by_fov(
+            boxes, confs, crosshair_x=50, crosshair_y=50, fov_size=100, config=config)
+        assert kept == boxes
+
+        # With the override: a shrunk fov_height=100 no longer reaches it,
+        # even though config.fov_height is still 300.
+        kept, _ = ai_loop_utils.filter_boxes_by_fov(
+            boxes, confs, crosshair_x=50, crosshair_y=50, fov_size=100, config=config, fov_height=100)
+        assert kept == []
+
+    def test_fov_height_param_omitted_falls_back_to_config_exactly_as_before(self, ai_loop_utils):
+        """Every existing caller that never passes fov_height must see
+        identical behavior to before the parameter existed."""
+        from types import SimpleNamespace
+        boxes = [[45, 145, 55, 155]]
+        confs = [0.9]
+        config = SimpleNamespace(fov_circle_filter_enabled=False, fov_height=300)
+        kept, _ = ai_loop_utils.filter_boxes_by_fov(
+            boxes, confs, crosshair_x=50, crosshair_y=50, fov_size=100, config=config)
+        assert kept == boxes
+
 
 class TestReduceBoxesForSingleTarget:
     """Regression coverage for the single_target_mode / sticky_lock_enabled

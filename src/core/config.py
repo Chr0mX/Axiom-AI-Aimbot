@@ -100,6 +100,9 @@ _FIELD_MAP = {
     'single_target_mode':         'aim.single_target_mode',
     'fov_follow_mouse':           'aim.fov_follow_mouse',
     'fov_circle_filter_enabled':  'aim.fov_circle_filter_enabled',
+    'fov_reduce_on_target_enabled': 'aim.fov_reduce.enabled',
+    'fov_min_size_pct':           'aim.fov_reduce.min_size_pct',
+    'fov_min_size_duration':      'aim.fov_reduce.duration',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
     'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
     'detect_min_bbox_area_px':    'aim.semantic_filter.min_bbox_area_px',
@@ -374,6 +377,33 @@ class Config:
                                      # from fov_size lets the FOV become a rectangle (or, with
                                      # fov_circle_filter_enabled, an ellipse) instead of forcing a
                                      # square/circle — see ai_loop_utils.filter_boxes_by_fov().
+
+        # Reduce FOV size while actively tracking a locked target, so a
+        # random target entering the edge of the (normally larger) FOV can't
+        # steal the lock mid-engagement. Shrinks both fov_size and fov_height
+        # to fov_min_size_pct% of their configured values (same percentage on
+        # each axis, so a rectangular/elliptical FOV keeps its aspect ratio
+        # while shrunk) for up to fov_min_size_duration seconds after a
+        # target is acquired, then reverts to the full FOV — bounded rather
+        # than permanent, so it widens back out to reacquire once the
+        # engagement window passes (e.g. current target moved on or died).
+        # See filter_boxes_by_fov()'s caller in ai_loop.py.
+        self.fov_reduce_on_target_enabled: bool = False
+        self.fov_min_size_pct: float = 50.0     # % of fov_size/fov_height to shrink to while active
+        self.fov_min_size_duration: float = 1.0  # seconds the shrink holds after acquisition (0 = indefinite while locked)
+
+        # Runtime state — not serialized (see _FIELD_MAP: neither key appears
+        # there). The FOV width/height actually in effect THIS frame
+        # (fov_size/fov_height, or the shrunk values while the reduce-on-
+        # target window is active) — written every frame by ai_loop.py so
+        # the in-game overlay, the UVC/NDI/UDP preview's baked-in overlay,
+        # and the Web ESP overlay can all draw/reason about the FOV that's
+        # actually being used right now, not just the static configured
+        # size. Default to fov_size/fov_height themselves so anything
+        # reading these before the AI loop's first frame still gets a sane
+        # value.
+        self.fov_effective_size: float = float(self.fov_size)
+        self.fov_effective_height: float = float(self.fov_height)
 
         # AI detection range (square edge length): Separated from fov_size, but must not be smaller than fov_size, and must not be larger than screen height
         self.detect_range_size: int = 320 # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）

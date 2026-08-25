@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import queue
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from .config import Config
@@ -181,6 +181,7 @@ def filter_boxes_by_fov(
     crosshair_y: int,
     fov_size: int,
     config=None,
+    fov_height: Optional[float] = None,
 ) -> Tuple[List[List[float]], List[float]]:
     """FOV 過濾：只保留與 FOV 框有交集的人物框
 
@@ -191,13 +192,21 @@ def filter_boxes_by_fov(
     (Someone_idea/fov_filter.py's original circle, generalized to an
     ellipse — a circle when fov_height == fov_size, same as it always was).
     fov_circle_filter_enabled=False (default) keeps the rectangular test.
+
+    fov_height (the parameter, not config.fov_height) lets a caller override
+    the height for just this call without touching config — used by "Reduce
+    FOV on Active Target" (ai_loop.py) to shrink both dimensions together
+    while a target is locked, since config.fov_height must stay the user's
+    real configured value. Omit it (the default) to read config.fov_height
+    exactly as before; every other caller is unaffected.
     """
 
     if not boxes:
         return [], []
 
     use_circle = bool(getattr(config, 'fov_circle_filter_enabled', False))
-    fov_height = int(getattr(config, 'fov_height', fov_size) or fov_size)
+    if fov_height is None:
+        fov_height = int(getattr(config, 'fov_height', fov_size) or fov_size)
     fov_half_x = fov_size / 2.0
     fov_half_y = fov_height / 2.0
     fov_left   = crosshair_x - fov_half_x

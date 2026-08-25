@@ -188,6 +188,41 @@ class TestConfigSerialization:
         assert c2.fov_size == 300
         assert c2.fov_height == 150
 
+    def test_fov_reduce_on_target_fields_round_trip(self):
+        c = _make_config()
+        c.fov_reduce_on_target_enabled = True
+        c.fov_min_size_pct = 35.0
+        c.fov_min_size_duration = 2.5
+        d = c.to_dict()
+        assert d['aim']['fov_reduce']['enabled'] is True
+        assert d['aim']['fov_reduce']['min_size_pct'] == 35.0
+        assert d['aim']['fov_reduce']['duration'] == 2.5
+
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.fov_reduce_on_target_enabled is True
+        assert c2.fov_min_size_pct == 35.0
+        assert c2.fov_min_size_duration == 2.5
+
+    def test_fov_reduce_on_target_defaults(self):
+        c = _make_config()
+        assert c.fov_reduce_on_target_enabled is False
+        assert c.fov_min_size_pct == 50.0
+        assert c.fov_min_size_duration == 1.0
+
+    def test_fov_effective_size_is_runtime_only_not_persisted(self):
+        """fov_effective_size/_height default to fov_size/fov_height but
+        must never appear in the persisted schema — they're written every
+        frame by ai_loop.py, not something a user configures or a preset
+        should save/restore."""
+        c = _make_config()
+        assert c.fov_effective_size == c.fov_size
+        assert c.fov_effective_height == c.fov_height
+        c.fov_effective_size = 42.0  # simulate a mid-engagement shrink
+        d = c.to_dict()
+        assert 'fov_effective_size' not in d.get('aim', {})
+        assert 'fov_effective_height' not in d.get('aim', {})
+
     def test_from_dict_updates_attributes(self):
         c = _make_config()
         c.from_dict({

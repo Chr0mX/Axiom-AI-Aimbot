@@ -766,6 +766,48 @@ def test_draw_detection_overlay_fov_corners_use_independent_width_and_height(mon
     assert min(ys) == 300 and max(ys) == 700, "height=400 -> crosshair (500) +/- 200"
 
 
+def test_draw_detection_overlay_fov_corners_shrink_with_fov_effective_size(monkeypatch):
+    """"Reduce FOV on Active Target" (ai_loop.py) writes fov_effective_size/
+    _height every frame; this baked-in preview overlay must draw THOSE, not
+    the static fov_size/fov_height, while a target is locked and the shrink
+    window is active."""
+    from core import screen_capture as sc
+
+    lines = []
+    monkeypatch.setattr(sc.cv2, 'line', lambda *a, **k: lines.append(a))
+
+    config = _make_overlay_config(
+        fov_size=200, fov_height=400,          # the user's real configured FOV
+        fov_effective_size=100, fov_effective_height=200,  # mid-engagement shrink to 50%
+    )
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+    sc._draw_detection_overlay(frame, None, config, has_alpha=True)
+
+    xs = [pt[0] for call in lines for pt in (call[1], call[2])]
+    ys = [pt[1] for call in lines for pt in (call[1], call[2])]
+    assert min(xs) == 450 and max(xs) == 550, "shrunk width=100 -> crosshair (500) +/- 50"
+    assert min(ys) == 400 and max(ys) == 600, "shrunk height=200 -> crosshair (500) +/- 100"
+
+
+def test_draw_detection_overlay_fov_corners_fall_back_when_no_effective_size(monkeypatch):
+    """A config predating fov_effective_size/_height (or before ai_loop.py's
+    first frame writes them) must draw the plain configured FOV, unchanged
+    from before this feature existed."""
+    from core import screen_capture as sc
+
+    lines = []
+    monkeypatch.setattr(sc.cv2, 'line', lambda *a, **k: lines.append(a))
+
+    config = _make_overlay_config(fov_size=200, fov_height=400)  # no fov_effective_* at all
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+    sc._draw_detection_overlay(frame, None, config, has_alpha=True)
+
+    xs = [pt[0] for call in lines for pt in (call[1], call[2])]
+    ys = [pt[1] for call in lines for pt in (call[1], call[2])]
+    assert min(xs) == 400 and max(xs) == 600
+    assert min(ys) == 300 and max(ys) == 700
+
+
 def test_draw_detection_overlay_ellipse_axes_match_width_and_height(monkeypatch):
     """fov_circle_filter_enabled must draw a true ellipse (independent
     semi-axes), not a circle keyed off fov_size alone."""

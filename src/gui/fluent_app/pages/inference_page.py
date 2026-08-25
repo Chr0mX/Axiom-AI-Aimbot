@@ -80,6 +80,38 @@ class InferencePage(BasePage):
             parent=self.fovGroup
         )
 
+        # Shrinks the FOV to fovMinSizeCard's percentage (both axes, so a
+        # rectangle/ellipse keeps its aspect ratio) while a target is
+        # locked, so a random target near the edge of the normally-larger
+        # FOV can't steal the lock mid-engagement. The two value cards are
+        # only meaningful while this is on — see _updateFovReduceVisibility().
+        self.fovReduceEnableCard = SwitchSettingCard(
+            FluentIcon.ZOOM,
+            t("fov_reduce_on_target", "Reduce FOV on Active Target"),
+            t("fov_reduce_on_target_desc", "Temporarily shrink the FOV while a target is locked, so a random target near the edge of the FOV can't steal the lock mid-engagement."),
+            parent=self.fovGroup
+        )
+
+        self.fovMinSizeCard = SliderSpinCard(
+            FluentIcon.ZOOM,
+            t("fov_min_size_pct", "FOV Min Size"),
+            1, 100,
+            suffix="%",
+            description=t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Size/Height, while a target is locked"),
+            parent=self.fovGroup
+        )
+
+        self.fovMinSizeDurationCard = SliderDoubleSpinCard(
+            FluentIcon.HISTORY,
+            t("fov_min_size_duration", "FOV Min Size Duration"),
+            0.0, 10.0,
+            decimals=1,
+            step=0.1,
+            suffix="s",
+            description=t("fov_min_size_duration_desc", "How long the shrink holds after a target is acquired before reverting to the full FOV (0 = holds indefinitely while locked)"),
+            parent=self.fovGroup
+        )
+
         self.detectRangeCard = SliderSpinCard(
             FluentIcon.FULL_SCREEN,
             t("detect_range_size"),
@@ -205,6 +237,9 @@ class InferencePage(BasePage):
         self.fovGroup.addSettingCard(self.fovHeightCard)
         self.fovGroup.addSettingCard(self.fovFollowCard)
         self.fovGroup.addSettingCard(self.fovCircleCard)
+        self.fovGroup.addSettingCard(self.fovReduceEnableCard)
+        self.fovGroup.addSettingCard(self.fovMinSizeCard)
+        self.fovGroup.addSettingCard(self.fovMinSizeDurationCard)
         self.fovGroup.addSettingCard(self.detectRangeCard)
         self.addContent(self.fovGroup)
 
@@ -235,6 +270,9 @@ class InferencePage(BasePage):
         self.fovHeightCard.valueChanged.connect(self._onFovHeightChanged)
         self.fovFollowCard.checkedChanged.connect(self._onFovFollowChanged)
         self.fovCircleCard.checkedChanged.connect(self._onFovCircleChanged)
+        self.fovReduceEnableCard.checkedChanged.connect(self._onFovReduceEnableChanged)
+        self.fovMinSizeCard.valueChanged.connect(self._onFovMinSizeChanged)
+        self.fovMinSizeDurationCard.valueChanged.connect(self._onFovMinSizeDurationChanged)
         self.detectRangeCard.valueChanged.connect(self._onDetectRangeChanged)
 
         self.detectIntervalCard.valueChanged.connect(self._onDetectIntervalChanged)
@@ -265,6 +303,11 @@ class InferencePage(BasePage):
             self.fovHeightCard.setValue(int(getattr(self._config, 'fov_height', self._config.fov_size)))
             self.fovFollowCard.setChecked(self._config.fov_follow_mouse)
             self.fovCircleCard.setChecked(bool(getattr(self._config, 'fov_circle_filter_enabled', False)))
+            fov_reduce_on = bool(getattr(self._config, 'fov_reduce_on_target_enabled', False))
+            self.fovReduceEnableCard.setChecked(fov_reduce_on)
+            self.fovMinSizeCard.setValue(int(getattr(self._config, 'fov_min_size_pct', 50.0)))
+            self.fovMinSizeDurationCard.setValue(float(getattr(self._config, 'fov_min_size_duration', 1.0)))
+            self._updateFovReduceVisibility(fov_reduce_on)
             self.detectRangeCard.setValue(self._config.detect_range_size)
 
             interval_ms = int(self._config.detect_interval * 1000)
@@ -299,6 +342,13 @@ class InferencePage(BasePage):
     # ──────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────
+
+    def _updateFovReduceVisibility(self, enabled: bool):
+        """Hide the min-size % / duration cards while the toggle is off —
+        per the request, not just greyed out, to keep the FOV group
+        uncluttered when the feature isn't in use."""
+        self.fovMinSizeCard.setVisible(enabled)
+        self.fovMinSizeDurationCard.setVisible(enabled)
 
     def _applyScreenshotMethodEffect(self, method: str):
         """Called by capture page (and on load) to sync fov_follow visibility."""
@@ -354,6 +404,19 @@ class InferencePage(BasePage):
     def _onFovCircleChanged(self, checked):
         if self._config:
             self._config.fov_circle_filter_enabled = bool(checked)
+
+    def _onFovReduceEnableChanged(self, checked):
+        if self._config:
+            self._config.fov_reduce_on_target_enabled = bool(checked)
+        self._updateFovReduceVisibility(bool(checked))
+
+    def _onFovMinSizeChanged(self, value):
+        if self._config:
+            self._config.fov_min_size_pct = float(value)
+
+    def _onFovMinSizeDurationChanged(self, value):
+        if self._config:
+            self._config.fov_min_size_duration = float(value)
 
     def _onDetectRangeChanged(self, value):
         if self._config:
@@ -430,6 +493,12 @@ class InferencePage(BasePage):
         self.fovFollowCard.titleLabel.setText(t("fov_follow_mouse"))
         self.fovCircleCard.titleLabel.setText(t("fov_circle_filter", "Circular FOV Filter"))
         self.fovCircleCard.contentLabel.setText(t("fov_circle_filter_desc", "Only track targets inside the FOV ellipse — a circle when Width equals Height — instead of the full rectangular region"))
+        self.fovReduceEnableCard.titleLabel.setText(t("fov_reduce_on_target", "Reduce FOV on Active Target"))
+        self.fovReduceEnableCard.contentLabel.setText(t("fov_reduce_on_target_desc", "Temporarily shrink the FOV while a target is locked, so a random target near the edge of the FOV can't steal the lock mid-engagement."))
+        self.fovMinSizeCard.titleLabel.setText(t("fov_min_size_pct", "FOV Min Size"))
+        self.fovMinSizeCard.contentLabel.setText(t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Size/Height, while a target is locked"))
+        self.fovMinSizeDurationCard.titleLabel.setText(t("fov_min_size_duration", "FOV Min Size Duration"))
+        self.fovMinSizeDurationCard.contentLabel.setText(t("fov_min_size_duration_desc", "How long the shrink holds after a target is acquired before reverting to the full FOV (0 = holds indefinitely while locked)"))
         self.detectRangeCard.titleLabel.setText(t("detect_range_size"))
         self.detectRangeCard.contentLabel.setText(t("detect_range_note"))
 
