@@ -52,6 +52,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 
 - **Humanization**
   - Master enable + intensity slider that scales every effect at once, plus a per-feature on/off toggle and fine-tuning sub-slider for each: micro-jitter, motion variation, speed shaping, micro-stutter, and reaction-time variability.
+  - Optional **Apply While Aiming Idle** — extends Micro-Jitter's tremor to frames where the aim key is held but no target is currently locked, so a held-but-idle aim isn't perfectly still.
   - One-click **Reset to Defaults** for the whole block.
 
 - **Y-Axis Recoil Suppression**

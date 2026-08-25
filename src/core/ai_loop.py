@@ -797,6 +797,13 @@ def ai_logic_loop(
                         if ai_aiming._kalman is not None:
                             ai_aiming._kalman.reset()
 
+                    # Humanization idle Micro-Jitter — aim key held, no target
+                    # this frame. Runs after the reset above so this call's own
+                    # sub-pixel carry isn't wiped by it in the same frame; opt-in
+                    # (see apply_idle_micro_jitter's docstring), no-ops otherwise.
+                    if is_aiming:
+                        ai_aiming.apply_idle_micro_jitter(config, state, state.cached_mouse_move_method)
+
                 if config.single_target_mode:
                     config.latest_boxes, config.latest_confidences = reduce_boxes_for_single_target(
                         boxes, confidences,

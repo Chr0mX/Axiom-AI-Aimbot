@@ -51,6 +51,15 @@ class HumanizationConfig:
     micro_jitter_base: float = 0.20     # base noise floor (pixels)
     micro_jitter_scale: float = 0.025   # noise_amp += scale * magnitude
 
+    # Idle variant — apply Micro-Jitter's tremor even when the aim key is
+    # held but no target is currently locked (e.g. ADS on an empty angle).
+    # process_aiming() (and this whole module) normally only runs on frames
+    # with an actual detection, so without this a held-but-idle aim stays
+    # perfectly still, which reads as robotic. Off by default: it's a
+    # separate opt-in from micro_jitter_enabled (which only gates the
+    # on-target case) so existing users see no behavior change.
+    micro_jitter_idle_enabled: bool = False
+
     # ── Feature 2 · Motion variation ─────────────────────────────────────────
     # Per-frame random output scale drawn from Uniform(1−r, 1+r).
     # E[scale] = 1.0 → no accumulated error; PID corrects residual next frame.
