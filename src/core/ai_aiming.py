@@ -386,3 +386,52 @@ def process_aiming(
     # `valid_targets` is therefore always non-empty. The no-detection /
     # sticky-lock-decay handling lives in ai_loop.py's `else` branch
     # (the zero-boxes case) instead.
+
+
+def apply_idle_micro_jitter(config: "Config", state: LoopState, mouse_method: str) -> None:
+    """
+    Optional companion to process_aiming(): simulate Humanization's
+    Micro-Jitter tremor while the aim key is held but no target is
+    currently locked (e.g. ADS on an empty angle, or the brief gap before
+    an unlocked target reacquires). process_aiming() never runs on these
+    frames (ai_loop.py only calls it under `is_aiming and boxes`), so
+    without this the crosshair sits perfectly still while "aiming" —
+    reads as robotic next to the on-target case.
+
+    Reuses apply_humanization(0.0, 0.0, hcfg) unchanged rather than
+    reimplementing the jitter math: with a zero-magnitude input, Speed
+    Shaping / Motion Variation / Micro-Stutter all no-op via their own
+    `magnitude > 0.0` guards, and only Micro-Jitter's amplitude floor
+    (micro_jitter_base, scaled by intensity) fires — the exact same
+    per-axis noise draw used on-target, just with no proportional term.
+
+    Gated on `humanization.micro_jitter_idle_enabled` — a separate opt-in
+    from `micro_jitter_enabled` (which only gates the on-target case) —
+    so this is fully off by default and existing users/presets see no
+    behavior change until they flip it on.
+
+    Called from ai_loop.py's `else` branch (aimed_this_frame is False),
+    only when `is_aiming` is still True that frame.
+    """
+    hcfg = getattr(config, 'humanization', None)
+    if hcfg is None or not hcfg.enabled:
+        return
+    if not (hcfg.micro_jitter_enabled and getattr(hcfg, 'micro_jitter_idle_enabled', False)):
+        return
+
+    result = apply_humanization(0.0, 0.0, hcfg)
+    if result is None:
+        return  # reaction-variability skip — no movement this frame
+    dx, dy = result
+
+    # Same sub-pixel carry as the main path, so idle-jitter's fractional
+    # remainder isn't silently dropped either.
+    raw_x = dx + state.aim_carry_x
+    raw_y = dy + state.aim_carry_y
+    move_x = int(raw_x)
+    move_y = int(raw_y)
+    state.aim_carry_x = raw_x - move_x
+    state.aim_carry_y = raw_y - move_y
+
+    if move_x != 0 or move_y != 0:
+        send_mouse_move(move_x, move_y, method=mouse_method)

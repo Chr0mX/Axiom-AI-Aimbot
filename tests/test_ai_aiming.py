@@ -231,3 +231,104 @@ class TestDeadzonePreviousErrorFreshness:
         assert sent_moves == []  # deadzone early-return, no movement sent
         assert pid_x.previous_error == 0.0
         assert pid_y.previous_error == 0.0
+
+
+class TestIdleMicroJitter:
+    """apply_idle_micro_jitter() — Humanization's optional "aim key held, no
+    target this frame" tremor (ai_loop.py calls this from its `else` branch
+    instead of process_aiming(), which never runs without boxes). Off by
+    default via humanization.micro_jitter_idle_enabled — a separate opt-in
+    from micro_jitter_enabled (which only gates the on-target case)."""
+
+    @staticmethod
+    def _make_hcfg(**overrides):
+        from core.humanization import HumanizationConfig
+        hcfg = HumanizationConfig()
+        for k, v in overrides.items():
+            setattr(hcfg, k, v)
+        return hcfg
+
+    def test_noop_when_humanization_missing(self, sent_moves):
+        from core.ai_aiming import apply_idle_micro_jitter
+        from core.ai_loop_state import LoopState
+
+        config = _make_config(humanization=None)
+        apply_idle_micro_jitter(config, LoopState(), "sendinput")
+        assert sent_moves == []
+
+    def test_noop_when_humanization_disabled(self, sent_moves):
+        from core.ai_aiming import apply_idle_micro_jitter
+        from core.ai_loop_state import LoopState
+
+        hcfg = self._make_hcfg(enabled=False, micro_jitter_enabled=True, micro_jitter_idle_enabled=True)
+        config = _make_config(humanization=hcfg)
+        apply_idle_micro_jitter(config, LoopState(), "sendinput")
+        assert sent_moves == []
+
+    def test_noop_when_micro_jitter_feature_off(self, sent_moves):
+        from core.ai_aiming import apply_idle_micro_jitter
+        from core.ai_loop_state import LoopState
+
+        hcfg = self._make_hcfg(enabled=True, micro_jitter_enabled=False, micro_jitter_idle_enabled=True)
+        config = _make_config(humanization=hcfg)
+        apply_idle_micro_jitter(config, LoopState(), "sendinput")
+        assert sent_moves == []
+
+    def test_noop_when_idle_toggle_off_by_default(self, sent_moves):
+        """The whole point of the opt-in: Humanization + Micro-Jitter both on
+        (the shipped default) must NOT fire idle jitter until the new toggle
+        is explicitly enabled too."""
+        from core.ai_aiming import apply_idle_micro_jitter
+        from core.ai_loop_state import LoopState
+
+        hcfg = self._make_hcfg(enabled=True, micro_jitter_enabled=True)
+        assert hcfg.micro_jitter_idle_enabled is False  # default
+        config = _make_config(humanization=hcfg)
+        apply_idle_micro_jitter(config, LoopState(), "sendinput")
+        assert sent_moves == []
+
+    def test_fires_and_carries_subpixel_remainder_when_fully_enabled(self, sent_moves, monkeypatch):
+        from core.ai_aiming import apply_idle_micro_jitter
+        from core.ai_loop_state import LoopState
+        import core.humanization as humanization_mod
+
+        hcfg = self._make_hcfg(
+            enabled=True, intensity=1.0,
+            micro_jitter_enabled=True, micro_jitter_idle_enabled=True,
+            micro_jitter_base=2.0, micro_jitter_scale=0.0,
+            motion_variation_enabled=False, speed_shaping_enabled=False,
+            micro_stutter_enabled=False, reaction_variability_enabled=False,
+        )
+        config = _make_config(humanization=hcfg)
+        state = LoopState()
+
+        # apply_humanization's Micro-Jitter step draws random.uniform(-amp, amp)
+        # independently for dx then dy — pin both draws to +amp deterministically.
+        monkeypatch.setattr(humanization_mod.random, "uniform", lambda a, b: b)
+
+        apply_idle_micro_jitter(config, state, "sendinput")
+
+        assert len(sent_moves) == 1
+        dx, dy, method = sent_moves[0]
+        assert method == "sendinput"
+        # amp = micro_jitter_base * intensity = 2.0 (scale term is 0 at zero
+        # magnitude either way) -> both axes land exactly on 2px, no carry left.
+        assert dx == 2 and dy == 2
+        assert state.aim_carry_x == 0.0 and state.aim_carry_y == 0.0
+
+    def test_skipped_on_reaction_variability_frame_skip(self, sent_moves, monkeypatch):
+        from core.ai_aiming import apply_idle_micro_jitter
+        from core.ai_loop_state import LoopState
+        import core.humanization as humanization_mod
+
+        hcfg = self._make_hcfg(
+            enabled=True, intensity=1.0,
+            micro_jitter_enabled=True, micro_jitter_idle_enabled=True,
+            reaction_variability_enabled=True, reaction_skip_prob=1.0,  # always skip
+        )
+        config = _make_config(humanization=hcfg)
+        # random.random() < reaction_skip_prob * intensity -> skip this frame.
+        monkeypatch.setattr(humanization_mod.random, "random", lambda: 0.0)
+
+        apply_idle_micro_jitter(config, LoopState(), "sendinput")
+        assert sent_moves == []

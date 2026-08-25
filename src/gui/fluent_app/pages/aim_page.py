@@ -554,6 +554,13 @@ class AimPage(BasePage):
             parent=self.humanizationGroup
         )
 
+        self.humanizationMicroJitterIdleCard = SwitchSettingCard(
+            FluentIcon.MOVE,
+            t("humanization_micro_jitter_idle", "Apply While Aiming Idle"),
+            t("humanization_micro_jitter_idle_desc", "Also apply Micro-Jitter's tremor while the aim key is held but no target is locked, instead of holding perfectly still."),
+            parent=self.humanizationGroup
+        )
+
         self.humanizationMotionVariationRangeCard = SliderLabelCard(
             FluentIcon.SYNC,
             t("humanization_motion_variation_range", "Variation Range"),
@@ -933,6 +940,7 @@ class AimPage(BasePage):
         self.humanizationGroup.addSettingCard(self.humanizationMicroJitterCard)
         self.humanizationGroup.addSettingCard(self.humanizationJitterBaseCard)
         self.humanizationGroup.addSettingCard(self.humanizationJitterScaleCard)
+        self.humanizationGroup.addSettingCard(self.humanizationMicroJitterIdleCard)
         self.humanizationGroup.addSettingCard(self.humanizationMotionVariationCard)
         self.humanizationGroup.addSettingCard(self.humanizationMotionVariationRangeCard)
         self.humanizationGroup.addSettingCard(self.humanizationSpeedShapingCard)
@@ -1032,6 +1040,7 @@ class AimPage(BasePage):
         self.humanizationReactionVariabilityCard.checkedChanged.connect(self._onHumanizationReactionVariabilityChanged)
         self.humanizationJitterBaseCard.valueChanged.connect(self._onHumanizationJitterBaseChanged)
         self.humanizationJitterScaleCard.valueChanged.connect(self._onHumanizationJitterScaleChanged)
+        self.humanizationMicroJitterIdleCard.checkedChanged.connect(self._onHumanizationMicroJitterIdleChanged)
         self.humanizationMotionVariationRangeCard.valueChanged.connect(self._onHumanizationMotionVariationRangeChanged)
         self.humanizationSpeedShapingLowCard.valueChanged.connect(self._onHumanizationSpeedShapingLowChanged)
         self.humanizationSpeedShapingHighCard.valueChanged.connect(self._onHumanizationSpeedShapingHighChanged)
@@ -1564,6 +1573,7 @@ class AimPage(BasePage):
             min(200, max(0, int(getattr(hcfg, 'micro_jitter_base', 0.20) * 100))))
         self.humanizationJitterScaleCard.setValue(
             min(200, max(0, int(getattr(hcfg, 'micro_jitter_scale', 0.025) * 1000))))
+        self.humanizationMicroJitterIdleCard.setChecked(bool(getattr(hcfg, 'micro_jitter_idle_enabled', False)))
         self.humanizationMotionVariationCard.setChecked(bool(getattr(hcfg, 'motion_variation_enabled', True)))
         self.humanizationMotionVariationRangeCard.setValue(
             min(200, max(0, int(getattr(hcfg, 'motion_variation_range', 0.06) * 1000))))
@@ -1599,7 +1609,8 @@ class AimPage(BasePage):
         clutter behind."""
         h_on = self.humanizationEnableCard.isChecked()
         jitter_on = h_on and self.humanizationMicroJitterCard.isChecked()
-        for card in (self.humanizationJitterBaseCard, self.humanizationJitterScaleCard):
+        for card in (self.humanizationJitterBaseCard, self.humanizationJitterScaleCard,
+                     self.humanizationMicroJitterIdleCard):
             card.setEnabled(jitter_on)
             card.setVisible(jitter_on)
         variation_on = h_on and self.humanizationMotionVariationCard.isChecked()
@@ -1667,6 +1678,10 @@ class AimPage(BasePage):
     def _onHumanizationJitterScaleChanged(self, value):
         if self._config and getattr(self._config, 'humanization', None) is not None:
             self._config.humanization.micro_jitter_scale = value / 1000.0
+
+    def _onHumanizationMicroJitterIdleChanged(self, checked):
+        if self._config and getattr(self._config, 'humanization', None) is not None:
+            self._config.humanization.micro_jitter_idle_enabled = bool(checked)
 
     def _onHumanizationMotionVariationRangeChanged(self, value):
         if self._config and getattr(self._config, 'humanization', None) is not None:
@@ -1886,6 +1901,8 @@ class AimPage(BasePage):
         self.humanizationJitterBaseCard.contentLabel.setText(t("humanization_jitter_base_desc", "Minimum jitter amplitude added every frame, in pixels."))
         self.humanizationJitterScaleCard.titleLabel.setText(t("humanization_jitter_scale", "Jitter Scale"))
         self.humanizationJitterScaleCard.contentLabel.setText(t("humanization_jitter_scale_desc", "Extra jitter added per pixel of movement, as % of movement size."))
+        self.humanizationMicroJitterIdleCard.titleLabel.setText(t("humanization_micro_jitter_idle", "Apply While Aiming Idle"))
+        self.humanizationMicroJitterIdleCard.contentLabel.setText(t("humanization_micro_jitter_idle_desc", "Also apply Micro-Jitter's tremor while the aim key is held but no target is locked, instead of holding perfectly still."))
         self.humanizationMotionVariationCard.titleLabel.setText(t("humanization_motion_variation", "Motion Variation"))
         self.humanizationMotionVariationCard.contentLabel.setText(t("humanization_motion_variation_desc", "Randomize output scale slightly each frame (mean-preserving, no drift)."))
         self.humanizationMotionVariationRangeCard.titleLabel.setText(t("humanization_motion_variation_range", "Variation Range"))
