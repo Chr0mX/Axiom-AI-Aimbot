@@ -167,7 +167,7 @@ class OtherPage(BasePage):
         self.makcuHwModelCard  = SettingCard(FluentIcon.DEVELOPER_TOOLS, t("makcu_hw_model",  "Model"),        "—", self.makcuHwGroup)
         self.makcuHwVendorCard = SettingCard(FluentIcon.GLOBE,           t("makcu_hw_vendor", "Vendor"),       "—", self.makcuHwGroup)
         self.makcuHwTempCard   = SettingCard(FluentIcon.CALORIES,        t("makcu_hw_temp",   "Temperature"),  "—", self.makcuHwGroup)
-        _grey = "color: #888888;"
+        _grey = f"color: {ThemeColors.TEXT_TERTIARY.get()};"
         for _card in (self.makcuHwVerCard, self.makcuHwModelCard,
                       self.makcuHwVendorCard, self.makcuHwTempCard):
             _card.contentLabel.setStyleSheet(_grey)
@@ -386,10 +386,10 @@ class OtherPage(BasePage):
 
         if connected:
             self.makcuHwStatusCard.contentLabel.setText(t("connected", "Connected"))
-            self.makcuHwStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+            self.makcuHwStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
         else:
             self.makcuHwStatusCard.contentLabel.setText(t("disconnected", "Disconnected"))
-            self.makcuHwStatusCard.contentLabel.setStyleSheet("color: #e74c3c;")
+            self.makcuHwStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()};")
 
         port = getattr(_makcu_mouse, '_com_port', '') or (
             getattr(self._config, 'makcu_com_port', '') if self._config else '')
@@ -493,16 +493,16 @@ class OtherPage(BasePage):
         if installed:
             self.trtStatusCard.contentLabel.setText(
                 t("trt_installed", "✓ Installed — TensorrtExecutionProvider available"))
-            self.trtStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+            self.trtStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
         elif provider_ok and dll_path is None:
             self.trtStatusCard.contentLabel.setText(
                 t("trt_provider_no_dll",
                   "⚠ Provider present but TensorRT DLLs not found — install tensorrt-cu12 wheels"))
-            self.trtStatusCard.contentLabel.setStyleSheet("color: #e67e22;")
+            self.trtStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.WARNING.get()};")
         else:
             self.trtStatusCard.contentLabel.setText(
                 t("trt_not_installed", "✗ Not installed — falls back to CUDA/CPU"))
-            self.trtStatusCard.contentLabel.setStyleSheet("color: #e74c3c;")
+            self.trtStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()};")
 
         self.trtVersionCard.contentLabel.setText(trt_version or "—")
         self.trtLibsCard.contentLabel.setText(dll_path or t("trt_not_found", "Not found"))
@@ -519,10 +519,10 @@ class OtherPage(BasePage):
         appdata_pkg = os.path.join(localappdata, "AxiomAI", "site-packages") if localappdata else ""
         if appdata_pkg and os.path.isdir(appdata_pkg):
             self.trtAppdataCard.contentLabel.setText(appdata_pkg)
-            self.trtAppdataCard.contentLabel.setStyleSheet("color: #2ecc71;")
+            self.trtAppdataCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
         else:
             self.trtAppdataCard.contentLabel.setText(appdata_pkg or "LOCALAPPDATA not set")
-            self.trtAppdataCard.contentLabel.setStyleSheet("color: #e74c3c;")
+            self.trtAppdataCard.contentLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()};")
 
         # Compute DML paths early so status block can use them
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
@@ -541,35 +541,35 @@ class OtherPage(BasePage):
         if dml_ok:
             self.dmlStatusCard.contentLabel.setText(
                 t("dml_available", "✓ DmlExecutionProvider active"))
-            self.dmlStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+            self.dmlStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
         elif dml_installed:
             self.dmlStatusCard.contentLabel.setText(
                 t("dml_installed_inactive", "✓ Installed — set backend to DirectML to activate"))
-            self.dmlStatusCard.contentLabel.setStyleSheet("color: #2ecc71;")
+            self.dmlStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
         elif configured_backend == "directml":
             self.dmlStatusCard.contentLabel.setText(
                 t("dml_restart_required", "⚠ Restart required — DirectML takes effect on next launch"))
-            self.dmlStatusCard.contentLabel.setStyleSheet("color: #e67e22;")
+            self.dmlStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.WARNING.get()};")
         else:
             self.dmlStatusCard.contentLabel.setText(
                 t("dml_not_available", "✗ Not installed"))
-            self.dmlStatusCard.contentLabel.setStyleSheet("color: #e74c3c;")
+            self.dmlStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()};")
 
         # DirectML DLL path
         if os.path.exists(dml_dll):
             self.dmlDllCard.contentLabel.setText(dml_dll)
-            self.dmlDllCard.contentLabel.setStyleSheet("color: #2ecc71;")
+            self.dmlDllCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
         else:
             self.dmlDllCard.contentLabel.setText(t("dml_not_found", "Not found"))
-            self.dmlDllCard.contentLabel.setStyleSheet("color: #e74c3c;")
+            self.dmlDllCard.contentLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()};")
 
         # Embedded onnxruntime-directml site-packages path
         if os.path.isdir(embedded_site):
             self.dmlEmbeddedPathCard.contentLabel.setText(embedded_site)
-            self.dmlEmbeddedPathCard.contentLabel.setStyleSheet("color: #2ecc71;")
+            self.dmlEmbeddedPathCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
         else:
             self.dmlEmbeddedPathCard.contentLabel.setText(t("dml_not_found", "Not found"))
-            self.dmlEmbeddedPathCard.contentLabel.setStyleSheet("color: #e74c3c;")
+            self.dmlEmbeddedPathCard.contentLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()};")
 
         # System Python — search Windows PATH, skipping the embedded interpreter
         import shutil as _shutil
@@ -582,16 +582,16 @@ class OtherPage(BasePage):
                 break
         self.trtSysPythonCard.contentLabel.setText(sys_python or "Not found in PATH")
         self.trtSysPythonCard.contentLabel.setStyleSheet(
-            "color: #2ecc71;" if sys_python else "color: #e74c3c;")
+            f"color: {ThemeColors.SUCCESS.get()};" if sys_python else f"color: {ThemeColors.ERROR.get()};")
 
         # Internal/Embedded Python (<project_root>/python/python.exe)
         internal_python = os.path.join(project_root, "python", "python.exe")
         if os.path.exists(internal_python):
             self.trtInternalPythonCard.contentLabel.setText(internal_python)
-            self.trtInternalPythonCard.contentLabel.setStyleSheet("color: #2ecc71;")
+            self.trtInternalPythonCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
         else:
             self.trtInternalPythonCard.contentLabel.setText(f"{internal_python}  (not found)")
-            self.trtInternalPythonCard.contentLabel.setStyleSheet("color: #e67e22;")
+            self.trtInternalPythonCard.contentLabel.setStyleSheet(f"color: {ThemeColors.WARNING.get()};")
 
     def _updateDiscordIcon(self):
         """根據當前主題更新 Discord 圖標顏色"""

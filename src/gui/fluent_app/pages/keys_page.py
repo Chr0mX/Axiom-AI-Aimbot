@@ -469,7 +469,7 @@ class KeysPage(BasePage):
 
         # Connection status label
         self.makcuConnectionLabel = BodyLabel(t("disconnected", "Disconnected"))
-        self.makcuConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.makcuConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
         self.makcuConnectionCard = SettingCard(
             FluentIcon.WIFI,
             t("connected", "Connected") + " / " + t("disconnected", "Disconnected"),
@@ -1005,11 +1005,11 @@ class KeysPage(BasePage):
         self._isMakcuConnected = connected
         if connected:
             self.makcuConnectionLabel.setText(t("connected", "Connected"))
-            self.makcuConnectionLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+            self.makcuConnectionLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-weight: bold;")
             self.makcuConnectBtn.setText(t("makcu_disconnect", "Disconnect MAKCU"))
         else:
             self.makcuConnectionLabel.setText(t("disconnected", "Disconnected"))
-            self.makcuConnectionLabel.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            self.makcuConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
             self.makcuConnectBtn.setText(t("makcu_connect", "Connect MAKCU"))
 
     def _updateMakcuAimStatus(self):
@@ -1023,10 +1023,10 @@ class KeysPage(BasePage):
             aiming = bool(getattr(self._config, 'makcu_aim_active', False))
             if aiming:
                 self.makcuAimStatusLabel.setText(t("aiming", "Aiming"))
-                self.makcuAimStatusLabel.setStyleSheet("color: #2ecc71; font-weight: bold;")
+                self.makcuAimStatusLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-weight: bold;")
             else:
                 self.makcuAimStatusLabel.setText(t("idle", "Idle"))
-                self.makcuAimStatusLabel.setStyleSheet("color: #aaaaaa; font-weight: bold;")
+                self.makcuAimStatusLabel.setStyleSheet(f"color: {ThemeColors.TEXT_SECONDARY.get()}; font-weight: bold;")
         except Exception:
             self.makcuAimStatusLabel.setText("—")
             self.makcuAimStatusLabel.setStyleSheet("font-weight: bold;")
