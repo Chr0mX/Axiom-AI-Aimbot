@@ -7,76 +7,135 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <div class="wordmark">AXIOM<span>·</span> <span class="sub">Web Control</span></div>
-    <div id="status" class="disconnected">connecting…</div>
-  </header>
+  <div class="app">
+    <div class="topbar">
+      <div class="wordmark">AXIOM<span>·</span> <span class="sub">Web Control</span></div>
+      <div class="tabs">
+        <button class="tab active" data-tab="model">Model</button>
+        <button class="tab" data-tab="capture">Capture</button>
+        <button class="tab" data-tab="inference">Inference</button>
+        <button class="tab" data-tab="aim">Aim</button>
+        <button class="tab" data-tab="trigger">Trigger</button>
+        <button class="tab" data-tab="keys">Keys &amp; HW</button>
+        <button class="tab" data-tab="visuals">Visuals</button>
+        <button class="tab" data-tab="configs">Configs</button>
+        <button class="tab" data-tab="convert">Convert</button>
+        <button class="tab" data-tab="other">Other</button>
+      </div>
+      <div id="status" class="disconnected">connecting…</div>
+    </div>
 
-  <main>
-    <section class="card">
-      <div class="card-title">Access Token</div>
-      <div class="row">
-        <input type="password" id="token-input" placeholder="Paste the token from the app's Other page">
-        <button id="token-save">Save</button>
-        <button id="token-show" title="Show/hide token">👁</button>
-      </div>
-      <div class="hint">Find or regenerate this under the app's <b>Other</b> page → <b>Remote Control</b>. Stored only in this browser.</div>
-    </section>
+    <div class="content">
+      <div class="sidebar">
+        <div class="sidebar-section">
+          <div class="card-title">Access Token</div>
+          <div class="row">
+            <input type="password" id="token-input" placeholder="Paste the token from the app's Other page">
+            <button id="token-save">Save</button>
+            <button id="token-show" title="Show/hide token">👁</button>
+          </div>
+          <div class="hint">Find or regenerate this under the app's <b>Other</b> page → <b>Remote Control</b>. Stored only in this browser.</div>
+        </div>
 
-    <section class="card">
-      <div class="card-title">Status</div>
-      <div class="grid">
-        <div class="stat"><div class="label">AI Running</div><div class="value" id="s-running">—</div></div>
-        <div class="stat"><div class="label">Aim Toggle</div><div class="value" id="s-active">—</div></div>
-        <div class="stat"><div class="label">Firing</div><div class="value" id="s-firing">—</div></div>
-        <div class="stat"><div class="label">Model</div><div class="value" id="s-model">—</div></div>
-        <div class="stat"><div class="label">Backend</div><div class="value" id="s-backend">—</div></div>
-        <div class="stat"><div class="label">Mouse Method</div><div class="value" id="s-mouse">—</div></div>
-        <div class="stat"><div class="label">MAKCU</div><div class="value" id="s-makcu">—</div></div>
-        <div class="stat"><div class="label">MAKCU Port</div><div class="value" id="s-makcu-port">—</div></div>
-        <div class="stat"><div class="label">Capture FPS</div><div class="value" id="s-capfps">—</div></div>
-        <div class="stat"><div class="label">Inference FPS</div><div class="value" id="s-inffps">—</div></div>
+        <div class="sidebar-section">
+          <div class="card-title">Status</div>
+          <div class="grid">
+            <div class="stat"><div class="label">AI Running</div><div class="value" id="s-running">—</div></div>
+            <div class="stat"><div class="label">Aim Toggle</div><div class="value" id="s-active">—</div></div>
+            <div class="stat"><div class="label">Firing</div><div class="value" id="s-firing">—</div></div>
+            <div class="stat"><div class="label">Mouse Method</div><div class="value" id="s-mouse">—</div></div>
+            <div class="stat"><div class="label">MAKCU</div><div class="value" id="s-makcu">—</div></div>
+            <div class="stat"><div class="label">MAKCU Port</div><div class="value" id="s-makcu-port">—</div></div>
+            <div class="stat"><div class="label">Capture FPS</div><div class="value" id="s-capfps">—</div></div>
+            <div class="stat"><div class="label">Inference FPS</div><div class="value" id="s-inffps">—</div></div>
+          </div>
+        </div>
       </div>
-    </section>
 
-    <section class="card">
-      <div class="card-title">Controls</div>
-      <div class="row control-row">
-        <label class="switch">
-          <input type="checkbox" id="always-aim-toggle">
-          <span class="slider"></span>
-        </label>
-        <div class="control-label">Always Aim</div>
-      </div>
-      <div class="row control-row">
-        <label class="switch">
-          <input type="checkbox" id="makcu-toggle">
-          <span class="slider"></span>
-        </label>
-        <div class="control-label">MAKCU Connect</div>
-      </div>
-      <div class="row control-row">
-        <button id="ai-start-btn">Start AI</button>
-        <button id="ai-stop-btn">Stop AI</button>
-        <div class="control-label" id="ai-control-reason"></div>
-      </div>
-    </section>
+      <div class="main">
+        <div class="panel active" id="panel-model">
+          <div class="panel-title">Model</div>
+          <div class="row">
+            <select id="model-select"></select>
+            <select id="backend-select">
+              <option value="auto">Auto</option>
+              <option value="tensorrt">TensorRT</option>
+              <option value="directml">DirectML</option>
+              <option value="cpu">CPU</option>
+            </select>
+            <button id="model-switch-btn">Switch</button>
+          </div>
+          <div class="hint" id="model-switch-reason"></div>
+          <div class="grid" style="margin-top: 16px;">
+            <div class="stat"><div class="label">Model</div><div class="value" id="s-model">—</div></div>
+            <div class="stat"><div class="label">Backend</div><div class="value" id="s-backend">—</div></div>
+          </div>
+        </div>
 
-    <section class="card">
-      <div class="card-title">Model &amp; Backend</div>
-      <div class="row">
-        <input type="text" id="model-path-input" placeholder="Model/foo.onnx">
-        <select id="backend-select">
-          <option value="auto">Auto</option>
-          <option value="tensorrt">TensorRT</option>
-          <option value="directml">DirectML</option>
-          <option value="cpu">CPU</option>
-        </select>
-        <button id="model-switch-btn">Switch</button>
+        <div class="panel" id="panel-capture">
+          <div class="panel-title">Capture</div>
+          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+        </div>
+
+        <div class="panel" id="panel-inference">
+          <div class="panel-title">Inference</div>
+          <div class="row control-row">
+            <button id="ai-start-btn">Start AI</button>
+            <button id="ai-stop-btn">Stop AI</button>
+            <div class="control-label" id="ai-control-reason"></div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-aim">
+          <div class="panel-title">Aim</div>
+          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+        </div>
+
+        <div class="panel" id="panel-trigger">
+          <div class="panel-title">Trigger</div>
+          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+        </div>
+
+        <div class="panel" id="panel-keys">
+          <div class="panel-title">Keys &amp; HW</div>
+          <div class="row control-row">
+            <label class="switch">
+              <input type="checkbox" id="always-aim-toggle">
+              <span class="slider"></span>
+            </label>
+            <div class="control-label">Always Aim</div>
+          </div>
+          <div class="row control-row">
+            <label class="switch">
+              <input type="checkbox" id="makcu-toggle">
+              <span class="slider"></span>
+            </label>
+            <div class="control-label">MAKCU Connect</div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-visuals">
+          <div class="panel-title">Visuals</div>
+          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+        </div>
+
+        <div class="panel" id="panel-configs">
+          <div class="panel-title">Configs</div>
+          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+        </div>
+
+        <div class="panel" id="panel-convert">
+          <div class="panel-title">Convert</div>
+          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+        </div>
+
+        <div class="panel" id="panel-other">
+          <div class="panel-title">Other</div>
+          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+        </div>
       </div>
-      <div class="hint" id="model-switch-reason"></div>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

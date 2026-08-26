@@ -16,10 +16,12 @@
   var aiStartBtn = document.getElementById("ai-start-btn");
   var aiStopBtn = document.getElementById("ai-stop-btn");
   var aiControlReason = document.getElementById("ai-control-reason");
-  var modelPathInput = document.getElementById("model-path-input");
+  var modelSelect = document.getElementById("model-select");
   var backendSelect = document.getElementById("backend-select");
   var modelSwitchBtn = document.getElementById("model-switch-btn");
   var modelSwitchReason = document.getElementById("model-switch-reason");
+  var tabButtons = document.querySelectorAll(".tab");
+  var panels = document.querySelectorAll(".panel");
 
   function getToken() {
     try {
@@ -61,6 +63,28 @@
     };
   }
 
+  // ---------------------------------------------------------------------
+  // Tabs — mirrors the real Qt app's NavigationInterface order (see
+  // CLAUDE.md's GUI section). Purely a visibility toggle: poll()/
+  // setInterval keep running regardless of which tab is active, since the
+  // sidebar (and its toggles' echo-suppression flags below) is always
+  // visible no matter which panel is showing.
+  // ---------------------------------------------------------------------
+  function activateTab(name) {
+    tabButtons.forEach(function (btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-tab") === name);
+    });
+    panels.forEach(function (panel) {
+      panel.classList.toggle("active", panel.id === "panel-" + name);
+    });
+  }
+
+  tabButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      activateTab(btn.getAttribute("data-tab"));
+    });
+  });
+
   // Set while we're writing a toggle's .checked from a server response, so
   // that write doesn't re-trigger the toggle's own "change" handler and
   // fire a redundant POST right back at the server. Two independent flags
@@ -69,11 +93,64 @@
   var suppressToggleEcho = false;
   var suppressMakcuToggleEcho = false;
 
-  // The model/backend form pre-fills from the first status poll only —
-  // once, not on every tick — so it's a starting point the operator edits,
-  // not a field a poll keeps clobbering out from under them while they're
-  // typing a different path in.
+  // The model select is populated once from GET /api/models (loadModelList,
+  // fetched once on page load — not every poll tick) and the "currently
+  // active" entry is applied once from the first status poll, same one-shot
+  // semantics the old text-input prefill had. The two requests can land in
+  // either order, so pendingModelSelection holds the status poll's answer
+  // if it arrives before the model list has options to select among.
   var modelFormPrefilled = false;
+  var modelListLoaded = false;
+  var pendingModelSelection = null;
+
+  function applyModelSelection(name) {
+    if (!name) return;
+    if (!modelListLoaded) {
+      pendingModelSelection = name;
+      return;
+    }
+    var hasOption = Array.prototype.some.call(modelSelect.options, function (opt) {
+      return opt.value === name;
+    });
+    if (hasOption) modelSelect.value = name;
+    // else: the active model isn't in Model/ anymore (renamed/deleted since
+    // it was loaded) — leave the select on its default rather than adding
+    // a phantom option for a file that may no longer exist.
+  }
+
+  function loadModelList() {
+    fetch("/api/models", { headers: authHeaders() })
+      .then(function (res) {
+        return res.ok ? res.json() : null;
+      })
+      .then(function (data) {
+        if (!data || !data.models) return;
+        modelSelect.innerHTML = "";
+        data.models.forEach(function (name) {
+          var opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          modelSelect.appendChild(opt);
+        });
+        modelListLoaded = true;
+        modelSwitchBtn.disabled = false;
+        if (pendingModelSelection) {
+          applyModelSelection(pendingModelSelection);
+          pendingModelSelection = null;
+        }
+      })
+      .catch(function () {});
+  }
+
+  // The backend select offers only 4 options with no separate "CUDA" entry
+  // (mirrors model_page.py's own reverse-map fold, which folds "cuda" onto
+  // the "TensorRT" display item) — a "cuda" backend from the server is
+  // shown as "TensorRT" here, but never written back as "cuda" in a POST
+  // body, matching model_page.py's write-side map which also never writes
+  // "cuda".
+  function displayBackend(name) {
+    return name === "cuda" ? "tensorrt" : name;
+  }
 
   function applyStatus(s) {
     document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
@@ -103,17 +180,18 @@
     }
 
     if (!modelFormPrefilled && s.model) {
-      modelPathInput.value = "Model/" + s.model;
+      applyModelSelection(s.model);
       modelFormPrefilled = true;
     }
     if (s.inference_backend) {
+      var backendDisplay = displayBackend(s.inference_backend);
       var hasOption = Array.prototype.some.call(backendSelect.options, function (opt) {
-        return opt.value === s.inference_backend;
+        return opt.value === backendDisplay;
       });
-      if (hasOption) backendSelect.value = s.inference_backend;
-      // else: e.g. "cuda" — a valid backend the route accepts but the GUI
-      // (and this select, mirroring it) doesn't offer as a pickable option
-      // — leave the select on whatever the operator last chose rather than
+      if (hasOption) backendSelect.value = backendDisplay;
+      // else: a valid backend the route accepts but the GUI (and this
+      // select, mirroring it) doesn't offer as a pickable option — leave
+      // the select on whatever the operator last chose rather than
       // silently landing on an unrelated option.
     }
   }
@@ -235,7 +313,11 @@
   });
 
   modelSwitchBtn.addEventListener("click", function () {
-    var modelPath = modelPathInput.value.trim();
+    // modelSelect's options are bare basenames (see loadModelList()) —
+    // resolve_model_path() joins a relative path directly against
+    // project_root, not project_root/Model, so the "Model/" prefix has to
+    // be added client-side.
+    var modelPath = "Model/" + modelSelect.value;
     modelSwitchBtn.disabled = true;
     modelSwitchReason.textContent = "";
     fetch("/api/control/model", {
@@ -271,6 +353,12 @@
       });
   });
 
+  // Model select starts disabled-for-submit until the real list arrives —
+  // submitting "Model/" (an empty selection) before then would always
+  // resolve to "not_found" rather than doing anything useful.
+  modelSwitchBtn.disabled = true;
+
+  loadModelList();
   poll();
   setInterval(poll, POLL_MS);
 })();

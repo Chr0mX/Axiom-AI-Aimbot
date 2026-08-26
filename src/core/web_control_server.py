@@ -243,6 +243,11 @@ def start(
     def get_status():
         return _build_status(config)
 
+    @app.get("/api/models", dependencies=[Depends(_check_token)])
+    def get_models():
+        from .app_controller import list_models
+        return {"models": list_models()}
+
     @app.post("/api/control/always_aim", dependencies=[Depends(_check_token)])
     def post_always_aim(body: AlwaysAimBody):
         from .app_controller import set_always_aim

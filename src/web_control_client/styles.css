@@ -19,20 +19,31 @@ html, body {
   font: 14px/1.5 "Segoe UI", "Consolas", "Menlo", monospace, sans-serif;
 }
 
-header {
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* Topbar: wordmark + tab bar (mirrors the real Qt app's NavigationInterface
+   order — see CLAUDE.md's GUI section) + connection status badge */
+.topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
+  gap: 20px;
+  padding: 0 20px;
+  height: 60px;
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
+  z-index: 10;
   background: rgba(13, 13, 19, 0.9);
   backdrop-filter: blur(6px);
 }
 .wordmark {
   font-weight: 700;
   letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 .wordmark span { color: var(--accent); }
 .wordmark .sub {
@@ -40,25 +51,66 @@ header {
   font-weight: 400;
   margin-left: 6px;
 }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  overflow-x: auto;
+}
+.tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 12px;
+  height: 34px;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab:hover { color: var(--ink); border-color: var(--line); }
+.tab.active {
+  color: var(--accent);
+  background: rgba(0, 224, 160, 0.1);
+  border-color: var(--line);
+}
+
 #status {
   font-size: 12px;
   padding: 3px 9px;
   border-radius: 4px;
   border: 1px solid var(--line);
+  white-space: nowrap;
 }
 #status.connected { color: var(--accent); }
 #status.disconnected { color: var(--bad); border-color: rgba(255, 96, 96, 0.35); }
 
-main {
-  max-width: 640px;
-  margin: 0 auto;
+/* Content: persistent left status sidebar + per-tab main panel */
+.content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  border-right: 1px solid var(--line);
 }
 
-.card {
+.main {
+  flex: 1;
+  padding: 20px;
+  max-width: 640px;
+}
+
+.sidebar-section {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -72,12 +124,31 @@ main {
   margin-bottom: 12px;
 }
 
+/* One .panel per tab; only the active one is shown. Cross-cutting facts
+   (running/aim/mouse/MAKCU/FPS) stay in the sidebar above, visible no
+   matter which tab is open — panel content is tab-specific only. */
+.panel { display: none; }
+.panel.active {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.panel-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.panel-placeholder {
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+
 .row {
   display: flex;
   gap: 8px;
   align-items: center;
 }
-input[type="password"], input[type="text"] {
+input[type="password"], input[type="text"], select {
   flex: 1;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -109,7 +180,6 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   grid-template-columns: repeat(2, 1fr);
   gap: 10px 16px;
 }
-@media (max-width: 460px) { .grid { grid-template-columns: 1fr; } }
 .stat .label {
   font-size: 11px;
   color: var(--ink-faint);
@@ -153,3 +223,20 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 }
 .switch input:checked + .slider { background: rgba(0, 224, 160, 0.18); border-color: var(--accent); }
 .switch input:checked + .slider::before { transform: translateX(20px); background: var(--accent); }
+
+@media (max-width: 760px) {
+  .content { flex-direction: column; }
+  .sidebar {
+    width: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .main { max-width: none; }
+}
+
+@media (max-width: 460px) {
+  .grid { grid-template-columns: 1fr; }
+  .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
+  .tabs { order: 3; width: 100%; }
+  .panel-title { font-size: 22px; }
+}

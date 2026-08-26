@@ -50,6 +50,7 @@ without that landmine.
 from __future__ import annotations
 
 import copy
+import glob
 import logging
 import os
 import queue
@@ -180,6 +181,21 @@ def resolve_model_path(model_path: str) -> tuple[str | None, str | None]:
     if not os.path.exists(resolved):
         return None, "not_found"
     return resolved, None
+
+
+def list_models() -> list[str]:
+    """Sorted list of .onnx basenames in Model/.
+
+    Mirrors model_page.py's _refreshModelList() glob+sort logic
+    conceptually — reimplemented here rather than imported, since
+    model_page.py is a GUI file this module must not depend on, and
+    per CLAUDE.md's Web Control section model_page.py itself stays
+    untouched (same precedent as MAKCU/request_model_change).
+    """
+    model_dir = os.path.join(project_root, "Model")
+    if not os.path.exists(model_dir):
+        return []
+    return sorted(os.path.basename(m) for m in glob.glob(os.path.join(model_dir, "*.onnx")))
 
 
 def start_ai_threads(

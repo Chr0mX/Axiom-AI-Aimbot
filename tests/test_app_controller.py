@@ -48,6 +48,7 @@ def test_module_importable_without_windows_deps():
     assert hasattr(app_controller, "disconnect_makcu")
     assert hasattr(app_controller, "resolve_model_path")
     assert hasattr(app_controller, "request_model_change")
+    assert hasattr(app_controller, "list_models")
 
 
 def test_set_always_aim_enables_and_disables_idle_detect():
@@ -258,6 +259,42 @@ class TestResolveModelPath:
     def test_nonexistent_relative_path(self, tmp_path, monkeypatch):
         monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
         assert app_controller.resolve_model_path("Model/missing.onnx") == (None, "not_found")
+
+
+class TestListModels:
+    """list_models() is pure os.path/glob logic — no onnxruntime/win32api
+    import, no dependency on model_page.py — so every branch is genuinely
+    testable here with no faking, same as TestResolveModelPath above.
+    """
+
+    def test_no_model_dir_returns_empty_list(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        assert app_controller.list_models() == []
+
+    def test_empty_model_dir_returns_empty_list(self, tmp_path, monkeypatch):
+        (tmp_path / "Model").mkdir()
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        assert app_controller.list_models() == []
+
+    def test_returns_sorted_onnx_basenames(self, tmp_path, monkeypatch):
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        (model_dir / "zeta.onnx").write_bytes(b"")
+        (model_dir / "alpha.onnx").write_bytes(b"")
+        (model_dir / "mid.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+
+        assert app_controller.list_models() == ["alpha.onnx", "mid.onnx", "zeta.onnx"]
+
+    def test_ignores_non_onnx_files(self, tmp_path, monkeypatch):
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        (model_dir / "real.onnx").write_bytes(b"")
+        (model_dir / "notes.txt").write_bytes(b"")
+        (model_dir / "real.engine").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+
+        assert app_controller.list_models() == ["real.onnx"]
 
 
 class TestRequestModelChange:
