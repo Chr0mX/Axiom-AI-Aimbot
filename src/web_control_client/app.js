@@ -199,7 +199,11 @@
       notesEl.value = "";
       return;
     }
-    fetch("/api/model_info?model=" + encodeURIComponent(name), { headers: authHeaders() })
+    // /api/model_info resolves via resolve_model_path(), which joins a
+    // relative path directly against project_root, not project_root/Model
+    // — same "Model/" prefix the Switch button already adds, needed here
+    // too since modelSelect's options are bare basenames.
+    fetch("/api/model_info?model=" + encodeURIComponent("Model/" + name), { headers: authHeaders() })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (data) {
         if (!data) { infoEl.textContent = "—"; return; }
