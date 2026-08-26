@@ -211,6 +211,10 @@ def start(
     class AlwaysAimBody(BaseModel):
         enabled: bool
 
+    class ModelChangeBody(BaseModel):
+        model_path: str
+        inference_backend: Optional[str] = None
+
     class _ThreadServer(uvicorn.Server):
         def install_signal_handlers(self) -> None:
             # Overridden to a no-op: uvicorn's default installs SIGINT/
@@ -291,6 +295,11 @@ def start(
         from .app_controller import stop_ai_threads
         stop_ai_threads(config)
         return {"ok": True, "running": bool(getattr(config, "Running", False))}
+
+    @app.post("/api/control/model", dependencies=[Depends(_check_token)])
+    def post_model_change(body: ModelChangeBody):
+        from .app_controller import request_model_change
+        return request_model_change(config, body.model_path, body.inference_backend)
 
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")

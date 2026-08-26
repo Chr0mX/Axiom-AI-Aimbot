@@ -28,6 +28,7 @@ class _FakeConfig:
     makcu_baud_rate = 4_000_000
     model_path = ""
     Running = False
+    inference_backend = "auto"
 
 
 def test_module_importable_without_windows_deps():
@@ -46,6 +47,7 @@ def test_module_importable_without_windows_deps():
     assert hasattr(app_controller, "connect_makcu")
     assert hasattr(app_controller, "disconnect_makcu")
     assert hasattr(app_controller, "resolve_model_path")
+    assert hasattr(app_controller, "request_model_change")
 
 
 def test_set_always_aim_enables_and_disables_idle_detect():
@@ -256,3 +258,140 @@ class TestResolveModelPath:
     def test_nonexistent_relative_path(self, tmp_path, monkeypatch):
         monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
         assert app_controller.resolve_model_path("Model/missing.onnx") == (None, "not_found")
+
+
+class TestRequestModelChange:
+    """request_model_change()'s refusal branches (not_found/invalid_model_path/
+    invalid_backend/needs_restart) are reachable with zero faking — they
+    return before the deferred `from .session_utils import needs_trt_build`.
+    The needs_conversion/success branches fake core.session_utils in
+    sys.modules, the same technique already established for
+    win_utils.makcu_mouse: `from .session_utils import needs_trt_build`
+    inside core/app_controller.py resolves against sys.modules
+    ["core.session_utils"] without ever importing the real module (which
+    needs onnxruntime, unavailable in this sandbox).
+    """
+
+    def _model_file(self, tmp_path):
+        model_file = tmp_path / "real.onnx"
+        model_file.write_bytes(b"")
+        return str(model_file)
+
+    def _fake_session_utils(self, monkeypatch, needs_build):
+        calls = []
+        fake_module = types.ModuleType("core.session_utils")
+
+        def _fake_needs_trt_build(cfg, model_path):
+            calls.append(cfg.inference_backend)
+            return needs_build
+
+        fake_module.needs_trt_build = _fake_needs_trt_build
+        monkeypatch.setitem(sys.modules, "core.session_utils", fake_module)
+        return calls
+
+    def test_refuses_missing_file(self):
+        config = _FakeConfig()
+        result = app_controller.request_model_change(config, "does/not/exist.onnx")
+        assert result == {"ok": False, "reason": "not_found"}
+        assert config.model_path == ""
+
+    def test_refuses_bad_extension(self, tmp_path):
+        bad_file = tmp_path / "real.txt"
+        bad_file.write_bytes(b"")
+        config = _FakeConfig()
+        result = app_controller.request_model_change(config, str(bad_file))
+        assert result == {"ok": False, "reason": "invalid_model_path"}
+
+    def test_refuses_invalid_backend(self, tmp_path):
+        config = _FakeConfig()
+        result = app_controller.request_model_change(
+            config, self._model_file(tmp_path), inference_backend="rocm")
+        assert result == {"ok": False, "reason": "invalid_backend"}
+        assert config.model_path == ""
+
+    def test_refuses_crossing_into_directml(self, tmp_path):
+        config = _FakeConfig()
+        config.inference_backend = "cuda"
+        result = app_controller.request_model_change(
+            config, self._model_file(tmp_path), inference_backend="directml")
+        assert result == {"ok": False, "reason": "needs_restart"}
+        assert config.inference_backend == "cuda"  # untouched
+        assert config.model_path == ""
+
+    def test_refuses_crossing_out_of_directml(self, tmp_path):
+        config = _FakeConfig()
+        config.inference_backend = "directml"
+        result = app_controller.request_model_change(
+            config, self._model_file(tmp_path), inference_backend="cuda")
+        assert result == {"ok": False, "reason": "needs_restart"}
+        assert config.inference_backend == "directml"  # untouched
+
+    def test_allows_staying_on_directml(self, tmp_path, monkeypatch):
+        """Same backend on both sides — not a crossing — must fall through
+        to the (faked) needs_trt_build check instead of refusing just
+        because DirectML is involved at all.
+        """
+        self._fake_session_utils(monkeypatch, needs_build=False)
+        config = _FakeConfig()
+        config.inference_backend = "directml"
+        result = app_controller.request_model_change(
+            config, self._model_file(tmp_path), inference_backend="directml")
+        assert result["ok"] is True
+        assert config.inference_backend == "directml"
+
+    def test_refuses_when_trt_build_needed(self, tmp_path, monkeypatch):
+        self._fake_session_utils(monkeypatch, needs_build=True)
+        config = _FakeConfig()
+        model_file = self._model_file(tmp_path)
+        result = app_controller.request_model_change(config, model_file, inference_backend="tensorrt")
+        assert result == {"ok": False, "reason": "needs_conversion"}
+        assert config.model_path == ""
+        assert config.inference_backend == "auto"  # untouched
+
+    def test_applies_both_fields_on_success(self, tmp_path, monkeypatch):
+        self._fake_session_utils(monkeypatch, needs_build=False)
+        config = _FakeConfig()
+        config.Running = True
+        model_file = self._model_file(tmp_path)
+
+        result = app_controller.request_model_change(config, model_file, inference_backend="cpu")
+
+        assert result["ok"] is True
+        assert result["model_path"] == model_file
+        assert result["inference_backend"] == "cpu"
+        assert result["applied_live"] is True
+        assert config.model_path == model_file
+        assert config.inference_backend == "cpu"
+
+    def test_applied_live_false_when_not_running(self, tmp_path, monkeypatch):
+        self._fake_session_utils(monkeypatch, needs_build=False)
+        config = _FakeConfig()
+        config.Running = False
+        result = app_controller.request_model_change(config, self._model_file(tmp_path))
+        assert result["applied_live"] is False
+
+    def test_defaults_to_current_backend_when_none_requested(self, tmp_path, monkeypatch):
+        calls = self._fake_session_utils(monkeypatch, needs_build=False)
+        config = _FakeConfig()
+        config.inference_backend = "cuda"
+        app_controller.request_model_change(config, self._model_file(tmp_path))
+        assert config.inference_backend == "cuda"
+        assert calls == ["cuda"]
+
+    def test_needs_trt_build_is_evaluated_against_requested_backend_not_current(self, tmp_path, monkeypatch):
+        """The deepcopy passed to needs_trt_build must reflect the
+        *requested* backend, not whatever config.inference_backend
+        currently is — otherwise a model+backend switch in one call would
+        evaluate the TRT-build question against the wrong provider.
+        """
+        calls = self._fake_session_utils(monkeypatch, needs_build=False)
+        config = _FakeConfig()
+        config.inference_backend = "cpu"
+        app_controller.request_model_change(
+            config, self._model_file(tmp_path), inference_backend="tensorrt")
+        # The fake saw "tensorrt" (the requested backend), not "cpu" (what
+        # config.inference_backend was at call time) — proving the check
+        # ran against the deepcopy's simulated value.
+        assert calls == ["tensorrt"]
+        # Only written to the real config afterward, since needs_build=False.
+        assert config.inference_backend == "tensorrt"

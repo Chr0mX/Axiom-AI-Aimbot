@@ -60,7 +60,21 @@
         <button id="ai-stop-btn">Stop AI</button>
         <div class="control-label" id="ai-control-reason"></div>
       </div>
-      <div class="hint">Model switching is a planned follow-up — see CLAUDE.md's Web Control section.</div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Model &amp; Backend</div>
+      <div class="row">
+        <input type="text" id="model-path-input" placeholder="Model/foo.onnx">
+        <select id="backend-select">
+          <option value="auto">Auto</option>
+          <option value="tensorrt">TensorRT</option>
+          <option value="directml">DirectML</option>
+          <option value="cpu">CPU</option>
+        </select>
+        <button id="model-switch-btn">Switch</button>
+      </div>
+      <div class="hint" id="model-switch-reason"></div>
     </section>
   </main>
 

@@ -16,6 +16,10 @@
   var aiStartBtn = document.getElementById("ai-start-btn");
   var aiStopBtn = document.getElementById("ai-stop-btn");
   var aiControlReason = document.getElementById("ai-control-reason");
+  var modelPathInput = document.getElementById("model-path-input");
+  var backendSelect = document.getElementById("backend-select");
+  var modelSwitchBtn = document.getElementById("model-switch-btn");
+  var modelSwitchReason = document.getElementById("model-switch-reason");
 
   function getToken() {
     try {
@@ -65,6 +69,12 @@
   var suppressToggleEcho = false;
   var suppressMakcuToggleEcho = false;
 
+  // The model/backend form pre-fills from the first status poll only —
+  // once, not on every tick — so it's a starting point the operator edits,
+  // not a field a poll keeps clobbering out from under them while they're
+  // typing a different path in.
+  var modelFormPrefilled = false;
+
   function applyStatus(s) {
     document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
@@ -90,6 +100,21 @@
       suppressMakcuToggleEcho = true;
       makcuToggle.checked = !!s.makcu_connected;
       suppressMakcuToggleEcho = false;
+    }
+
+    if (!modelFormPrefilled && s.model) {
+      modelPathInput.value = "Model/" + s.model;
+      modelFormPrefilled = true;
+    }
+    if (s.inference_backend) {
+      var hasOption = Array.prototype.some.call(backendSelect.options, function (opt) {
+        return opt.value === s.inference_backend;
+      });
+      if (hasOption) backendSelect.value = s.inference_backend;
+      // else: e.g. "cuda" — a valid backend the route accepts but the GUI
+      // (and this select, mirroring it) doesn't offer as a pickable option
+      // — leave the select on whatever the operator last chose rather than
+      // silently landing on an unrelated option.
     }
   }
 
@@ -207,6 +232,43 @@
 
   aiStopBtn.addEventListener("click", function () {
     runAiControl("/api/control/ai_stop");
+  });
+
+  modelSwitchBtn.addEventListener("click", function () {
+    var modelPath = modelPathInput.value.trim();
+    modelSwitchBtn.disabled = true;
+    modelSwitchReason.textContent = "";
+    fetch("/api/control/model", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ model_path: modelPath, inference_backend: backendSelect.value }),
+    })
+      .then(function (res) {
+        if (!res.ok) {
+          modelSwitchReason.textContent = "request failed";
+          return null;
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        if (data.ok === false) {
+          modelSwitchReason.textContent = data.reason || "failed";
+        } else {
+          // Never optimistically write s-model/s-backend here — the next
+          // status poll is the sole source of truth for those, same as
+          // every other field this client doesn't own a checkbox for.
+          modelSwitchReason.textContent = data.applied_live
+            ? "applied — live"
+            : "applied — takes effect on next AI start";
+        }
+      })
+      .catch(function () {
+        modelSwitchReason.textContent = "request failed";
+      })
+      .then(function () {
+        modelSwitchBtn.disabled = false;
+      });
   });
 
   poll();
