@@ -1267,12 +1267,257 @@
 
         <div class="panel" id="panel-visuals">
           <div class="panel-title">Visuals</div>
-          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+
+          <div class="field-group-title">Display</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show FOV</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_fov" data-key="show_fov" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Boxes</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_boxes" data-key="show_boxes" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Full Bounding Box</div>
+                <div class="field-desc">Show a full rectangle instead of corner brackets</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-box_full_rect" data-key="box_full_rect" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Confidence</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_confidence" data-key="show_confidence" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Detection Range</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_detect_range" data-key="show_detect_range" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Tracer Line</div>
+                <div class="field-desc">Draw a line from screen center to each detected target</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_tracer_line" data-key="show_tracer_line" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Box Color Theme</div>
+                <div class="field-desc">Color preset for detection boxes</div>
+              </div>
+              <div class="field-control">
+                <select id="vis-box_color_theme" data-key="box_color_theme" data-type="choice">
+                  <option value="default">Default</option>
+                  <option value="cyan">Cyan</option>
+                  <option value="red">Red</option>
+                  <option value="yellow">Yellow</option>
+                  <option value="white">White</option>
+                  <option value="purple">Purple</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Chroma Speed</div>
+                <div class="field-desc">Rainbow cycle speed for boxes inside FOV. 0 = off.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-chroma_box_speed" data-key="chroma_box_speed" data-type="number" min="0" max="20" step="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Status Panel</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Status Panel</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_status_panel" data-key="show_status_panel" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Auto Aim row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_auto_aim" data-key="status_panel_show_auto_aim" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Model row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_model" data-key="status_panel_show_model" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Mouse Move Method row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_mouse_move" data-key="status_panel_show_mouse_move" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Mouse Click Method row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_mouse_click" data-key="status_panel_show_mouse_click" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Screenshot Method row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_screenshot_method" data-key="status_panel_show_screenshot_method" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Capture FPS row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_screenshot_fps" data-key="status_panel_show_screenshot_fps" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Inference FPS row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_detection_fps" data-key="status_panel_show_detection_fps" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Crosshair</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Crosshair</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_crosshair" data-key="show_crosshair" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Crosshair Style</div></div>
+              <div class="field-control">
+                <select id="vis-crosshair_style" data-key="crosshair_style" data-type="choice">
+                  <option value="dot">Dot</option>
+                  <option value="cross">Cross</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Crosshair Size</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-crosshair_size" data-key="crosshair_size" data-type="number" min="1" max="20" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Red</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-crosshair_color_r" data-key="crosshair_color_r" data-type="number" min="0" max="255" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Green</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-crosshair_color_g" data-key="crosshair_color_g" data-type="number" min="0" max="255" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Blue</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-crosshair_color_b" data-key="crosshair_color_b" data-type="number" min="0" max="255" step="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Appearance</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Enable Acrylic</div>
+                <div class="field-desc">Only affects the Qt app's own window on the host — takes effect there, not on this browser page.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-enable_acrylic" data-key="enable_acrylic" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Acrylic Window Alpha</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-acrylic_window_alpha" data-key="acrylic_window_alpha" data-type="number" min="60" max="255" step="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Web HUD Overlay</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Enable Web HUD</div>
+                <div class="field-desc">Stream the HUD to a browser on this PC or any device on your LAN.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-web_esp_enabled"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">HTTP Port</div>
+                <div class="field-desc">Port for the overlay web page.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-web_esp_http_port" data-key="web_esp_http_port" data-type="number" min="1024" max="65535" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">WebSocket Port</div>
+                <div class="field-desc">Port for the live state stream.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-web_esp_ws_port" data-key="web_esp_ws_port" data-type="number" min="1024" max="65535" step="1">
+              </div>
+            </div>
+            <div class="field-card stacked">
+              <div class="row" style="justify-content: space-between;">
+                <div class="field-title">Connect</div>
+                <button id="vis-web-esp-open-btn">Open</button>
+              </div>
+              <div class="field-desc">Open this URL on the same PC, or share it with a device on your LAN. "Open" opens on the machine running Axiom, not this browser.</div>
+              <div class="field-readonly" id="vis-web-esp-url">—</div>
+            </div>
+          </div>
         </div>
 
         <div class="panel" id="panel-configs">
           <div class="panel-title">Configs</div>
-          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+
+          <div class="field-card stacked">
+            <div class="row" style="justify-content: space-between;">
+              <div class="field-title">Presets</div>
+              <button id="configs-refresh-btn">Refresh</button>
+            </div>
+            <select id="configs-select" size="8" style="width: 100%; height: auto;"></select>
+          </div>
+
+          <div class="row control-row" style="flex-wrap: wrap;">
+            <button id="configs-create-btn">Create</button>
+            <button id="configs-load-btn">Load</button>
+            <button id="configs-save-btn">Save</button>
+            <button id="configs-rename-btn">Rename</button>
+            <button id="configs-delete-btn">Delete</button>
+            <button id="configs-export-btn">Export</button>
+            <button id="configs-import-btn">Import</button>
+            <input type="file" id="configs-import-file" accept="application/json" class="hidden">
+            <button id="configs-open-folder-btn">Open Folder</button>
+          </div>
+          <div class="hint">"Open Folder" opens the configs directory on the machine running Axiom, not this browser. "Export" downloads the preset to this browser; "Import" reads a file from this browser and saves it as a new preset (never overwrites an existing name — a duplicate is saved as "name_1", etc.).</div>
+          <div class="hint" id="configs-reason"></div>
         </div>
 
         <div class="panel" id="panel-convert">

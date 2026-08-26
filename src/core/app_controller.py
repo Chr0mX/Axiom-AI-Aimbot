@@ -468,3 +468,39 @@ def request_model_change(
         "inference_backend": config.inference_backend,
         "applied_live": bool(getattr(config, "Running", False)),
     }
+
+
+def set_web_esp_enabled(config: "Config", enabled: bool) -> bool:
+    """Enable/disable the Web ESP overlay server, mirroring
+    visuals_page.py's _onWebEspEnableChanged(): writes config.web_esp_enabled
+    AND starts/stops the actual esp_server live, so the toggle takes effect
+    immediately instead of only on the next app launch. Deliberately not a
+    plain generic-schema field for this reason — see web_control_settings.py's
+    _SCHEMA["visuals"] comment.
+
+    Returns whether the server is running after this call.
+    """
+    from core import esp_server
+
+    config.web_esp_enabled = bool(enabled)
+    if enabled:
+        esp_server.start(config)
+    else:
+        esp_server.stop()
+    return esp_server.is_running()
+
+
+def restart_web_esp_if_running(config: "Config") -> bool:
+    """Mirrors visuals_page.py's _restartWebEspIfRunning(): Web ESP binds its
+    HTTP/WS sockets once in esp_server.start(), so changing a port field
+    while it's already running doesn't rebind on its own — this restarts it
+    on the (already-written) new ports. A no-op if not currently running.
+
+    Returns whether the server is running after this call.
+    """
+    from core import esp_server
+
+    if esp_server.is_running():
+        esp_server.stop()
+        esp_server.start(config)
+    return esp_server.is_running()

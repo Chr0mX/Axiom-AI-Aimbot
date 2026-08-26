@@ -200,6 +200,39 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "makcu_aim_mode": {"type": "choice", "choices": ["hold", "toggle"]},
         "makcu_disengage_delay": {"type": "float", "min": 0.0, "max": 20.0},
     },
+    "visuals": {
+        "show_fov": {"type": "bool"},
+        "show_boxes": {"type": "bool"},
+        "box_full_rect": {"type": "bool"},
+        "show_confidence": {"type": "bool"},
+        "show_detect_range": {"type": "bool"},
+        "show_tracer_line": {"type": "bool"},
+        "box_color_theme": {"type": "choice", "choices": ["default", "cyan", "red", "yellow", "white", "purple"]},
+        "chroma_box_speed": {"type": "int", "min": 0, "max": 20},
+        "show_status_panel": {"type": "bool"},
+        "status_panel_show_auto_aim": {"type": "bool"},
+        "status_panel_show_model": {"type": "bool"},
+        "status_panel_show_mouse_move": {"type": "bool"},
+        "status_panel_show_mouse_click": {"type": "bool"},
+        "status_panel_show_screenshot_method": {"type": "bool"},
+        "status_panel_show_screenshot_fps": {"type": "bool"},
+        "status_panel_show_detection_fps": {"type": "bool"},
+        "show_crosshair": {"type": "bool"},
+        "crosshair_style": {"type": "choice", "choices": ["dot", "cross"]},
+        "crosshair_size": {"type": "int", "min": 1, "max": 20},
+        "crosshair_color_r": {"type": "int", "min": 0, "max": 255},
+        "crosshair_color_g": {"type": "int", "min": 0, "max": 255},
+        "crosshair_color_b": {"type": "int", "min": 0, "max": 255},
+        "enable_acrylic": {"type": "bool"},
+        "acrylic_window_alpha": {"type": "int", "min": 60, "max": 255},
+        # web_esp_enabled is deliberately NOT a plain schema field here — a
+        # bare Config write wouldn't actually start/stop the real esp_server
+        # the way visuals_page.py's own toggle does (see set_web_esp_enabled()
+        # in app_controller.py), so it's a dedicated action route instead,
+        # same reasoning as always_aim.
+        "web_esp_http_port": {"type": "int", "min": 1024, "max": 65535},
+        "web_esp_ws_port": {"type": "int", "min": 1024, "max": 65535},
+    },
 }
 
 TABS = tuple(_SCHEMA.keys())
@@ -315,6 +348,20 @@ def get_tab_settings(config, tab: str) -> dict:
         result["mouse_move_method"] = getattr(config, "mouse_move_method", "")
         result["keep_detecting"] = bool(getattr(config, "keep_detecting", False))
         result["always_aim"] = bool(getattr(config, "always_aim", False))
+
+    if tab == "visuals":
+        # Read-only extras — web_esp_enabled's canonical write is the
+        # dedicated action route (see _SCHEMA["visuals"]'s comment above),
+        # but the panel still needs to know the live enabled/running state
+        # and connect URL to render its Web ESP group correctly.
+        result["web_esp_enabled"] = bool(getattr(config, "web_esp_enabled", False))
+        try:
+            from core import esp_server
+            result["web_esp_running"] = esp_server.is_running()
+            result["web_esp_url"] = esp_server.connect_url() if result["web_esp_running"] else ""
+        except Exception:
+            result["web_esp_running"] = False
+            result["web_esp_url"] = ""
 
     return result
 
@@ -681,3 +728,151 @@ def reset_humanization(config) -> dict:
         return {"ok": False, "reason": "humanization_unavailable", "detail": str(exc)}
     config.humanization = HumanizationConfig()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Web ESP overlay — start/stop lives in app_controller.py (mirrors AI start/
+# stop and MAKCU connect/disconnect: a real service lifecycle action, not a
+# plain Config write). This module only holds the "open in browser" action,
+# same tier as open_model_folder() — reads state, no Config mutation.
+# ---------------------------------------------------------------------------
+
+def open_web_esp_in_browser() -> bool:
+    """Open the running Web ESP overlay's URL in a browser ON THE HOST
+    MACHINE running Axiom — not on the remote client — mirroring
+    visuals_page.py's _onWebEspOpen(). Returns False if the server isn't
+    running."""
+    try:
+        from core import esp_server
+        if not esp_server.is_running():
+            return False
+        url = esp_server.connect_url()
+    except Exception:
+        return False
+    if not url:
+        return False
+    import webbrowser
+    webbrowser.open(url)
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Config presets — mirrors configs_page.py's preset management, via
+# core.config_manager.ConfigManager (a pure-Python core module, no Qt/
+# onnxruntime — safe to import directly rather than defer). A fresh
+# instance is created per call rather than threading the Qt app's real one
+# through web_control_server.start(): ConfigManager holds no state beyond
+# a directory path, so a throwaway instance pointed at the same "config"
+# directory behaves identically — every operation is plain file I/O.
+# ---------------------------------------------------------------------------
+
+def _config_manager():
+    from core.config_manager import ConfigManager
+    return ConfigManager()
+
+
+def list_config_presets() -> list[str]:
+    return _config_manager().get_config_list()
+
+
+def save_config_preset(config, name: str) -> dict:
+    """Mirrors configs_page.py's Create/Save buttons (both call
+    ConfigManager.save_config() — Create for a new name, Save to overwrite
+    the selected one; the GUI's distinction is just which confirmation
+    dialog it shows first, not a different underlying call)."""
+    ok = _config_manager().save_config(config, name)
+    return {"ok": ok}
+
+
+def preview_config_preset(config, name: str) -> dict:
+    """Dry-run of load_config_preset() — what would change without
+    applying it, mirroring the GUI's pre-load diff confirmation."""
+    changes = _config_manager().preview_config_changes(config, name)
+    if changes is None:
+        return {"ok": False, "reason": "read_failed"}
+    return {"ok": True, "changes": changes}
+
+
+def load_config_preset(config, name: str) -> dict:
+    ok = _config_manager().load_config(config, name)
+    return {"ok": ok}
+
+
+def delete_config_preset(name: str) -> dict:
+    ok = _config_manager().delete_config(name)
+    return {"ok": ok}
+
+
+def rename_config_preset(old_name: str, new_name: str) -> dict:
+    ok = _config_manager().rename_config(old_name, new_name)
+    return {"ok": ok}
+
+
+def open_configs_folder() -> bool:
+    """Opens the configs directory in the host machine's file explorer —
+    same "opens on the host, not the remote browser" caveat as
+    open_model_folder()."""
+    mgr = _config_manager()
+    if not os.path.isdir(mgr.configs_dir):
+        return False
+    if not hasattr(os, "startfile"):
+        return False
+    os.startfile(mgr.configs_dir)
+    return True
+
+
+def export_config_preset_content(name: str) -> dict:
+    """Returns a preset's raw JSON file content for the browser to
+    download — the natural web equivalent of the GUI's Export (which opens
+    a save-path dialog on the host, meaningless remotely, since the server
+    already has the file — the browser downloading it to the client's own
+    machine is actually the more useful direction for a remote operator)."""
+    mgr = _config_manager()
+    if name not in mgr.get_config_list():
+        return {"ok": False, "reason": "not_found"}
+    path = os.path.join(mgr.configs_dir, f"{name}.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return {"ok": False, "reason": "read_failed"}
+    return {"ok": True, "name": name, "content": content}
+
+
+def import_config_preset_content(content: str) -> dict:
+    """Web equivalent of ConfigManager.import_config(path) — that method
+    takes a HOST-side file path, which a browser's file picker can never
+    hand to a network request (browsers only ever expose the *content* of
+    a locally-picked file, never its path on the picking machine). This
+    reimplements the same name-extraction/uniqueness/write logic directly
+    against parsed JSON content instead of a path.
+    """
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {"ok": False, "reason": "invalid_json"}
+    if not isinstance(data, dict):
+        return {"ok": False, "reason": "invalid_json"}
+
+    from core.config_manager import _sanitize_config_name
+
+    name = _sanitize_config_name(data.get("name", "imported_config")) or "imported_config"
+
+    mgr = _config_manager()
+    # Ensure uniqueness — never overwrite an existing preset on import,
+    # same as ConfigManager.import_config()'s own _1/_2/... suffix loop.
+    original_name = name
+    counter = 1
+    existing = set(mgr.get_config_list())
+    while name in existing:
+        name = f"{original_name}_{counter}"
+        counter += 1
+
+    data["name"] = name
+    path = os.path.join(mgr.configs_dir, f"{name}.json")
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except OSError:
+        return {"ok": False, "reason": "write_failed"}
+    return {"ok": True, "name": name}

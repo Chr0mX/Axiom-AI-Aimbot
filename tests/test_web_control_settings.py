@@ -547,3 +547,330 @@ class TestAimAndKeysSchemaCoverage:
         result = wcs.apply_tab_settings(config, "aim", {})
         assert result["ok"] is True
         assert config.fov_size == 123
+
+
+def _fake_esp_server_module(monkeypatch, **attrs):
+    """Fakes core.esp_server for a deferred `from core import esp_server`.
+
+    Patching sys.modules["core.esp_server"] alone isn't sufficient once
+    something elsewhere in a full-suite run has already done a REAL `from
+    core import esp_server` (test_esp_server.py does, at module level):
+    that binds a real `esp_server` attribute directly on the `core`
+    package object, and `from core import esp_server` resolves via a
+    plain getattr(core, "esp_server") first — succeeding against that
+    cached real attribute — before it would ever fall back to consulting
+    sys.modules. So the package attribute has to be patched too, same
+    two-level fix as TestListVkOptions/TestGetSerialPorts' "module
+    unavailable" tests above.
+    """
+    fake_module = types.ModuleType("core.esp_server")
+    for key, value in attrs.items():
+        setattr(fake_module, key, value)
+    monkeypatch.setitem(sys.modules, "core.esp_server", fake_module)
+    import core
+    monkeypatch.setattr(core, "esp_server", fake_module, raising=False)
+    return fake_module
+
+
+def _clear_esp_server_module(monkeypatch):
+    """Forces `from core import esp_server` to fail with ImportError —
+    both levels again (see _fake_esp_server_module's docstring): a bare
+    sys.modules[...] = None wouldn't be seen at all if core.esp_server is
+    already a real cached attribute on the core package."""
+    monkeypatch.setitem(sys.modules, "core.esp_server", None)
+    import core
+    monkeypatch.delattr(core, "esp_server", raising=False)
+
+
+class TestVisualsSchema:
+    """_SCHEMA["visuals"] round-trip + its read-only web_esp_* extras.
+    core.esp_server has no win32api/Qt import (see CLAUDE.md's testability
+    note), so it's faked via sys.modules the same way core.screen_capture
+    is above — purely to avoid a real get_tab_settings() call binding an
+    actual socket/thread, not because the real module is unimportable."""
+
+    def _install_fake_esp_server(self, monkeypatch, running=False, url=""):
+        _fake_esp_server_module(monkeypatch, is_running=lambda: running, connect_url=lambda: url)
+
+    def test_get_tab_settings_returns_every_schema_key(self, monkeypatch):
+        self._install_fake_esp_server(monkeypatch)
+        result = wcs.get_tab_settings(_config(), "visuals")
+        assert set(result.keys()) >= set(wcs._SCHEMA["visuals"].keys())
+
+    def test_reads_bool_choice_int_fields(self, monkeypatch):
+        self._install_fake_esp_server(monkeypatch)
+        config = _config(
+            show_fov=True, box_color_theme="cyan", chroma_box_speed=5,
+            crosshair_color_r=10, crosshair_color_g=20, crosshair_color_b=30,
+        )
+        result = wcs.get_tab_settings(config, "visuals")
+        assert result["show_fov"] is True
+        assert result["box_color_theme"] == "cyan"
+        assert result["chroma_box_speed"] == 5
+        assert result["crosshair_color_r"] == 10
+
+    def test_apply_rejects_invalid_box_color_theme(self, monkeypatch):
+        self._install_fake_esp_server(monkeypatch)
+        config = _config(box_color_theme="default")
+        result = wcs.apply_tab_settings(config, "visuals", {"box_color_theme": "not_a_theme"})
+        assert result == {"ok": False, "reason": "invalid_choice", "field": "box_color_theme"}
+        assert config.box_color_theme == "default"
+
+    def test_apply_clamps_crosshair_size(self, monkeypatch):
+        self._install_fake_esp_server(monkeypatch)
+        config = _config(crosshair_size=5)
+        wcs.apply_tab_settings(config, "visuals", {"crosshair_size": 999})
+        assert config.crosshair_size == 20  # schema max
+
+    def test_web_esp_enabled_is_not_a_writable_schema_field(self):
+        """Deliberately excluded — see the _SCHEMA["visuals"] comment.
+        Enabling/disabling must go through the dedicated action route
+        (app_controller.set_web_esp_enabled), not a plain setattr, since a
+        bare Config write wouldn't start/stop the real server."""
+        assert "web_esp_enabled" not in wcs._SCHEMA["visuals"]
+
+    def test_extras_reflect_not_running(self, monkeypatch):
+        self._install_fake_esp_server(monkeypatch, running=False)
+        config = _config(web_esp_enabled=True)
+        result = wcs.get_tab_settings(config, "visuals")
+        assert result["web_esp_enabled"] is True
+        assert result["web_esp_running"] is False
+        assert result["web_esp_url"] == ""
+
+    def test_extras_reflect_running_with_url(self, monkeypatch):
+        self._install_fake_esp_server(monkeypatch, running=True, url="http://127.0.0.1:8080/?ws=8765")
+        config = _config(web_esp_enabled=True)
+        result = wcs.get_tab_settings(config, "visuals")
+        assert result["web_esp_running"] is True
+        assert result["web_esp_url"] == "http://127.0.0.1:8080/?ws=8765"
+
+    def test_extras_degrade_gracefully_when_esp_server_unavailable(self, monkeypatch):
+        _clear_esp_server_module(monkeypatch)
+        config = _config(web_esp_enabled=False)
+        result = wcs.get_tab_settings(config, "visuals")
+        assert result["web_esp_running"] is False
+        assert result["web_esp_url"] == ""
+
+
+class TestOpenWebEspInBrowser:
+    def test_returns_false_when_not_running(self, monkeypatch):
+        _fake_esp_server_module(monkeypatch, is_running=lambda: False)
+        assert wcs.open_web_esp_in_browser() is False
+
+    def test_returns_false_when_url_empty(self, monkeypatch):
+        _fake_esp_server_module(monkeypatch, is_running=lambda: True, connect_url=lambda: "")
+        assert wcs.open_web_esp_in_browser() is False
+
+    def test_opens_browser_when_running(self, monkeypatch):
+        _fake_esp_server_module(
+            monkeypatch, is_running=lambda: True,
+            connect_url=lambda: "http://127.0.0.1:8080/?ws=8765",
+        )
+        opened = []
+        monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+        assert wcs.open_web_esp_in_browser() is True
+        assert opened == ["http://127.0.0.1:8080/?ws=8765"]
+
+    def test_esp_server_unavailable_returns_false(self, monkeypatch):
+        _clear_esp_server_module(monkeypatch)
+        assert wcs.open_web_esp_in_browser() is False
+
+
+class TestConfigPresets:
+    """Preset CRUD wrappers around core.config_manager.ConfigManager — a
+    pure-Python module (no Qt/onnxruntime), so real ConfigManager instances
+    are used here rather than faked, pointed at a tmp_path directory via
+    monkeypatching wcs._config_manager() (the same one-ConfigManager-per-
+    call factory the real routes use). A fresh ConfigManager always seeds
+    the bundled "Apex MAKCU UDP Precision" built-in preset into any empty
+    directory (see ConfigManager._seed_builtin_presets()) — tests account
+    for that rather than assuming an empty list.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _patch_config_manager(self, tmp_path, monkeypatch):
+        from core.config_manager import ConfigManager
+        self.configs_dir = tmp_path / "config"
+        monkeypatch.setattr(wcs, "_config_manager", lambda: ConfigManager(str(self.configs_dir)))
+
+    def _real_config(self):
+        # Config() calls _get_screen_size(), which uses ctypes.windll —
+        # unavailable outside Windows (see test_config.py's _make_config(),
+        # the same established pattern for this sandbox).
+        from unittest.mock import patch
+        from core.config import Config
+        with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+            return Config()
+
+    def test_list_config_presets_includes_seeded_builtin(self):
+        presets = wcs.list_config_presets()
+        assert "Apex MAKCU UDP Precision" in presets
+
+    def test_save_then_list(self):
+        result = wcs.save_config_preset(self._real_config(), "my_preset")
+        assert result == {"ok": True}
+        assert "my_preset" in wcs.list_config_presets()
+
+    def test_save_empty_name_fails(self):
+        result = wcs.save_config_preset(self._real_config(), "")
+        assert result == {"ok": False}
+
+    def test_preview_identical_config_returns_no_changes(self):
+        config = self._real_config()
+        wcs.save_config_preset(config, "identical")
+        result = wcs.preview_config_preset(config, "identical")
+        assert result == {"ok": True, "changes": []}
+
+    def test_preview_missing_preset_returns_read_failed(self):
+        result = wcs.preview_config_preset(self._real_config(), "does_not_exist")
+        assert result == {"ok": False, "reason": "read_failed"}
+
+    def test_preview_reports_a_real_change(self):
+        config = self._real_config()
+        config.fov_size = 150
+        wcs.save_config_preset(config, "wide_fov")
+        config.fov_size = 50
+        result = wcs.preview_config_preset(config, "wide_fov")
+        assert result["ok"] is True
+        assert len(result["changes"]) >= 1
+
+    def test_load_applies_saved_values(self):
+        saved = self._real_config()
+        saved.fov_size = 275
+        wcs.save_config_preset(saved, "custom_fov")
+
+        target = self._real_config()
+        target.fov_size = 100
+        result = wcs.load_config_preset(target, "custom_fov")
+        assert result == {"ok": True}
+        assert target.fov_size == 275
+
+    def test_load_missing_preset_fails(self):
+        result = wcs.load_config_preset(self._real_config(), "no_such_preset")
+        assert result == {"ok": False}
+
+    def test_delete_removes_preset(self):
+        wcs.save_config_preset(self._real_config(), "to_delete")
+        assert wcs.delete_config_preset("to_delete") == {"ok": True}
+        assert "to_delete" not in wcs.list_config_presets()
+
+    def test_delete_missing_preset_fails(self):
+        assert wcs.delete_config_preset("never_existed") == {"ok": False}
+
+    def test_rename_updates_list(self):
+        wcs.save_config_preset(self._real_config(), "old_name")
+        result = wcs.rename_config_preset("old_name", "new_name")
+        assert result == {"ok": True}
+        presets = wcs.list_config_presets()
+        assert "new_name" in presets
+        assert "old_name" not in presets
+
+    def test_rename_missing_preset_fails(self):
+        result = wcs.rename_config_preset("does_not_exist", "whatever")
+        assert result == {"ok": False}
+
+    def test_open_configs_folder_missing_dir_returns_false(self):
+        # The autouse fixture points configs_dir at a path ConfigManager
+        # itself creates via ensure_configs_directory() — remove it first
+        # so this genuinely exercises the "not os.path.isdir" guard.
+        import shutil
+        shutil.rmtree(self.configs_dir, ignore_errors=True)
+        assert wcs.open_configs_folder() is False
+
+    def test_open_configs_folder_no_startfile_returns_false(self, monkeypatch):
+        wcs.save_config_preset(self._real_config(), "anything")  # ensures dir exists
+        monkeypatch.delattr("os.startfile", raising=False)
+        assert wcs.open_configs_folder() is False
+
+
+class TestExportImportConfigPreset:
+    @pytest.fixture(autouse=True)
+    def _patch_config_manager(self, tmp_path, monkeypatch):
+        from core.config_manager import ConfigManager
+        self.configs_dir = tmp_path / "config"
+        monkeypatch.setattr(wcs, "_config_manager", lambda: ConfigManager(str(self.configs_dir)))
+
+    def _real_config(self):
+        # Config() calls _get_screen_size(), which uses ctypes.windll —
+        # unavailable outside Windows (see test_config.py's _make_config(),
+        # the same established pattern for this sandbox).
+        from unittest.mock import patch
+        from core.config import Config
+        with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+            return Config()
+
+    def test_export_missing_preset_returns_not_found(self):
+        result = wcs.export_config_preset_content("does_not_exist")
+        assert result == {"ok": False, "reason": "not_found"}
+
+    def test_export_returns_raw_json_content(self):
+        config = self._real_config()
+        config.fov_size = 321
+        wcs.save_config_preset(config, "export_me")
+        result = wcs.export_config_preset_content("export_me")
+        assert result["ok"] is True
+        assert result["name"] == "export_me"
+        import json
+        parsed = json.loads(result["content"])
+        assert parsed["config"]["fov_size"] == 321
+
+    def test_import_invalid_json_rejected(self):
+        result = wcs.import_config_preset_content("not valid json")
+        assert result == {"ok": False, "reason": "invalid_json"}
+
+    def test_import_non_dict_json_rejected(self):
+        result = wcs.import_config_preset_content("[1, 2, 3]")
+        assert result == {"ok": False, "reason": "invalid_json"}
+
+    def test_import_uses_name_field_from_content(self):
+        import json
+        content = json.dumps({"name": "imported_preset", "config": {"fov_size": 111}})
+        result = wcs.import_config_preset_content(content)
+        assert result == {"ok": True, "name": "imported_preset"}
+        assert "imported_preset" in wcs.list_config_presets()
+
+    def test_import_missing_name_falls_back_to_default(self):
+        import json
+        content = json.dumps({"config": {"fov_size": 111}})
+        result = wcs.import_config_preset_content(content)
+        assert result["ok"] is True
+        assert result["name"] == "imported_config"
+
+    def test_import_never_overwrites_existing_preset(self):
+        import json
+        wcs.save_config_preset(self._real_config(), "dup_name")
+        content = json.dumps({"name": "dup_name", "config": {"fov_size": 999}})
+        result = wcs.import_config_preset_content(content)
+        assert result["ok"] is True
+        assert result["name"] == "dup_name_1"
+        assert "dup_name" in wcs.list_config_presets()
+        assert "dup_name_1" in wcs.list_config_presets()
+
+    def test_import_sanitizes_unsafe_name(self):
+        import json
+        content = json.dumps({"name": "../../evil", "config": {}})
+        result = wcs.import_config_preset_content(content)
+        assert result["ok"] is True
+        # basename() strips the path traversal — only "evil" (or its
+        # sanitized form) should ever land inside configs_dir.
+        assert "/" not in result["name"]
+        assert ".." not in result["name"]
+
+    def test_export_then_import_round_trips_via_content(self):
+        """The whole content-based Export -> (client downloads) -> Import
+        flow, without ever touching a host-side file path."""
+        config = self._real_config()
+        config.fov_size = 456
+        wcs.save_config_preset(config, "round_trip_source")
+        exported = wcs.export_config_preset_content("round_trip_source")
+        assert exported["ok"] is True
+
+        wcs.delete_config_preset("round_trip_source")
+        imported = wcs.import_config_preset_content(exported["content"])
+        assert imported["ok"] is True
+        assert imported["name"] == "round_trip_source"
+
+        fresh = self._real_config()
+        fresh.fov_size = 1
+        wcs.load_config_preset(fresh, "round_trip_source")
+        assert fresh.fov_size == 456

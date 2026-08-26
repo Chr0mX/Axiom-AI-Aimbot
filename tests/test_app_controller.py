@@ -432,3 +432,108 @@ class TestRequestModelChange:
         assert calls == ["tensorrt"]
         # Only written to the real config afterward, since needs_build=False.
         assert config.inference_backend == "tensorrt"
+
+
+class _FakeEspServer:
+    """Stand-in for core.esp_server with the same running-state semantics
+    the real module has (module-level state toggled by start()/stop()) —
+    faked via sys.modules so set_web_esp_enabled()/
+    restart_web_esp_if_running() never bind a real socket/thread in this
+    unit test, same "fake the deferred import" technique as win_utils.
+    makcu_mouse above.
+    """
+
+    def __init__(self):
+        self.running = False
+        self.start_calls = []
+        self.stop_calls = 0
+
+    def start(self, config):
+        self.running = True
+        self.start_calls.append(config)
+        return True
+
+    def stop(self):
+        self.running = False
+        self.stop_calls += 1
+
+    def is_running(self):
+        return self.running
+
+
+def _install_fake_esp_server(monkeypatch):
+    """Fakes core.esp_server for the deferred `from core import esp_server`
+    in set_web_esp_enabled()/restart_web_esp_if_running().
+
+    Patching sys.modules["core.esp_server"] alone isn't sufficient once
+    something elsewhere in a full-suite run has done a REAL `from core
+    import esp_server` (test_esp_server.py does, at module level): that
+    binds a real `esp_server` attribute directly on the `core` package
+    object, and `from core import esp_server` resolves via a plain
+    getattr(core, "esp_server") first — succeeding against that cached
+    real attribute — before it would ever fall back to consulting
+    sys.modules. So the package attribute has to be patched too, same
+    two-level fix as vk_codes/get_serial_ports' "module unavailable" tests
+    (see web_control_settings.py's TestListVkOptions/TestGetSerialPorts).
+    """
+    fake = _FakeEspServer()
+    fake_module = types.ModuleType("core.esp_server")
+    fake_module.start = fake.start
+    fake_module.stop = fake.stop
+    fake_module.is_running = fake.is_running
+    monkeypatch.setitem(sys.modules, "core.esp_server", fake_module)
+    import core
+    monkeypatch.setattr(core, "esp_server", fake_module, raising=False)
+    return fake
+
+
+class TestSetWebEspEnabled:
+    def test_enabling_writes_config_and_starts_server(self, monkeypatch):
+        fake = _install_fake_esp_server(monkeypatch)
+        config = _FakeConfig()
+        config.web_esp_enabled = False
+        result = app_controller.set_web_esp_enabled(config, True)
+        assert result is True
+        assert config.web_esp_enabled is True
+        assert fake.start_calls == [config]
+        assert fake.stop_calls == 0
+
+    def test_disabling_writes_config_and_stops_server(self, monkeypatch):
+        fake = _install_fake_esp_server(monkeypatch)
+        fake.running = True
+        config = _FakeConfig()
+        config.web_esp_enabled = True
+        result = app_controller.set_web_esp_enabled(config, False)
+        assert result is False
+        assert config.web_esp_enabled is False
+        assert fake.stop_calls == 1
+        assert fake.start_calls == []
+
+    def test_enabled_flag_coerced_to_real_bool(self, monkeypatch):
+        """A truthy non-bool (e.g. from a loosely-deserialized JSON body)
+        must still be stored as an actual bool on config, not the raw
+        truthy value — mirrors set_always_aim()'s own bool() coercion."""
+        _install_fake_esp_server(monkeypatch)
+        config = _FakeConfig()
+        app_controller.set_web_esp_enabled(config, 1)
+        assert config.web_esp_enabled is True
+
+
+class TestRestartWebEspIfRunning:
+    def test_noop_when_not_running(self, monkeypatch):
+        fake = _install_fake_esp_server(monkeypatch)
+        fake.running = False
+        config = _FakeConfig()
+        result = app_controller.restart_web_esp_if_running(config)
+        assert result is False
+        assert fake.stop_calls == 0
+        assert fake.start_calls == []
+
+    def test_restarts_when_running(self, monkeypatch):
+        fake = _install_fake_esp_server(monkeypatch)
+        fake.running = True
+        config = _FakeConfig()
+        result = app_controller.restart_web_esp_if_running(config)
+        assert result is True
+        assert fake.stop_calls == 1
+        assert fake.start_calls == [config]

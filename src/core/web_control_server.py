@@ -219,6 +219,19 @@ def start(
         model: str
         text: str
 
+    class WebEspEnabledBody(BaseModel):
+        enabled: bool
+
+    class ConfigNameBody(BaseModel):
+        name: str
+
+    class ConfigRenameBody(BaseModel):
+        old_name: str
+        new_name: str
+
+    class ConfigImportBody(BaseModel):
+        content: str
+
     class _ThreadServer(uvicorn.Server):
         def install_signal_handlers(self) -> None:
             # Overridden to a no-op: uvicorn's default installs SIGINT/
@@ -318,12 +331,12 @@ def start(
     # -----------------------------------------------------------------
 
     @app.get("/api/settings/{tab}", dependencies=[Depends(_check_token)])
-    def get_settings(tab: Literal["model", "capture", "inference", "aim", "keys"]):
+    def get_settings(tab: Literal["model", "capture", "inference", "aim", "keys", "visuals"]):
         from .web_control_settings import get_tab_settings
         return get_tab_settings(config, tab)
 
     @app.post("/api/settings/{tab}", dependencies=[Depends(_check_token)])
-    def post_settings(tab: Literal["model", "capture", "inference", "aim", "keys"], body: dict):
+    def post_settings(tab: Literal["model", "capture", "inference", "aim", "keys", "visuals"], body: dict):
         from .web_control_settings import apply_tab_settings
         return apply_tab_settings(config, tab, body)
 
@@ -382,6 +395,78 @@ def start(
     def post_humanization_reset_route():
         from .web_control_settings import reset_humanization
         return reset_humanization(config)
+
+    # -----------------------------------------------------------------
+    # Visuals — Web ESP overlay start/stop/restart/open. A real service
+    # lifecycle action (not a plain Config write), same tier as
+    # always_aim/ai_start/makcu_connect — see app_controller.py.
+    # -----------------------------------------------------------------
+
+    @app.post("/api/control/web_esp_enabled", dependencies=[Depends(_check_token)])
+    def post_web_esp_enabled_route(body: WebEspEnabledBody):
+        from .app_controller import set_web_esp_enabled
+        running = set_web_esp_enabled(config, body.enabled)
+        return {"ok": True, "running": running}
+
+    @app.post("/api/control/web_esp_restart", dependencies=[Depends(_check_token)])
+    def post_web_esp_restart_route():
+        from .app_controller import restart_web_esp_if_running
+        running = restart_web_esp_if_running(config)
+        return {"ok": True, "running": running}
+
+    @app.post("/api/control/web_esp_open", dependencies=[Depends(_check_token)])
+    def post_web_esp_open_route():
+        from .web_control_settings import open_web_esp_in_browser
+        return {"ok": open_web_esp_in_browser()}
+
+    # -----------------------------------------------------------------
+    # Configs — preset management via core.config_manager.ConfigManager.
+    # -----------------------------------------------------------------
+
+    @app.get("/api/configs", dependencies=[Depends(_check_token)])
+    def get_configs_route():
+        from .web_control_settings import list_config_presets
+        return {"presets": list_config_presets()}
+
+    @app.post("/api/configs/save", dependencies=[Depends(_check_token)])
+    def post_configs_save_route(body: ConfigNameBody):
+        from .web_control_settings import save_config_preset
+        return save_config_preset(config, body.name)
+
+    @app.get("/api/configs/preview", dependencies=[Depends(_check_token)])
+    def get_configs_preview_route(name: str = ""):
+        from .web_control_settings import preview_config_preset
+        return preview_config_preset(config, name)
+
+    @app.post("/api/configs/load", dependencies=[Depends(_check_token)])
+    def post_configs_load_route(body: ConfigNameBody):
+        from .web_control_settings import load_config_preset
+        return load_config_preset(config, body.name)
+
+    @app.post("/api/configs/delete", dependencies=[Depends(_check_token)])
+    def post_configs_delete_route(body: ConfigNameBody):
+        from .web_control_settings import delete_config_preset
+        return delete_config_preset(body.name)
+
+    @app.post("/api/configs/rename", dependencies=[Depends(_check_token)])
+    def post_configs_rename_route(body: ConfigRenameBody):
+        from .web_control_settings import rename_config_preset
+        return rename_config_preset(body.old_name, body.new_name)
+
+    @app.get("/api/configs/export", dependencies=[Depends(_check_token)])
+    def get_configs_export_route(name: str = ""):
+        from .web_control_settings import export_config_preset_content
+        return export_config_preset_content(name)
+
+    @app.post("/api/configs/import", dependencies=[Depends(_check_token)])
+    def post_configs_import_route(body: ConfigImportBody):
+        from .web_control_settings import import_config_preset_content
+        return import_config_preset_content(body.content)
+
+    @app.post("/api/control/open_configs_folder", dependencies=[Depends(_check_token)])
+    def post_open_configs_folder_route():
+        from .web_control_settings import open_configs_folder
+        return {"ok": open_configs_folder()}
 
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")

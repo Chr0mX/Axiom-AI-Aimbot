@@ -80,7 +80,7 @@
     // Re-fetch this tab's settings every time it's activated (not just
     // once) so a change made from the Qt GUI while this tab was in the
     // background is picked up on return.
-    if (name === "model" || name === "capture" || name === "inference" || name === "aim" || name === "keys") {
+    if (name === "model" || name === "capture" || name === "inference" || name === "aim" || name === "keys" || name === "visuals") {
       loadTabSettings(name);
     }
     if (name === "model") {
@@ -88,6 +88,9 @@
     }
     if (name === "keys") {
       ensureVkOptionsLoaded();
+    }
+    if (name === "configs") {
+      refreshConfigsList();
     }
   }
 
@@ -307,6 +310,7 @@
         if (tab === "inference") updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
         if (tab === "aim") updateHumanizationVisibility();
         if (tab === "keys") updateKeysVisibility(data);
+        if (tab === "visuals") applyVisualsExtras(data);
       })
       .catch(function () {});
   }
@@ -344,6 +348,9 @@
         }
         if (tab === "inference" && key === "fov_reduce_on_target_enabled") updateFovReduceVisibility(el.checked);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
+        if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
+          scheduleWebEspRestart();
+        }
       });
     });
   }
@@ -792,6 +799,294 @@
     }
   }
 
+  // ---------------------------------------------------------------------
+  // Visuals panel — Web ESP Enable is a dedicated action (not a plain
+  // Config field: see web_control_settings.py's _SCHEMA["visuals"]
+  // comment), since flipping it must actually start/stop the live
+  // esp_server, mirroring visuals_page.py's _onWebEspEnableChanged(). Port
+  // changes go through the generic field path (wireGenericFields("visuals"))
+  // but additionally trigger a debounced restart so the already-running
+  // server picks up the new port, mirroring _restartWebEspIfRunning()'s
+  // 600ms QTimer.
+  // ---------------------------------------------------------------------
+  var suppressWebEspToggleEcho = false;
+  var webEspRestartTimer = null;
+
+  function applyVisualsExtras(data) {
+    var toggle = document.getElementById("vis-web_esp_enabled");
+    if (toggle !== document.activeElement) {
+      suppressWebEspToggleEcho = true;
+      toggle.checked = !!data.web_esp_enabled;
+      suppressWebEspToggleEcho = false;
+    }
+    var urlEl = document.getElementById("vis-web-esp-url");
+    urlEl.textContent = data.web_esp_running && data.web_esp_url ? data.web_esp_url : "—  (not running)";
+  }
+
+  function scheduleWebEspRestart() {
+    if (webEspRestartTimer) clearTimeout(webEspRestartTimer);
+    webEspRestartTimer = setTimeout(function () {
+      webEspRestartTimer = null;
+      fetch("/api/control/web_esp_restart", { method: "POST", headers: authHeaders() })
+        .catch(function () {})
+        .then(function () { loadTabSettings("visuals"); });
+    }, 600);
+  }
+
+  document.getElementById("vis-web_esp_enabled").addEventListener("change", function (e) {
+    if (suppressWebEspToggleEcho) return;
+    var enabled = e.target.checked;
+    e.target.disabled = true;
+    fetch("/api/control/web_esp_enabled", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ enabled: enabled }),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || data.ok === false) {
+          e.target.checked = !enabled;
+        } else {
+          loadTabSettings("visuals");
+        }
+      })
+      .catch(function () { e.target.checked = !enabled; })
+      .then(function () { e.target.disabled = false; });
+  });
+
+  // Opens on the HOST machine running Axiom, not this remote browser tab
+  // — same caveat as Model panel's Open Model Folder button.
+  document.getElementById("vis-web-esp-open-btn").addEventListener("click", function () {
+    var btn = document.getElementById("vis-web-esp-open-btn");
+    btn.disabled = true;
+    fetch("/api/control/web_esp_open", { method: "POST", headers: authHeaders() })
+      .catch(function () {})
+      .then(function () { btn.disabled = false; });
+  });
+
+  // ---------------------------------------------------------------------
+  // Configs panel — preset CRUD via ConfigManager, plus content-based
+  // Export/Import since a browser can't supply a host-side file path (see
+  // web_control_settings.py's export_config_preset_content()/
+  // import_config_preset_content() docstrings). window.prompt()/confirm()
+  // stand in for configs_page.py's QInputDialog/QMessageBox — the direct
+  // browser-native equivalent for this plain, no-framework client.
+  // ---------------------------------------------------------------------
+  var configsSelect = document.getElementById("configs-select");
+  var configsReason = document.getElementById("configs-reason");
+
+  function refreshConfigsList() {
+    fetch("/api/configs", { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || !data.presets) return;
+        var current = configsSelect.value;
+        configsSelect.innerHTML = "";
+        data.presets.forEach(function (name) {
+          var opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          configsSelect.appendChild(opt);
+        });
+        var has = Array.prototype.some.call(configsSelect.options, function (o) { return o.value === current; });
+        if (has) configsSelect.value = current;
+      })
+      .catch(function () {});
+  }
+
+  document.getElementById("configs-refresh-btn").addEventListener("click", refreshConfigsList);
+
+  document.getElementById("configs-create-btn").addEventListener("click", function () {
+    var name = window.prompt("New config name:");
+    if (!name) return;
+    fetch("/api/configs/save", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ name: name }),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || data.ok === false) {
+          configsReason.textContent = (data && data.reason) || "failed to create";
+        } else {
+          configsReason.textContent = "created \"" + name + "\"";
+          refreshConfigsList();
+        }
+      })
+      .catch(function () { configsReason.textContent = "request failed"; });
+  });
+
+  document.getElementById("configs-save-btn").addEventListener("click", function () {
+    var name = configsSelect.value;
+    if (!name) { configsReason.textContent = "select a config first"; return; }
+    if (!window.confirm('Overwrite "' + name + '" with the current live settings?')) return;
+    fetch("/api/configs/save", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ name: name }),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        configsReason.textContent = (data && data.ok) ? "saved \"" + name + "\"" : ((data && data.reason) || "failed to save");
+      })
+      .catch(function () { configsReason.textContent = "request failed"; });
+  });
+
+  document.getElementById("configs-load-btn").addEventListener("click", function () {
+    var name = configsSelect.value;
+    if (!name) { configsReason.textContent = "select a config first"; return; }
+    // Dry-run preview first (mirrors configs_page.py's Load button — see
+    // ConfigManager.preview_config_changes()) so the operator sees what
+    // would actually change before it's applied, instead of silently
+    // overwriting the live config.
+    fetch("/api/configs/preview?name=" + encodeURIComponent(name), { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        var changes = data && data.changes;
+        var proceed = true;
+        if (changes && changes.length) {
+          proceed = window.confirm('Loading "' + name + '" will change:\n\n' + changes.join("\n") + "\n\nProceed?");
+        }
+        // changes === [] (identical to current) or preview unavailable
+        // (null) both fall through to loading directly, same as the Qt
+        // page's own fallback behavior.
+        if (!proceed) return;
+        fetch("/api/configs/load", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ name: name }),
+        })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (loadData) {
+            if (loadData && loadData.ok) {
+              configsReason.textContent = "loaded \"" + name + "\"";
+              // The just-loaded preset can touch fields on any tab —
+              // resync every generic-schema tab's settings so the whole
+              // client reflects the new live config, not just Configs.
+              ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(loadTabSettings);
+            } else {
+              configsReason.textContent = (loadData && loadData.reason) || "failed to load";
+            }
+          })
+          .catch(function () { configsReason.textContent = "request failed"; });
+      })
+      .catch(function () { configsReason.textContent = "request failed"; });
+  });
+
+  document.getElementById("configs-rename-btn").addEventListener("click", function () {
+    var oldName = configsSelect.value;
+    if (!oldName) { configsReason.textContent = "select a config first"; return; }
+    var newName = window.prompt("Rename \"" + oldName + "\" to:", oldName);
+    if (!newName || newName === oldName) return;
+    fetch("/api/configs/rename", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ old_name: oldName, new_name: newName }),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (data && data.ok) {
+          configsReason.textContent = "renamed to \"" + newName + "\"";
+          refreshConfigsList();
+        } else {
+          configsReason.textContent = (data && data.reason) || "failed to rename";
+        }
+      })
+      .catch(function () { configsReason.textContent = "request failed"; });
+  });
+
+  document.getElementById("configs-delete-btn").addEventListener("click", function () {
+    var name = configsSelect.value;
+    if (!name) { configsReason.textContent = "select a config first"; return; }
+    if (!window.confirm('Delete "' + name + '"? This cannot be undone.')) return;
+    fetch("/api/configs/delete", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ name: name }),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (data && data.ok) {
+          configsReason.textContent = "deleted \"" + name + "\"";
+          refreshConfigsList();
+        } else {
+          configsReason.textContent = (data && data.reason) || "failed to delete";
+        }
+      })
+      .catch(function () { configsReason.textContent = "request failed"; });
+  });
+
+  // Export downloads the preset's raw JSON via a Blob + temporary <a
+  // download> link — this page is the app's own hosted static client, not
+  // a sandboxed Artifact, so a download link works normally here.
+  document.getElementById("configs-export-btn").addEventListener("click", function () {
+    var name = configsSelect.value;
+    if (!name) { configsReason.textContent = "select a config first"; return; }
+    fetch("/api/configs/export?name=" + encodeURIComponent(name), { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || data.ok === false) {
+          configsReason.textContent = (data && data.reason) || "failed to export";
+          return;
+        }
+        var blob = new Blob([data.content], { type: "application/json" });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement("a");
+        a.href = url;
+        a.download = name + ".json";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        configsReason.textContent = "exported \"" + name + "\"";
+      })
+      .catch(function () { configsReason.textContent = "request failed"; });
+  });
+
+  // Import reads the chosen file's content client-side (FileReader) and
+  // POSTs it as JSON text — there's no host-side path a browser could send
+  // instead, see import_config_preset_content()'s docstring.
+  var configsImportFile = document.getElementById("configs-import-file");
+  document.getElementById("configs-import-btn").addEventListener("click", function () {
+    configsImportFile.click();
+  });
+
+  configsImportFile.addEventListener("change", function () {
+    var file = configsImportFile.files && configsImportFile.files[0];
+    configsImportFile.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      fetch("/api/configs/import", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ content: reader.result }),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (data && data.ok) {
+            configsReason.textContent = "imported as \"" + data.name + "\"";
+            refreshConfigsList();
+          } else {
+            configsReason.textContent = (data && data.reason) || "failed to import";
+          }
+        })
+        .catch(function () { configsReason.textContent = "request failed"; });
+    };
+    reader.onerror = function () { configsReason.textContent = "failed to read file"; };
+    reader.readAsText(file);
+  });
+
+  // Opens on the HOST machine running Axiom, not this remote browser tab
+  // — same caveat as Model panel's Open Model Folder button.
+  document.getElementById("configs-open-folder-btn").addEventListener("click", function () {
+    var btn = document.getElementById("configs-open-folder-btn");
+    btn.disabled = true;
+    fetch("/api/control/open_configs_folder", { method: "POST", headers: authHeaders() })
+      .catch(function () {})
+      .then(function () { btn.disabled = false; });
+  });
+
   // The backend select offers only 4 options with no separate "CUDA" entry
   // (mirrors model_page.py's own reverse-map fold, which folds "cuda" onto
   // the "TensorRT" display item) — a "cuda" backend from the server is
@@ -1036,6 +1331,7 @@
   wireGenericFields("inference");
   wireGenericFields("aim");
   wireGenericFields("keys");
+  wireGenericFields("visuals");
 
   loadModelList();
   // Model is the default-active panel (no click to trigger activateTab's
