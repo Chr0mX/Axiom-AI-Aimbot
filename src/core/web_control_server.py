@@ -31,8 +31,29 @@ level, so this module stays importable (and start() can fail gracefully
 with a clear log message) on a checkout that predates them being
 vendored in, the same way main.py already wraps esp_server.start() in a
 try/except so one subsystem's absence never blocks the rest of the app.
+
+Deliberately does NOT use `from __future__ import annotations`: every
+POST route's body model (AlwaysAimBody, ModelChangeBody, etc.) is a
+Pydantic BaseModel class defined *locally* inside start() (since
+`from pydantic import BaseModel` is itself deferred to inside start(),
+per the module-stays-importable-without-fastapi goal above). With
+postponed evaluation on, a route handler's `body: ModelChangeBody`
+annotation becomes the *string* "ModelChangeBody", and FastAPI resolves
+that string via the handler function's `__globals__` (this module's
+top-level namespace) — which does not include ModelChangeBody, since
+it's a local variable of start(), not a module global. Pydantic's
+resolver swallows that failure and leaves the annotation as an
+unresolved ForwardRef instead of raising, so FastAPI never recognizes it
+as a BaseModel and silently reclassifies the parameter as a required
+*query* parameter named "body" — every such route then 422s with
+`{"loc": ["query", "body"], "msg": "Field required"}` no matter what the
+client POSTs. Without the future import, `body: ModelChangeBody` is
+evaluated eagerly at function-definition time through the normal closure
+over start()'s locals, so it's already the real class object and needs
+no runtime resolution at all — confirmed directly (this bug reproduces
+with a bare `typing.get_type_hints()` call on a nested function with a
+locally-scoped annotation, no fastapi/pydantic needed to see it).
 """
-from __future__ import annotations
 
 import logging
 import os
