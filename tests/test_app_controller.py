@@ -26,6 +26,8 @@ class _FakeConfig:
     idle_detect_enabled = True
     makcu_com_port = ""
     makcu_baud_rate = 4_000_000
+    model_path = ""
+    Running = False
 
 
 def test_module_importable_without_windows_deps():
@@ -43,6 +45,7 @@ def test_module_importable_without_windows_deps():
     assert hasattr(app_controller, "stop_ai_threads")
     assert hasattr(app_controller, "connect_makcu")
     assert hasattr(app_controller, "disconnect_makcu")
+    assert hasattr(app_controller, "resolve_model_path")
 
 
 def test_set_always_aim_enables_and_disables_idle_detect():
@@ -215,3 +218,41 @@ class TestDisconnectMakcu:
         config = _FakeConfig()
         app_controller.disconnect_makcu(config)
         assert calls == [True]
+
+
+class TestResolveModelPath:
+    """resolve_model_path() is pure os.path logic — no onnxruntime/win32api
+    import at all — so every branch is genuinely testable here with no
+    faking, unlike the rest of start_ai_threads().
+    """
+
+    def test_empty_path(self):
+        assert app_controller.resolve_model_path("") == (None, "no_model_path")
+
+    def test_wrong_extension(self):
+        assert app_controller.resolve_model_path("model.txt") == (None, "invalid_model_path")
+
+    def test_nonexistent_absolute_path(self, tmp_path):
+        missing = str(tmp_path / "does_not_exist.onnx")
+        assert app_controller.resolve_model_path(missing) == (None, "not_found")
+
+    def test_existing_absolute_path(self, tmp_path):
+        model_file = tmp_path / "real.onnx"
+        model_file.write_bytes(b"")
+        resolved, reason = app_controller.resolve_model_path(str(model_file))
+        assert reason is None
+        assert resolved == str(model_file)
+
+    def test_existing_relative_path_resolved_against_project_root(self, tmp_path, monkeypatch):
+        (tmp_path / "Model").mkdir()
+        model_file = tmp_path / "Model" / "real.onnx"
+        model_file.write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+
+        resolved, reason = app_controller.resolve_model_path("Model/real.onnx")
+        assert reason is None
+        assert resolved == str(model_file)
+
+    def test_nonexistent_relative_path(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        assert app_controller.resolve_model_path("Model/missing.onnx") == (None, "not_found")

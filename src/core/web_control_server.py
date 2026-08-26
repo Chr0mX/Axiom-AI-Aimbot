@@ -55,6 +55,14 @@ _server = None            # uvicorn.Server instance, once start() succeeds
 _thread: Optional[threading.Thread] = None
 _actual_port: int = 0
 
+# Passed in from main.py's start() call so /api/control/ai_start can call
+# app_controller.start_ai_threads() with the *same* queue objects
+# PyQtOverlay/auto_fire_loop already read — never independently created,
+# or a web-started AI thread's output would silently never reach them.
+_overlay_boxes_queue = None
+_overlay_confidences_queue = None
+_auto_fire_boxes_queue = None
+
 # Per-request FPS diffing (capture_fps/inference_fps) — same technique
 # esp_server.py's broadcast loop uses, just recomputed lazily against
 # whenever /api/status is actually polled instead of on a fixed tick, since
@@ -139,9 +147,25 @@ def _build_status(config) -> dict:
 # Public API
 # ---------------------------------------------------------------------------
 
-def start(config) -> bool:
-    """Start the Web Control server (idempotent). Returns True if running afterwards."""
+def start(
+    config,
+    overlay_boxes_queue=None,
+    overlay_confidences_queue=None,
+    auto_fire_boxes_queue=None,
+) -> bool:
+    """Start the Web Control server (idempotent). Returns True if running afterwards.
+
+    overlay_boxes_queue/overlay_confidences_queue/auto_fire_boxes_queue are
+    optional only so this signature doesn't force every caller to have them
+    on hand — main.py's real call site always passes the actual queue
+    objects it already created (the same ones PyQtOverlay/auto_fire_loop
+    read), so /api/control/ai_start can call
+    app_controller.start_ai_threads() with them. Without real queues,
+    ai_start responds with {"ok": false, "reason": "queues_not_configured"}
+    rather than silently creating disconnected ones.
+    """
     global _config, _server, _thread, _actual_port
+    global _overlay_boxes_queue, _overlay_confidences_queue, _auto_fire_boxes_queue
 
     if is_running():
         return True
@@ -168,6 +192,9 @@ def start(config) -> bool:
         return False
 
     _config = config
+    _overlay_boxes_queue = overlay_boxes_queue
+    _overlay_confidences_queue = overlay_confidences_queue
+    _auto_fire_boxes_queue = auto_fire_boxes_queue
 
     if not getattr(config, "web_control_token", ""):
         config.web_control_token = secrets.token_urlsafe(24)
@@ -237,6 +264,34 @@ def start(config) -> bool:
         disconnect_makcu(config)
         return {"ok": True, "makcu_connected": False}
 
+    @app.post("/api/control/ai_start", dependencies=[Depends(_check_token)])
+    def post_ai_start():
+        from .app_controller import resolve_model_path, start_ai_threads
+
+        if _overlay_boxes_queue is None or _overlay_confidences_queue is None or _auto_fire_boxes_queue is None:
+            return {"ok": False, "running": False, "reason": "queues_not_configured"}
+
+        # Always the configured model, same as main.py's own launch-time
+        # auto-start — a caller-supplied model_path belongs to
+        # POST /api/control/model instead, not this route.
+        model_path = str(getattr(config, "model_path", "") or "")
+        resolved_path, reason = resolve_model_path(model_path)
+        if resolved_path is None:
+            return {"ok": False, "running": False, "reason": reason}
+
+        ok = start_ai_threads(
+            config, _overlay_boxes_queue, _overlay_confidences_queue, _auto_fire_boxes_queue, model_path,
+        )
+        if not ok:
+            return {"ok": False, "running": False, "reason": "start_failed"}
+        return {"ok": True, "running": True, "model": os.path.basename(resolved_path)}
+
+    @app.post("/api/control/ai_stop", dependencies=[Depends(_check_token)])
+    def post_ai_stop():
+        from .app_controller import stop_ai_threads
+        stop_ai_threads(config)
+        return {"ok": True, "running": bool(getattr(config, "Running", False))}
+
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")
     else:
@@ -272,6 +327,7 @@ def start(config) -> bool:
 def stop() -> None:
     """Stop the server."""
     global _server, _thread, _actual_port
+    global _overlay_boxes_queue, _overlay_confidences_queue, _auto_fire_boxes_queue
 
     if _server is not None:
         try:
@@ -284,6 +340,9 @@ def stop() -> None:
     _server = None
     _thread = None
     _actual_port = 0
+    _overlay_boxes_queue = None
+    _overlay_confidences_queue = None
+    _auto_fire_boxes_queue = None
     with _fps_lock:
         _fps_state.update(t=0.0, cap=0, inf=0, cap_fps=0.0, inf_fps=0.0)
     logger.info("[WebControl] stopped")

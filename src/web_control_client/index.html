@@ -26,6 +26,7 @@
     <section class="card">
       <div class="card-title">Status</div>
       <div class="grid">
+        <div class="stat"><div class="label">AI Running</div><div class="value" id="s-running">—</div></div>
         <div class="stat"><div class="label">Aim Toggle</div><div class="value" id="s-active">—</div></div>
         <div class="stat"><div class="label">Firing</div><div class="value" id="s-firing">—</div></div>
         <div class="stat"><div class="label">Model</div><div class="value" id="s-model">—</div></div>
@@ -54,7 +55,12 @@
         </label>
         <div class="control-label">MAKCU Connect</div>
       </div>
-      <div class="hint">Model switching and AI start/stop are planned follow-ups — see CLAUDE.md's Web Control section.</div>
+      <div class="row control-row">
+        <button id="ai-start-btn">Start AI</button>
+        <button id="ai-stop-btn">Stop AI</button>
+        <div class="control-label" id="ai-control-reason"></div>
+      </div>
+      <div class="hint">Model switching is a planned follow-up — see CLAUDE.md's Web Control section.</div>
     </section>
   </main>
 
