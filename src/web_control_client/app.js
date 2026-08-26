@@ -13,6 +13,9 @@
   var tokenShowBtn = document.getElementById("token-show");
   var alwaysAimToggle = document.getElementById("always-aim-toggle");
   var makcuToggle = document.getElementById("makcu-toggle");
+  var aiStartBtn = document.getElementById("ai-start-btn");
+  var aiStopBtn = document.getElementById("ai-stop-btn");
+  var aiControlReason = document.getElementById("ai-control-reason");
 
   function getToken() {
     try {
@@ -63,6 +66,7 @@
   var suppressMakcuToggleEcho = false;
 
   function applyStatus(s) {
+    document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
     document.getElementById("s-firing").textContent = s.aim_firing ? "FIRING" : "idle";
     document.getElementById("s-model").textContent = s.model || "—";
@@ -165,6 +169,44 @@
       .then(function () {
         makcuToggle.disabled = false;
       });
+  });
+
+  function runAiControl(path) {
+    aiStartBtn.disabled = true;
+    aiStopBtn.disabled = true;
+    aiControlReason.textContent = "";
+    fetch(path, { method: "POST", headers: authHeaders() })
+      .then(function (res) {
+        if (!res.ok) {
+          aiControlReason.textContent = "request failed";
+          return null;
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        // Neither route has anything to optimistically flip (there's no
+        // checkbox here) — on success, the next status poll is the sole
+        // source of truth for s-running; on failure, show the reason
+        // inline instead.
+        if (data && data.ok === false) {
+          aiControlReason.textContent = data.reason || "failed";
+        }
+      })
+      .catch(function () {
+        aiControlReason.textContent = "request failed";
+      })
+      .then(function () {
+        aiStartBtn.disabled = false;
+        aiStopBtn.disabled = false;
+      });
+  }
+
+  aiStartBtn.addEventListener("click", function () {
+    runAiControl("/api/control/ai_start");
+  });
+
+  aiStopBtn.addEventListener("click", function () {
+    runAiControl("/api/control/ai_stop");
   });
 
   poll();

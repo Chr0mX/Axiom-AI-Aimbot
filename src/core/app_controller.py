@@ -156,6 +156,31 @@ def resume_ai_inference(config: "Config") -> None:
     _inference_controller.resume()
 
 
+def resolve_model_path(model_path: str) -> tuple[str | None, str | None]:
+    """Validate + resolve a model path exactly like start_ai_threads()'s own
+    pre-flight checks: must end in .onnx, must exist once resolved relative
+    to project_root.
+
+    Pure os.path logic — no onnxruntime/win32api import — so unlike
+    start_ai_threads() itself, this is fully unit-testable without any
+    faking. Shared by start_ai_threads() and request_model_change() so both
+    callers apply the identical validation.
+
+    Returns:
+        (absolute_path, None) on success, or (None, reason) on failure,
+        where reason is one of "no_model_path" / "invalid_model_path" /
+        "not_found".
+    """
+    if not model_path:
+        return None, "no_model_path"
+    if not model_path.endswith('.onnx'):
+        return None, "invalid_model_path"
+    resolved = model_path if os.path.isabs(model_path) else os.path.join(project_root, model_path)
+    if not os.path.exists(resolved):
+        return None, "not_found"
+    return resolved, None
+
+
 def start_ai_threads(
     config: "Config",
     overlay_boxes_queue: queue.Queue,
@@ -192,19 +217,11 @@ def start_ai_threads(
             if ai_thread.is_alive():
                 logger.warning("AI thread did not stop within 3s — continuing anyway")
 
-        config.Running = True
-
-        # Only .onnx models are supported.
-        if not model_path.endswith('.onnx'):
-            logger.error("Unsupported model format (expected .onnx): %s", model_path)
+        resolved_path, reason = resolve_model_path(model_path)
+        if resolved_path is None:
+            logger.error("Cannot start AI threads (%s): %s", reason, model_path)
             return False
-
-        if not os.path.isabs(model_path):
-            model_path = os.path.join(project_root, model_path)
-
-        if not os.path.exists(model_path):
-            logger.error("Model file does not exist: %s", model_path)
-            return False
+        model_path = resolved_path
 
         model = None
         try:
@@ -238,6 +255,12 @@ def start_ai_threads(
             logger.error("Failed to load ONNX model: %s", e)
             logger.error("Check that the matching ONNX Runtime backend (CUDA/DirectML/CPU) is installed")
             return False
+
+        # Set only once the session has actually loaded successfully — every
+        # earlier return above leaves config.Running at whatever it already
+        # was (almost always False), instead of the previous behavior of
+        # setting it True up front and leaving it wrong on any failure path.
+        config.Running = True
 
         ai_thread = threading.Thread(
             target=ai_logic_loop,

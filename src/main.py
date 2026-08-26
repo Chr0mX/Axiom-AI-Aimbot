@@ -372,7 +372,12 @@ def main():
     if getattr(config, 'web_control_enabled', False):
         try:
             from core import web_control_server
-            web_control_server.start(config)
+            web_control_server.start(
+                config,
+                overlay_boxes_queue=overlay_boxes_queue,
+                overlay_confidences_queue=overlay_confidences_queue,
+                auto_fire_boxes_queue=auto_fire_boxes_queue,
+            )
         except Exception as exc:
             import logging as _logging
             _logging.getLogger(__name__).error("[WebControl] failed to start: %s", exc)
