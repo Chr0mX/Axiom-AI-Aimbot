@@ -129,6 +129,7 @@ def _build_status(config) -> dict:
         "inference_backend": str(getattr(config, "current_provider", "") or getattr(config, "inference_backend", "auto")),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
+        "makcu_com_port": str(getattr(config, "makcu_com_port", "") or ""),
         "capture_fps": round(cap_fps, 1),
         "inference_fps": round(inf_fps, 1),
     }
@@ -216,6 +217,25 @@ def start(config) -> bool:
         from .app_controller import set_always_aim
         set_always_aim(config, body.enabled)
         return {"ok": True, "always_aim": bool(getattr(config, "always_aim", False))}
+
+    @app.post("/api/control/makcu_connect", dependencies=[Depends(_check_token)])
+    def post_makcu_connect():
+        from .app_controller import connect_makcu
+
+        com_port = str(getattr(config, "makcu_com_port", "") or "")
+        if not com_port:
+            return {"ok": False, "makcu_connected": False, "reason": "no_port_configured"}
+
+        ok = connect_makcu(config)
+        if not ok:
+            return {"ok": False, "makcu_connected": False, "reason": "connect_failed"}
+        return {"ok": True, "makcu_connected": True, "com_port": com_port}
+
+    @app.post("/api/control/makcu_disconnect", dependencies=[Depends(_check_token)])
+    def post_makcu_disconnect():
+        from .app_controller import disconnect_makcu
+        disconnect_makcu(config)
+        return {"ok": True, "makcu_connected": False}
 
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")

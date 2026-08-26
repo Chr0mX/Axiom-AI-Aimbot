@@ -1,8 +1,9 @@
 """Unit tests for core/app_controller.py.
 
-Covers only set_always_aim() — the AI-thread lifecycle functions
-(start_ai_threads/stop_ai_threads/pause_ai_inference/resume_ai_inference)
-depend transitively on win32api/onnxruntime/cv2 (via .ai_loop/.auto_fire/
+Covers set_always_aim() and the connect_makcu()/disconnect_makcu() thin
+wrappers. The AI-thread lifecycle functions (start_ai_threads/
+stop_ai_threads/pause_ai_inference/resume_ai_inference) depend
+transitively on win32api/onnxruntime/cv2 (via .ai_loop/.auto_fire/
 .session_utils) that aren't installed in this sandbox; they're moved
 verbatim from main.py with no behavior change (see the module's own
 docstring), so there's nothing new to unit-test there beyond what
@@ -10,7 +11,9 @@ importing this module already exercises (see test_module_importable_
 without_windows_deps below).
 """
 
+import sys
 import threading
+import types
 
 import pytest
 
@@ -18,9 +21,11 @@ from core import app_controller
 
 
 class _FakeConfig:
-    """Minimal stand-in carrying just the fields set_always_aim touches."""
+    """Minimal stand-in carrying just the fields these functions touch."""
     always_aim = False
     idle_detect_enabled = True
+    makcu_com_port = ""
+    makcu_baud_rate = 4_000_000
 
 
 def test_module_importable_without_windows_deps():
@@ -36,6 +41,8 @@ def test_module_importable_without_windows_deps():
     assert hasattr(app_controller, "set_always_aim")
     assert hasattr(app_controller, "start_ai_threads")
     assert hasattr(app_controller, "stop_ai_threads")
+    assert hasattr(app_controller, "connect_makcu")
+    assert hasattr(app_controller, "disconnect_makcu")
 
 
 def test_set_always_aim_enables_and_disables_idle_detect():
@@ -100,3 +107,111 @@ def test_set_always_aim_is_reentrant_under_concurrent_calls():
     # always_aim True implies idle_detect_enabled False.
     if config.always_aim:
         assert config.idle_detect_enabled is False
+
+
+class TestConnectMakcu:
+    """connect_makcu()'s own decide logic — the guard clause and the
+    ImportError fallback are both genuinely exercisable here with no
+    mocking; the true delegate-to-win_utils happy path needs sys.modules
+    faked (see _fake_makcu_module below), since the real win_utils package
+    transitively imports win32api, unavailable in this sandbox.
+    """
+
+    def test_empty_port_returns_false_without_importing_win_utils(self):
+        """The empty-port guard must run before the deferred import at all.
+
+        Proven, not assumed: this sandbox genuinely has no `win_utils`
+        importable (confirmed elsewhere in this file), so if the guard
+        clause didn't short-circuit before the import, this call would
+        raise instead of returning False.
+        """
+        config = _FakeConfig()
+        config.makcu_com_port = ""
+        assert app_controller.connect_makcu(config) is False
+
+    def test_missing_win_utils_returns_false(self):
+        """Real sandbox condition, not a simulated one: win_utils.makcu_mouse
+        is genuinely unimportable here (missing win32api), so this exercises
+        the try/except ImportError fallback for real.
+        """
+        config = _FakeConfig()
+        config.makcu_com_port = "COM5"
+        assert app_controller.connect_makcu(config) is False
+
+    def test_delegates_to_win_utils_makcu_mouse_when_available(self, monkeypatch):
+        """Fakes win_utils/win_utils.makcu_mouse in sys.modules so the
+        deferred `from win_utils.makcu_mouse import connect_makcu` resolves
+        against the fake without ever executing the real win_utils/
+        __init__.py (which is what actually pulls in win32api) — this is
+        the technique any app_controller function with a deferred heavy
+        import needs for a real happy-path test in this sandbox.
+        """
+        calls = []
+
+        def _fake_connect(com_port, baud_rate):
+            calls.append((com_port, baud_rate))
+            return True
+
+        fake_pkg = types.ModuleType("win_utils")
+        fake_submodule = types.ModuleType("win_utils.makcu_mouse")
+        fake_submodule.connect_makcu = _fake_connect
+        monkeypatch.setitem(sys.modules, "win_utils", fake_pkg)
+        monkeypatch.setitem(sys.modules, "win_utils.makcu_mouse", fake_submodule)
+
+        config = _FakeConfig()
+        config.makcu_com_port = "COM7"
+        config.makcu_baud_rate = 115200
+
+        assert app_controller.connect_makcu(config) is True
+        assert calls == [("COM7", 115200)]
+
+    def test_propagates_a_false_result_from_win_utils(self, monkeypatch):
+        fake_pkg = types.ModuleType("win_utils")
+        fake_submodule = types.ModuleType("win_utils.makcu_mouse")
+        fake_submodule.connect_makcu = lambda com_port, baud_rate: False
+        monkeypatch.setitem(sys.modules, "win_utils", fake_pkg)
+        monkeypatch.setitem(sys.modules, "win_utils.makcu_mouse", fake_submodule)
+
+        config = _FakeConfig()
+        config.makcu_com_port = "COM7"
+
+        assert app_controller.connect_makcu(config) is False
+
+    def test_default_baud_used_when_config_field_is_falsy(self, monkeypatch):
+        """getattr(..., 4_000_000) only supplies a default when the attribute
+        is missing — an explicit 0/None/"" on Config must fall back too.
+        """
+        calls = []
+        fake_pkg = types.ModuleType("win_utils")
+        fake_submodule = types.ModuleType("win_utils.makcu_mouse")
+        fake_submodule.connect_makcu = lambda com_port, baud_rate: calls.append(baud_rate) or True
+        monkeypatch.setitem(sys.modules, "win_utils", fake_pkg)
+        monkeypatch.setitem(sys.modules, "win_utils.makcu_mouse", fake_submodule)
+
+        config = _FakeConfig()
+        config.makcu_com_port = "COM7"
+        config.makcu_baud_rate = 0
+
+        app_controller.connect_makcu(config)
+        assert calls == [4_000_000]
+
+
+class TestDisconnectMakcu:
+    def test_missing_win_utils_does_not_raise(self):
+        """Same real-sandbox-condition test as connect_makcu's fallback —
+        disconnect_makcu() must degrade to a no-op, never propagate.
+        """
+        config = _FakeConfig()
+        assert app_controller.disconnect_makcu(config) is None
+
+    def test_delegates_to_win_utils_makcu_mouse_when_available(self, monkeypatch):
+        calls = []
+        fake_pkg = types.ModuleType("win_utils")
+        fake_submodule = types.ModuleType("win_utils.makcu_mouse")
+        fake_submodule.disconnect_makcu = lambda: calls.append(True)
+        monkeypatch.setitem(sys.modules, "win_utils", fake_pkg)
+        monkeypatch.setitem(sys.modules, "win_utils.makcu_mouse", fake_submodule)
+
+        config = _FakeConfig()
+        app_controller.disconnect_makcu(config)
+        assert calls == [True]

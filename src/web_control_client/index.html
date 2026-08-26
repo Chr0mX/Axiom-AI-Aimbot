@@ -32,6 +32,7 @@
         <div class="stat"><div class="label">Backend</div><div class="value" id="s-backend">—</div></div>
         <div class="stat"><div class="label">Mouse Method</div><div class="value" id="s-mouse">—</div></div>
         <div class="stat"><div class="label">MAKCU</div><div class="value" id="s-makcu">—</div></div>
+        <div class="stat"><div class="label">MAKCU Port</div><div class="value" id="s-makcu-port">—</div></div>
         <div class="stat"><div class="label">Capture FPS</div><div class="value" id="s-capfps">—</div></div>
         <div class="stat"><div class="label">Inference FPS</div><div class="value" id="s-inffps">—</div></div>
       </div>
@@ -46,8 +47,14 @@
         </label>
         <div class="control-label">Always Aim</div>
       </div>
-      <div class="hint">This is the first control action wired up (milestone 2). Model switching,
-        AI start/stop, and MAKCU connect are planned follow-ups — see CLAUDE.md's Web Control section.</div>
+      <div class="row control-row">
+        <label class="switch">
+          <input type="checkbox" id="makcu-toggle">
+          <span class="slider"></span>
+        </label>
+        <div class="control-label">MAKCU Connect</div>
+      </div>
+      <div class="hint">Model switching and AI start/stop are planned follow-ups — see CLAUDE.md's Web Control section.</div>
     </section>
   </main>
 

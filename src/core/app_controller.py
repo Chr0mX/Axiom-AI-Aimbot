@@ -95,6 +95,13 @@ _ai_threads_lock = threading.Lock()
 # Guards multi-field Config "commands" only — see the module docstring.
 _multi_field_lock = threading.Lock()
 
+# Guards connect_makcu() against two overlapping connect attempts racing on
+# the same port (e.g. a double-click, or the Qt GUI and a web client both
+# clicking connect within the same ~1-2s handshake window) — MakcuMouse's
+# own connect() has no such guard. Not needed for disconnect_makcu(): its
+# teardown path is idempotent-safe to call repeatedly.
+_makcu_connect_lock = threading.Lock()
+
 
 def stop_ai_threads(config: "Config", join_timeout: float = 3.0) -> None:
     """Stop AI inference and auto-fire threads without closing the application.
@@ -273,3 +280,54 @@ def set_always_aim(config: "Config", enabled: bool) -> None:
         config.always_aim = bool(enabled)
         if enabled:
             config.idle_detect_enabled = False
+
+
+# ---------------------------------------------------------------------------
+# MAKCU device connect/disconnect — thin wrappers around already GUI-free
+# win_utils.makcu_mouse functions, so a web route and keys_page.py's own
+# Connect/Disconnect button share the exact same config-read/guard logic.
+# ---------------------------------------------------------------------------
+
+def connect_makcu(config: "Config") -> bool:
+    """Connect to the MAKCU device using the configured port/baud.
+
+    Reads `config.makcu_com_port`/`config.makcu_baud_rate` rather than
+    taking them as parameters — a web caller has no combo boxes to read
+    them from the way `keys_page.py`'s own `_onMakcuConnectToggle` does
+    (`self.makcuComPortCombo`/`self.makcuBaudCombo`), so this is the one
+    place both callers can share the same already-persisted values.
+
+    `win_utils.makcu_mouse.connect_makcu()` is already GUI-free and
+    documented as safe to call off the GUI thread (its own lock is never
+    held across a sleep) — this wrapper exists only to own the config-read
+    and the empty-port guard, and to serialize concurrent connect attempts
+    via `_makcu_connect_lock`, not to add any new hardware logic.
+    """
+    com_port = str(getattr(config, "makcu_com_port", "") or "")
+    if not com_port:
+        logger.warning("[MAKCU] connect requested with no COM port configured")
+        return False
+    baud = int(getattr(config, "makcu_baud_rate", 4_000_000) or 4_000_000)
+
+    with _makcu_connect_lock:
+        try:
+            from win_utils.makcu_mouse import connect_makcu as _connect_makcu
+        except ImportError:
+            logger.error("[MAKCU] win_utils.makcu_mouse not importable")
+            return False
+        return bool(_connect_makcu(com_port, baud))
+
+
+def disconnect_makcu(config: "Config") -> None:
+    """Disconnect the MAKCU device, if connected.
+
+    `config` is accepted (and currently unused) to match this module's
+    "plain functions, config first" convention and keep the signature
+    stable if a future revision needs to read/write Config here too.
+    """
+    try:
+        from win_utils.makcu_mouse import disconnect_makcu as _disconnect_makcu
+    except ImportError:
+        logger.error("[MAKCU] win_utils.makcu_mouse not importable")
+        return
+    _disconnect_makcu()

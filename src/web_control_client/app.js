@@ -12,6 +12,7 @@
   var tokenSaveBtn = document.getElementById("token-save");
   var tokenShowBtn = document.getElementById("token-show");
   var alwaysAimToggle = document.getElementById("always-aim-toggle");
+  var makcuToggle = document.getElementById("makcu-toggle");
 
   function getToken() {
     try {
@@ -53,10 +54,13 @@
     };
   }
 
-  // Set while we're writing alwaysAimToggle.checked from a server response,
-  // so that write doesn't re-trigger the toggle's own "change" handler and
-  // fire a redundant POST right back at the server.
+  // Set while we're writing a toggle's .checked from a server response, so
+  // that write doesn't re-trigger the toggle's own "change" handler and
+  // fire a redundant POST right back at the server. Two independent flags
+  // — suppressing one toggle's echo must not accidentally suppress the
+  // other's if both happen to update in the same applyStatus() call.
   var suppressToggleEcho = false;
+  var suppressMakcuToggleEcho = false;
 
   function applyStatus(s) {
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
@@ -65,12 +69,24 @@
     document.getElementById("s-backend").textContent = s.inference_backend || "—";
     document.getElementById("s-mouse").textContent = s.mouse_move_method || "—";
     document.getElementById("s-makcu").textContent = s.makcu_connected ? "connected" : "disconnected";
+    document.getElementById("s-makcu-port").textContent = s.makcu_com_port || "—";
     document.getElementById("s-capfps").textContent = s.capture_fps != null ? s.capture_fps.toFixed(1) : "—";
     document.getElementById("s-inffps").textContent = s.inference_fps != null ? s.inference_fps.toFixed(1) : "—";
 
     suppressToggleEcho = true;
     alwaysAimToggle.checked = !!s.always_aim;
     suppressToggleEcho = false;
+
+    // Only reflect server state onto the toggle while it isn't mid-request
+    // (disabled) — otherwise a status poll landing between the user's click
+    // and the connect/disconnect response finishing could flip it back to
+    // the pre-click state for a moment, fighting the in-flight request's own
+    // eventual (and authoritative) update.
+    if (!makcuToggle.disabled) {
+      suppressMakcuToggleEcho = true;
+      makcuToggle.checked = !!s.makcu_connected;
+      suppressMakcuToggleEcho = false;
+    }
   }
 
   function poll() {
@@ -114,6 +130,40 @@
       })
       .catch(function () {
         alwaysAimToggle.checked = !enabled;
+      });
+  });
+
+  makcuToggle.addEventListener("change", function () {
+    if (suppressMakcuToggleEcho) return;
+    var connecting = makcuToggle.checked;
+    var path = connecting ? "/api/control/makcu_connect" : "/api/control/makcu_disconnect";
+
+    makcuToggle.disabled = true;
+    fetch(path, { method: "POST", headers: authHeaders() })
+      .then(function (res) {
+        if (!res.ok) {
+          // Bad token / server error — not a normal "connect failed", so
+          // there's no JSON body worth reading.
+          makcuToggle.checked = !connecting;
+          return;
+        }
+        return res.json();
+      })
+      .then(function (data) {
+        // Unlike always_aim (which can't fail), a MAKCU connect attempt
+        // can come back 200 with {"ok": false, "reason": ...} — a bad/
+        // unset COM port or a failed handshake, not a request error — so
+        // the toggle has to be reverted based on the body, not just
+        // res.ok.
+        if (data && data.ok === false) {
+          makcuToggle.checked = false;
+        }
+      })
+      .catch(function () {
+        makcuToggle.checked = !connecting;
+      })
+      .then(function () {
+        makcuToggle.disabled = false;
       });
   });
 

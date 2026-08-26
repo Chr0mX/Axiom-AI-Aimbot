@@ -1012,10 +1012,24 @@ class KeysPage(BasePage):
             self.makcuConnectBtn.setText(t("makcu_connect", "Connect MAKCU"))
 
     def _updateMakcuAimStatus(self):
-        """Poll aim status (50 ms timer)."""
+        """Poll aim status (50 ms timer).
+
+        Also piggybacks a connection-state check on this same tick: this is
+        the only recurring timer on this page, and it already calls
+        is_makcu_connected() for its own purposes below. Without this,
+        _updateMakcuConnectionStatus() (the Connect/Disconnect button text
+        + label) only ever refreshes from this page's own four call sites
+        (startup load, this page's own toggle, the connect-worker
+        callback, a language switch) — a connect/disconnect triggered from
+        elsewhere (e.g. the Web Control API) would leave this page's button
+        showing the stale state until one of those happened to fire.
+        """
         try:
             from win_utils.makcu_mouse import is_makcu_connected
-            if not is_makcu_connected():
+            connected = is_makcu_connected()
+            if connected != self._isMakcuConnected:
+                self._updateMakcuConnectionStatus()
+            if not connected:
                 self.makcuAimStatusLabel.setText("—")
                 self.makcuAimStatusLabel.setStyleSheet("font-weight: bold;")
                 return
