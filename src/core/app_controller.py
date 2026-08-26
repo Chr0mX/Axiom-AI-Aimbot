@@ -49,6 +49,7 @@ without that landmine.
 """
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import queue
@@ -294,10 +295,11 @@ def set_always_aim(config: "Config", enabled: bool) -> None:
     web-issued toggle needs the identical side effect, so it has to live
     here rather than staying trapped inside a Qt-only method.
 
-    This is the first (and so far only) multi-field Config command exposed
-    to a caller outside the GUI thread, so it's the one that actually needs
-    `_multi_field_lock` — a single-field `setattr` elsewhere in this
-    codebase relies on the GIL for atomicity and doesn't take a lock at all.
+    This was the first multi-field Config command exposed to a caller
+    outside the GUI thread (request_model_change() below is the second),
+    so it's one of the two that actually need `_multi_field_lock` — a
+    single-field `setattr` elsewhere in this codebase relies on the GIL
+    for atomicity and doesn't take a lock at all.
     """
     with _multi_field_lock:
         config.always_aim = bool(enabled)
@@ -354,3 +356,99 @@ def disconnect_makcu(config: "Config") -> None:
         logger.error("[MAKCU] win_utils.makcu_mouse not importable")
         return
     _disconnect_makcu()
+
+
+# ---------------------------------------------------------------------------
+# Model/provider switching — mirrors model_page.py's own decide logic
+# (needs_trt_build(), the DirectML-crossing restart condition) with none of
+# its GUI rendering: a web route can't switch tabs, show a progress bar, or
+# restart the process, so both cases are refused outright here instead of
+# handled the way the GUI handles them. model_page.py itself is untouched
+# — same precedent as MAKCU, whose GUI button still calls
+# win_utils.makcu_mouse directly rather than through this module.
+# ---------------------------------------------------------------------------
+
+# Mirrors config.py's _validate_inference_backend()'s own tuple exactly
+# (config.py:983) — duplicated rather than imported, matching this
+# module's existing tolerance for small duplicated constants (e.g.
+# esp_server.py/web_control_server.py each keeping their own _lan_ip()).
+_VALID_INFERENCE_BACKENDS = ("auto", "tensorrt", "cuda", "directml", "cpu")
+
+
+def request_model_change(
+    config: "Config",
+    model_path: str,
+    inference_backend: str | None = None,
+) -> dict:
+    """Decide whether a model/backend switch can be applied right now.
+
+    Returns a plain dict (not a bare bool/None like this module's other
+    functions) because there's a real 4-way outcome space here — funneling
+    that through a bool would just force the route to re-derive which
+    reason applies by duplicating the same branching a second time. It's
+    still exactly as Qt/HTTP-agnostic as everything else here: a dict of
+    primitives, nothing FastAPI-specific touches it.
+
+    - {"ok": True, "model_path": ..., "inference_backend": ...,
+       "applied_live": bool} on success — config was written. If AI threads
+       are currently running, ai_loop.py's own per-frame
+       _try_hot_swap_model() picks this up on its very next iteration
+       (applied_live=True); otherwise it only takes effect on the next
+       start_ai_threads() call (applied_live=False).
+    - {"ok": False, "reason": "no_model_path"|"invalid_model_path"|
+       "not_found"|"invalid_backend"|"needs_restart"|"needs_conversion"}
+       on refusal — config is left completely untouched.
+
+    The "needs_restart"/"needs_conversion" refusals are the whole point of
+    this function existing separately from model_page.py's own
+    _onModelChanged()/_onInferenceBackendChanged(): those GUI methods
+    handle exactly these two cases by switching tabs / kicking off a
+    background build with a progress bar / restarting the app — none of
+    which a headless web route can do. CLAUDE.md's ONNX/TensorRT section
+    explains why the TensorRT build in particular must never run inline
+    (a synchronous 1-5 minute call that would freeze this whole request).
+    """
+    resolved_path, reason = resolve_model_path(model_path)
+    if resolved_path is None:
+        return {"ok": False, "reason": reason}
+
+    current_backend = str(getattr(config, "inference_backend", "auto"))
+    requested_backend = inference_backend if inference_backend is not None else current_backend
+    if requested_backend not in _VALID_INFERENCE_BACKENDS:
+        return {"ok": False, "reason": "invalid_backend"}
+
+    # Mirrors model_page.py's _onInferenceBackendChanged() restart condition
+    # in spirit, but stricter: that GUI condition fires whenever either side
+    # of the comparison is "directml" at all (selected == "directml" or
+    # prev == "directml"), with no requirement that they actually differ —
+    # harmless there only because Qt's currentTextChanged doesn't fire on
+    # an unchanged combo value. A web route has no such implicit guard, so
+    # this requires an actual crossing, or a same-backend model-only switch
+    # while already on DirectML would be wrongly refused.
+    if requested_backend != current_backend and "directml" in (requested_backend, current_backend):
+        return {"ok": False, "reason": "needs_restart"}
+
+    from .session_utils import needs_trt_build  # deferred — same reason as every other heavy import in this module
+
+    with _multi_field_lock:
+        # Simulate the requested backend against a throwaway copy rather
+        # than the real config, so needs_trt_build() evaluates what WOULD
+        # happen without ever mutating live state until we know it's safe
+        # — same technique ConfigManager.preview_config_changes() already
+        # uses on this exact Config class (see that method's own docstring
+        # for why copy.deepcopy(config) is safe here: no lock lives on
+        # Config itself).
+        preview = copy.deepcopy(config)
+        preview.inference_backend = requested_backend
+        if needs_trt_build(preview, resolved_path):
+            return {"ok": False, "reason": "needs_conversion"}
+
+        config.model_path = model_path
+        config.inference_backend = requested_backend
+
+    return {
+        "ok": True,
+        "model_path": config.model_path,
+        "inference_backend": config.inference_backend,
+        "applied_live": bool(getattr(config, "Running", False)),
+    }
