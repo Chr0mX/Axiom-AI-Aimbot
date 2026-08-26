@@ -98,7 +98,6 @@ project_root = os.path.dirname(src_dir)
 
 import threading
 import queue
-from typing import Optional
 
 # ── AppData GPU packages — inject BEFORE importing onnxruntime ───────────────
 # Read the configured backend before any onnxruntime import so we can decide
@@ -244,9 +243,6 @@ if sys.platform == "win32":
 # 從我們自己建立的模組中導入
 from core.config import Config, load_config, save_config
 from win_utils import check_and_request_admin, test_ddxoft_functions, ensure_ddxoft_ready
-from core.session_utils import build_provider_list, optimize_onnx_session
-from core.ai_loop import ai_logic_loop
-from core.auto_fire import auto_fire_loop
 from core.key_listener import aim_toggle_key_listener
 from gui.overlay import PyQtOverlay
 
@@ -254,168 +250,18 @@ from gui.status_panel import StatusPanel
 from gui.disclaimer_dialog import DisclaimerDialog
 
 
-# 全域變數宣告
-ai_thread: Optional[threading.Thread] = None
-auto_fire_thread: Optional[threading.Thread] = None
-
-# Serializes every read-check-join-reassign sequence that touches ai_thread/
-# auto_fire_thread. Without it, a GUI "reload model" call (start_ai_threads)
-# racing a concurrent stop_ai_threads() call (e.g. from an installer worker
-# thread) — or two rapid reloads — could interleave: one caller's join()
-# could observe a thread object the other had already replaced, leaving a
-# stale handle abandoned without ever being joined, or briefly running two
-# inference threads at once. Held across the whole lifecycle transition
-# (including model load in start_ai_threads) rather than split into smaller
-# critical sections — these calls are infrequent GUI-triggered actions, not
-# hot-path code, so serializing the full transition is the correct trade.
-_ai_threads_lock = threading.Lock()
-
-# Shared inference controller — lets the GUI pause/stop inference without
-# killing the UI or closing the application.
-from core.session_utils import inference_controller as _inference_controller
-
-def stop_ai_threads(config: "Config", join_timeout: float = 3.0) -> None:
-    """Stop AI inference and auto-fire threads without closing the application.
-
-    Safe to call from the GUI (e.g. before a CUDA installer runs in a worker
-    thread).  The UI remains responsive because this only touches background
-    daemon threads.
-
-    After this call:
-    - config.Running is False
-    - Both AI threads have been joined (or timed out)
-    - The ONNX session held by the AI thread goes out of scope and will be
-      garbage-collected, releasing its GPU/CPU resources.
-    """
-    global ai_thread, auto_fire_thread
-
-    config.Running = False
-    _inference_controller.request_stop()
-
-    with _ai_threads_lock:
-        if ai_thread is not None and ai_thread.is_alive():
-            ai_thread.join(timeout=join_timeout)
-            if ai_thread.is_alive():
-                logger.warning("AI thread did not stop within %.1fs", join_timeout)
-
-        if auto_fire_thread is not None and auto_fire_thread.is_alive():
-            auto_fire_thread.join(timeout=join_timeout)
-
-    _inference_controller.clear_stop()
-
-
-def pause_ai_inference(config: "Config") -> None:
-    """Pause AI inference cooperatively without stopping threads.
-
-    The inference loop will sleep on its next iteration.  Call
-    resume_ai_inference() to continue.  Prefer stop_ai_threads() when you
-    need to release GPU resources (e.g. before a CUDA upgrade install).
-    """
-    config.inference_paused = True
-    _inference_controller.pause()
-
-
-def resume_ai_inference(config: "Config") -> None:
-    """Resume AI inference after a pause_ai_inference() call."""
-    config.inference_paused = False
-    _inference_controller.resume()
-
-
-def start_ai_threads(
-    config: Config,
-    overlay_boxes_queue: queue.Queue,
-    overlay_confidences_queue: queue.Queue,
-    auto_fire_boxes_queue: queue.Queue,
-    model_path: str
-) -> bool:
-    """由 GUI 呼叫，載入模型並啟動/重啟 AI 執行緒
-    
-    Args:
-        config: 配置實例
-        boxes_queue: 檢測框隊列
-        confidences_queue: 置信度隊列
-        model_path: 模型路徑
-        
-    Returns:
-        是否成功啟動
-    """
-    global ai_thread, auto_fire_thread
-
-    with _ai_threads_lock:
-        # 停止現有線程
-        if ai_thread is not None and ai_thread.is_alive():
-            config.Running = False
-            ai_thread.join(timeout=3.0)
-            if auto_fire_thread is not None and auto_fire_thread.is_alive():
-                auto_fire_thread.join(timeout=3.0)
-            # 確認舊執行緒已結束
-            if ai_thread.is_alive():
-                logger.warning("AI 執行緒在 3 秒內未停止，強制繼續")
-
-        config.Running = True
-
-        # 僅支持 ONNX 模型
-        if not model_path.endswith('.onnx'):
-            logger.error("僅支援 .onnx 模型格式: %s", model_path)
-            return False
-
-        # 將相對路徑轉換為絕對路徑（相對於項目根目錄）
-        if not os.path.isabs(model_path):
-            model_path = os.path.join(project_root, model_path)
-
-        # 檢查文件是否存在
-        if not os.path.exists(model_path):
-            logger.error("模型文件不存在: %s", model_path)
-            return False
-
-        model = None
-        try:
-            providers = build_provider_list(config)
-            logger.info("嘗試載入 ONNX providers: %s", providers)
-
-            # 獲取優化的會話選項
-            session_options = optimize_onnx_session(config)
-            if session_options:
-                model = ort.InferenceSession(model_path, providers=providers, sess_options=session_options)
-            else:
-                model = ort.InferenceSession(model_path, providers=providers)
-
-            # 獲取實際使用的提供者
-            actual_providers = model.get_providers()
-            if actual_providers:
-                config.current_provider = actual_providers[0]
-                logger.info("模型載入使用提供者: %s", actual_providers[0])
-                logger.info("最終啟用 ONNX provider: %s", config.current_provider)
-
-                requested_backend = getattr(config, "inference_backend", "auto")
-                if requested_backend == "cuda" and config.current_provider != "CUDAExecutionProvider":
-                    logger.warning(
-                        "已選擇 CUDA 後端，但實際 provider 為 %s。請檢查 onnxruntime-gpu、NVIDIA Driver、CUDA/cuDNN 相容性。",
-                        config.current_provider,
-                    )
-            else:
-                logger.warning("無法獲取提供者資訊")
-                config.current_provider = providers[0] if providers else 'CPUExecutionProvider'
-                logger.info("最終啟用 ONNX provider: %s", config.current_provider)
-        except Exception as e:
-            logger.error("載入 ONNX 模型失敗: %s", e)
-            logger.error("請確認已安裝對應 ONNX Runtime 後端（CUDA/DirectML/CPU）")
-            return False
-
-        ai_thread = threading.Thread(
-            target=ai_logic_loop,
-            args=(config, model, 'onnx', overlay_boxes_queue, overlay_confidences_queue, auto_fire_boxes_queue),
-            daemon=True
-        )
-        auto_fire_thread = threading.Thread(
-            target=auto_fire_loop,
-            args=(config, auto_fire_boxes_queue),
-            daemon=True
-        )
-
-        ai_thread.start()
-        auto_fire_thread.start()
-        return True
+# AI thread lifecycle (start_ai_threads/stop_ai_threads/pause_ai_inference/
+# resume_ai_inference, plus the ai_thread/auto_fire_thread handles and the
+# lock guarding them) now lives in core/app_controller.py — moved verbatim,
+# no behavior change — so a web control route can call the exact same
+# functions this file's own startup/shutdown code below does, instead of
+# these being module-private to main.py with no other caller reachable.
+from core.app_controller import (
+    start_ai_threads,
+    stop_ai_threads,
+    pause_ai_inference,
+    resume_ai_inference,
+)
 
 
 def main():
@@ -519,6 +365,18 @@ def main():
             import logging as _logging
             _logging.getLogger(__name__).error("[WebESP] failed to start: %s", exc)
 
+    # Web Control — control-plane LAN API (see core/web_control_server.py).
+    # Unlike Web ESP above, this can mutate state, so it's gated by its own
+    # flag and fails the same soft way if fastapi/uvicorn aren't vendored in
+    # yet — one subsystem missing must never block the rest of the app.
+    if getattr(config, 'web_control_enabled', False):
+        try:
+            from core import web_control_server
+            web_control_server.start(config)
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).error("[WebControl] failed to start: %s", exc)
+
     # 建立並顯示新的狀態面板（根據配置決定是否顯示）
     status_panel = StatusPanel(config)
     if config.show_status_panel:
@@ -579,6 +437,12 @@ def main():
                 esp_server.stop()
         except Exception:
             logger.exception("Error stopping Web ESP server during shutdown")
+        try:
+            from core import web_control_server
+            if web_control_server.is_running():
+                web_control_server.stop()
+        except Exception:
+            logger.exception("Error stopping Web Control server during shutdown")
         try:
             save_config(config)
         except Exception:

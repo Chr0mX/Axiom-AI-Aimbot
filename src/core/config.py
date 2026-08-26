@@ -195,6 +195,9 @@ _FIELD_MAP = {
     'web_esp_http_port':          'web_esp.http_port',
     'web_esp_ws_port':            'web_esp.ws_port',
     'web_esp_fps':                'web_esp.fps',
+    'web_control_enabled':        'web_control.enabled',
+    'web_control_port':           'web_control.port',
+    'web_control_token':          'web_control.token',
 
     # --- hardware ---
     'mouse_move_method':          'hardware.mouse_move_method',
@@ -577,6 +580,19 @@ class Config:
         self.web_esp_http_port: int = 8080   # static page server
         self.web_esp_ws_port: int = 8765     # state broadcast websocket
         self.web_esp_fps: int = 60           # broadcast tick rate (latest-state wins)
+
+        # Web Control — a *control-plane* LAN server (unlike Web ESP above,
+        # which is read-only telemetry): lets a browser call the same
+        # main-function actions the Qt GUI does (see core/app_controller.py).
+        # Because it can mutate state rather than just observe it, it is
+        # gated by a shared token (web_control_token) checked on every
+        # request/WS handshake — see core/web_control_server.py.
+        self.web_control_enabled: bool = False
+        self.web_control_port: int = 8090
+        # Empty until the feature is first enabled — web_control_server.start()
+        # (and the GUI's enable toggle) generate one via secrets.token_urlsafe()
+        # the first time it's needed, then persist it here so it survives restarts.
+        self.web_control_token: str = ""
 
         # Aim shaping (ported from Someone_idea)
         self.aim_deadzone_enabled: bool = False

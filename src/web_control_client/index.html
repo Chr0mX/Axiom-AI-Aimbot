@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Axiom Web Control</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="wordmark">AXIOM<span>·</span> <span class="sub">Web Control</span></div>
+    <div id="status" class="disconnected">connecting…</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="card-title">Access Token</div>
+      <div class="row">
+        <input type="password" id="token-input" placeholder="Paste the token from the app's Other page">
+        <button id="token-save">Save</button>
+        <button id="token-show" title="Show/hide token">👁</button>
+      </div>
+      <div class="hint">Find or regenerate this under the app's <b>Other</b> page → <b>Remote Control</b>. Stored only in this browser.</div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Status</div>
+      <div class="grid">
+        <div class="stat"><div class="label">Aim Toggle</div><div class="value" id="s-active">—</div></div>
+        <div class="stat"><div class="label">Firing</div><div class="value" id="s-firing">—</div></div>
+        <div class="stat"><div class="label">Model</div><div class="value" id="s-model">—</div></div>
+        <div class="stat"><div class="label">Backend</div><div class="value" id="s-backend">—</div></div>
+        <div class="stat"><div class="label">Mouse Method</div><div class="value" id="s-mouse">—</div></div>
+        <div class="stat"><div class="label">MAKCU</div><div class="value" id="s-makcu">—</div></div>
+        <div class="stat"><div class="label">Capture FPS</div><div class="value" id="s-capfps">—</div></div>
+        <div class="stat"><div class="label">Inference FPS</div><div class="value" id="s-inffps">—</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-title">Controls</div>
+      <div class="row control-row">
+        <label class="switch">
+          <input type="checkbox" id="always-aim-toggle">
+          <span class="slider"></span>
+        </label>
+        <div class="control-label">Always Aim</div>
+      </div>
+      <div class="hint">This is the first control action wired up (milestone 2). Model switching,
+        AI start/stop, and MAKCU connect are planned follow-ups — see CLAUDE.md's Web Control section.</div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
