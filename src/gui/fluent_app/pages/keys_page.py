@@ -808,9 +808,8 @@ class KeysPage(BasePage):
 
     def _onAlwaysAimChanged(self, checked: bool):
         if self._config:
-            self._config.always_aim = bool(checked)
-            if checked:
-                self._config.idle_detect_enabled = False
+            from core.app_controller import set_always_aim
+            set_always_aim(self._config, checked)
         self._refreshMakcuVisibility()
 
     def _onAimKeyChanged(self, index: int, vk: int):

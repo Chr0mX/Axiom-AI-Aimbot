@@ -3,8 +3,8 @@
 
 import os
 import sys
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
+from PyQt6.QtCore import Qt, QUrl, QTimer
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QApplication
 from PyQt6.QtGui import QDesktopServices, QIcon
 from qfluentwidgets import (
     SettingCardGroup, SettingCard, SwitchSettingCard,
@@ -16,6 +16,7 @@ from qfluentwidgets import (
 from ..base_page import BasePage
 from ..language_manager import t
 from ..theme_colors import ThemeColors
+from ..components.no_wheel_widgets import NoWheelSpinBox
 from win_utils.makcu_mouse import makcu_mouse as _makcu_mouse, is_makcu_connected
 from version import __version__
 
@@ -26,6 +27,13 @@ class OtherPage(BasePage):
     def __init__(self, parent=None):
         super().__init__("tab_program_control", parent)
         self._config = None
+        # Debounces a Web Control server restart after a port-field edit —
+        # same reasoning as visuals_page.py's Web ESP restart timer: a
+        # restart is a real socket rebind, not a cheap config write.
+        self._webControlRestartTimer = QTimer(self)
+        self._webControlRestartTimer.setSingleShot(True)
+        self._webControlRestartTimer.setInterval(600)
+        self._webControlRestartTimer.timeout.connect(self._restartWebControlIfRunning)
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -88,6 +96,57 @@ class OtherPage(BasePage):
         )
         self.exitSaveCard.hBoxLayout.addWidget(self.exitSaveBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.exitSaveCard.hBoxLayout.addSpacing(16)
+
+        # === Remote Control (Web Control API) ===
+        # A control-plane LAN API — lets a browser on another PC call the
+        # same main-function actions the Qt GUI does (see
+        # core/app_controller.py). Sibling feature to the Web ESP overlay
+        # above; kept in its own group since it's a different concern
+        # (control, not just viewing) with its own auth token.
+        self.webControlGroup = SettingCardGroup(t("web_control_settings", "Remote Control"), self.scrollWidget)
+
+        self.webControlEnableCard = SwitchSettingCard(
+            FluentIcon.GLOBE,
+            t("web_control_enabled", "Enable Web Control"),
+            t("web_control_desc", "Let a browser on your LAN control main functions (always-aim, status) over a token-authenticated API."),
+            parent=self.webControlGroup
+        )
+
+        self.webControlPortSpin = NoWheelSpinBox()
+        self.webControlPortSpin.setRange(1024, 65535)
+        self.webControlPortCard = SettingCard(
+            FluentIcon.WIFI,
+            t("web_control_port", "Port"),
+            t("web_control_port_desc", "Port the control API listens on."),
+            self.webControlGroup
+        )
+        self.webControlPortCard.hBoxLayout.addWidget(self.webControlPortSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.webControlPortCard.hBoxLayout.addSpacing(16)
+
+        self.webControlCopyTokenBtn = PushButton(t("web_control_copy", "Copy"))
+        self.webControlCopyTokenBtn.setIcon(FluentIcon.COPY)
+        self.webControlRegenTokenBtn = PushButton(t("web_control_regenerate", "Regenerate"))
+        self.webControlRegenTokenBtn.setIcon(FluentIcon.SYNC)
+        self.webControlTokenCard = SettingCard(
+            FluentIcon.CERTIFICATE,
+            t("web_control_token", "Access Token"),
+            t("web_control_token_desc", "Paste this into the web client so it's allowed to send commands."),
+            self.webControlGroup,
+        )
+        self.webControlTokenCard.hBoxLayout.addWidget(self.webControlCopyTokenBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.webControlTokenCard.hBoxLayout.addSpacing(8)
+        self.webControlTokenCard.hBoxLayout.addWidget(self.webControlRegenTokenBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.webControlTokenCard.hBoxLayout.addSpacing(16)
+
+        self.webControlOpenBtn = PushButton(t("web_control_open", "Open in browser"))
+        self.webControlConnectCard = SettingCard(
+            FluentIcon.LINK,
+            t("web_control_connect", "Connect"),
+            t("web_control_connect_desc", "Open this URL on the same PC, or on any device on your LAN."),
+            self.webControlGroup,
+        )
+        self.webControlConnectCard.hBoxLayout.addWidget(self.webControlOpenBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.webControlConnectCard.hBoxLayout.addSpacing(16)
 
         # === Environment — TensorRT ===
         self.trtGroup = SettingCardGroup(t("env_trt", "TensorRT"), self.scrollWidget)
@@ -233,6 +292,13 @@ class OtherPage(BasePage):
         self.programGroup.addSettingCard(self.exitSaveCard)
         self.addContent(self.programGroup)
 
+        # Remote Control
+        self.webControlGroup.addSettingCard(self.webControlEnableCard)
+        self.webControlGroup.addSettingCard(self.webControlPortCard)
+        self.webControlGroup.addSettingCard(self.webControlTokenCard)
+        self.webControlGroup.addSettingCard(self.webControlConnectCard)
+        self.addContent(self.webControlGroup)
+
         # Environment — TensorRT
         self.trtGroup.addSettingCard(self.trtStatusCard)
         self.trtGroup.addSettingCard(self.trtVersionCard)
@@ -300,6 +366,13 @@ class OtherPage(BasePage):
         self.showConsoleCard.checkedChanged.connect(self._onShowConsoleChanged)
         self.exitSaveBtn.clicked.connect(self._onExitSave)
 
+        # Remote Control (Web Control API)
+        self.webControlEnableCard.checkedChanged.connect(self._onWebControlEnableChanged)
+        self.webControlPortSpin.valueChanged.connect(self._onWebControlPortChanged)
+        self.webControlCopyTokenBtn.clicked.connect(self._onWebControlCopyToken)
+        self.webControlRegenTokenBtn.clicked.connect(self._onWebControlRegenerateToken)
+        self.webControlOpenBtn.clicked.connect(self._onWebControlOpen)
+
         # TensorRT 環境檢查
         self.trtRecheckBtn.clicked.connect(self._checkTensorRT)
         self._checkTensorRT()
@@ -330,6 +403,18 @@ class OtherPage(BasePage):
         self.threadPriorityCombo.setCurrentText(
             _prio_rev.get(getattr(self._config, 'thread_priority', 'high'), "High"))
         self.threadPriorityCombo.blockSignals(False)
+
+        web_control_on = bool(getattr(self._config, 'web_control_enabled', False))
+        self.webControlEnableCard.setChecked(web_control_on)
+        self.webControlPortSpin.blockSignals(True)
+        self.webControlPortSpin.setValue(int(getattr(self._config, 'web_control_port', 8090)))
+        self.webControlPortSpin.blockSignals(False)
+        self.webControlTokenCard.contentLabel.setText(
+            getattr(self._config, 'web_control_token', '') or t("web_control_token_none", "(generated on first enable)"))
+        self.webControlPortCard.setEnabled(web_control_on)
+        self.webControlTokenCard.setEnabled(web_control_on)
+        self.webControlConnectCard.setEnabled(web_control_on)
+        self._refreshWebControlConnect()
 
         self._refreshMakcuHwInfo()
     
@@ -376,7 +461,83 @@ class OtherPage(BasePage):
                 save_config(self._config)
             # 關閉視窗
             window.close()
-    
+
+    # === Remote Control (Web Control API) ===
+    def _onWebControlEnableChanged(self, checked):
+        if self._config:
+            self._config.web_control_enabled = bool(checked)
+        self.webControlPortCard.setEnabled(checked)
+        self.webControlTokenCard.setEnabled(checked)
+        self.webControlConnectCard.setEnabled(checked)
+        try:
+            from core import web_control_server
+            if checked:
+                web_control_server.start(self._config)
+                # start() auto-generates a token the first time it's empty —
+                # reflect whatever it actually ended up with.
+                self.webControlTokenCard.contentLabel.setText(
+                    getattr(self._config, 'web_control_token', '') or "—")
+            else:
+                web_control_server.stop()
+        except Exception as e:
+            print(f"[WebControl] failed to start/stop: {e}")
+        self._refreshWebControlConnect()
+
+    def _onWebControlPortChanged(self, value):
+        if self._config:
+            self._config.web_control_port = int(value)
+        self._webControlRestartTimer.start()
+
+    def _restartWebControlIfRunning(self):
+        # web_control_server.start() only binds a socket once — changing the
+        # port on a live config does nothing on its own until an explicit
+        # stop()+start() cycle, same as esp_server.py's own restart-on-
+        # port-change path (visuals_page.py's _restartWebEspIfRunning).
+        try:
+            from core import web_control_server
+            if web_control_server.is_running():
+                web_control_server.stop()
+                web_control_server.start(self._config)
+        except Exception as e:
+            print(f"[WebControl] failed to restart: {e}")
+        self._refreshWebControlConnect()
+
+    def _onWebControlRegenerateToken(self):
+        if not self._config:
+            return
+        import secrets
+        self._config.web_control_token = secrets.token_urlsafe(24)
+        self.webControlTokenCard.contentLabel.setText(self._config.web_control_token)
+        try:
+            from core import web_control_server
+            if web_control_server.is_running():
+                web_control_server.stop()
+                web_control_server.start(self._config)
+        except Exception as e:
+            print(f"[WebControl] failed to apply new token: {e}")
+
+    def _onWebControlCopyToken(self):
+        if not self._config:
+            return
+        QApplication.clipboard().setText(getattr(self._config, 'web_control_token', '') or '')
+
+    def _onWebControlOpen(self):
+        try:
+            from core import web_control_server
+            url = web_control_server.connect_url()
+        except Exception:
+            url = ""
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+    def _refreshWebControlConnect(self):
+        try:
+            from core import web_control_server
+            running = web_control_server.is_running()
+        except Exception:
+            running = False
+        self.webControlOpenBtn.setEnabled(running)
+
     def _refreshMakcuHwInfo(self):
         dash = "—"
         try:
@@ -633,6 +794,24 @@ class OtherPage(BasePage):
         self.showConsoleCard.titleLabel.setText(t("show_console"))
         self.exitSaveCard.titleLabel.setText(t("exit_and_save"))
         self.exitSaveBtn.setText(t("exit_and_save"))
+
+        # Remote Control (Web Control API)
+        self.webControlGroup.titleLabel.setText(t("web_control_settings", "Remote Control"))
+        self.webControlEnableCard.titleLabel.setText(t("web_control_enabled", "Enable Web Control"))
+        self.webControlEnableCard.contentLabel.setText(
+            t("web_control_desc", "Let a browser on your LAN control main functions (always-aim, status) over a token-authenticated API."))
+        self.webControlPortCard.titleLabel.setText(t("web_control_port", "Port"))
+        self.webControlPortCard.contentLabel.setText(t("web_control_port_desc", "Port the control API listens on."))
+        self.webControlCopyTokenBtn.setText(t("web_control_copy", "Copy"))
+        self.webControlRegenTokenBtn.setText(t("web_control_regenerate", "Regenerate"))
+        self.webControlTokenCard.titleLabel.setText(t("web_control_token", "Access Token"))
+        self.webControlTokenCard.contentLabel.setText(
+            (getattr(self._config, 'web_control_token', '') if self._config else '')
+            or t("web_control_token_none", "(generated on first enable)"))
+        self.webControlOpenBtn.setText(t("web_control_open", "Open in browser"))
+        self.webControlConnectCard.titleLabel.setText(t("web_control_connect", "Connect"))
+        self.webControlConnectCard.contentLabel.setText(
+            t("web_control_connect_desc", "Open this URL on the same PC, or on any device on your LAN."))
 
         # TensorRT 環境
         self.trtGroup.titleLabel.setText(t("trt_env", "TensorRT Environment"))
