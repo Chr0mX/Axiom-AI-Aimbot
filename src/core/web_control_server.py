@@ -40,7 +40,7 @@ import secrets
 import socket
 import threading
 import time
-from typing import Optional
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +215,10 @@ def start(
         model_path: str
         inference_backend: Optional[str] = None
 
+    class ModelNotesBody(BaseModel):
+        model: str
+        text: str
+
     class _ThreadServer(uvicorn.Server):
         def install_signal_handlers(self) -> None:
             # Overridden to a no-op: uvicorn's default installs SIGINT/
@@ -305,6 +309,64 @@ def start(
     def post_model_change(body: ModelChangeBody):
         from .app_controller import request_model_change
         return request_model_change(config, body.model_path, body.inference_backend)
+
+    # -----------------------------------------------------------------
+    # Tab settings — generic get/apply covering the Model/Capture/
+    # Inference panels' plain Config fields. See web_control_settings.py's
+    # module docstring for why this is a separate module from
+    # app_controller.py (nothing here is called by a Qt slot).
+    # -----------------------------------------------------------------
+
+    @app.get("/api/settings/{tab}", dependencies=[Depends(_check_token)])
+    def get_settings(tab: Literal["model", "capture", "inference"]):
+        from .web_control_settings import get_tab_settings
+        return get_tab_settings(config, tab)
+
+    @app.post("/api/settings/{tab}", dependencies=[Depends(_check_token)])
+    def post_settings(tab: Literal["model", "capture", "inference"], body: dict):
+        from .web_control_settings import apply_tab_settings
+        return apply_tab_settings(config, tab, body)
+
+    @app.get("/api/model_info", dependencies=[Depends(_check_token)])
+    def get_model_info_route(model: str = ""):
+        from .web_control_settings import get_model_info
+        return get_model_info(config, model)
+
+    @app.get("/api/model_notes", dependencies=[Depends(_check_token)])
+    def get_model_notes_route(model: str = ""):
+        from .web_control_settings import get_model_notes
+        return {"text": get_model_notes(model)}
+
+    @app.post("/api/model_notes", dependencies=[Depends(_check_token)])
+    def post_model_notes_route(body: ModelNotesBody):
+        from .web_control_settings import save_model_notes
+        ok = save_model_notes(body.model, body.text)
+        return {"ok": ok}
+
+    @app.post("/api/control/open_model_folder", dependencies=[Depends(_check_token)])
+    def post_open_model_folder():
+        from .web_control_settings import open_model_folder
+        return {"ok": open_model_folder()}
+
+    @app.get("/api/game_profiles", dependencies=[Depends(_check_token)])
+    def get_game_profiles_route():
+        from .web_control_settings import get_game_profiles
+        return get_game_profiles()
+
+    @app.get("/api/hud_models", dependencies=[Depends(_check_token)])
+    def get_hud_models_route():
+        from .web_control_settings import get_hud_models
+        return {"models": get_hud_models()}
+
+    @app.get("/api/uvc_probe", dependencies=[Depends(_check_token)])
+    def get_uvc_probe_route(device: int = 0, method: str = "msmf", width: int = 1920, height: int = 1080):
+        from .web_control_settings import probe_uvc
+        return probe_uvc(device, method, width, height)
+
+    @app.get("/api/ndi_sources", dependencies=[Depends(_check_token)])
+    def get_ndi_sources_route():
+        from .web_control_settings import get_ndi_sources
+        return get_ndi_sources()
 
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")

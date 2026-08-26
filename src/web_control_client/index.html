@@ -55,26 +55,282 @@
       <div class="main">
         <div class="panel active" id="panel-model">
           <div class="panel-title">Model</div>
-          <div class="row">
-            <select id="model-select"></select>
-            <select id="backend-select">
-              <option value="auto">Auto</option>
-              <option value="tensorrt">TensorRT</option>
-              <option value="directml">DirectML</option>
-              <option value="cpu">CPU</option>
-            </select>
-            <button id="model-switch-btn">Switch</button>
+
+          <div class="field-group">
+            <input type="text" id="model-search-input" placeholder="Search models…">
+            <div class="row">
+              <select id="model-select"></select>
+              <select id="backend-select">
+                <option value="auto">Auto</option>
+                <option value="tensorrt">TensorRT</option>
+                <option value="directml">DirectML</option>
+                <option value="cpu">CPU</option>
+              </select>
+              <button id="model-switch-btn">Switch</button>
+            </div>
+            <div class="hint" id="model-switch-reason"></div>
           </div>
-          <div class="hint" id="model-switch-reason"></div>
-          <div class="grid" style="margin-top: 16px;">
+
+          <div class="grid">
             <div class="stat"><div class="label">Model</div><div class="value" id="s-model">—</div></div>
             <div class="stat"><div class="label">Backend</div><div class="value" id="s-backend">—</div></div>
+          </div>
+
+          <div class="field-card stacked">
+            <div class="field-title">Model Info</div>
+            <div class="field-readonly" id="model-info-text">—</div>
+          </div>
+
+          <div class="field-card stacked">
+            <div class="row" style="justify-content: space-between;">
+              <div class="field-title">Model Notes</div>
+              <button id="model-notes-edit-btn">Edit</button>
+            </div>
+            <textarea id="model-notes-text" readonly></textarea>
+          </div>
+
+          <div class="field-card">
+            <div class="field-info">
+              <div class="field-title">Open Model Folder</div>
+              <div class="field-desc">Opens Model/ in File Explorer on the machine running Axiom — not on this browser.</div>
+            </div>
+            <div class="field-control">
+              <button id="open-model-folder-btn">Open</button>
+            </div>
+          </div>
+
+          <div class="field-group-title">Model HUD Settings</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Game Profile</div>
+                <div class="field-desc">HUD region coords loaded from game.json</div>
+              </div>
+              <div class="field-control">
+                <select id="hud-game-select" data-key="hud_game" data-type="choice" data-custom="1"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">HUD Model</div>
+                <div class="field-desc">YOLO11n .onnx model from Model_Hud/ for V2 weapon detection</div>
+              </div>
+              <div class="field-control">
+                <select id="hud-model-select" data-key="hud_model_path" data-type="text"></select>
+              </div>
+            </div>
           </div>
         </div>
 
         <div class="panel" id="panel-capture">
           <div class="panel-title">Capture</div>
-          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Screenshot Method</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-screenshot_method" data-key="screenshot_method" data-type="choice">
+                  <option value="mss">mss</option>
+                  <option value="dxcam">dxcam</option>
+                  <option value="uvc">uvc</option>
+                  <option value="ndi">ndi</option>
+                  <option value="udp">udp</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Screenshot Interval</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="cap-screenshot_interval" data-key="screenshot_interval" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="cap-uvc-group-title">UVC Camera</div>
+          <div class="field-group" id="cap-uvc-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">UVC Capture Method</div>
+                <div class="field-desc">msmf recommended for 1080p60 on Windows 10/11. 'dshow' unlocks the DirectShow Version and FFmpeg options below.</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc_capture_method" data-key="uvc_capture_method" data-type="choice">
+                  <option value="msmf">msmf</option>
+                  <option value="dshow">dshow</option>
+                  <option value="any">any</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="cap-uvc-dshow-v2-card">
+              <div class="field-info">
+                <div class="field-title">Use Native DirectShow DLL (V2)</div>
+                <div class="field-desc">Off = OpenCV's DirectShow wrapper (V1). On = the native directshow_capture.dll — owns the capture graph directly for lower, OBS-like latency.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="cap-uvc_dshow_backend" data-key="uvc_dshow_backend" data-type="dshow-toggle">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card" id="cap-uvc-ffmpeg-enabled-card">
+              <div class="field-info">
+                <div class="field-title">Use FFmpeg Subprocess</div>
+                <div class="field-desc">Captures via an external ffmpeg.exe process instead of OpenCV.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="cap-uvc_ffmpeg_enabled" data-key="uvc_ffmpeg_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Device</div>
+                <div class="field-desc">Select the UVC capture device</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc-device-select"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Resolution</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc-resolution-select"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">FPS</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc-fps-select"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Video Format</div>
+                <div class="field-desc">MJPEG (compressed) recommended for 1080p60+; YUY2/NV12/YUV420P are raw and need much more USB bandwidth.</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc_video_format" data-key="uvc_video_format" data-type="choice">
+                  <option value="mjpeg">mjpeg</option>
+                  <option value="yuy2">yuy2</option>
+                  <option value="nv12">nv12</option>
+                  <option value="yuv420p">yuv420p</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Crop Mode</div>
+                <div class="field-desc">Dynamic crops to the live Detection Range every frame. Fixed freezes a centered crop at capture-start.</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc_crop_mode" data-key="uvc_crop_mode" data-type="choice">
+                  <option value="dynamic">dynamic</option>
+                  <option value="fixed">fixed</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="cap-uvc-ffmpeg-path-card">
+              <div class="field-info">
+                <div class="field-title">FFmpeg Path</div>
+                <div class="field-desc">Optional override — path to ffmpeg.exe. Leave blank to auto-detect.</div>
+              </div>
+              <div class="field-control">
+                <input type="text" id="cap-uvc_ffmpeg_path" data-key="uvc_ffmpeg_path" data-type="text" placeholder="auto-detect">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Device Resolution &amp; FPS</div>
+                <div class="field-desc">Actual values reported by the driver</div>
+              </div>
+              <div class="field-control">
+                <span class="field-readonly" id="cap-uvc-hw-info">—</span>
+                <button id="cap-uvc-refresh-btn">Refresh Device</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="cap-ndi-group-title">NDI</div>
+          <div class="field-group" id="cap-ndi-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">NDI Stream</div>
+                <div class="field-desc">Select the NDI source to capture</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-ndi-source-select"></select>
+                <button id="cap-ndi-refresh-btn">Refresh</button>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">NDI Bandwidth</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-ndi_bandwidth" data-key="ndi_bandwidth" data-type="choice">
+                  <option value="highest">highest</option>
+                  <option value="lowest">lowest</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Stream Resolution &amp; FPS</div>
+                <div class="field-desc">Actual values from the active NDI source</div>
+              </div>
+              <div class="field-control">
+                <span class="field-readonly" id="cap-ndi-hw-info">—</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="cap-udp-group-title">UDP Stream</div>
+          <div class="field-group" id="cap-udp-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">System IP Address</div>
+                <div class="field-desc" id="cap-udp-system-ip">Stream to: —</div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Bind IP</div>
+                <div class="field-desc">Listen on a specific interface, or 0.0.0.0 for all</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-udp-bind-ip-select" data-key="udp_bind_ip" data-type="choice"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">UDP Port</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="cap-udp_bind_port" data-key="udp_bind_port" data-type="number" min="1" max="65535" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Restart Receiver</div>
+                <div class="field-desc">Stop and re-bind the UDP socket</div>
+              </div>
+              <div class="field-control">
+                <button id="cap-udp-restart-btn">Restart</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="panel" id="panel-inference">
@@ -83,6 +339,187 @@
             <button id="ai-start-btn">Start AI</button>
             <button id="ai-stop-btn">Stop AI</button>
             <div class="control-label" id="ai-control-reason"></div>
+          </div>
+
+          <div class="field-group-title">FOV &amp; Detect Range</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">FOV Size</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_size" data-key="fov_size" data-type="number" min="50" max="500" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">FOV Height</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_height" data-key="fov_height" data-type="number" min="50" max="500" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Follow Mouse</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-fov_follow_mouse" data-key="fov_follow_mouse" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Circular FOV Filter</div>
+                <div class="field-desc">Only track targets inside the FOV ellipse — a circle when Width equals Height — instead of the full rectangular region.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-fov_circle_filter_enabled" data-key="fov_circle_filter_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reduce FOV on Active Target</div>
+                <div class="field-desc">Temporarily shrink the FOV while a target is locked, so a random target near the edge can't steal the lock mid-engagement.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-fov_reduce_on_target_enabled" data-key="fov_reduce_on_target_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-min-size-card">
+              <div class="field-info">
+                <div class="field-title">FOV Min Size</div>
+                <div class="field-desc">How much to shrink the FOV to, as a % of FOV Size/Height, while a target is locked.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_min_size_pct" data-key="fov_min_size_pct" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-min-duration-card">
+              <div class="field-info">
+                <div class="field-title">FOV Min Size Duration</div>
+                <div class="field-desc">How long the shrink holds after acquisition before reverting to full FOV (0 = holds indefinitely while locked).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_min_size_duration" data-key="fov_min_size_duration" data-type="number" min="0" max="10" step="0.1">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Detect Range Size</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-detect_range_size" data-key="detect_range_size" data-type="number" min="100" max="1080" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">General Parameters</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Detect Interval</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-detect_interval" data-key="detect_interval" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Min Confidence</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-min_confidence" data-key="min_confidence" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Semantic FP Filter</div>
+                <div class="field-desc">Discard trees, vehicles, and HUD elements by class name and geometry.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-detect_semantic_filter_enabled" data-key="detect_semantic_filter_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Keep Detecting</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-keep_detecting" data-key="keep_detecting" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Idle Detect Enabled</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-idle_detect_enabled" data-key="idle_detect_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Idle Detect Interval</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-idle_detect_interval" data-key="idle_detect_interval" data-type="number" min="5" max="500" step="1">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Single Target Mode</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-single_target_mode" data-key="single_target_mode" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Inference Performance</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">CUDA IO Binding</div>
+                <div class="field-desc">Zero-copy GPU inference. Effective only with CUDA or TensorRT backend.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-cuda_io_binding_enabled" data-key="cuda_io_binding_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Frame Skip Gate</div>
+                <div class="field-desc">Skip inference when the capture region hasn't changed significantly.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-frame_skip_enabled" data-key="frame_skip_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Skip Threshold</div>
+                <div class="field-desc">Avg pixel diff below this value triggers skip (higher = more skipping).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-frame_skip_threshold" data-key="frame_skip_threshold" data-type="number" min="0.5" max="10" step="0.1">
+              </div>
+            </div>
           </div>
         </div>
 
