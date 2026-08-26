@@ -342,3 +342,208 @@ class TestGetLocalIps:
         # Network-dependent — just confirm it degrades to a list (possibly
         # empty in a sandboxed/offline environment) rather than raising.
         assert isinstance(wcs.get_local_ips(), list)
+
+
+class TestNestedFieldPaths:
+    """_get_nested()/_set_nested() (exercised indirectly through
+    get_tab_settings()/apply_tab_settings()) for dotted attribute paths
+    (config.humanization.*, the "aim" tab) and list-index paths
+    (config.AimKeys[N], the "keys" tab)."""
+
+    def _humanization_config(self, **overrides):
+        base = dict(
+            enabled=True, intensity=0.5,
+            micro_jitter_enabled=True, micro_jitter_base=0.2, micro_jitter_scale=0.025,
+            micro_jitter_idle_enabled=False,
+            motion_variation_enabled=True, motion_variation_range=0.06,
+            speed_shaping_enabled=True, speed_shaping_low=4.0, speed_shaping_high=22.0,
+            speed_shaping_low_factor=0.88,
+            micro_stutter_enabled=False, micro_stutter_prob=0.03, micro_stutter_min=0.65,
+            micro_stutter_max=0.90,
+            reaction_variability_enabled=False, reaction_skip_prob=0.015,
+        )
+        base.update(overrides)
+        return types.SimpleNamespace(**base)
+
+    def test_get_reads_dotted_humanization_field(self):
+        config = _config(humanization=self._humanization_config(intensity=0.7))
+        result = wcs.get_tab_settings(config, "aim")
+        assert result["humanization.intensity"] == 0.7
+
+    def test_apply_writes_dotted_humanization_field_without_touching_siblings(self):
+        config = _config(humanization=self._humanization_config())
+        result = wcs.apply_tab_settings(config, "aim", {"humanization.intensity": 0.9})
+        assert result["ok"] is True
+        assert config.humanization.intensity == 0.9
+        assert config.humanization.enabled is True  # untouched
+
+    def test_get_reads_list_index_field(self):
+        config = _config(AimKeys=[1, 6, 2])
+        result = wcs.get_tab_settings(config, "keys")
+        assert result["AimKeys.0"] == 1
+        assert result["AimKeys.1"] == 6
+        assert result["AimKeys.2"] == 2
+
+    def test_apply_writes_list_index_field_without_touching_siblings(self):
+        config = _config(AimKeys=[1, 6, 2])
+        result = wcs.apply_tab_settings(config, "keys", {"AimKeys.1": 4})
+        assert result["ok"] is True
+        assert config.AimKeys == [1, 4, 2]
+
+    def test_get_missing_intermediate_object_is_none(self):
+        config = _config()  # no .humanization attribute at all
+        result = wcs.get_tab_settings(config, "aim")
+        assert result["humanization.intensity"] is None
+
+    def test_apply_missing_intermediate_object_does_not_raise(self):
+        config = _config()  # no .humanization
+        # _set_nested() returns False for a missing intermediate object;
+        # the write loop discards that return value (there's nothing to
+        # meaningfully report per-field once validation has already
+        # passed), so the overall apply still reports ok.
+        result = wcs.apply_tab_settings(config, "aim", {"humanization.intensity": 0.9})
+        assert result["ok"] is True
+
+    def test_plain_field_unaffected_by_nested_path_generalization(self):
+        """A bare (non-dotted) field must behave exactly as before —
+        _get_nested()/_set_nested()'s loop runs zero iterations for a
+        single-segment path, falling straight through to getattr/setattr."""
+        config = _config(fov_size=100)
+        result = wcs.apply_tab_settings(config, "inference", {"fov_size": 200})
+        assert result["ok"] is True
+        assert config.fov_size == 200
+
+
+class TestIntValuedChoices:
+    """"choice" fields whose choices list holds ints (cam_motion_comp_size,
+    makcu_baud_rate) instead of the usual strings — must round-trip as int,
+    not get coerced into a string."""
+
+    def test_cam_motion_comp_size_round_trips_as_int(self):
+        config = _config(cam_motion_comp_size=128)
+        result = wcs.apply_tab_settings(config, "aim", {"cam_motion_comp_size": 256})
+        assert result["ok"] is True
+        assert config.cam_motion_comp_size == 256
+        assert isinstance(config.cam_motion_comp_size, int)
+
+    def test_cam_motion_comp_size_accepts_string_value(self):
+        """The HTML <select>'s value attribute is always a string — the
+        wire value from a real browser is "256", not the number 256."""
+        config = _config(cam_motion_comp_size=128)
+        result = wcs.apply_tab_settings(config, "aim", {"cam_motion_comp_size": "256"})
+        assert result["ok"] is True
+        assert config.cam_motion_comp_size == 256
+        assert isinstance(config.cam_motion_comp_size, int)
+
+    def test_cam_motion_comp_size_rejects_invalid_value(self):
+        config = _config(cam_motion_comp_size=128)
+        result = wcs.apply_tab_settings(config, "aim", {"cam_motion_comp_size": 512})
+        assert result == {"ok": False, "reason": "invalid_choice", "field": "cam_motion_comp_size"}
+        assert config.cam_motion_comp_size == 128
+
+    def test_makcu_baud_rate_round_trips_as_int(self):
+        config = _config(makcu_baud_rate=4_000_000)
+        result = wcs.apply_tab_settings(config, "keys", {"makcu_baud_rate": 115200})
+        assert result["ok"] is True
+        assert config.makcu_baud_rate == 115200
+        assert isinstance(config.makcu_baud_rate, int)
+
+
+class TestListVkOptions:
+    def test_missing_win_utils_falls_back_to_none_only(self, monkeypatch):
+        """Forced-unavailable case, not a "real sandbox condition" test:
+        other test files in this suite (test_makcu_mouse.py) leave a
+        working win32api stand-in cached in sys.modules for the rest of
+        the process once they've run, which makes the real
+        win_utils.vk_codes genuinely importable again later in a full
+        `pytest tests/` run — so asserting "win_utils is unimportable here"
+        would be order-dependent. Force it explicitly instead."""
+        # Both keys: "win_utils.vk_codes" can already be cached in
+        # sys.modules independently of its parent package (e.g. from an
+        # earlier real import elsewhere in the same process), so forcing
+        # only the parent to None isn't sufficient to guarantee the import
+        # fails here too.
+        monkeypatch.setitem(sys.modules, "win_utils", None)
+        monkeypatch.setitem(sys.modules, "win_utils.vk_codes", None)
+        options = wcs.list_vk_options()
+        assert options == [{"code": 0, "label": "None / Unbound"}]
+
+    def test_happy_path_includes_named_entries(self, monkeypatch):
+        fake_pkg = types.ModuleType("win_utils")
+        fake_submodule = types.ModuleType("win_utils.vk_codes")
+        fake_submodule.VK_CODE_MAP = {0x01: "Mouse Left", 0x41: "A"}
+        monkeypatch.setitem(sys.modules, "win_utils", fake_pkg)
+        monkeypatch.setitem(sys.modules, "win_utils.vk_codes", fake_submodule)
+
+        options = wcs.list_vk_options()
+        assert options[0] == {"code": 0, "label": "None / Unbound"}
+        assert {"code": 1, "label": "Mouse Left"} in options
+        assert {"code": 0x41, "label": "A"} in options
+        assert len(options) == 3
+
+
+class TestGetSerialPorts:
+    def test_serial_unavailable(self, monkeypatch):
+        """Forced-unavailable case (see TestListVkOptions's equivalent test
+        for why this can't rely on ambient sandbox state across the full
+        suite)."""
+        monkeypatch.setitem(sys.modules, "serial", None)
+        result = wcs.get_serial_ports()
+        assert result["ok"] is False
+        assert result["reason"] == "serial_unavailable"
+
+    def test_happy_path(self, monkeypatch):
+        class _FakePortInfo:
+            def __init__(self, device):
+                self.device = device
+
+        fake_serial = types.ModuleType("serial")
+        fake_tools = types.ModuleType("serial.tools")
+        fake_list_ports = types.ModuleType("serial.tools.list_ports")
+        fake_list_ports.comports = lambda: [_FakePortInfo("COM3"), _FakePortInfo("COM5")]
+        fake_tools.list_ports = fake_list_ports
+        fake_serial.tools = fake_tools
+        monkeypatch.setitem(sys.modules, "serial", fake_serial)
+        monkeypatch.setitem(sys.modules, "serial.tools", fake_tools)
+        monkeypatch.setitem(sys.modules, "serial.tools.list_ports", fake_list_ports)
+
+        result = wcs.get_serial_ports()
+        assert result == {"ok": True, "ports": ["COM3", "COM5"]}
+
+
+class TestResetHumanization:
+    def test_replaces_humanization_with_fresh_defaults(self):
+        stale = types.SimpleNamespace(enabled=False, intensity=0.1)
+        config = _config(humanization=stale)
+        result = wcs.reset_humanization(config)
+        assert result == {"ok": True}
+        # core.humanization is pure Python (no Qt/onnxruntime), genuinely
+        # importable here — real HumanizationConfig() defaults, not faked.
+        assert config.humanization is not stale
+        assert config.humanization.enabled is True
+        assert config.humanization.intensity == 0.5
+
+    def test_humanization_unavailable(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "core.humanization", None)
+        config = _config()
+        result = wcs.reset_humanization(config)
+        assert result["ok"] is False
+        assert result["reason"] == "humanization_unavailable"
+
+
+class TestAimAndKeysSchemaCoverage:
+    """Sanity checks that the aim/keys schemas are internally consistent —
+    complements the cross-file data-key-vs-schema check done by hand while
+    building the frontend (every data-key in index.html resolves to a real
+    schema entry, and vice versa for anything wired to a live field)."""
+
+    def test_get_tab_settings_returns_every_schema_key(self):
+        config = _config()
+        result = wcs.get_tab_settings(config, "aim")
+        assert set(result.keys()) >= set(wcs._SCHEMA["aim"].keys())
+
+    def test_apply_empty_update_is_a_no_op_success(self):
+        config = _config(fov_size=123)
+        result = wcs.apply_tab_settings(config, "aim", {})
+        assert result["ok"] is True
+        assert config.fov_size == 123

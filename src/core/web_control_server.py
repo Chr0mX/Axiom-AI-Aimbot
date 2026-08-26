@@ -318,12 +318,12 @@ def start(
     # -----------------------------------------------------------------
 
     @app.get("/api/settings/{tab}", dependencies=[Depends(_check_token)])
-    def get_settings(tab: Literal["model", "capture", "inference"]):
+    def get_settings(tab: Literal["model", "capture", "inference", "aim", "keys"]):
         from .web_control_settings import get_tab_settings
         return get_tab_settings(config, tab)
 
     @app.post("/api/settings/{tab}", dependencies=[Depends(_check_token)])
-    def post_settings(tab: Literal["model", "capture", "inference"], body: dict):
+    def post_settings(tab: Literal["model", "capture", "inference", "aim", "keys"], body: dict):
         from .web_control_settings import apply_tab_settings
         return apply_tab_settings(config, tab, body)
 
@@ -367,6 +367,21 @@ def start(
     def get_ndi_sources_route():
         from .web_control_settings import get_ndi_sources
         return get_ndi_sources()
+
+    @app.get("/api/vk_options", dependencies=[Depends(_check_token)])
+    def get_vk_options_route():
+        from .web_control_settings import list_vk_options
+        return {"options": list_vk_options()}
+
+    @app.get("/api/serial_ports", dependencies=[Depends(_check_token)])
+    def get_serial_ports_route():
+        from .web_control_settings import get_serial_ports
+        return get_serial_ports()
+
+    @app.post("/api/control/humanization_reset", dependencies=[Depends(_check_token)])
+    def post_humanization_reset_route():
+        from .web_control_settings import reset_humanization
+        return reset_humanization(config)
 
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")

@@ -525,7 +525,594 @@
 
         <div class="panel" id="panel-aim">
           <div class="panel-title">Aim</div>
-          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Part</div></div>
+              <div class="field-control">
+                <select id="aim-aim_part" data-key="aim_part" data-type="choice">
+                  <option value="head">Head</option>
+                  <option value="body">Body</option>
+                  <option value="center">Smart (Center-mass)</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Move Method</div>
+                <div class="field-desc">Arduino/Xbox setup (COM port, ViGEmBus connect) isn't available remotely — only pick these if already set up on the host.</div>
+              </div>
+              <div class="field-control">
+                <select id="aim-mouse_move_method" data-key="mouse_move_method" data-type="choice" data-custom="1">
+                  <option value="ddxoft">ddxoft</option>
+                  <option value="mouse_event">mouse_event</option>
+                  <option value="sendinput">sendinput</option>
+                  <option value="arduino">arduino</option>
+                  <option value="makcu">makcu</option>
+                  <option value="xbox">xbox</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Aim Speed (PID)</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Unsafe Mode</div>
+                <div class="field-desc">Lets the P (reaction speed) sliders go past the proven-stable 0.50 cap, up to 1.00. Higher values can cause oscillation/overshoot.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-pid_unsafe_mode" data-key="pid_unsafe_mode" data-type="bool" data-custom="1">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Reaction Speed X (P)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_kp_x" data-key="pid_kp_x" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Error Correction X (I)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_ki_x" data-key="pid_ki_x" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Stability Control X (D)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_kd_x" data-key="pid_kd_x" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Reaction Speed Y (P)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_kp_y" data-key="pid_kp_y" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Error Correction Y (I)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_ki_y" data-key="pid_ki_y" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Stability Control Y (D)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_kd_y" data-key="pid_kd_y" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Max Move Per Frame</div>
+                <div class="field-desc">Hard cap on PID output per frame, both axes (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-max_move_per_frame_px" data-key="max_move_per_frame_px" data-type="number" min="0" max="500" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Y-Axis Recoil Suppression</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Enable Y-Axis Recoil Reset</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-aim_y_reduce_enabled" data-key="aim_y_reduce_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Y-Axis Reset Delay</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_reduce_delay" data-key="aim_y_reduce_delay" data-type="number" min="0" max="5" step="0.01">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Y Floor</div>
+                <div class="field-desc">Min Y multiplier after ramp — 0.00 = full cut, 1.00 = no suppression</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_reduce_floor" data-key="aim_y_reduce_floor" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Y Ramp Window</div>
+                <div class="field-desc">Time to fade 1.0 → floor after delay (0 = instant cut)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_reduce_ramp" data-key="aim_y_reduce_ramp" data-type="number" min="0" max="2" step="0.01">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Y Settle Threshold</div>
+                <div class="field-desc">Skip suppression while vertical error &gt; this (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_reduce_settle_px" data-key="aim_y_reduce_settle_px" data-type="number" min="0" max="50" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Y Velocity Restore</div>
+                <div class="field-desc">Restore full Y tracking if target moves vertically faster than this (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_vel_restore_px_s" data-key="aim_y_vel_restore_px_s" data-type="number" min="0" max="500" step="1">
+                <span class="field-slider-value">px/s</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Humanization</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Humanization</div>
+                <div class="field-desc">Perturb the final mouse output to look less robotic. Operates only on dx/dy — never touches detection or PID state.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-enabled" data-key="humanization.enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Intensity</div>
+                <div class="field-desc">0% = robotic precision, 100% = fully human-like. Scales every effect below.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-humanization-intensity" data-key="humanization.intensity" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Micro-Jitter</div>
+                <div class="field-desc">Small zero-mean noise added to every move, scaled by movement size.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-micro-jitter-enabled" data-key="humanization.micro_jitter_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-jitter-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Jitter Base</div>
+                  <div class="field-desc">Minimum jitter amplitude added every frame, in pixels.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-jitter-base" data-key="humanization.micro_jitter_base" data-type="number" min="0" max="2" step="0.01">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Jitter Scale</div>
+                  <div class="field-desc">Extra jitter added per pixel of movement, as a fraction of movement size.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-jitter-scale" data-key="humanization.micro_jitter_scale" data-type="number" min="0" max="0.2" step="0.001">
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Apply While Aiming Idle</div>
+                  <div class="field-desc">Also apply Micro-Jitter's tremor while the aim key is held but no target is locked.</div>
+                </div>
+                <div class="field-control">
+                  <label class="switch">
+                    <input type="checkbox" id="aim-humanization-micro-jitter-idle-enabled" data-key="humanization.micro_jitter_idle_enabled" data-type="bool">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Motion Variation</div>
+                <div class="field-desc">Randomize output scale slightly each frame (mean-preserving, no drift).</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-motion-variation-enabled" data-key="humanization.motion_variation_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-motion-variation-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Variation Range</div>
+                  <div class="field-desc">Random output-scale range applied each frame (mean-preserving).</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-motion-variation-range" data-key="humanization.motion_variation_range" data-type="number" min="0" max="0.2" step="0.001">
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Speed Shaping</div>
+                <div class="field-desc">Compress small corrections and pass through large movements unmodified.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-speed-shaping-enabled" data-key="humanization.speed_shaping_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-speed-shaping-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Fine-Control Threshold</div>
+                  <div class="field-desc">Movements below this size are compressed by the Low-Speed Factor.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-low" data-key="humanization.speed_shaping_low" data-type="number" min="0" max="20" step="0.1">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Full-Speed Threshold</div>
+                  <div class="field-desc">Movements above this size pass through unmodified.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-high" data-key="humanization.speed_shaping_high" data-type="number" min="0" max="50" step="0.1">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Low-Speed Factor</div>
+                  <div class="field-desc">Magnitude scale applied to movements below the Fine-Control Threshold.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-low-factor" data-key="humanization.speed_shaping_low_factor" data-type="number" min="0" max="1" step="0.01">
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Micro-Stutter</div>
+                <div class="field-desc">Occasional brief magnitude reduction, modeling muscle hesitation.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-micro-stutter-enabled" data-key="humanization.micro_stutter_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-stutter-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Stutter Chance</div>
+                  <div class="field-desc">Probability per frame of a brief magnitude reduction.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-stutter-prob" data-key="humanization.micro_stutter_prob" data-type="number" min="0" max="0.2" step="0.001">
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Stutter Min</div>
+                  <div class="field-desc">Lower bound of the stutter magnitude factor.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-stutter-min" data-key="humanization.micro_stutter_min" data-type="number" min="0" max="1" step="0.01">
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Stutter Max</div>
+                  <div class="field-desc">Upper bound of the stutter magnitude factor.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-stutter-max" data-key="humanization.micro_stutter_max" data-type="number" min="0" max="1" step="0.01">
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reaction Variability</div>
+                <div class="field-desc">Occasionally skip a frame's mouse injection to simulate human micro-hesitation. Adds real per-frame latency.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-reaction-variability-enabled" data-key="humanization.reaction_variability_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-reaction-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Skip Chance</div>
+                  <div class="field-desc">Probability per frame of skipping the mouse injection entirely.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-reaction-skip-prob" data-key="humanization.reaction_skip_prob" data-type="number" min="0" max="0.1" step="0.001">
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reset to Defaults</div>
+                <div class="field-desc">Resets this entire Humanization section — Intensity, every feature toggle, and every fine-tuning field above.</div>
+              </div>
+              <div class="field-control">
+                <button id="aim-humanization-reset-btn">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Target Priority</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Priority Mode</div>
+                <div class="field-desc">How to select the best target</div>
+              </div>
+              <div class="field-control">
+                <select id="aim-target_priority_mode" data-key="target_priority_mode" data-type="choice">
+                  <option value="distance">Distance</option>
+                  <option value="confidence">Confidence</option>
+                  <option value="composite">Composite</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Confidence Weight</div>
+                <div class="field-desc">Used in Composite mode only</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-target_priority_confidence_weight" data-key="target_priority_confidence_weight" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Target Tracking</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Velocity Prediction</div>
+                <div class="field-desc">Extrapolate target position forward by the prediction horizon.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-prediction_enabled" data-key="prediction_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Prediction Horizon</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-prediction_horizon_ms" data-key="prediction_horizon_ms" data-type="number" min="5" max="50" step="1">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Max Velocity Cap</div>
+                <div class="field-desc">Velocity spikes above this are treated as detection jumps and reset prediction</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-prediction_max_velocity" data-key="prediction_max_velocity" data-type="number" min="300" max="3000" step="10">
+                <span class="field-slider-value">px/s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">History Frames</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-prediction_history_len" data-key="prediction_history_len" data-type="number" min="2" max="6" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Sticky Target Lock</div>
+                <div class="field-desc">Lock onto a target and hold aim across short detection gaps.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-sticky_lock_enabled" data-key="sticky_lock_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Lock Decay Frames</div>
+                <div class="field-desc">Frames to hold aim after target is lost before releasing the lock</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-lock_decay_frames" data-key="lock_decay_frames" data-type="number" min="3" max="60" step="1">
+                <span class="field-slider-value">fr</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">IoU Match Threshold</div>
+                <div class="field-desc">Minimum overlap required to match the same target across frames</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-lock_iou_threshold" data-key="lock_iou_threshold" data-type="number" min="0.10" max="0.70" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Kalman Filter</div>
+                <div class="field-desc">2D Kalman filter for aim-point smoothing.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-kalman_enabled" data-key="kalman_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Process Noise</div>
+                <div class="field-desc">Lower = smoother but slower to react</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-kalman_process_noise" data-key="kalman_process_noise" data-type="number" min="0.01" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Measurement Noise</div>
+                <div class="field-desc">Lower = reacts faster but noisier</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-kalman_measurement_noise" data-key="kalman_measurement_noise" data-type="number" min="0.01" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Camera Motion Compensation</div>
+                <div class="field-desc">Subtract per-frame global scene shift from aim error to cancel camera shake.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-cam_motion_comp_enabled" data-key="cam_motion_comp_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Compensation Resolution</div>
+                <div class="field-desc">128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)</div>
+              </div>
+              <div class="field-control">
+                <select id="aim-cam_motion_comp_size" data-key="cam_motion_comp_size" data-type="choice">
+                  <option value="128">128</option>
+                  <option value="256">256</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Target Area Settings</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Custom Aim Y Position</div>
+                <div class="field-desc">0% = top of box, 100% = bottom. ~20% = head, ~60% = body.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_custom_y_pct" data-key="aim_custom_y_pct" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Head Width Ratio</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-head_width_ratio" data-key="head_width_ratio" data-type="number" min="0.10" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Head Height Ratio</div>
+                <div class="field-desc">Body Height = 100% − Head Height</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-head_height_ratio" data-key="head_height_ratio" data-type="number" min="0.10" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Body Width Ratio</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-body_width_ratio" data-key="body_width_ratio" data-type="number" min="0.10" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Distance-Adaptive Ratio</div>
+                <div class="field-desc">Scale head ratio inversely with box size — keeps head aim accurate from close to long range.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-aim_adaptive_ratio_enabled" data-key="aim_adaptive_ratio_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reference Box Height</div>
+                <div class="field-desc">Box height (px) where head ratio is nominal.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_adaptive_ratio_ref_h" data-key="aim_adaptive_ratio_ref_h" data-type="number" min="20" max="200" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Posture-Aware Targeting</div>
+                <div class="field-desc">Fall back to center-mass when box is wider than tall (crouch / slide / prone).</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-aim_posture_aware_enabled" data-key="aim_posture_aware_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Crouch Aspect Threshold</div>
+                <div class="field-desc">box_w / box_h above which player is treated as crouching. Default 1.2×.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_crouch_aspect_threshold" data-key="aim_crouch_aspect_threshold" data-type="number" min="0.80" max="2.00" step="0.01">
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="panel" id="panel-trigger">
@@ -548,6 +1135,133 @@
               <span class="slider"></span>
             </label>
             <div class="control-label">MAKCU Connect</div>
+          </div>
+
+          <div class="hint">Hotkey fields below are a named-option dropdown, not the Qt app's "press a key" live capture — a remote browser can't safely reproduce that (no global key polling, and browser key/mouse codes don't match this app's own VK scheme).</div>
+
+          <div class="field-group-title" id="keys-aim-group-title">Auto Aim</div>
+          <div class="field-group" id="keys-aim-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Key 1</div></div>
+              <div class="field-control">
+                <select id="keys-aim-key-1" class="vk-select" data-key="AimKeys.0" data-type="number"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Key 2</div></div>
+              <div class="field-control">
+                <select id="keys-aim-key-2" class="vk-select" data-key="AimKeys.1" data-type="number"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Key 3</div></div>
+              <div class="field-control">
+                <select id="keys-aim-key-3" class="vk-select" data-key="AimKeys.2" data-type="number"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Toggle Key</div>
+                <div class="field-desc">Toggle Auto Aim</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-toggle-key" class="vk-select" data-key="aim_toggle_key" data-type="number"></select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="keys-fire-group-title">Keys &amp; Auto Fire</div>
+          <div class="field-group" id="keys-fire-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Auto Fire Key 1</div></div>
+              <div class="field-control">
+                <select id="keys-fire-key-1" class="vk-select" data-key="auto_fire_key" data-type="number"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Auto Fire Key 2</div></div>
+              <div class="field-control">
+                <select id="keys-fire-key-2" class="vk-select" data-key="auto_fire_key2" data-type="number"></select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="keys-makcu-conn-group-title">MAKCU Connection</div>
+          <div class="field-group" id="keys-makcu-conn-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">COM Port</div></div>
+              <div class="field-control">
+                <select id="keys-makcu_com_port" data-key="makcu_com_port" data-type="text"></select>
+                <button id="keys-makcu-port-refresh-btn">Refresh</button>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Baud Rate</div></div>
+              <div class="field-control">
+                <select id="keys-makcu_baud_rate" data-key="makcu_baud_rate" data-type="choice">
+                  <option value="115200">115200</option>
+                  <option value="460800">460800</option>
+                  <option value="1000000">1000000</option>
+                  <option value="2000000">2000000</option>
+                  <option value="4000000">4000000</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="keys-makcu-keys-group-title">MAKCU Keys</div>
+          <div class="field-group" id="keys-makcu-keys-group">
+            <div class="field-card" id="keys-makcu-inference-card">
+              <div class="field-info">
+                <div class="field-title">Inference</div>
+                <div class="field-desc">Hold this mouse button to activate inference</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-makcu-inference-select" data-key="AimKeys.0" data-type="number">
+                  <option value="1">Left</option>
+                  <option value="2">Right</option>
+                  <option value="4">Middle</option>
+                  <option value="5">Side 1</option>
+                  <option value="6">Side 2</option>
+                  <option value="0">None</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-trigger-card">
+              <div class="field-info">
+                <div class="field-title">Auto Aim Key</div>
+                <div class="field-desc">Mouse button that activates Auto Aim</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-makcu_aim_button" data-key="makcu_aim_button" data-type="choice">
+                  <option value="lmb">Left</option>
+                  <option value="rmb">Right</option>
+                  <option value="off">Off</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-aim-mode-card">
+              <div class="field-info">
+                <div class="field-title">Aim Mode</div>
+                <div class="field-desc">Hold: aim while button held  |  Toggle: click to toggle aim on/off</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-makcu_aim_mode" data-key="makcu_aim_mode" data-type="choice">
+                  <option value="hold">Hold</option>
+                  <option value="toggle">Toggle</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-disengage-card">
+              <div class="field-info">
+                <div class="field-title">Disengage Delay</div>
+                <div class="field-desc">Keep aiming after releasing the aim button (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-makcu_disengage_delay" data-key="makcu_disengage_delay" data-type="number" min="0" max="20" step="0.1">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
           </div>
         </div>
 

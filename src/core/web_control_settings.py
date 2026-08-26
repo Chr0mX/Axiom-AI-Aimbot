@@ -108,13 +108,161 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # label to carry the /10 translation the GUI's format_func provides.
         "frame_skip_threshold": {"type": "float", "min": 0.5, "max": 10.0},
     },
+    "aim": {
+        "aim_part": {"type": "choice", "choices": ["head", "body", "center", "custom"]},
+        # mouse_click_method isn't set generically here when mouse_move_method
+        # becomes "makcu" — that coupling (aim_page.py's _onMouseMoveChanged)
+        # is left to the client, same precedent as ndi_source_name/
+        # ndi_force_reconnect: it already has both values in hand, so no
+        # server-side "decide" logic is needed for a plain two-key POST.
+        "mouse_move_method": {"type": "choice", "choices": ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]},
+        "mouse_click_method": {"type": "str"},
+        "pid_unsafe_mode": {"type": "bool"},
+        # Effective safe range is 0.0-0.5 unless pid_unsafe_mode is on (up to
+        # 1.0) — the GUI enforces this by capping slider travel and clamping
+        # pid_kp_x/y down to 0.5 when Unsafe Mode is turned off. This schema
+        # always allows the full 0.0-1.0 range; the clamp-on-disable is done
+        # client-side (same reasoning as the mouse_click_method note above).
+        "pid_kp_x": {"type": "float", "min": 0.0, "max": 1.0},
+        "pid_ki_x": {"type": "float", "min": 0.0, "max": 1.0},
+        "pid_kd_x": {"type": "float", "min": 0.0, "max": 1.0},
+        "pid_kp_y": {"type": "float", "min": 0.0, "max": 1.0},
+        "pid_ki_y": {"type": "float", "min": 0.0, "max": 1.0},
+        "pid_kd_y": {"type": "float", "min": 0.0, "max": 1.0},
+        "max_move_per_frame_px": {"type": "float", "min": 0, "max": 500},
+        "aim_y_reduce_enabled": {"type": "bool"},
+        "aim_y_reduce_delay": {"type": "float", "min": 0.0, "max": 5.0},
+        "aim_y_reduce_floor": {"type": "float", "min": 0.0, "max": 1.0},
+        "aim_y_reduce_ramp": {"type": "float", "min": 0.0, "max": 2.0},
+        "aim_y_reduce_settle_px": {"type": "float", "min": 0, "max": 50},
+        "aim_y_vel_restore_px_s": {"type": "float", "min": 0, "max": 500},
+        # Humanization fields live on config.humanization (its own
+        # HumanizationConfig dataclass), reached via the dotted-path
+        # mechanism in _get_nested()/_set_nested() above.
+        "humanization.enabled": {"type": "bool"},
+        "humanization.intensity": {"type": "float", "min": 0.0, "max": 1.0},
+        "humanization.micro_jitter_enabled": {"type": "bool"},
+        "humanization.micro_jitter_base": {"type": "float", "min": 0.0, "max": 2.0},
+        "humanization.micro_jitter_scale": {"type": "float", "min": 0.0, "max": 0.2},
+        "humanization.micro_jitter_idle_enabled": {"type": "bool"},
+        "humanization.motion_variation_enabled": {"type": "bool"},
+        "humanization.motion_variation_range": {"type": "float", "min": 0.0, "max": 0.2},
+        "humanization.speed_shaping_enabled": {"type": "bool"},
+        "humanization.speed_shaping_low": {"type": "float", "min": 0.0, "max": 20.0},
+        "humanization.speed_shaping_high": {"type": "float", "min": 0.0, "max": 50.0},
+        "humanization.speed_shaping_low_factor": {"type": "float", "min": 0.0, "max": 1.0},
+        "humanization.micro_stutter_enabled": {"type": "bool"},
+        "humanization.micro_stutter_prob": {"type": "float", "min": 0.0, "max": 0.2},
+        "humanization.micro_stutter_min": {"type": "float", "min": 0.0, "max": 1.0},
+        "humanization.micro_stutter_max": {"type": "float", "min": 0.0, "max": 1.0},
+        "humanization.reaction_variability_enabled": {"type": "bool"},
+        "humanization.reaction_skip_prob": {"type": "float", "min": 0.0, "max": 0.1},
+        "target_priority_mode": {"type": "choice", "choices": ["distance", "confidence", "composite"]},
+        "target_priority_confidence_weight": {"type": "float", "min": 0.0, "max": 1.0},
+        "prediction_enabled": {"type": "bool"},
+        "prediction_horizon_ms": {"type": "float", "min": 5, "max": 50},
+        "prediction_max_velocity": {"type": "float", "min": 300, "max": 3000},
+        "prediction_history_len": {"type": "int", "min": 2, "max": 6},
+        "sticky_lock_enabled": {"type": "bool"},
+        "lock_decay_frames": {"type": "int", "min": 3, "max": 60},
+        "lock_iou_threshold": {"type": "float", "min": 0.10, "max": 0.70},
+        "kalman_enabled": {"type": "bool"},
+        "kalman_process_noise": {"type": "float", "min": 0.01, "max": 1.0},
+        "kalman_measurement_noise": {"type": "float", "min": 0.01, "max": 1.0},
+        "cam_motion_comp_enabled": {"type": "bool"},
+        "cam_motion_comp_size": {"type": "choice", "choices": [128, 256]},
+        "aim_custom_y_pct": {"type": "float", "min": 0, "max": 100},
+        "head_width_ratio": {"type": "float", "min": 0.10, "max": 1.0},
+        "head_height_ratio": {"type": "float", "min": 0.10, "max": 1.0},
+        "body_width_ratio": {"type": "float", "min": 0.10, "max": 1.0},
+        "aim_adaptive_ratio_enabled": {"type": "bool"},
+        "aim_adaptive_ratio_ref_h": {"type": "float", "min": 20, "max": 200},
+        "aim_posture_aware_enabled": {"type": "bool"},
+        "aim_crouch_aspect_threshold": {"type": "float", "min": 0.80, "max": 2.00},
+    },
+    "keys": {
+        # AimKeys[0]/[1]/[2] double as "Aim Key 1/2/3" (non-MAKCU mode) and
+        # "Inference" (MAKCU mode, index 0 only) — same underlying field the
+        # GUI itself reuses across both presentations. VK codes are plain
+        # ints here (no choice validation against the whole VK table): the
+        # web client only offers a <select> populated from
+        # GET /api/vk_options, so a normal client can't send an invalid
+        # one, and any other int just falls back to a hex label.
+        "AimKeys.0": {"type": "int"},
+        "AimKeys.1": {"type": "int"},
+        "AimKeys.2": {"type": "int"},
+        "aim_toggle_key": {"type": "int"},
+        "auto_fire_key": {"type": "int"},
+        "auto_fire_key2": {"type": "int"},
+        "makcu_com_port": {"type": "str"},
+        "makcu_baud_rate": {"type": "choice", "choices": [115200, 460800, 1000000, 2000000, 4000000]},
+        "makcu_aim_button": {"type": "choice", "choices": ["lmb", "rmb", "off"]},
+        "makcu_aim_mode": {"type": "choice", "choices": ["hold", "toggle"]},
+        "makcu_disengage_delay": {"type": "float", "min": 0.0, "max": 20.0},
+    },
 }
 
 TABS = tuple(_SCHEMA.keys())
 
 
+def _path_part(obj, part: str):
+    """One segment of a dotted field path — a plain attribute name, or an
+    all-digit segment addressing a list index (e.g. "AimKeys.0" reaches
+    config.AimKeys[0]). Returns None if obj is None or the segment doesn't
+    resolve (missing attribute / out-of-range index)."""
+    if obj is None:
+        return None
+    if part.isdigit():
+        try:
+            return obj[int(part)]
+        except (IndexError, TypeError, KeyError):
+            return None
+    return getattr(obj, part, None)
+
+
+def _get_nested(config, dotted_field: str):
+    """Resolve a "."-separated field path against config — e.g.
+    "humanization.intensity" reads config.humanization.intensity,
+    "AimKeys.0" reads config.AimKeys[0]. A plain field with no "." behaves
+    exactly like a bare getattr(config, field, None) (the loop below runs
+    zero iterations for a single-segment path)."""
+    parts = dotted_field.split(".")
+    obj = config
+    for p in parts[:-1]:
+        obj = _path_part(obj, p)
+        if obj is None:
+            return None
+    return _path_part(obj, parts[-1])
+
+
+def _set_nested(config, dotted_field: str, value) -> bool:
+    """Write to the same path _get_nested() reads. Returns False (without
+    raising) if an intermediate segment doesn't resolve — e.g. writing
+    "AimKeys.5" when AimKeys only has 3 elements."""
+    parts = dotted_field.split(".")
+    obj = config
+    for p in parts[:-1]:
+        obj = _path_part(obj, p)
+        if obj is None:
+            return False
+    last = parts[-1]
+    if last.isdigit():
+        try:
+            obj[int(last)] = value
+            return True
+        except (IndexError, TypeError):
+            return False
+    setattr(obj, last, value)
+    return True
+
+
 def get_tab_settings(config, tab: str) -> dict:
     """Read every field in _SCHEMA[tab] off config, in display units.
+
+    Field names may be dotted/indexed paths (see _get_nested()) for values
+    that don't live directly on Config — e.g. "humanization.intensity"
+    (Config.humanization is its own HumanizationConfig dataclass) or
+    "AimKeys.0" (Config.AimKeys is a list[int]).
 
     Unknown tab -> {}. capture also gets two extra, non-schema keys
     (system_ip, bind_ip_options) computed from get_local_ips() below, since
@@ -127,7 +275,7 @@ def get_tab_settings(config, tab: str) -> dict:
 
     result: dict = {}
     for field, spec in schema.items():
-        raw = getattr(config, field, None)
+        raw = _get_nested(config, field)
         ftype = spec["type"]
         if raw is None:
             result[field] = None
@@ -153,6 +301,20 @@ def get_tab_settings(config, tab: str) -> dict:
         result["ndi_width"] = int(getattr(config, "ndi_width", 0) or 0)
         result["ndi_height"] = int(getattr(config, "ndi_height", 0) or 0)
         result["ndi_source_nominal_fps"] = float(getattr(config, "source_nominal_fps", 0.0) or 0.0)
+
+    if tab == "keys":
+        # Read-only extras — these three drive the Keys & HW panel's own
+        # visibility rules (MAKCU-mode groups vs. Aim/Fire Keys groups;
+        # Inference card hidden when keep_detecting; Auto Aim Key/Aim Mode/
+        # Disengage Delay hidden when always_aim) but each is *owned* by a
+        # different tab/route: mouse_move_method by the "aim" tab's own
+        # schema entry, keep_detecting by the "inference" tab's, always_aim
+        # by the dedicated POST /api/control/always_aim route (its
+        # idle_detect_enabled coupling means it must never be a plain
+        # generic-schema field — see app_controller.set_always_aim()).
+        result["mouse_move_method"] = getattr(config, "mouse_move_method", "")
+        result["keep_detecting"] = bool(getattr(config, "keep_detecting", False))
+        result["always_aim"] = bool(getattr(config, "always_aim", False))
 
     return result
 
@@ -185,10 +347,25 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
         if ftype == "bool":
             to_apply[field] = bool(value)
         elif ftype == "choice":
-            text = str(value).strip().lower()
-            if text not in spec["choices"]:
+            # Choices are usually strings (e.g. "mss"), matched case-
+            # insensitively — but a few fields (cam_motion_comp_size,
+            # makcu_baud_rate) have int-valued choices instead, matched by
+            # string comparison then stored back as the matched choice's
+            # own type, so an int-valued choice list round-trips as int
+            # rather than being coerced into a string.
+            text = str(value).strip()
+            matched = None
+            for choice in spec["choices"]:
+                if isinstance(choice, str):
+                    if text.lower() == choice.lower():
+                        matched = choice
+                        break
+                elif text == str(choice):
+                    matched = choice
+                    break
+            if matched is None:
                 return {"ok": False, "reason": "invalid_choice", "field": field}
-            to_apply[field] = text
+            to_apply[field] = matched
         elif ftype == "str":
             to_apply[field] = str(value)
         else:  # "int" / "float" — bounds are expressed in display units
@@ -205,7 +382,7 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
             to_apply[field] = int(round(config_value)) if ftype == "int" else config_value
 
     for field, coerced in to_apply.items():
-        setattr(config, field, coerced)
+        _set_nested(config, field, coerced)
 
     return {"ok": True, "applied": get_tab_settings(config, tab)}
 
@@ -438,3 +615,69 @@ def get_local_ips() -> list[str]:
         except Exception:
             pass
     return ips
+
+
+# ---------------------------------------------------------------------------
+# Hotkey rebinding — VK-code options for the Keys & HW panel's select-based
+# rebind fields. The Qt GUI's KeyBindButton live-captures a keypress (a
+# global win32api.GetAsyncKeyState() poll, so it works even while the app is
+# unfocused) — that mechanism can't be safely replicated from a remote
+# browser: there's no equivalent of global OS-level key polling from a web
+# page, and browser key/mouse-button codes (KeyboardEvent.code,
+# MouseEvent.button) don't match this app's own VK-code scheme at all,
+# so a naively-translated live-captured browser event could silently bind
+# the wrong input. A known-good dropdown sacrifices "press to bind" UX for
+# correctness instead.
+# ---------------------------------------------------------------------------
+
+def list_vk_options() -> list[dict]:
+    """Named VK-code options, sourced from win_utils.vk_codes.VK_CODE_MAP —
+    a plain pure-Python table (no Qt/win32api import of its own), reused
+    directly rather than copied, unlike keys_page.py's separate/parallel
+    VK_CODE_TRANSLATION_MAP (a GUI file). Importing win_utils.vk_codes still
+    executes win_utils/__init__.py first (Python always runs a package's
+    __init__ on any submodule import), which does pull in win32api — fine on
+    the real Windows host this runs on, just unusable in a non-Windows
+    sandbox, same as every other win_utils-touching function in this
+    codebase.
+
+    A synthetic 0 = "None / Unbound" entry is prepended, matching this
+    app's own "0 = unbound" convention (not itself a key in VK_CODE_MAP).
+    """
+    try:
+        from win_utils.vk_codes import VK_CODE_MAP
+    except Exception:
+        VK_CODE_MAP = {}
+    options = [{"code": 0, "label": "None / Unbound"}]
+    for code, label in VK_CODE_MAP.items():
+        options.append({"code": code, "label": label})
+    return options
+
+
+def get_serial_ports() -> dict:
+    """Enumerate COM ports, mirroring keys_page.py's/aim_page.py's own live
+    serial-port refresh (serial.tools.list_ports.comports()) — used here
+    for the MAKCU COM Port select (Arduino's own COM Port isn't exposed;
+    the whole Arduino group is out of scope, see CLAUDE.md)."""
+    try:
+        import serial.tools.list_ports
+    except Exception as exc:
+        return {"ok": False, "reason": "serial_unavailable", "detail": str(exc)}
+    try:
+        ports = [p.device for p in serial.tools.list_ports.comports()]
+    except Exception:
+        ports = []
+    return {"ok": True, "ports": ports}
+
+
+def reset_humanization(config) -> dict:
+    """Replace config.humanization with a fresh HumanizationConfig(),
+    mirroring aim_page.py's _onHumanizationResetClicked() exactly — reusing
+    the real dataclass's own defaults rather than duplicating them here, so
+    this can never drift from core/humanization.py's actual defaults."""
+    try:
+        from core.humanization import HumanizationConfig
+    except Exception as exc:
+        return {"ok": False, "reason": "humanization_unavailable", "detail": str(exc)}
+    config.humanization = HumanizationConfig()
+    return {"ok": True}

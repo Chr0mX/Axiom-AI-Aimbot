@@ -80,11 +80,14 @@
     // Re-fetch this tab's settings every time it's activated (not just
     // once) so a change made from the Qt GUI while this tab was in the
     // background is picked up on return.
-    if (name === "model" || name === "capture" || name === "inference") {
+    if (name === "model" || name === "capture" || name === "inference" || name === "aim" || name === "keys") {
       loadTabSettings(name);
     }
     if (name === "model") {
       ensureModelPanelExtras();
+    }
+    if (name === "keys") {
+      ensureVkOptionsLoaded();
     }
   }
 
@@ -302,6 +305,8 @@
         });
         if (tab === "capture") updateCaptureVisibility(data.screenshot_method);
         if (tab === "inference") updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
+        if (tab === "aim") updateHumanizationVisibility();
+        if (tab === "keys") updateKeysVisibility(data);
       })
       .catch(function () {});
   }
@@ -338,6 +343,7 @@
           updateUvcSubVisibility();
         }
         if (tab === "inference" && key === "fov_reduce_on_target_enabled") updateFovReduceVisibility(el.checked);
+        if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
       });
     });
   }
@@ -346,6 +352,176 @@
     document.getElementById("inf-fov-min-size-card").classList.toggle("hidden", !enabled);
     document.getElementById("inf-fov-min-duration-card").classList.toggle("hidden", !enabled);
   }
+
+  // ---------------------------------------------------------------------
+  // Aim panel — Humanization sub-field visibility, PID Unsafe Mode's
+  // clamp-on-disable, Move Method's mouse_click_method coupling, and the
+  // Humanization Reset-to-Defaults action.
+  // ---------------------------------------------------------------------
+  var HUMANIZATION_TOGGLE_KEYS = [
+    "humanization.enabled",
+    "humanization.micro_jitter_enabled",
+    "humanization.motion_variation_enabled",
+    "humanization.speed_shaping_enabled",
+    "humanization.micro_stutter_enabled",
+    "humanization.reaction_variability_enabled",
+  ];
+
+  function updateHumanizationVisibility() {
+    var master = document.getElementById("aim-humanization-enabled").checked;
+    function gate(toggleId, groupId) {
+      var toggle = document.getElementById(toggleId);
+      var enabled = master && !!(toggle && toggle.checked);
+      document.getElementById(groupId).classList.toggle("hidden", !enabled);
+    }
+    gate("aim-humanization-micro-jitter-enabled", "aim-humanization-jitter-subgroup");
+    gate("aim-humanization-motion-variation-enabled", "aim-humanization-motion-variation-subgroup");
+    gate("aim-humanization-speed-shaping-enabled", "aim-humanization-speed-shaping-subgroup");
+    gate("aim-humanization-micro-stutter-enabled", "aim-humanization-stutter-subgroup");
+    gate("aim-humanization-reaction-variability-enabled", "aim-humanization-reaction-subgroup");
+  }
+
+  document.getElementById("aim-humanization-reset-btn").addEventListener("click", function () {
+    var btn = document.getElementById("aim-humanization-reset-btn");
+    btn.disabled = true;
+    fetch("/api/control/humanization_reset", { method: "POST", headers: authHeaders() })
+      .catch(function () {})
+      .then(function () {
+        loadTabSettings("aim"); // re-pull the fresh HumanizationConfig() defaults
+        btn.disabled = false;
+      });
+  });
+
+  // pid_unsafe_mode is data-custom — turning it OFF must also clamp
+  // pid_kp_x/y down to <=0.5, mirroring aim_page.py's _onPidUnsafeChanged().
+  // Done as one coupled POST (all three keys the client already has in
+  // hand from the currently-loaded number inputs), same precedent as
+  // ndi_source_name/ndi_force_reconnect.
+  document.getElementById("aim-pid_unsafe_mode").addEventListener("change", function (e) {
+    var enabled = e.target.checked;
+    var body = { pid_unsafe_mode: enabled };
+    if (!enabled) {
+      var kpX = document.getElementById("aim-pid_kp_x");
+      var kpY = document.getElementById("aim-pid_kp_y");
+      var xVal = parseFloat(kpX.value);
+      var yVal = parseFloat(kpY.value);
+      if (!isNaN(xVal) && xVal > 0.5) { body.pid_kp_x = 0.5; kpX.value = "0.5"; }
+      if (!isNaN(yVal) && yVal > 0.5) { body.pid_kp_y = 0.5; kpY.value = "0.5"; }
+    }
+    fetch("/api/settings/aim", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || data.ok === false) loadTabSettings("aim");
+      })
+      .catch(function () { loadTabSettings("aim"); });
+  });
+
+  // mouse_move_method is data-custom — switching to "makcu" must also set
+  // mouse_click_method="makcu", mirroring aim_page.py's
+  // _onMouseMoveChanged(). ensure_ddxoft_ready() and the cross-page
+  // keysInterface visibility refresh the GUI does on this same change have
+  // no remote equivalent — the Keys & HW panel already re-fetches its own
+  // visibility state every time it's activated, so it self-heals without
+  // needing a push from here.
+  document.getElementById("aim-mouse_move_method").addEventListener("change", function (e) {
+    var method = e.target.value;
+    var body = { mouse_move_method: method };
+    if (method === "makcu") body.mouse_click_method = "makcu";
+    fetch("/api/settings/aim", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || data.ok === false) loadTabSettings("aim");
+      })
+      .catch(function () { loadTabSettings("aim"); });
+  });
+
+  // ---------------------------------------------------------------------
+  // Keys & HW panel — MAKCU-mode visibility, hotkey VK-select population,
+  // MAKCU COM port enumeration.
+  // ---------------------------------------------------------------------
+  function updateKeysVisibility(data) {
+    var isMakcu = data.mouse_move_method === "makcu";
+    ["keys-aim-group", "keys-aim-group-title", "keys-fire-group", "keys-fire-group-title"].forEach(function (id) {
+      document.getElementById(id).classList.toggle("hidden", isMakcu);
+    });
+    ["keys-makcu-conn-group", "keys-makcu-conn-group-title", "keys-makcu-keys-group", "keys-makcu-keys-group-title"].forEach(function (id) {
+      document.getElementById(id).classList.toggle("hidden", !isMakcu);
+    });
+    document.getElementById("keys-makcu-inference-card").classList.toggle("hidden", !!data.keep_detecting);
+    // always_aim-gated cards are also kept live-synced from every status
+    // poll (see applyStatus()) regardless of which tab is active — set
+    // here too so a fresh tab activation doesn't show a stale state for
+    // the instant before the next poll tick lands.
+    var hideForAlwaysAim = !!data.always_aim;
+    document.getElementById("keys-makcu-trigger-card").classList.toggle("hidden", hideForAlwaysAim);
+    document.getElementById("keys-makcu-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
+    document.getElementById("keys-makcu-disengage-card").classList.toggle("hidden", hideForAlwaysAim);
+  }
+
+  var vkOptionsLoaded = false;
+
+  function ensureVkOptionsLoaded() {
+    if (vkOptionsLoaded) return;
+    vkOptionsLoaded = true;
+    fetch("/api/vk_options", { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || !data.options) return;
+        var selects = document.querySelectorAll(".vk-select");
+        selects.forEach(function (select) {
+          select.innerHTML = "";
+          data.options.forEach(function (opt) {
+            var el = document.createElement("option");
+            el.value = String(opt.code);
+            el.textContent = opt.label;
+            select.appendChild(el);
+          });
+        });
+        // Options didn't exist yet the first time loadTabSettings("keys")
+        // ran (at tab-activation time) — re-apply now that they do.
+        loadTabSettings("keys");
+      })
+      .catch(function () {});
+  }
+
+  document.getElementById("keys-makcu-port-refresh-btn").addEventListener("click", function () {
+    var btn = document.getElementById("keys-makcu-port-refresh-btn");
+    btn.disabled = true;
+    fetch("/api/serial_ports", { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || data.ok === false) return;
+        var select = document.getElementById("keys-makcu_com_port");
+        var current = select.value;
+        select.innerHTML = "";
+        (data.ports || []).forEach(function (port) {
+          var opt = document.createElement("option");
+          opt.value = port;
+          opt.textContent = port;
+          select.appendChild(opt);
+        });
+        if (current) {
+          var has = Array.prototype.some.call(select.options, function (o) { return o.value === current; });
+          if (!has) {
+            var opt2 = document.createElement("option");
+            opt2.value = current;
+            opt2.textContent = current;
+            select.appendChild(opt2);
+          }
+          select.value = current;
+        }
+      })
+      .catch(function () {})
+      .then(function () { btn.disabled = false; });
+  });
 
   // ---------------------------------------------------------------------
   // Capture panel — conditional UVC/NDI/UDP groups + device/source probing
@@ -453,6 +629,21 @@
     if (!w || !h) return;
     pushTabSetting("capture", "uvc_width", w);
     pushTabSetting("capture", "uvc_height", h);
+  });
+
+  // Device/FPS selects have no data-key (their options are populated live
+  // by the Refresh Device probe, not static HTML) — wire their writes
+  // explicitly, same single-field pushTabSetting() every generic field uses.
+  document.getElementById("cap-uvc-device-select").addEventListener("change", function (e) {
+    var idx = parseInt(e.target.value, 10);
+    if (isNaN(idx)) return;
+    pushTabSetting("capture", "uvc_device_index", idx);
+  });
+
+  document.getElementById("cap-uvc-fps-select").addEventListener("change", function (e) {
+    var fps = parseInt(e.target.value, 10);
+    if (isNaN(fps)) return;
+    pushTabSetting("capture", "uvc_fps", fps);
   });
 
   document.getElementById("cap-ndi-source-select").addEventListener("change", function (e) {
@@ -626,6 +817,16 @@
     suppressToggleEcho = true;
     alwaysAimToggle.checked = !!s.always_aim;
     suppressToggleEcho = false;
+
+    // Keep the always_aim-gated Keys & HW cards live-synced from every
+    // status poll (not just on tab activation), mirroring the Qt app's own
+    // continuous re-check pattern (_updateMakcuAimStatus()) — this way a
+    // toggle flipped from either the Qt GUI or this same page updates the
+    // Keys panel even while it isn't the active tab.
+    var hideForAlwaysAim = !!s.always_aim;
+    document.getElementById("keys-makcu-trigger-card").classList.toggle("hidden", hideForAlwaysAim);
+    document.getElementById("keys-makcu-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
+    document.getElementById("keys-makcu-disengage-card").classList.toggle("hidden", hideForAlwaysAim);
 
     // Only reflect server state onto the toggle while it isn't mid-request
     // (disabled) — otherwise a status poll landing between the user's click
@@ -820,6 +1021,8 @@
   wireGenericFields("model");
   wireGenericFields("capture");
   wireGenericFields("inference");
+  wireGenericFields("aim");
+  wireGenericFields("keys");
 
   loadModelList();
   // Model is the default-active panel (no click to trigger activateTab's
