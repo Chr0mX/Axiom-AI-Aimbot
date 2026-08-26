@@ -21,11 +21,14 @@ shape, just fronting an asyncio loop instead of a blocking socket loop).
 Access is LAN-wide (binds 0.0.0.0, matching esp_server.py's own precedent)
 — the token is the actual safeguard, not the bind address.
 
-fastapi/uvicorn/pydantic are not part of this app's vendored dependency
-tree yet (see CLAUDE.md's Web Control section) — every import of them
-here is deferred to inside start() specifically so this module stays
-importable (and start() can fail gracefully with a clear log message)
-on a machine that hasn't vendored them in yet, the same way main.py
+fastapi/uvicorn aren't part of this app's bundled src/python/ dependency
+tree — like TensorRT/PaddleOCR, they're installed on demand via
+"Install Web Control.bat" (src/install_web_control_local.py) into
+%LOCALAPPDATA%\\AxiomAI\\site-packages, which session_utils.py's
+_inject_axiom_packages() already adds to sys.path at startup. Every
+import of them here is deferred to inside start() specifically so this
+module stays importable (and start() can fail gracefully with a clear
+log message) before that installer has been run, the same way main.py
 already wraps esp_server.start() in a try/except so one subsystem's
 absence never blocks the rest of the app.
 """
@@ -156,8 +159,9 @@ def start(config) -> bool:
     except ImportError as exc:
         logger.error(
             "[WebControl] fastapi/uvicorn not installed — Web Control server "
-            "not started. Vendor them into this app's Python environment "
-            "(pip install fastapi uvicorn) to enable this feature. (%s)", exc,
+            "not started. Run \"Install Web Control.bat\" (or "
+            "src\\python\\python.exe src\\install_web_control_local.py) and "
+            "restart Axiom to enable this feature. (%s)", exc,
         )
         return False
 
