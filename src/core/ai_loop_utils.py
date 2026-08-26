@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from .config import Config
+    from .ai_loop_state import LoopState
 
 
 def get_capture_dimensions(config: Config) -> Tuple[int, int]:
@@ -127,6 +128,66 @@ def get_effective_detect_range_size(
     # The lower bound is max(fov_size, fov_height) — the square detection
     # region must contain the whole FOV rectangle, not just its width.
     return max(fov_size, fov_height, min(int(capture_height), int(capture_width), detection_size))
+
+
+def compute_effective_fov(config: Config, state: LoopState, current_time: float) -> Tuple[int, int]:
+    """FOV width/height actually in effect this frame, applying "Reduce FOV
+    on Active Target" (fov_reduce_on_target_enabled) on top of the
+    configured fov_size/fov_height.
+
+    Mutates state.fov_reduce_since / state.fov_reduce_expired to track the
+    shrink window across frames:
+
+    - fov_reduce_since == 0.0 and not fov_reduce_expired: no window armed
+      for the current lock yet. The None -> non-None edge of
+      state.locked_box arms one exactly once (not every frame the target
+      stays locked — see LoopState.fov_reduce_since for why that
+      distinction matters).
+    - fov_reduce_since > 0.0: an armed window, still within
+      fov_min_size_duration (or fov_min_size_duration <= 0, meaning "hold
+      indefinitely while locked") — FOV is shrunk to fov_min_size_pct%.
+    - fov_reduce_expired: the window ran its full duration and reverted.
+      Stays this way for the rest of the *current* lock. Without this
+      separate flag, the very next frame reads "window just expired" as
+      indistinguishable from "no window has ever started" (both leave
+      fov_reduce_since at 0.0 while state.locked_box is still non-None),
+      re-arms immediately, and the FOV shrinks again — an unbroken
+      shrink/revert loop that (at any real frame rate, since the reverted
+      frame lasts a single tick) looks exactly like "the FOV shrinks
+      instantly and never actually respects the configured duration."
+
+    Both flags reset to their "no window" state once state.locked_box goes
+    back to None, so the next fresh acquisition always gets its own full
+    window — and also reset (defensively) whenever the feature itself is
+    off, so re-enabling it later never inherits a stale window from
+    however long ago it was last on.
+    """
+    effective_size = int(getattr(config, 'fov_size', 0) or 0)
+    effective_height = int(getattr(config, 'fov_height', effective_size) or effective_size)
+
+    if not getattr(config, 'fov_reduce_on_target_enabled', False):
+        state.fov_reduce_since = 0.0
+        state.fov_reduce_expired = False
+        return effective_size, effective_height
+
+    if getattr(state, 'locked_box', None) is not None:
+        if state.fov_reduce_since == 0.0 and not state.fov_reduce_expired:
+            state.fov_reduce_since = current_time
+    else:
+        state.fov_reduce_since = 0.0
+        state.fov_reduce_expired = False  # lock lost — next acquisition starts a fresh window
+
+    if state.fov_reduce_since > 0.0:
+        duration = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
+        if duration <= 0.0 or current_time - state.fov_reduce_since < duration:
+            pct = max(1.0, min(100.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0)))
+            effective_size = max(1, int(effective_size * pct / 100.0))
+            effective_height = max(1, int(effective_height * pct / 100.0))
+        else:
+            state.fov_reduce_since = 0.0
+            state.fov_reduce_expired = True  # ran its course — stays expired until the lock is lost
+
+    return effective_size, effective_height
 
 
 def calculate_detection_region(config: Config, crosshair_x: int, crosshair_y: int) -> Dict[str, int]:

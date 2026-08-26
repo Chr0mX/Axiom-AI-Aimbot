@@ -25,6 +25,7 @@ from .ai_loop_state import LoopState
 from .ai_loop_utils import (
     calculate_detection_region,
     clear_queues,
+    compute_effective_fov,
     filter_boxes_by_fov,
     get_capture_dimensions,
     reduce_boxes_for_single_target,
@@ -691,31 +692,11 @@ def ai_logic_loop(
                 # gate THIS frame's FOV is the correct causal order: "was a target
                 # already locked coming into this frame" decides whether to keep
                 # other, farther-out detections from ever reaching target
-                # selection at all this frame.
-                _effective_fov_size = config.fov_size
-                _effective_fov_height = int(getattr(config, 'fov_height', config.fov_size) or config.fov_size)
-                if getattr(config, 'fov_reduce_on_target_enabled', False):
-                    if state.locked_box is not None:
-                        if state.fov_reduce_since == 0.0:
-                            # Rising edge only — set once per acquisition, NOT
-                            # every frame the target stays locked. Setting this
-                            # unconditionally every frame a target is locked
-                            # would pin (current_time - fov_reduce_since) near
-                            # zero forever, so the duration window could never
-                            # actually expire — the same continuous-reset bug
-                            # already fixed once for the MAKCU disengage delay.
-                            state.fov_reduce_since = current_time
-                    else:
-                        state.fov_reduce_since = 0.0  # lock lost — next acquisition starts a fresh window
-
-                    if state.fov_reduce_since > 0.0:
-                        _duration = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
-                        if _duration <= 0.0 or current_time - state.fov_reduce_since < _duration:
-                            _pct = max(1.0, min(100.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0)))
-                            _effective_fov_size = max(1, int(config.fov_size * _pct / 100.0))
-                            _effective_fov_height = max(1, int(_effective_fov_height * _pct / 100.0))
-                        else:
-                            state.fov_reduce_since = 0.0  # window expired — revert to full FOV until re-acquired
+                # selection at all this frame. See compute_effective_fov()'s own
+                # docstring for the fov_reduce_since/fov_reduce_expired state
+                # machine this drives.
+                _effective_fov_size, _effective_fov_height = compute_effective_fov(
+                    config, state, current_time)
                 # Published every frame (not just while shrunk) so the in-game
                 # overlay, the UVC/NDI/UDP preview's baked-in overlay, and the
                 # Web ESP overlay all draw/reason about the FOV actually in

@@ -353,3 +353,108 @@ class TestReduceBoxesForSingleTarget:
             priority_mode="confidence",
         )
         assert picked == [[400, 400, 410, 410]]
+
+
+class TestComputeEffectiveFov:
+    """"Reduce FOV on Active Target" — regression coverage for the exact bug
+    this was rewritten to fix: once the shrink window's fov_min_size_duration
+    elapses, the FOV must revert to full size and *stay* there for the rest
+    of the current lock, not re-arm a fresh shrink window on the very next
+    frame just because state.locked_box is still non-None (both "never
+    armed" and "just expired" used to look identical: fov_reduce_since == 0.0
+    while locked_box is still set)."""
+
+    @staticmethod
+    def _config(**overrides):
+        from types import SimpleNamespace
+        cfg = SimpleNamespace(
+            fov_size=200, fov_height=200,
+            fov_reduce_on_target_enabled=True,
+            fov_min_size_pct=50.0, fov_min_size_duration=1.0,
+        )
+        for k, v in overrides.items():
+            setattr(cfg, k, v)
+        return cfg
+
+    def test_disabled_feature_leaves_fov_untouched_and_resets_state(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config(fov_reduce_on_target_enabled=False)
+        state = LoopState(locked_box=[0, 0, 10, 10], fov_reduce_since=5.0, fov_reduce_expired=True)
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=10.0)
+        assert (size, height) == (200, 200)
+        # Defensive reset, so re-enabling later never inherits a stale window.
+        assert state.fov_reduce_since == 0.0
+        assert state.fov_reduce_expired is False
+
+    def test_no_lock_leaves_fov_full(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config()
+        state = LoopState(locked_box=None)
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=50.0)
+        assert (size, height) == (200, 200)
+
+    def test_lock_acquired_shrinks_immediately(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config()
+        state = LoopState(locked_box=[0, 0, 10, 10])
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)
+        assert (size, height) == (100, 100)
+        assert state.fov_reduce_since == 100.0
+
+    def test_shrink_holds_for_the_configured_duration(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config()
+        state = LoopState(locked_box=[0, 0, 10, 10])
+        ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)  # acquire
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=100.9)
+        assert (size, height) == (100, 100)  # still within the 1.0s duration
+
+    def test_reverts_to_full_after_duration_and_stays_there(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config()
+        state = LoopState(locked_box=[0, 0, 10, 10])
+        ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)  # acquire, shrinks
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=101.1)  # duration elapsed
+        assert (size, height) == (200, 200)
+        assert state.fov_reduce_expired is True
+
+        # Same lock, many frames later — must NOT shrink again. This is
+        # exactly the scenario that used to loop forever: every one of
+        # these calls used to see fov_reduce_since == 0.0 with locked_box
+        # still set and misread it as a brand-new acquisition.
+        for t in (101.2, 102.0, 105.0, 130.0):
+            size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=t)
+            assert (size, height) == (200, 200), f"re-armed at t={t}"
+
+    def test_losing_and_reacquiring_the_lock_arms_a_fresh_window(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config()
+        state = LoopState(locked_box=[0, 0, 10, 10])
+        ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)
+        ai_loop_utils.compute_effective_fov(config, state, current_time=101.1)  # expires
+        assert state.fov_reduce_expired is True
+
+        state.locked_box = None  # target genuinely lost
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=101.2)
+        assert (size, height) == (200, 200)
+        assert state.fov_reduce_expired is False
+        assert state.fov_reduce_since == 0.0
+
+        state.locked_box = [5, 5, 15, 15]  # a new target
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=101.2)
+        assert (size, height) == (100, 100)  # shrinks again — a fresh window
+
+    def test_zero_duration_holds_indefinitely_while_locked(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config(fov_min_size_duration=0.0)
+        state = LoopState(locked_box=[0, 0, 10, 10])
+        ai_loop_utils.compute_effective_fov(config, state, current_time=50.0)
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=999.0)
+        assert (size, height) == (100, 100)
+
+    def test_rectangular_fov_shrinks_both_axes_by_the_same_percentage(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config(fov_size=200, fov_height=100, fov_min_size_pct=25.0)
+        state = LoopState(locked_box=[0, 0, 10, 10])
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=1.0)
+        assert (size, height) == (50, 25)
