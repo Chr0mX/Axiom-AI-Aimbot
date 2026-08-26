@@ -181,6 +181,7 @@ class TestBodyModelAnnotationsResolveToRealClasses:
             ("/api/configs/save", "ConfigNameBody"),
             ("/api/configs/rename", "ConfigRenameBody"),
             ("/api/configs/import", "ConfigImportBody"),
+            ("/api/control/convert", "ConvertBody"),
         ],
     )
     def test_body_param_is_a_real_class_not_a_string(self, started_server, path, model_name):

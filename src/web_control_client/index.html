@@ -1117,7 +1117,68 @@
 
         <div class="panel" id="panel-trigger">
           <div class="panel-title">Trigger</div>
-          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+
+          <div class="field-group-title">Auto-Fire</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Auto-Fire Target</div></div>
+              <div class="field-control">
+                <select id="trig-auto_fire_target_part" data-key="auto_fire_target_part" data-type="choice">
+                  <option value="head">Head</option>
+                  <option value="body">Body</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Always Auto-Fire</div>
+                <div class="field-desc">Fire continuously without needing to hold an auto-fire key. Turning this on also disables Keep Detecting While Idle.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="trig-always_auto_fire" data-key="always_auto_fire" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Mouse Click Method</div>
+                <div class="field-desc">Simulated click signal auto-fire uses to pull the trigger.</div>
+              </div>
+              <div class="field-control">
+                <select id="trig-mouse_click_method" data-key="mouse_click_method" data-type="choice">
+                  <option value="mouse_event">mouse_event</option>
+                  <option value="sendinput">sendinput</option>
+                  <option value="ddxoft">ddxoft</option>
+                  <option value="arduino">arduino</option>
+                  <option value="makcu">makcu</option>
+                  <option value="xbox">xbox</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Scope Delay</div>
+                <div class="field-desc">Wait after aiming settles before auto-fire is allowed to pull the trigger.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="trig-auto_fire_delay" data-key="auto_fire_delay" data-type="number" min="0.0" max="2.0" step="0.01">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Fire Interval</div>
+                <div class="field-desc">Minimum time between consecutive auto-fire shots.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="trig-auto_fire_interval" data-key="auto_fire_interval" data-type="number" min="0.01" max="1.0" step="0.01">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="panel" id="panel-keys">
@@ -1522,7 +1583,60 @@
 
         <div class="panel" id="panel-convert">
           <div class="panel-title">Convert</div>
-          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+
+          <div class="field-group-title">Engine Conversion</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Source ONNX Model</div>
+                <div class="field-desc">Select the .onnx model to compile into a TensorRT engine.</div>
+              </div>
+              <div class="field-control">
+                <select id="convert-model-select"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">FP16 Precision</div>
+                <div class="field-desc">Half precision — ~2&times; faster on RTX GPUs, negligible accuracy loss.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="convert-trt_fp16_enabled" data-key="trt_fp16_enabled" data-type="bool" data-custom="1" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Builder Workspace (MiB)</div>
+                <div class="field-desc">GPU memory budget for the build. Increase for larger models.</div>
+              </div>
+              <div class="field-control">
+                <select id="convert-workspace-select">
+                  <option value="1024">1024</option>
+                  <option value="2048" selected>2048</option>
+                  <option value="4096">4096</option>
+                  <option value="8192">8192</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Output Cache Directory</div>
+                <div class="field-desc">Cached under <code>trt_cache/</code> in the app's install directory, on the machine running Axiom.</div>
+              </div>
+              <div class="field-control">
+                <button id="convert-btn">Convert</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Build Log</div>
+          <div class="progress-bar hidden" id="convert-progress"><div class="progress-bar-fill"></div></div>
+          <textarea id="convert-log" readonly placeholder="Conversion output will appear here. First build can take 1–5 minutes."></textarea>
+          <div class="hint">The engine is cached in <code>trt_cache/</code>. On the next app launch, TensorRT loads it in under a second instead of rebuilding.</div>
+          <div class="hint" id="convert-reason"></div>
         </div>
 
         <div class="panel" id="panel-other">

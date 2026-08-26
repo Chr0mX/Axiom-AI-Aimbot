@@ -307,6 +307,29 @@ textarea {
 
 .hidden { display: none !important; }
 
+/* Indeterminate progress bar — Convert tab's build-in-progress indicator,
+   mirroring the Qt app's IndeterminateProgressBar. Hidden (via .hidden)
+   except while a conversion is actually running. */
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin: 4px 0 12px;
+}
+.progress-bar-fill {
+  width: 40%;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: progress-bar-slide 1.2s ease-in-out infinite;
+}
+@keyframes progress-bar-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
 @media (max-width: 760px) {
   .content { flex-direction: column; }
   .sidebar {

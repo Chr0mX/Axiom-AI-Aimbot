@@ -253,6 +253,11 @@ def start(
     class ConfigImportBody(BaseModel):
         content: str
 
+    class ConvertBody(BaseModel):
+        model_path: str
+        fp16: bool = True
+        workspace_mb: int = 2048
+
     class _ThreadServer(uvicorn.Server):
         def install_signal_handlers(self) -> None:
             # Overridden to a no-op: uvicorn's default installs SIGINT/
@@ -352,12 +357,12 @@ def start(
     # -----------------------------------------------------------------
 
     @app.get("/api/settings/{tab}", dependencies=[Depends(_check_token)])
-    def get_settings(tab: Literal["model", "capture", "inference", "aim", "keys", "visuals"]):
+    def get_settings(tab: Literal["model", "capture", "inference", "aim", "keys", "visuals", "trigger", "convert"]):
         from .web_control_settings import get_tab_settings
         return get_tab_settings(config, tab)
 
     @app.post("/api/settings/{tab}", dependencies=[Depends(_check_token)])
-    def post_settings(tab: Literal["model", "capture", "inference", "aim", "keys", "visuals"], body: dict):
+    def post_settings(tab: Literal["model", "capture", "inference", "aim", "keys", "visuals", "trigger", "convert"], body: dict):
         from .web_control_settings import apply_tab_settings
         return apply_tab_settings(config, tab, body)
 
@@ -488,6 +493,25 @@ def start(
     def post_open_configs_folder_route():
         from .web_control_settings import open_configs_folder
         return {"ok": open_configs_folder()}
+
+    # -----------------------------------------------------------------
+    # TensorRT conversion — the Convert tab's one real action. A build is
+    # a genuine 1-5 minute subprocess (see app_controller.start_conversion()'s
+    # docstring), so this is start-then-poll, not a single blocking route:
+    # POST kicks off the background thread and returns immediately, GET
+    # streams the accumulated log via a since-cursor so a client polling
+    # every ~1s never re-fetches lines it already has.
+    # -----------------------------------------------------------------
+
+    @app.post("/api/control/convert", dependencies=[Depends(_check_token)])
+    def post_convert_route(body: ConvertBody):
+        from .app_controller import start_conversion
+        return start_conversion(config, body.model_path, body.fp16, body.workspace_mb)
+
+    @app.get("/api/convert/status", dependencies=[Depends(_check_token)])
+    def get_convert_status_route(since: int = 0):
+        from .app_controller import get_conversion_status
+        return get_conversion_status(since)
 
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")

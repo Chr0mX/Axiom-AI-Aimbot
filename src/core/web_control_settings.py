@@ -233,6 +233,39 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "web_esp_http_port": {"type": "int", "min": 1024, "max": 65535},
         "web_esp_ws_port": {"type": "int", "min": 1024, "max": 65535},
     },
+    "trigger": {
+        "auto_fire_target_part": {"type": "choice", "choices": ["head", "body", "both"]},
+        # always_auto_fire's one-directional coupling (turning it ON also
+        # turns idle_detect_enabled off, mirroring trigger_page.py's
+        # _onAlwaysAutoFireChanged) is left to the client — same "it
+        # already has both values in hand" precedent as ndi_source_name/
+        # ndi_force_reconnect, not a server-side decide function.
+        "always_auto_fire": {"type": "bool"},
+        # A second, independently-validated entry for the same
+        # mouse_click_method Config field the "aim" tab's schema already
+        # exposes (as a looser, unrestricted "str" — see that entry's own
+        # comment) — trigger_page.py's own combo only offers these 6
+        # choices, so this tab's POST validates against that narrower list
+        # instead. Two schema entries mapping to one flat attribute is
+        # harmless: get_tab_settings()/apply_tab_settings() have no
+        # cross-tab awareness of each other, exactly as if two separate Qt
+        # pages both had a control bound to the same Config field.
+        "mouse_click_method": {
+            "type": "choice",
+            "choices": ["mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox"],
+        },
+        "auto_fire_delay": {"type": "float", "min": 0.0, "max": 2.0},
+        "auto_fire_interval": {"type": "float", "min": 0.01, "max": 1.0},
+    },
+    "convert": {
+        # Only the FP16 default is a plain persisted Config field (pre-
+        # populates the toggle, mirroring ConvertPage.setConfig()) — the
+        # model to build and the workspace budget are one-shot parameters
+        # to the /api/control/convert action below, not persisted settings
+        # of their own, matching convert_page.py's own workspaceCombo
+        # (never written back to Config either).
+        "trt_fp16_enabled": {"type": "bool"},
+    },
 }
 
 TABS = tuple(_SCHEMA.keys())

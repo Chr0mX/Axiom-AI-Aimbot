@@ -70,7 +70,22 @@
   // sidebar (and its toggles' echo-suppression flags below) is always
   // visible no matter which panel is showing.
   // ---------------------------------------------------------------------
+  // Every tab backed by the generic get_tab_settings()/apply_tab_settings()
+  // mechanism — used both to decide whether activateTab() should fetch it
+  // and, further down, to keep whichever one is currently on-screen synced
+  // on every poll() tick (not just on activation), so a change made from
+  // the Qt GUI while this page is sitting open surfaces within ~1s with no
+  // reload. See loadTabSettings()'s "don't clobber an in-progress edit"
+  // guard for why this can't just blindly overwrite fields the user is
+  // mid-edit on.
+  var GENERIC_SCHEMA_TABS = ["model", "capture", "inference", "aim", "keys", "visuals", "trigger", "convert"];
+
+  // The tab currently on-screen — updated by activateTab(), read by
+  // poll()'s continuous-resync tick below.
+  var currentTab = "model";
+
   function activateTab(name) {
+    currentTab = name;
     tabButtons.forEach(function (btn) {
       btn.classList.toggle("active", btn.getAttribute("data-tab") === name);
     });
@@ -80,7 +95,7 @@
     // Re-fetch this tab's settings every time it's activated (not just
     // once) so a change made from the Qt GUI while this tab was in the
     // background is picked up on return.
-    if (name === "model" || name === "capture" || name === "inference" || name === "aim" || name === "keys" || name === "visuals") {
+    if (GENERIC_SCHEMA_TABS.indexOf(name) !== -1) {
       loadTabSettings(name);
     }
     if (name === "model") {
@@ -91,6 +106,9 @@
     }
     if (name === "configs") {
       refreshConfigsList();
+    }
+    if (name === "convert") {
+      ensureConvertPanelExtras();
     }
   }
 
@@ -274,6 +292,62 @@
     return document.querySelectorAll('#panel-' + tab + ' [data-key]');
   }
 
+  // Almost every numeric field across the Qt app pairs a Slider with its
+  // SpinBox/DoubleSpinBox (SliderSpinCard/SliderDoubleSpinCard/
+  // SliderLabelCard — see CLAUDE.md's slider_spin_card.py note): FOV size,
+  // PID gains, humanization params, target-area thresholds, MAKCU
+  // disengage delay, auto-fire delay/interval, and so on. This gives every
+  // input[type=number][data-key] in this client the same treatment, driven
+  // entirely by the number input's own min/max/step attributes (already
+  // present on every one of them for client-side validation) rather than
+  // hand-writing a paired <input type="range"> into ~80 individual
+  // field-cards. The two Web ESP port fields are the one deliberate
+  // exception — they're plain SpinBoxes with no Slider companion in Qt
+  // (visuals_page.py never pairs a port number with a slider).
+  var SLIDER_EXCLUDED_KEYS = ["web_esp_http_port", "web_esp_ws_port"];
+
+  function enhanceNumberInputsWithSliders() {
+    var inputs = document.querySelectorAll('input[type="number"][data-key]');
+    Array.prototype.forEach.call(inputs, function (numberInput) {
+      var key = numberInput.getAttribute("data-key");
+      if (SLIDER_EXCLUDED_KEYS.indexOf(key) !== -1) return;
+      var min = numberInput.getAttribute("min");
+      var max = numberInput.getAttribute("max");
+      if (min === null || max === null || min === "" || max === "") return;
+
+      var range = document.createElement("input");
+      range.type = "range";
+      range.min = min;
+      range.max = max;
+      range.step = numberInput.getAttribute("step") || "1";
+      range.value = numberInput.value || min;
+      range.className = "field-slider";
+
+      // Inserted as a plain sibling inside the number input's own
+      // .field-control row (slider, then number, then any unit suffix) —
+      // it carries no data-key of its own, so it never enters
+      // fieldElsFor()'s generic read/write loop; it's purely a second View
+      // over the exact same number input, wired below to mirror it in
+      // both directions and to re-dispatch a real "change" event so
+      // wireGenericFields()'s existing listener (already attached to the
+      // number input) fires exactly as if the number input itself had
+      // been edited. No new server-communication path needed at all.
+      numberInput.parentNode.insertBefore(range, numberInput);
+      numberInput._pairedRange = range;
+
+      range.addEventListener("input", function () {
+        numberInput.value = range.value;
+      });
+      range.addEventListener("change", function () {
+        numberInput.value = range.value;
+        numberInput.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      numberInput.addEventListener("input", function () {
+        range.value = numberInput.value;
+      });
+    });
+  }
+
   function applyGenericValue(el, type, value) {
     if (value === null || value === undefined) return;
     if (type === "bool") {
@@ -282,6 +356,11 @@
       el.checked = value === "v2";
     } else {
       el.value = value;
+      // Keep a paired range slider (see enhanceNumberInputsWithSliders())
+      // in sync too — applyGenericValue() sets .value directly rather than
+      // dispatching an "input" event, so the slider's own mirroring
+      // listener never fires on its own for a server-driven refresh.
+      if (el._pairedRange) el._pairedRange.value = value;
     }
   }
 
@@ -301,6 +380,10 @@
         if (tab === "capture") applyCaptureExtras(data);
         Array.prototype.forEach.call(fieldElsFor(tab), function (el) {
           if (el === document.activeElement) return; // don't clobber an in-progress edit
+          // ...nor while the user is mid-drag on its paired range slider —
+          // dragging focuses the range element, not this number input, so
+          // the check above alone wouldn't catch it.
+          if (el._pairedRange && el._pairedRange === document.activeElement) return;
           var key = el.getAttribute("data-key");
           var type = el.getAttribute("data-type");
           if (!(key in data)) return;
@@ -350,6 +433,17 @@
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
+        }
+        // One-directional coupling, mirroring trigger_page.py's
+        // _onAlwaysAutoFireChanged(): turning Always Auto-Fire ON also
+        // disables Keep Detecting While Idle — turning it back off does
+        // NOT re-enable idle detect (Qt doesn't either). idle_detect_enabled
+        // lives on the "inference" tab's own schema, so this is a second,
+        // independent POST to a different tab's route, not a same-tab
+        // coupled body — same "client already has both values in hand"
+        // precedent as every other coupled write in this file.
+        if (tab === "trigger" && key === "always_auto_fire" && value === true) {
+          pushTabSetting("inference", "idle_detect_enabled", false);
         }
       });
     });
@@ -1087,6 +1181,136 @@
       .then(function () { btn.disabled = false; });
   });
 
+  // ---------------------------------------------------------------------
+  // Convert panel — kicks off a background TensorRT engine build and
+  // polls its status/log, mirroring convert_page.py's _ConvertWorker (a
+  // QThread + subprocess there; a plain background thread + subprocess on
+  // the server here — see app_controller.start_conversion()). The model
+  // to build and the workspace budget are one-shot POST parameters, never
+  // persisted Config fields, matching convert_page.py's own workspaceCombo
+  // (also never written back to Config). trt_fp16_enabled is the one
+  // field that DOES round-trip through the generic settings mechanism —
+  // marked data-custom="1" so it's read generically (pre-populates the
+  // toggle from the last-used value, mirroring ConvertPage.setConfig())
+  // but never auto-pushed on a bare flip; the real write happens only
+  // after a successful build, exactly when _onConvertFinished() does it.
+  // ---------------------------------------------------------------------
+  var convertModelSelect = document.getElementById("convert-model-select");
+  var convertFp16Toggle = document.getElementById("convert-trt_fp16_enabled");
+  var convertWorkspaceSelect = document.getElementById("convert-workspace-select");
+  var convertBtn = document.getElementById("convert-btn");
+  var convertProgress = document.getElementById("convert-progress");
+  var convertLog = document.getElementById("convert-log");
+  var convertReason = document.getElementById("convert-reason");
+  var convertModelListPopulated = false;
+  var convertLogSince = 0;
+  var convertPolling = false;
+
+  function populateConvertModelSelect() {
+    var current = convertModelSelect.value || modelSelect.value;
+    convertModelSelect.innerHTML = "";
+    allModelNames.forEach(function (name) {
+      var opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      convertModelSelect.appendChild(opt);
+    });
+    var hasCurrent = Array.prototype.some.call(convertModelSelect.options, function (o) { return o.value === current; });
+    if (hasCurrent) convertModelSelect.value = current;
+  }
+
+  function ensureConvertPanelExtras() {
+    if (allModelNames.length) {
+      // Re-populate on every activation (not just once) — allModelNames
+      // may have grown since the last visit (loadModelList() only ever
+      // fetches once, but a new .onnx file added while this page is open
+      // still needs its own path to show up here eventually via a reload).
+      populateConvertModelSelect();
+      convertModelListPopulated = true;
+    } else if (!convertModelListPopulated) {
+      // The Model tab's own GET /api/models hasn't resolved yet (very
+      // first page load, arriving here before it does) — try again
+      // shortly rather than leaving the select permanently empty.
+      setTimeout(ensureConvertPanelExtras, 300);
+    }
+    // Resume log-following if a build is already in progress — started
+    // from the Qt GUI, from a previous visit to this tab, or still running
+    // across a page reload (the server-side job isn't tied to any one
+    // browser tab).
+    pollConvertStatus();
+  }
+
+  function setConvertRunningUi(running) {
+    convertBtn.disabled = running;
+    convertBtn.textContent = running ? "Converting…" : "Convert";
+    convertModelSelect.disabled = running;
+    convertWorkspaceSelect.disabled = running;
+    convertProgress.classList.toggle("hidden", !running);
+  }
+
+  function pollConvertStatus() {
+    if (convertPolling) return; // an identical in-flight request already covers this tick
+    convertPolling = true;
+    fetch("/api/convert/status?since=" + convertLogSince, { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) return;
+        convertLogSince = data.next_since;
+        if (data.log_lines && data.log_lines.length) {
+          data.log_lines.forEach(function (line) {
+            convertLog.value += (convertLog.value ? "\n" : "") + line;
+          });
+          convertLog.scrollTop = convertLog.scrollHeight;
+        }
+        setConvertRunningUi(data.running);
+        if (data.done && data.message) {
+          convertReason.textContent = data.success
+            ? "✓ Done. Engine cache written to: " + data.message
+            : "✗ " + data.message;
+        }
+        if (data.running) {
+          // Keep following the log every ~1s for as long as the build
+          // runs — independent of which tab is on-screen, so a build
+          // finishes and its result is ready even if the operator
+          // wandered off to another tab in the meantime.
+          setTimeout(function () { convertPolling = false; pollConvertStatus(); }, 1000);
+        } else {
+          convertPolling = false;
+        }
+      })
+      .catch(function () { convertPolling = false; });
+  }
+
+  convertBtn.addEventListener("click", function () {
+    var name = convertModelSelect.value;
+    if (!name) { convertReason.textContent = "select a model first"; return; }
+    convertLog.value = "";
+    convertLogSince = 0;
+    convertReason.textContent = "";
+    fetch("/api/control/convert", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({
+        // resolve_model_path() joins a relative path directly against
+        // project_root, not project_root/Model — same "Model/" prefix
+        // the Model tab's own Switch button already adds.
+        model_path: "Model/" + name,
+        fp16: convertFp16Toggle.checked,
+        workspace_mb: parseInt(convertWorkspaceSelect.value, 10) || 2048,
+      }),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || data.ok === false) {
+          convertReason.textContent = (data && data.reason) || "failed to start";
+          return;
+        }
+        setConvertRunningUi(true);
+        pollConvertStatus();
+      })
+      .catch(function () { convertReason.textContent = "request failed"; });
+  });
+
   // The backend select offers only 4 options with no separate "CUDA" entry
   // (mirrors model_page.py's own reverse-map fold, which folds "cuda" onto
   // the "TensorRT" display item) — a "cuda" backend from the server is
@@ -1173,6 +1397,16 @@
       .catch(function () {
         setStatusBadge(false);
       });
+
+    // Keep whichever generic-schema tab is on-screen synced to the live
+    // Config every tick too — not just on activation — so a change made
+    // from the Qt GUI while this page is sitting open on that tab surfaces
+    // within ~1s with no reload. loadTabSettings()'s own guards (skip a
+    // focused field, skip a field whose paired range slider is mid-drag)
+    // already keep this from fighting an in-progress edit here.
+    if (GENERIC_SCHEMA_TABS.indexOf(currentTab) !== -1) {
+      loadTabSettings(currentTab);
+    }
   }
 
   alwaysAimToggle.addEventListener("change", function () {
@@ -1332,6 +1566,14 @@
   wireGenericFields("aim");
   wireGenericFields("keys");
   wireGenericFields("visuals");
+  wireGenericFields("trigger");
+  wireGenericFields("convert");
+
+  // A one-time progressive-enhancement pass over every numeric field in
+  // the document (all panels are already in the DOM, just hidden by CSS
+  // until activated — see the .panel/.tab comment near the top of this
+  // file), not tied to any one tab's activation.
+  enhanceNumberInputsWithSliders();
 
   loadModelList();
   // Model is the default-active panel (no click to trigger activateTab's

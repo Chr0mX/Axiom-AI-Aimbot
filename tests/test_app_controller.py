@@ -11,6 +11,7 @@ importing this module already exercises (see test_module_importable_
 without_windows_deps below).
 """
 
+import os
 import sys
 import threading
 import types
@@ -537,3 +538,233 @@ class TestRestartWebEspIfRunning:
         assert result is True
         assert fake.stop_calls == 1
         assert fake.start_calls == [config]
+
+
+class _FakePopen:
+    """Stand-in for subprocess.Popen — records the exact cmd it was built
+    with and hands back a canned stdout/returncode, so
+    _run_conversion_worker()'s subprocess plumbing is exercised without
+    ever spawning a real convert_to_engine.py process."""
+
+    def __init__(self, cmd, lines=(), returncode=0, **kwargs):
+        self.cmd = cmd
+        self.stdout = iter(lines)
+        self.returncode = returncode
+
+    def wait(self):
+        pass
+
+
+@pytest.fixture
+def _reset_convert_state():
+    """_convert_state is module-level shared mutable state — snapshot and
+    restore it so tests can freely mutate/inspect it without leaking into
+    each other or into a real (non-test) caller within the same process."""
+    original = dict(app_controller._convert_state)
+    yield
+    app_controller._convert_state.clear()
+    app_controller._convert_state.update(original)
+
+
+class TestStartConversion:
+    def _model_file(self, tmp_path, under_model_dir=False):
+        if under_model_dir:
+            model_dir = tmp_path / "Model"
+            model_dir.mkdir()
+            model_file = model_dir / "real.onnx"
+        else:
+            model_file = tmp_path / "real.onnx"
+        model_file.write_bytes(b"")
+        return str(model_file)
+
+    def test_refuses_missing_model_path(self, _reset_convert_state):
+        config = _FakeConfig()
+        result = app_controller.start_conversion(config, "does/not/exist.onnx")
+        assert result == {"ok": False, "reason": "not_found"}
+        assert app_controller._convert_state["running"] is False
+
+    def test_refuses_when_already_running(self, tmp_path, _reset_convert_state):
+        app_controller._convert_state["running"] = True
+        config = _FakeConfig()
+        result = app_controller.start_conversion(config, self._model_file(tmp_path))
+        assert result == {"ok": False, "reason": "already_running"}
+
+    def test_starts_background_worker_and_pauses_inference(self, tmp_path, monkeypatch, _reset_convert_state):
+        model_file = self._model_file(tmp_path)
+        calls = []
+        started = threading.Event()
+
+        def _fake_worker(config, onnx_path, cache_dir, fp16, workspace_mb):
+            calls.append((onnx_path, fp16, workspace_mb))
+            started.set()
+
+        monkeypatch.setattr(app_controller, "_run_conversion_worker", _fake_worker)
+        config = _FakeConfig()
+        result = app_controller.start_conversion(config, model_file, fp16=False, workspace_mb=4096)
+
+        assert result == {"ok": True}
+        assert config.inference_paused is True
+        assert started.wait(timeout=2), "background worker never ran"
+        assert calls == [(model_file, False, 4096)]
+
+    def test_bad_workspace_value_falls_back_to_2048(self, tmp_path, monkeypatch, _reset_convert_state):
+        model_file = self._model_file(tmp_path)
+        calls = []
+        started = threading.Event()
+
+        def _fake_worker(config, onnx_path, cache_dir, fp16, workspace_mb):
+            calls.append(workspace_mb)
+            started.set()
+
+        monkeypatch.setattr(app_controller, "_run_conversion_worker", _fake_worker)
+        config = _FakeConfig()
+        app_controller.start_conversion(config, model_file, workspace_mb=9999)
+        assert started.wait(timeout=2)
+        assert calls == [2048]
+
+
+class TestRunConversionWorker:
+    """_run_conversion_worker() itself — called directly (not through the
+    background thread start_conversion() spawns) so success/failure/
+    exception outcomes are deterministic instead of racing a real thread.
+    """
+
+    def test_success_updates_config_and_state(self, tmp_path, monkeypatch, _reset_convert_state):
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        onnx_path = str(model_dir / "real.onnx")
+        (model_dir / "real.onnx").write_bytes(b"")
+        cache_dir = str(tmp_path / "trt_cache")
+
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        monkeypatch.setattr(
+            app_controller.subprocess, "Popen",
+            lambda cmd, **k: _FakePopen(cmd, lines=["line1", "line2"], returncode=0),
+        )
+        saved = []
+        fake_config_module = types.ModuleType("core.config")
+        fake_config_module.save_config = lambda cfg: saved.append(cfg) or True
+        monkeypatch.setitem(sys.modules, "core.config", fake_config_module)
+
+        config = _FakeConfig()
+        config.model_path = ""
+        app_controller._run_conversion_worker(config, onnx_path, cache_dir, True, 2048)
+
+        assert config.inference_paused is False
+        assert config.trt_fp16_enabled is True
+        # Re-derived as "Model/real.onnx" (portable relative form), not the
+        # absolute tmp_path — mirrors convert_page.py's own storage format.
+        assert config.model_path == os.path.join("Model", "real.onnx")
+        assert saved == [config]
+        assert app_controller._convert_state["running"] is False
+        assert app_controller._convert_state["done"] is True
+        assert app_controller._convert_state["success"] is True
+        assert app_controller._convert_state["message"] == cache_dir
+        assert app_controller._convert_state["log"] == ["line1", "line2"]
+
+    def test_nonzero_returncode_is_a_failure_not_an_exception(self, tmp_path, monkeypatch, _reset_convert_state):
+        onnx_path = str(tmp_path / "real.onnx")
+        (tmp_path / "real.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        monkeypatch.setattr(
+            app_controller.subprocess, "Popen",
+            lambda cmd, **k: _FakePopen(cmd, lines=["boom"], returncode=1),
+        )
+        config = _FakeConfig()
+        config.model_path = "unchanged"
+        app_controller._run_conversion_worker(config, onnx_path, str(tmp_path / "trt_cache"), True, 2048)
+
+        assert app_controller._convert_state["success"] is False
+        assert "code 1" in app_controller._convert_state["message"]
+        assert config.inference_paused is False
+        # A failed build must never touch model_path/trt_fp16_enabled —
+        # the app keeps running whatever it was running before.
+        assert config.model_path == "unchanged"
+
+    def test_popen_exception_is_caught_and_reported(self, tmp_path, monkeypatch, _reset_convert_state):
+        onnx_path = str(tmp_path / "real.onnx")
+        (tmp_path / "real.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+
+        def _raise(cmd, **k):
+            raise OSError("no such file or directory")
+
+        monkeypatch.setattr(app_controller.subprocess, "Popen", _raise)
+        config = _FakeConfig()
+        app_controller._run_conversion_worker(config, onnx_path, str(tmp_path / "trt_cache"), True, 2048)
+
+        assert app_controller._convert_state["success"] is False
+        assert "OSError" in app_controller._convert_state["message"]
+        assert config.inference_paused is False
+
+    def test_fp16_false_adds_no_fp16_flag(self, tmp_path, monkeypatch, _reset_convert_state):
+        onnx_path = str(tmp_path / "real.onnx")
+        (tmp_path / "real.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        captured = {}
+
+        def _fake_popen(cmd, **k):
+            captured["cmd"] = cmd
+            return _FakePopen(cmd, lines=[], returncode=0)
+
+        monkeypatch.setattr(app_controller.subprocess, "Popen", _fake_popen)
+        config = _FakeConfig()
+        app_controller._run_conversion_worker(config, onnx_path, str(tmp_path / "trt_cache"), False, 2048)
+
+        assert "--no-fp16" in captured["cmd"]
+        assert config.trt_fp16_enabled is False
+
+    def test_save_config_failure_does_not_propagate(self, tmp_path, monkeypatch, _reset_convert_state):
+        """save_config() is wrapped in its own try/except in the worker —
+        a failure to persist must never turn a successful build into a
+        reported failure."""
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        onnx_path = str(model_dir / "real.onnx")
+        (model_dir / "real.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        monkeypatch.setattr(
+            app_controller.subprocess, "Popen",
+            lambda cmd, **k: _FakePopen(cmd, lines=[], returncode=0),
+        )
+        fake_config_module = types.ModuleType("core.config")
+
+        def _raise_save(cfg):
+            raise OSError("disk full")
+
+        fake_config_module.save_config = _raise_save
+        monkeypatch.setitem(sys.modules, "core.config", fake_config_module)
+
+        config = _FakeConfig()
+        app_controller._run_conversion_worker(config, onnx_path, str(tmp_path / "trt_cache"), True, 2048)
+
+        assert app_controller._convert_state["success"] is True
+
+
+class TestGetConversionStatus:
+    def test_reports_current_state(self, _reset_convert_state):
+        app_controller._convert_state.update(
+            running=True, log=["a", "b", "c"], done=False, success=None,
+            message="", model_path="/x/real.onnx",
+        )
+        result = app_controller.get_conversion_status(since=0)
+        assert result["running"] is True
+        assert result["log_lines"] == ["a", "b", "c"]
+        assert result["next_since"] == 3
+
+    def test_since_cursor_returns_only_new_lines(self, _reset_convert_state):
+        app_controller._convert_state.update(log=["a", "b", "c", "d"])
+        result = app_controller.get_conversion_status(since=2)
+        assert result["log_lines"] == ["c", "d"]
+        assert result["next_since"] == 4
+
+    def test_since_beyond_log_length_returns_empty(self, _reset_convert_state):
+        app_controller._convert_state.update(log=["a"])
+        result = app_controller.get_conversion_status(since=999)
+        assert result["log_lines"] == []
+        assert result["next_since"] == 1
+
+    def test_negative_since_clamped_to_zero(self, _reset_convert_state):
+        app_controller._convert_state.update(log=["a", "b"])
+        result = app_controller.get_conversion_status(since=-5)
+        assert result["log_lines"] == ["a", "b"]

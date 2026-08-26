@@ -874,3 +874,68 @@ class TestExportImportConfigPreset:
         fresh.fov_size = 1
         wcs.load_config_preset(fresh, "round_trip_source")
         assert fresh.fov_size == 456
+
+
+class TestTriggerSchema:
+    def test_get_tab_settings_returns_every_schema_key(self):
+        config = _config()
+        result = wcs.get_tab_settings(config, "trigger")
+        assert set(result.keys()) >= set(wcs._SCHEMA["trigger"].keys())
+
+    def test_reads_all_fields(self):
+        config = _config(
+            auto_fire_target_part="head", always_auto_fire=True,
+            mouse_click_method="makcu", auto_fire_delay=0.5, auto_fire_interval=0.2,
+        )
+        result = wcs.get_tab_settings(config, "trigger")
+        assert result["auto_fire_target_part"] == "head"
+        assert result["always_auto_fire"] is True
+        assert result["mouse_click_method"] == "makcu"
+        assert result["auto_fire_delay"] == 0.5
+        assert result["auto_fire_interval"] == 0.2
+
+    def test_apply_rejects_invalid_target_part(self):
+        config = _config(auto_fire_target_part="both")
+        result = wcs.apply_tab_settings(config, "trigger", {"auto_fire_target_part": "legs"})
+        assert result == {"ok": False, "reason": "invalid_choice", "field": "auto_fire_target_part"}
+        assert config.auto_fire_target_part == "both"
+
+    def test_apply_rejects_mouse_click_method_outside_triggers_narrower_list(self):
+        """The "trigger" tab's mouse_click_method entry is independently
+        validated against trigger_page.py's own 6-item combo list, tighter
+        than the "aim" tab's unrestricted "str" entry for the same field —
+        see _SCHEMA["trigger"]'s comment."""
+        config = _config(mouse_click_method="mouse_event")
+        result = wcs.apply_tab_settings(config, "trigger", {"mouse_click_method": "not_a_real_method"})
+        assert result == {"ok": False, "reason": "invalid_choice", "field": "mouse_click_method"}
+        # The "aim" tab's own (looser) entry for the same field must be
+        # completely unaffected by "trigger"'s stricter validation.
+        result2 = wcs.apply_tab_settings(config, "aim", {"mouse_click_method": "not_a_real_method"})
+        assert result2["ok"] is True
+        assert config.mouse_click_method == "not_a_real_method"
+
+    def test_apply_clamps_auto_fire_delay_and_interval(self):
+        config = _config(auto_fire_delay=1.0, auto_fire_interval=0.5)
+        wcs.apply_tab_settings(config, "trigger", {"auto_fire_delay": 99, "auto_fire_interval": 99})
+        assert config.auto_fire_delay == 2.0  # schema max
+        assert config.auto_fire_interval == 1.0  # schema max
+
+    def test_always_auto_fire_bool_coercion(self):
+        config = _config(always_auto_fire=False)
+        wcs.apply_tab_settings(config, "trigger", {"always_auto_fire": 1})
+        assert config.always_auto_fire is True
+
+
+class TestConvertSchema:
+    def test_get_tab_settings_returns_every_schema_key(self):
+        config = _config()
+        result = wcs.get_tab_settings(config, "convert")
+        assert set(result.keys()) >= set(wcs._SCHEMA["convert"].keys())
+
+    def test_reads_and_writes_trt_fp16_enabled(self):
+        config = _config(trt_fp16_enabled=False)
+        result = wcs.get_tab_settings(config, "convert")
+        assert result["trt_fp16_enabled"] is False
+
+        wcs.apply_tab_settings(config, "convert", {"trt_fp16_enabled": True})
+        assert config.trt_fp16_enabled is True
