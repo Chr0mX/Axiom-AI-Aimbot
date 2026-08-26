@@ -987,8 +987,18 @@
     })
       .then(function (res) {
         if (!res.ok) {
-          modelSwitchReason.textContent = "request failed";
-          return null;
+          // Show the actual status instead of a bare "request failed" —
+          // 401 (bad/stale token), 422 (malformed body), and a 5xx server
+          // error all need a different fix, and a generic message can't
+          // be told apart from the network-failure case in .catch() below.
+          return res.text().then(function (bodyText) {
+            var detail = bodyText ? " — " + bodyText.slice(0, 200) : "";
+            modelSwitchReason.textContent = "request failed (HTTP " + res.status + ")" + detail;
+            return null;
+          }, function () {
+            modelSwitchReason.textContent = "request failed (HTTP " + res.status + ")";
+            return null;
+          });
         }
         return res.json();
       })
@@ -1005,8 +1015,11 @@
             : "applied — takes effect on next AI start";
         }
       })
-      .catch(function () {
-        modelSwitchReason.textContent = "request failed";
+      .catch(function (err) {
+        // A thrown exception here means the request never got a response
+        // at all (network error, CORS, server unreachable) — distinct
+        // from the !res.ok branch above, which did get a response.
+        modelSwitchReason.textContent = "request failed (" + (err && err.message ? err.message : "network error") + ")";
       })
       .then(function () {
         modelSwitchBtn.disabled = false;
