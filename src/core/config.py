@@ -199,6 +199,7 @@ _FIELD_MAP = {
     'web_control_enabled':        'web_control.enabled',
     'web_control_port':           'web_control.port',
     'web_control_token':          'web_control.token',
+    'preset_slots':               'web_control.preset_slots',
 
     # --- hardware ---
     'mouse_move_method':          'hardware.mouse_move_method',
@@ -595,6 +596,14 @@ class Config:
         # (and the GUI's enable toggle) generate one via secrets.token_urlsafe()
         # the first time it's needed, then persist it here so it survives restarts.
         self.web_control_token: str = ""
+        # 5 quick-load preset slots shown in the web control client's
+        # sidebar (below Status) — each entry is either "" (unassigned) or
+        # the name of a saved aim preset (see config_manager.py's
+        # ConfigManager). Web-Control-only UI state, not aim behavior
+        # itself, which is why this lives under web_control.* rather than
+        # aim.*/tracking.* — it must never be captured inside an aim
+        # preset's own saved data.
+        self.preset_slots: List[str] = ["", "", "", "", ""]
 
         # Aim shaping (ported from Someone_idea)
         self.aim_deadzone_enabled: bool = False

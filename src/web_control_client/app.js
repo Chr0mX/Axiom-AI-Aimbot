@@ -1086,6 +1086,10 @@
         });
         var has = Array.prototype.some.call(configsSelect.options, function (o) { return o.value === current; });
         if (has) configsSelect.value = current;
+        // The Quick Presets sidebar section reuses this exact fetch rather
+        // than making its own — one master list, same "allModelNames"
+        // precedent the Model/Convert tabs already share.
+        populatePresetSlotSelects(data.presets);
       })
       .catch(function () {});
   }
@@ -1281,6 +1285,103 @@
     fetch("/api/control/open_configs_folder", { method: "POST", headers: authHeaders() })
       .catch(function () {})
       .then(function () { btn.disabled = false; });
+  });
+
+  // ---------------------------------------------------------------------
+  // Quick Presets — 5 one-click shortcuts below the sidebar's Status
+  // section, always visible regardless of which tab is open (unlike the
+  // Configs panel itself). Each slot is independently assignable to a
+  // saved preset via its own <select>; picking a value there POSTs the
+  // assignment immediately (GET/POST /api/preset_slots), while Load fires
+  // a bare POST /api/configs/load with no confirmation prompt — a
+  // deliberate fast-path, unlike the Configs tab's own Load button, which
+  // previews the diff first. Reuses refreshConfigsList()'s own fetched
+  // preset list (populatePresetSlotSelects(), called from inside it) —
+  // same "share one fetched list" precedent as allModelNames.
+  // ---------------------------------------------------------------------
+  var PRESET_SLOT_COUNT = 5;
+  var presetSlotSelects = [];
+  var presetSlotLoadBtns = [];
+  for (var _psi = 0; _psi < PRESET_SLOT_COUNT; _psi++) {
+    presetSlotSelects.push(document.getElementById("preset-slot-" + _psi));
+    presetSlotLoadBtns.push(document.getElementById("preset-slot-load-" + _psi));
+  }
+
+  function populatePresetSlotSelects(names) {
+    presetSlotSelects.forEach(function (sel) {
+      if (document.activeElement === sel) return; // don't clobber a mid-pick
+      var current = sel.value;
+      sel.innerHTML = '<option value="">— unassigned —</option>';
+      (names || []).forEach(function (name) {
+        var opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      });
+      var has = Array.prototype.some.call(sel.options, function (o) { return o.value === current; });
+      sel.value = has ? current : "";
+    });
+  }
+
+  function fetchPresetSlotAssignments() {
+    fetch("/api/preset_slots", { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || !data.slots) return;
+        data.slots.forEach(function (name, i) {
+          var sel = presetSlotSelects[i];
+          if (!sel || document.activeElement === sel) return;
+          sel.value = name || "";
+          presetSlotLoadBtns[i].disabled = !name;
+        });
+      })
+      .catch(function () {});
+  }
+
+  presetSlotSelects.forEach(function (sel, i) {
+    sel.addEventListener("change", function () {
+      var name = sel.value;
+      fetch("/api/preset_slots", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ index: i, name: name }),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (data && data.ok) {
+            presetSlotLoadBtns[i].disabled = !name;
+          } else {
+            // Refused (e.g. the picked name no longer exists) — resync
+            // this row from the server's actual current assignment rather
+            // than trusting the now-stale local selection.
+            fetchPresetSlotAssignments();
+          }
+        })
+        .catch(function () {});
+    });
+  });
+
+  presetSlotLoadBtns.forEach(function (btn, i) {
+    btn.addEventListener("click", function () {
+      var name = presetSlotSelects[i].value;
+      if (!name) return;
+      btn.disabled = true;
+      fetch("/api/configs/load", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ name: name }),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (data && data.ok) {
+            // Same resync every other successful preset load already does
+            // — a preset can touch fields on any generic-schema tab.
+            ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(loadTabSettings);
+          }
+        })
+        .catch(function () {})
+        .then(function () { btn.disabled = !presetSlotSelects[i].value; });
+    });
   });
 
   // ---------------------------------------------------------------------
@@ -1883,6 +1984,11 @@
   // own load), so its tab settings + HUD extras are fetched explicitly here.
   loadTabSettings("model");
   ensureModelPanelExtras();
+  // Quick Presets lives in the sidebar, visible regardless of which tab is
+  // open — fetch its preset list + slot assignments once at startup too,
+  // not gated on the Configs tab ever being activated.
+  refreshConfigsList();
+  fetchPresetSlotAssignments();
   poll();
   setInterval(poll, POLL_MS);
 })();
