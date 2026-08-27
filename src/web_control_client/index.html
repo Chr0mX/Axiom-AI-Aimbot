@@ -40,14 +40,16 @@
         <div class="sidebar-section">
           <div class="card-title">Status</div>
           <div class="grid">
-            <div class="stat"><div class="label">AI Running</div><div class="value" id="s-running">—</div></div>
+            <div class="stat"><div class="label">Inference Running</div><div class="value" id="s-running">—</div></div>
             <div class="stat"><div class="label">Aim Toggle</div><div class="value" id="s-active">—</div></div>
-            <div class="stat"><div class="label">Firing</div><div class="value" id="s-firing">—</div></div>
+            <div class="stat"><div class="label">Auto Aim</div><div class="value" id="s-firing">—</div></div>
             <div class="stat"><div class="label">Mouse Method</div><div class="value" id="s-mouse">—</div></div>
-            <div class="stat"><div class="label">MAKCU</div><div class="value" id="s-makcu">—</div></div>
-            <div class="stat"><div class="label">MAKCU Port</div><div class="value" id="s-makcu-port">—</div></div>
             <div class="stat"><div class="label">Capture FPS</div><div class="value" id="s-capfps">—</div></div>
             <div class="stat"><div class="label">Inference FPS</div><div class="value" id="s-inffps">—</div></div>
+            <!-- Stream FPS — hidden unless screenshot_method is uvc/ndi/udp
+                 (matching status_panel.py's own source_fps_row condition);
+                 label/value are filled in by applyStatus() in app.js. -->
+            <div class="stat hidden" id="s-stream-fps-stat"><div class="label" id="s-stream-fps-label">Stream FPS</div><div class="value" id="s-stream-fps">—</div></div>
           </div>
         </div>
       </div>

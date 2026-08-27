@@ -166,9 +166,23 @@ def _build_status(config) -> dict:
         "selected_backend": str(getattr(config, "inference_backend", "auto")),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
-        "makcu_com_port": str(getattr(config, "makcu_com_port", "") or ""),
         "capture_fps": round(cap_fps, 1),
         "inference_fps": round(inf_fps, 1),
+        # Stream/source FPS — only meaningful for the three capture backends
+        # that read from an external device/stream rather than the desktop
+        # itself (uvc/ndi/udp); the client shows a "Stream FPS" stat only
+        # for those three, same condition status_panel.py's own
+        # source_fps_row uses. Two separate fields rather than one merged
+        # value, mirroring esp_server.py's own _build_snapshot() convention:
+        # source_nominal_fps is the device's own reported rate (uvc/ndi),
+        # while udp_recv_fps is the actual assembled-frames/sec rate from
+        # the sender — source_nominal_fps for udp is only the local decode
+        # throughput, not the real stream rate (see status_panel.py's own
+        # comment on this exact distinction).
+        "screenshot_method": str(getattr(config, "screenshot_method", "mss")),
+        "source_fps": round(float(getattr(config, "source_nominal_fps", 0.0)), 1),
+        "udp_recv_fps": round(float(getattr(config, "udp_recv_fps", 0.0)), 1),
+        "udp_dropped_fps": round(float(getattr(config, "udp_dropped_fps", 0.0)), 1),
     }
 
 

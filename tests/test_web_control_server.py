@@ -254,3 +254,44 @@ class TestBuildStatus:
         status = wcserver._build_status(config)
         assert status["selected_backend"] == "cpu"
         assert status["inference_backend"] == "cpu"
+
+    def test_makcu_com_port_no_longer_in_response(self):
+        """The sidebar's standalone MAKCU Port stat was removed (dropped in
+        favor of the Keys & HW tab's own COM Port field, which already
+        shows this) — makcu_com_port is now dead weight in the response,
+        confirmed gone rather than just unused."""
+        import core.web_control_server as wcserver
+
+        config = self._config(makcu_com_port="COM5")
+        status = wcserver._build_status(config)
+        assert "makcu_com_port" not in status
+        # makcu_connected stays — the Keys & HW tab's MAKCU toggle still
+        # syncs from it (see app.js's applyStatus()).
+        assert "makcu_connected" in status
+
+    def test_stream_fps_fields_reflect_config(self):
+        """screenshot_method/source_fps/udp_recv_fps/udp_dropped_fps —
+        added so the web client can show a "Stream FPS" stat for
+        uvc/ndi/udp, mirroring status_panel.py's own source_fps_row."""
+        import core.web_control_server as wcserver
+
+        config = self._config(
+            screenshot_method="udp",
+            source_nominal_fps=30.0,
+            udp_recv_fps=59.6,
+            udp_dropped_fps=2.3,
+        )
+        status = wcserver._build_status(config)
+        assert status["screenshot_method"] == "udp"
+        assert status["source_fps"] == 30.0
+        assert status["udp_recv_fps"] == 59.6
+        assert status["udp_dropped_fps"] == 2.3
+
+    def test_stream_fps_fields_default_when_missing(self):
+        import core.web_control_server as wcserver
+
+        status = wcserver._build_status(self._config())
+        assert status["screenshot_method"] == "mss"
+        assert status["source_fps"] == 0.0
+        assert status["udp_recv_fps"] == 0.0
+        assert status["udp_dropped_fps"] == 0.0

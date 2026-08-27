@@ -182,6 +182,7 @@ _FIELD_MAP = {
     'chroma_box_speed':           'display.chroma_box_speed',
     'show_status_panel':          'display.status_panel.show',
     'status_panel_show_auto_aim': 'display.status_panel.show_auto_aim',
+    'status_panel_show_aim_toggle': 'display.status_panel.show_aim_toggle',
     'status_panel_show_model':    'display.status_panel.show_model',
     'status_panel_show_mouse_move': 'display.status_panel.show_mouse_move',
     'status_panel_show_mouse_click': 'display.status_panel.show_mouse_click',
@@ -520,6 +521,7 @@ class Config:
         self.show_detect_range: bool = True
         self.show_status_panel: bool = True
         self.status_panel_show_auto_aim: bool = True
+        self.status_panel_show_aim_toggle: bool = True
         self.status_panel_show_model: bool = True
         self.status_panel_show_mouse_move: bool = False
         self.status_panel_show_mouse_click: bool = False

@@ -1405,17 +1405,40 @@
     return name === "cuda" ? "tensorrt" : name;
   }
 
+  // Only the three capture backends that read from an external device/
+  // stream rather than the desktop itself get a Stream FPS stat — mirrors
+  // status_panel.py's own source_fps_row label map and unit convention
+  // (fps for udp's real assembled-frame rate, Hz for uvc/ndi's device-
+  // reported nominal rate). mss/dxcam get no row at all, same as this
+  // client's own scoping request.
+  var STREAM_FPS_LABELS = { uvc: "UVC Source FPS", ndi: "NDI Source FPS", udp: "UDP Stream FPS" };
+
   function applyStatus(s) {
     document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
-    document.getElementById("s-firing").textContent = s.aim_firing ? "FIRING" : "idle";
+    document.getElementById("s-firing").textContent = s.aim_firing ? "ON" : "OFF";
     document.getElementById("s-model").textContent = s.model || "—";
     document.getElementById("s-backend").textContent = s.inference_backend || "—";
     document.getElementById("s-mouse").textContent = s.mouse_move_method || "—";
-    document.getElementById("s-makcu").textContent = s.makcu_connected ? "connected" : "disconnected";
-    document.getElementById("s-makcu-port").textContent = s.makcu_com_port || "—";
     document.getElementById("s-capfps").textContent = s.capture_fps != null ? s.capture_fps.toFixed(1) : "—";
     document.getElementById("s-inffps").textContent = s.inference_fps != null ? s.inference_fps.toFixed(1) : "—";
+
+    var streamStat = document.getElementById("s-stream-fps-stat");
+    var streamLabel = STREAM_FPS_LABELS[s.screenshot_method];
+    if (streamLabel) {
+      streamStat.classList.remove("hidden");
+      document.getElementById("s-stream-fps-label").textContent = streamLabel;
+      var isUdp = s.screenshot_method === "udp";
+      var nominal = isUdp ? s.udp_recv_fps : s.source_fps;
+      var unit = isUdp ? "fps" : "Hz";
+      var streamText = nominal > 0 ? nominal.toFixed(0) + " " + unit : "—";
+      if (isUdp && s.udp_dropped_fps >= 1.0) {
+        streamText += "  ⚠ " + s.udp_dropped_fps.toFixed(0) + " dropped/s";
+      }
+      document.getElementById("s-stream-fps").textContent = streamText;
+    } else {
+      streamStat.classList.add("hidden");
+    }
 
     suppressToggleEcho = true;
     alwaysAimToggle.checked = !!s.always_aim;

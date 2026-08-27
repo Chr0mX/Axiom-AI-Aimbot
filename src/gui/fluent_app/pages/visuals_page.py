@@ -146,6 +146,7 @@ class VisualsPage(BasePage):
         self.statusPanelElementsLayout.setVerticalSpacing(4)
 
         self.spAutoAimCheck = CheckBox(self._shortText("auto_aim"), self.statusPanelElementsWidget)
+        self.spAimToggleCheck = CheckBox(t("status_panel_aim_toggle", "Aim Toggle"), self.statusPanelElementsWidget)
         self.spModelCheck = CheckBox(self._shortText("status_panel_current_model"), self.statusPanelElementsWidget)
         self.spMouseMoveCheck = CheckBox(self._shortText("mouse_move_method"), self.statusPanelElementsWidget)
         self.spMouseClickCheck = CheckBox(self._shortText("mouse_click_method"), self.statusPanelElementsWidget)
@@ -155,6 +156,7 @@ class VisualsPage(BasePage):
 
         self._statusPanelChecks = [
             self.spAutoAimCheck,
+            self.spAimToggleCheck,
             self.spModelCheck,
             self.spMouseMoveCheck,
             self.spMouseClickCheck,
@@ -364,6 +366,7 @@ class VisualsPage(BasePage):
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
         self.spAutoAimCheck.stateChanged.connect(self._onStatusPanelAutoAimChanged)
+        self.spAimToggleCheck.stateChanged.connect(self._onStatusPanelAimToggleChanged)
         self.spModelCheck.stateChanged.connect(self._onStatusPanelModelChanged)
         self.spMouseMoveCheck.stateChanged.connect(self._onStatusPanelMouseMoveChanged)
         self.spMouseClickCheck.stateChanged.connect(self._onStatusPanelMouseClickChanged)
@@ -409,6 +412,7 @@ class VisualsPage(BasePage):
         self.boxThemeCombo.setCurrentText(theme_text if theme_text in _valid_themes else "Default")
         self.chromaSpeedCard.setValue(int(getattr(self._config, 'chroma_box_speed', 1)))
         self.spAutoAimCheck.setChecked(getattr(self._config, 'status_panel_show_auto_aim', True))
+        self.spAimToggleCheck.setChecked(getattr(self._config, 'status_panel_show_aim_toggle', True))
         self.spModelCheck.setChecked(getattr(self._config, 'status_panel_show_model', True))
         self.spMouseMoveCheck.setChecked(getattr(self._config, 'status_panel_show_mouse_move', True))
         self.spMouseClickCheck.setChecked(getattr(self._config, 'status_panel_show_mouse_click', True))
@@ -482,6 +486,10 @@ class VisualsPage(BasePage):
     def _onStatusPanelAutoAimChanged(self, state):
         if self._config:
             self._config.status_panel_show_auto_aim = bool(state)
+
+    def _onStatusPanelAimToggleChanged(self, state):
+        if self._config:
+            self._config.status_panel_show_aim_toggle = bool(state)
 
     def _onStatusPanelModelChanged(self, state):
         if self._config:
@@ -685,6 +693,7 @@ class VisualsPage(BasePage):
         self.statusPanelElementsCard.titleLabel.setText(t("status_panel_elements", "Status Panel Elements"))
         self.statusPanelElementsCard.contentLabel.setText(t("status_panel_elements_hint", "Choose which rows are shown in status panel"))
         self.spAutoAimCheck.setText(self._shortText("auto_aim"))
+        self.spAimToggleCheck.setText(t("status_panel_aim_toggle", "Aim Toggle"))
         self.spModelCheck.setText(self._shortText("status_panel_current_model"))
         self.spMouseMoveCheck.setText(self._shortText("mouse_move_method"))
         self.spMouseClickCheck.setText(self._shortText("mouse_click_method"))
