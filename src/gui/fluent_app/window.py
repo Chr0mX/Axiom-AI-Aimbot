@@ -138,17 +138,21 @@ class AxiomWindow(FluentWindow):
         self.initBottomNavigation()
 
         # Re-sync a page's widgets from the live Config every time the user
-        # navigates to it. Config is a single object shared by reference
-        # between this GUI and web_control_server.py's routes running on
-        # their own thread — a web-triggered change (e.g. toggling a
-        # setting from the browser, or a completed remote model
-        # conversion) writes straight into it, but nothing previously told
-        # this window's widgets to reflect that. Bounded to just the page
-        # becoming visible (not a periodic timer touching all ten pages at
-        # once) — the user just clicked here, so there's no in-progress
-        # edit on this page to clobber, mirroring the same "refresh on
-        # activation" precedent the web client's own activateTab() uses.
+        # navigates to it (zero-lag — doesn't wait for the timer below) and
+        # continuously while they're already looking at one (the timer).
+        # Config is a single object shared by reference between this GUI
+        # and web_control_server.py's routes running on their own thread —
+        # a web-triggered change (toggling a setting from the browser, a
+        # completed remote model conversion) writes straight into it, but
+        # nothing previously told this window's widgets to reflect that.
+        # A first attempt only refreshed on navigation, which missed the
+        # common case of both UIs open side by side on the *same* page —
+        # continuous polling is the only way to catch that, matching the
+        # web client's own 1s poll cadence.
         self.stackedWidget.currentChanged.connect(self._onPageActivated)
+        self._configSyncTimer = QTimer(self)
+        self._configSyncTimer.timeout.connect(self._onConfigSyncTick)
+        self._configSyncTimer.start(1000)
 
         from .components.capture_preview import CapturePreviewPanel
         from PyQt6.QtWidgets import QToolButton
@@ -475,13 +479,37 @@ class AxiomWindow(FluentWindow):
         else telling this window's widgets to reflect it). Deliberately
         scoped to one page, not all ten (_refreshAllPages() territory) —
         cheap, and the user only ever sees the page they just switched to.
+        Zero-lag: this fires the instant navigation happens, rather than
+        waiting for _onConfigSyncTick()'s next tick.
         """
         if self._config is None:
             return
         widget = self.stackedWidget.widget(index)
         if widget is not None and hasattr(widget, 'setConfig'):
             widget.setConfig(self._config)
-        
+
+    def _onConfigSyncTick(self):
+        """Continuously re-syncs the *currently visible* page from the live
+        Config, once a second — catches the case _onPageActivated() can't:
+        the operator already has this exact page open (in Qt) when a web
+        control route changes a field it shows, e.g. both UIs open side by
+        side and a toggle flipped from the browser. Skips the refresh
+        entirely while the keyboard focus is somewhere inside the current
+        page, so an in-progress local edit (typing a value, mid-drag on a
+        slider) is never clobbered by a tick landing at the wrong moment —
+        the same guard the web client's own poll uses for its fields.
+        """
+        if self._config is None:
+            return
+        widget = self.stackedWidget.currentWidget()
+        if widget is None or not hasattr(widget, 'setConfig'):
+            return
+        from PyQt6.QtWidgets import QApplication
+        focused = QApplication.focusWidget()
+        if focused is not None and widget.isAncestorOf(focused):
+            return
+        widget.setConfig(self._config)
+
     def initNavigation(self):
         # Navigation items using translation keys
 
