@@ -366,6 +366,16 @@ input[type="range"] {
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
+  /* The global `* { box-sizing: border-box }` reset (top of this file)
+     does NOT reach ::-webkit-slider-thumb — the universal selector never
+     matches a pseudo-element unless explicitly listed. Left at the
+     content-box default, this thumb's 2px border would render OUTSIDE the
+     18x18 box (rendering at 22x22), throwing off the margin-top centering
+     math below by exactly that border width and visibly sitting the thumb
+     a couple pixels off the track's true vertical center — a real,
+     reported bug. border-box makes the border render inside the declared
+     18x18, matching what the margin-top math below actually assumes. */
+  box-sizing: border-box;
   width: 18px;
   height: 18px;
   margin-top: -6px; /* (track height 6px − thumb 18px) / 2, Chromium needs manual centering */
@@ -376,6 +386,11 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: pointer;
 }
 input[type="range"]::-moz-range-thumb {
+  /* Same reasoning as the -webkit- rule above — Firefox doesn't need a
+     manual margin-top to center this thumb, but the border would still
+     inflate it to 22x22 without this, making it look a couple pixels
+     larger/less precisely positioned than its Chromium counterpart. */
+  box-sizing: border-box;
   width: 18px;
   height: 18px;
   border: 2px solid var(--bg);

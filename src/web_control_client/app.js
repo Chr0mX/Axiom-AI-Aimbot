@@ -306,16 +306,42 @@
   // (visuals_page.py never pairs a port number with a slider).
   var SLIDER_EXCLUDED_KEYS = ["web_esp_http_port", "web_esp_ws_port"];
 
+  // Fixed dimensions from styles.css's input[type="range"] / ::-webkit-
+  // slider-thumb rules — kept in sync with those, not read from the DOM
+  // (see the thumb-inset comment below for why).
+  var RANGE_TRACK_PX = 160;
+  var RANGE_THUMB_PX = 18;
+
   // Drives the filled-progress look in styles.css (the --range-progress
   // custom property a linear-gradient background reads) — called on every
   // value change from any direction (drag, typing in the paired number
   // box, or a server-driven refresh) so the fill never goes stale.
+  //
+  // A naive fraction*100% split (the first version of this) visibly drifts
+  // from where the thumb actually sits — a real, reported bug ("slider not
+  // properly aligned to the slider [thumb]"): the browser insets the
+  // thumb's travel by half its own width at each end (its center can never
+  // reach x=0 or x=trackWidth, only x=thumbWidth/2 and x=trackWidth-
+  // thumbWidth/2), but a flat value-fraction split assumes the fill
+  // boundary reaches all the way to both edges. The mismatch is worst near
+  // either end (up to ~half the thumb's own width, ~9px here) and zero
+  // only exactly at the midpoint. Computing the thumb's true center
+  // position first and expressing THAT as a percentage of the track
+  // eliminates it. offsetWidth isn't used here on purpose — most of these
+  // ranges live inside a `.panel` that's still `display:none` (not yet
+  // activated) the first time enhanceNumberInputsWithSliders() runs at
+  // page load, where offsetWidth would read 0 and this whole calculation
+  // would divide by zero; the track/thumb widths are fixed in CSS anyway,
+  // so hardcoding them (kept in sync via the comment above) avoids that
+  // trap entirely.
   function updateRangeFill(range) {
     var min = parseFloat(range.min);
     var max = parseFloat(range.max);
     var val = parseFloat(range.value);
-    var pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
-    pct = Math.max(0, Math.min(100, pct));
+    var fraction = max > min ? (val - min) / (max - min) : 0;
+    fraction = Math.max(0, Math.min(1, fraction));
+    var thumbCenterPx = RANGE_THUMB_PX / 2 + fraction * (RANGE_TRACK_PX - RANGE_THUMB_PX);
+    var pct = (thumbCenterPx / RANGE_TRACK_PX) * 100;
     range.style.setProperty("--range-progress", pct + "%");
   }
 
@@ -1408,7 +1434,23 @@
       applyModelSelection(s.model);
       modelFormPrefilled = true;
     }
-    if (s.selected_backend) {
+    // Two guards, both required — without either, the operator picking
+    // "DirectML" here visibly snaps back to "TensorRT" within ~1s (this was
+    // a real, reported bug): (1) document.activeElement !== backendSelect
+    // skips the write while the dropdown is focused/open — the operator
+    // hasn't clicked Switch yet, s.selected_backend still reflects the OLD
+    // backend, and the very next poll tick (every ~1s) would otherwise
+    // silently revert their in-progress choice before they can even click
+    // Switch. (2) !modelSwitchPending skips it for the entire in-flight
+    // switch flow — the initial POST's round trip, PLUS (for a
+    // needs_restart refusal) the confirm() dialog and the subsequent
+    // /api/control/model_restart round trip — during which
+    // s.selected_backend is still the pre-switch value until that whole
+    // flow actually lands, so reflecting it early would revert the
+    // dropdown to the old backend right as the operator is confirming the
+    // restart. See modelSwitchPending's own comment for exactly where it's
+    // set/cleared.
+    if (s.selected_backend && document.activeElement !== backendSelect && !modelSwitchPending) {
       var backendDisplay = displayBackend(s.selected_backend);
       var hasOption = Array.prototype.some.call(backendSelect.options, function (opt) {
         return opt.value === backendDisplay;
@@ -1572,6 +1614,18 @@
     return MODEL_SWITCH_REASONS[reason] || reason || "failed";
   }
 
+  // Guards backendSelect (see applyStatus()) against a poll tick reverting
+  // it while a switch is genuinely in flight — the plain round trip to
+  // /api/control/model, PLUS, for a needs_restart refusal, the confirm()
+  // dialog and the subsequent /api/control/model_restart round trip.
+  // Deliberately NOT tied to modelSwitchBtn.disabled, which re-enables
+  // right after the FIRST request settles (so the operator isn't stuck if
+  // the confirm dialog takes a while to answer) — this flag instead spans
+  // the operator's whole intent, cleared only once the flow actually
+  // resolves one way or another (applied, refused-and-shown, declined, or
+  // the restart request itself failed).
+  var modelSwitchPending = false;
+
   // Confirmed-restart flow for the one reason above that a plain retry
   // can never fix: crossing to/from DirectML needs a real app restart
   // (see MODEL_SWITCH_REASONS.needs_restart's own text and
@@ -1588,6 +1642,7 @@
     );
     if (!confirmed) {
       modelSwitchReason.textContent = "restart declined — model/backend left unchanged";
+      modelSwitchPending = false;
       return;
     }
     modelSwitchReason.textContent = "restarting Axiom…";
@@ -1600,9 +1655,19 @@
       .then(function (data) {
         if (!data || data.ok === false) {
           modelSwitchReason.textContent = describeModelSwitchReason(data && data.reason);
+          // Nothing was actually applied — safe (and correct) to let the
+          // next poll resync backendSelect from the still-unchanged config.
+          modelSwitchPending = false;
           return;
         }
         modelSwitchReason.textContent = "restarting Axiom — this page reconnects automatically once it's back up";
+        // config.model_path/inference_backend are already written
+        // server-side at this point (confirm_model_change_with_restart()
+        // applies them before scheduling the restart) — releasing the
+        // guard now is what lets applyStatus() start reflecting the real,
+        // just-confirmed backend instead of fighting it for the remaining
+        // few seconds until the process actually restarts.
+        modelSwitchPending = false;
       })
       .catch(function () {
         // The process may already be mid-restart by the time this settles
@@ -1610,6 +1675,7 @@
         // loop silently recovers once the new process's server responds
         // again, so there's nothing more to surface here than what's
         // already showing.
+        modelSwitchPending = false;
       });
   }
 
@@ -1619,6 +1685,7 @@
     // project_root, not project_root/Model, so the "Model/" prefix has to
     // be added client-side.
     var modelPath = "Model/" + modelSelect.value;
+    modelSwitchPending = true;
     modelSwitchBtn.disabled = true;
     modelSwitchReason.textContent = "";
     fetch("/api/control/model", {
@@ -1644,13 +1711,25 @@
         return res.json();
       })
       .then(function (data) {
-        if (!data) return;
+        if (!data) {
+          // The !res.ok branch above already reported its own reason text
+          // and resolved with null — nothing was applied, so it's safe
+          // (and necessary — otherwise this would wedge backendSelect's
+          // poll-guard permanently true) to release the guard here too.
+          modelSwitchPending = false;
+          return;
+        }
         if (data.ok === false) {
           if (data.reason === "needs_restart") {
+            // offerModelRestartConfirm() owns clearing modelSwitchPending
+            // itself once its own longer flow (confirm dialog + possible
+            // /api/control/model_restart round trip) actually settles —
+            // see its own comment. Skip the generic clear below for this
+            // one branch only.
             offerModelRestartConfirm(modelPath, backendSelect.value);
-          } else {
-            modelSwitchReason.textContent = describeModelSwitchReason(data.reason);
+            return;
           }
+          modelSwitchReason.textContent = describeModelSwitchReason(data.reason);
         } else {
           // Never optimistically write s-model/s-backend here — the next
           // status poll is the sole source of truth for those, same as
@@ -1659,12 +1738,14 @@
             ? "applied — live"
             : "applied — takes effect on next AI start";
         }
+        modelSwitchPending = false;
       })
       .catch(function (err) {
         // A thrown exception here means the request never got a response
         // at all (network error, CORS, server unreachable) — distinct
         // from the !res.ok branch above, which did get a response.
         modelSwitchReason.textContent = "request failed (" + (err && err.message ? err.message : "network error") + ")";
+        modelSwitchPending = false;
       })
       .then(function () {
         modelSwitchBtn.disabled = false;

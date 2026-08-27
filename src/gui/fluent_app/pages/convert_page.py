@@ -74,6 +74,12 @@ class ConvertPage(BasePage):
         self._config = None
         self._worker = None
         self._converting_onnx_path = None
+        # Tracks whether the LAST showRemoteConversionState() call saw a
+        # build in progress — lets that method tell "just started" from
+        # "still running" without window.py needing to know anything about
+        # this page's internals. See showRemoteConversionState()'s own
+        # docstring.
+        self._remote_conversion_active = False
         self._all_model_files = []  # master (name, abs_path) list; modelSearchEdit filters a view of this
         # repo root: .../src/gui/fluent_app/pages/convert_page.py → up 4 → src → up 1 → root
         _src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
@@ -294,6 +300,84 @@ class ConvertPage(BasePage):
         if model_path:
             self.selectModelForConversion(model_path)
         self._onConvert()
+
+    def showRemoteConversionState(self, status: dict) -> None:
+        """Mirrors a TensorRT build that was triggered remotely — via the
+        Web Control API's POST /api/control/convert
+        (app_controller.start_conversion()/_run_conversion_worker()) —
+        into this page's own widgets. window.py's own timer polls
+        app_controller.get_conversion_status() and calls this once it
+        detects one running, so an operator physically at the machine sees
+        the exact same live log/progress they'd get from clicking Convert
+        here themselves, even though the request came from the browser —
+        "auto redirect the gui to start the conversion process then wait
+        for it to finish then detect the model swap", per the explicit
+        request this was built for.
+
+        Purely a passive renderer: this never starts, owns, or touches a
+        _ConvertWorker of its own, so the local button-click path
+        (_onConvert()/_ConvertWorker/_onConvertFinished()) is completely
+        untouched by any of this. It also never re-applies
+        config.model_path/trt_fp16_enabled or calls save_config() itself —
+        _run_conversion_worker() already did that on success; window.py's
+        own _refreshAllPages() (called once `status["done"]` fires) is what
+        pulls the already-applied change into this page (and every other
+        one, including the Model page's own cache-status badges) — the
+        same mechanism a LOCAL Convert-tab build already triggers.
+        """
+        if self._worker is not None and self._worker.isRunning():
+            # A local conversion (this page's own Convert button) already
+            # owns this UI. app_controller.start_conversion() already
+            # refuses a second *remote* build while one is running, but
+            # nothing stops a local click racing a remote one — never let
+            # this remote mirror fight the local worker's own signals for
+            # control of these widgets.
+            return
+
+        is_running = bool(status.get("running"))
+        just_started = not self._remote_conversion_active
+        self._remote_conversion_active = is_running
+
+        if just_started and is_running:
+            model_path = status.get("model_path") or ""
+            if model_path:
+                try:
+                    self.selectModelForConversion(model_path)
+                except Exception:
+                    pass
+            self.logView.clear()
+            self.logView.append(
+                f"→ Build requested from the Web Control panel "
+                f"({os.path.basename(model_path) or 'unknown model'})"
+            )
+
+        self.progressBar.setVisible(is_running)
+        self.convertBtn.setEnabled(not is_running)
+        self.convertBtn.setText(
+            t("trt_converting", "Converting…") if is_running else t("trt_convert", "Convert"))
+        self.modelCombo.setEnabled(not is_running)
+        self.browseBtn.setEnabled(not is_running)
+
+        for line in status.get("log_lines") or []:
+            self.logView.append(line)
+
+        if status.get("done"):
+            success = bool(status.get("success"))
+            message = status.get("message") or ""
+            if success:
+                self.logView.append(f"✓ Done. Engine cache written to: {message}")
+                InfoBar.success(
+                    t("trt_convert_ok", "Conversion complete"),
+                    message, duration=6000, isClosable=True,
+                    position=InfoBarPosition.TOP, parent=self,
+                )
+            else:
+                self.logView.append(f"✗ {message}")
+                InfoBar.error(
+                    t("trt_convert_fail", "Conversion failed"),
+                    message, duration=8000, isClosable=True,
+                    position=InfoBarPosition.TOP, parent=self,
+                )
 
     # === Callbacks ===
     def _onBrowse(self):
