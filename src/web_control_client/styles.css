@@ -10,6 +10,17 @@
   --accent: #00e0a0;
   --line: rgba(0, 224, 160, 0.25);
   --bad: #ff6060;
+  /* A step lighter than --surface-2, used only for a range slider's
+     unfilled track — --surface-2 itself is too close to --surface/--bg
+     to read as a distinct interactive control against the page/card
+     behind it. */
+  --track-empty: #2c2c3a;
+  /* This client is always dark, no light variant — telling the browser
+     so lets it render every native control (number-input spinner arrows,
+     checkboxes, date pickers, and the scrollbar itself) in its own dark
+     styling instead of the harsh light-mode default it'd otherwise use on
+     a dark page. */
+  color-scheme: dark;
 }
 
 html, body {
@@ -17,22 +28,56 @@ html, body {
   background: var(--bg);
   color: var(--ink);
   font: 14px/1.5 "Segoe UI", "Consolas", "Menlo", monospace, sans-serif;
+  /* Firefox's scrollbar theming knobs — Chromium/Edge/Safari use the
+     ::-webkit-scrollbar pseudo-elements below instead. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-2) var(--surface);
 }
 
-header {
+/* Scrollbar — Chromium/Edge/Safari. Thin, rounded, theme-colored, with an
+   accent-tinted hover state instead of the default light-gray bar that
+   otherwise clashes with this page's dark background. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-2);
+  border-radius: 6px;
+  border: 2px solid var(--surface);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* Topbar: wordmark + tab bar (mirrors the real Qt app's NavigationInterface
+   order — see CLAUDE.md's GUI section) + connection status badge */
+.topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px;
+  gap: 20px;
+  padding: 0 20px;
+  height: 60px;
   border-bottom: 1px solid var(--line);
   position: sticky;
   top: 0;
+  z-index: 10;
   background: rgba(13, 13, 19, 0.9);
   backdrop-filter: blur(6px);
 }
 .wordmark {
   font-weight: 700;
   letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 .wordmark span { color: var(--accent); }
 .wordmark .sub {
@@ -40,25 +85,67 @@ header {
   font-weight: 400;
   margin-left: 6px;
 }
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  overflow-x: auto;
+}
+.tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 12px;
+  height: 34px;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab:hover { color: var(--ink); border-color: var(--line); }
+.tab.active {
+  color: var(--accent);
+  background: rgba(0, 224, 160, 0.1);
+  border-color: var(--line);
+}
+
 #status {
   font-size: 12px;
   padding: 3px 9px;
   border-radius: 4px;
   border: 1px solid var(--line);
+  white-space: nowrap;
 }
 #status.connected { color: var(--accent); }
 #status.disconnected { color: var(--bad); border-color: rgba(255, 96, 96, 0.35); }
 
-main {
-  max-width: 640px;
-  margin: 0 auto;
+/* Content: persistent left status sidebar + per-tab main panel */
+.content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 400px;
+  flex-shrink: 0;
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  border-right: 1px solid var(--line);
 }
 
-.card {
+.main {
+  flex: 1;
+  padding: 20px;
+  max-width: 640px;
+  overflow-y: auto;
+}
+
+.sidebar-section {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -72,13 +159,49 @@ main {
   margin-bottom: 12px;
 }
 
+/* One .panel per tab; only the active one is shown. Cross-cutting facts
+   (running/aim/mouse/MAKCU/FPS) stay in the sidebar above, visible no
+   matter which tab is open — panel content is tab-specific only. */
+.panel { display: none; }
+.panel.active {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.panel-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.panel-placeholder {
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+
 .row {
   display: flex;
   gap: 8px;
   align-items: center;
 }
-input[type="password"], input[type="text"] {
+input[type="password"], input[type="text"], select {
   flex: 1;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--ink);
+  font: inherit;
+}
+/* Number fields get the same dark background/border/radius look as the
+   access-token box above (previously unstyled, falling back to the
+   browser's plain white default) — deliberately its own rule rather than
+   folded into the one above: it must NOT inherit that rule's flex: 1,
+   which would fight .field-control's own sizing (see below) and was one
+   of the sources of the per-row alignment drift. The native up/down
+   spinner arrows are left in place (never hidden) — color-scheme: dark on
+   :root already tints them to match this page instead of the light-mode
+   default. */
+input[type="number"] {
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -109,7 +232,6 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   grid-template-columns: repeat(2, 1fr);
   gap: 10px 16px;
 }
-@media (max-width: 460px) { .grid { grid-template-columns: 1fr; } }
 .stat .label {
   font-size: 11px;
   color: var(--ink-faint);
@@ -153,3 +275,207 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 }
 .switch input:checked + .slider { background: rgba(0, 224, 160, 0.18); border-color: var(--accent); }
 .switch input:checked + .slider::before { transform: translateX(20px); background: var(--accent); }
+
+/* Field cards — a generic settings-row look mirroring the Qt app's
+   SettingCard (title + description, control right-aligned), used to
+   build out the Model/Capture/Inference panels' real content. */
+.field-group { display: flex; flex-direction: column; gap: 10px; }
+.field-group-title {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin: 10px 0 -2px;
+}
+.field-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.field-card.stacked { flex-direction: column; align-items: stretch; }
+.field-info { flex: 1; min-width: 0; }
+.field-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+.field-desc { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
+.field-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  /* Right-justified, same as every Qt SettingCard's own widget (always
+     added with Qt.AlignmentFlag.AlignRight) — with a fixed min-width this
+     also lines up every field-card's control column consistently down a
+     whole panel, regardless of how many children one particular row has
+     (a lone toggle vs. a range+number+unit trio). */
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 200px;
+}
+.field-control select,
+.field-control input[type="text"] {
+  min-width: 140px;
+}
+.field-control input[type="number"] {
+  min-width: 140px;
+}
+/* Narrower once a range slider is paired onto it (see
+   enhanceNumberInputsWithSliders() in app.js, which adds this class) —
+   the slider itself is already the wide/precise input, so the number box
+   next to it only needs to comfortably fit typical values + its spinner
+   arrows, not the full 140px a standalone number field wants. */
+.field-control input[type="number"].has-slider {
+  min-width: 70px;
+}
+.field-slider-value {
+  font-size: 12px;
+  color: var(--ink-soft);
+  min-width: 32px;
+  text-align: right;
+}
+.field-readonly {
+  font-size: 13px;
+  color: var(--ink-soft);
+  word-break: break-word;
+}
+
+/* Filled-progress slider — a plain flat track on a dark page barely read
+   as interactive at all. The unfilled portion uses --track-empty (a step
+   lighter than every surface tone so it doesn't blend into the card
+   behind it), and the filled portion (0 up to the current value) is
+   solid --accent, updated live via the --range-progress custom property
+   (set in app.js's updateRangeFill(), called on every value change —
+   drag, typing in the paired number box, or a server-driven refresh).
+   Neither -webkit nor -moz has a cross-browser "fill" pseudo-element, so
+   this two-color split is done as a background gradient instead — the
+   standard technique for a themed range input.
+
+   The base <input> is a plain, generously-tall (40px) hit target —
+   deliberately NOT sized to match the thumb (an earlier attempt tried
+   that, on the theory that WebKit positions ::-webkit-slider-thumb
+   relative to the input's own box height; a user-supplied, actually
+   browser-verified demo proved that theory wrong and confirmed the values
+   below instead). The thin 6px line is drawn on a dedicated track
+   pseudo-element (::-webkit-slider-runnable-track / ::-moz-range-track),
+   and the thumb is positioned relative to THAT track's own box, not the
+   outer input's — the correct offset is (track-height − thumb-height)/2 =
+   (6−18)/2 = -6px regardless of how tall the outer input itself is. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 160px;
+  height: 40px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%, var(--accent) var(--range-progress, 0%),
+    var(--track-empty) var(--range-progress, 0%), var(--track-empty) 100%
+  );
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  /* The global `* { box-sizing: border-box }` reset (top of this file)
+     does NOT reach ::-webkit-slider-thumb — the universal selector never
+     matches a pseudo-element unless explicitly listed. Left at the
+     content-box default, this thumb's 2px border would render outside the
+     declared 18x18 box; border-box keeps the border inside it instead. */
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px; /* (track height 6px − thumb 18px) / 2 — centers the thumb on the runnable-track, not the outer input */
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 1px rgba(0, 224, 160, 0.4), 0 0 8px rgba(0, 224, 160, 0.7);
+  cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  /* Firefox has always auto-centered this thumb over its own track
+     natively (unlike WebKit/Blink above, hence no margin-top here) —
+     box-sizing still matters though, for the same border-inflation
+     reason as the -webkit- rule. */
+  box-sizing: border-box;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--bg);
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 224, 160, 0.4), 0 0 8px rgba(0, 224, 160, 0.7);
+  cursor: pointer;
+}
+/* Firefox draws its own track color per side of the thumb via these two
+   pseudo-elements, auto-centered within the (taller) base input the same
+   way ::-webkit-slider-runnable-track is above. */
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--track-empty);
+}
+input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+textarea {
+  width: 100%;
+  min-height: 120px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.hidden { display: none !important; }
+
+/* Indeterminate progress bar — Convert tab's build-in-progress indicator,
+   mirroring the Qt app's IndeterminateProgressBar. Hidden (via .hidden)
+   except while a conversion is actually running. */
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin: 4px 0 12px;
+}
+.progress-bar-fill {
+  width: 40%;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  animation: progress-bar-slide 1.2s ease-in-out infinite;
+}
+@keyframes progress-bar-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+@media (max-width: 760px) {
+  .content { flex-direction: column; }
+  .sidebar {
+    width: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .main { max-width: none; }
+}
+
+@media (max-width: 460px) {
+  .grid { grid-template-columns: 1fr; }
+  .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
+  .tabs { order: 3; width: 100%; }
+  .panel-title { font-size: 22px; }
+}

@@ -7,76 +7,1647 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <div class="wordmark">AXIOM<span>·</span> <span class="sub">Web Control</span></div>
-    <div id="status" class="disconnected">connecting…</div>
-  </header>
+  <div class="app">
+    <div class="topbar">
+      <div class="wordmark">AXIOM<span>·</span> <span class="sub">Web Control</span></div>
+      <div class="tabs">
+        <button class="tab active" data-tab="model">Model</button>
+        <button class="tab" data-tab="capture">Capture</button>
+        <button class="tab" data-tab="inference">Inference</button>
+        <button class="tab" data-tab="aim">Aim</button>
+        <button class="tab" data-tab="trigger">Trigger</button>
+        <button class="tab" data-tab="keys">Keys &amp; HW</button>
+        <button class="tab" data-tab="visuals">Visuals</button>
+        <button class="tab" data-tab="configs">Configs</button>
+        <button class="tab" data-tab="convert">Convert</button>
+        <button class="tab" data-tab="other">Other</button>
+      </div>
+      <div id="status" class="disconnected">connecting…</div>
+    </div>
 
-  <main>
-    <section class="card">
-      <div class="card-title">Access Token</div>
-      <div class="row">
-        <input type="password" id="token-input" placeholder="Paste the token from the app's Other page">
-        <button id="token-save">Save</button>
-        <button id="token-show" title="Show/hide token">👁</button>
-      </div>
-      <div class="hint">Find or regenerate this under the app's <b>Other</b> page → <b>Remote Control</b>. Stored only in this browser.</div>
-    </section>
+    <div class="content">
+      <div class="sidebar">
+        <div class="sidebar-section">
+          <div class="card-title">Access Token</div>
+          <div class="row">
+            <input type="password" id="token-input" placeholder="Paste the token from the app's Other page">
+            <button id="token-save">Save</button>
+            <button id="token-show" title="Show/hide token">👁</button>
+          </div>
+          <div class="hint">Find or regenerate this under the app's <b>Other</b> page → <b>Remote Control</b>. Stored only in this browser.</div>
+        </div>
 
-    <section class="card">
-      <div class="card-title">Status</div>
-      <div class="grid">
-        <div class="stat"><div class="label">AI Running</div><div class="value" id="s-running">—</div></div>
-        <div class="stat"><div class="label">Aim Toggle</div><div class="value" id="s-active">—</div></div>
-        <div class="stat"><div class="label">Firing</div><div class="value" id="s-firing">—</div></div>
-        <div class="stat"><div class="label">Model</div><div class="value" id="s-model">—</div></div>
-        <div class="stat"><div class="label">Backend</div><div class="value" id="s-backend">—</div></div>
-        <div class="stat"><div class="label">Mouse Method</div><div class="value" id="s-mouse">—</div></div>
-        <div class="stat"><div class="label">MAKCU</div><div class="value" id="s-makcu">—</div></div>
-        <div class="stat"><div class="label">MAKCU Port</div><div class="value" id="s-makcu-port">—</div></div>
-        <div class="stat"><div class="label">Capture FPS</div><div class="value" id="s-capfps">—</div></div>
-        <div class="stat"><div class="label">Inference FPS</div><div class="value" id="s-inffps">—</div></div>
+        <div class="sidebar-section">
+          <div class="card-title">Status</div>
+          <div class="grid">
+            <div class="stat"><div class="label">Inference Running</div><div class="value" id="s-running">—</div></div>
+            <div class="stat"><div class="label">Aim Toggle</div><div class="value" id="s-active">—</div></div>
+            <div class="stat"><div class="label">Auto Aim</div><div class="value" id="s-firing">—</div></div>
+            <div class="stat"><div class="label">Mouse Method</div><div class="value" id="s-mouse">—</div></div>
+            <div class="stat"><div class="label">Capture FPS</div><div class="value" id="s-capfps">—</div></div>
+            <div class="stat"><div class="label">Inference FPS</div><div class="value" id="s-inffps">—</div></div>
+            <!-- Stream FPS — hidden unless screenshot_method is uvc/ndi/udp
+                 (matching status_panel.py's own source_fps_row condition);
+                 label/value are filled in by applyStatus() in app.js. -->
+            <div class="stat hidden" id="s-stream-fps-stat"><div class="label" id="s-stream-fps-label">Stream FPS</div><div class="value" id="s-stream-fps">—</div></div>
+          </div>
+        </div>
       </div>
-    </section>
 
-    <section class="card">
-      <div class="card-title">Controls</div>
-      <div class="row control-row">
-        <label class="switch">
-          <input type="checkbox" id="always-aim-toggle">
-          <span class="slider"></span>
-        </label>
-        <div class="control-label">Always Aim</div>
-      </div>
-      <div class="row control-row">
-        <label class="switch">
-          <input type="checkbox" id="makcu-toggle">
-          <span class="slider"></span>
-        </label>
-        <div class="control-label">MAKCU Connect</div>
-      </div>
-      <div class="row control-row">
-        <button id="ai-start-btn">Start AI</button>
-        <button id="ai-stop-btn">Stop AI</button>
-        <div class="control-label" id="ai-control-reason"></div>
-      </div>
-    </section>
+      <div class="main">
+        <div class="panel active" id="panel-model">
+          <div class="panel-title">Model</div>
 
-    <section class="card">
-      <div class="card-title">Model &amp; Backend</div>
-      <div class="row">
-        <input type="text" id="model-path-input" placeholder="Model/foo.onnx">
-        <select id="backend-select">
-          <option value="auto">Auto</option>
-          <option value="tensorrt">TensorRT</option>
-          <option value="directml">DirectML</option>
-          <option value="cpu">CPU</option>
-        </select>
-        <button id="model-switch-btn">Switch</button>
+          <div class="field-group">
+            <input type="text" id="model-search-input" placeholder="Search models…">
+            <div class="row">
+              <select id="model-select"></select>
+              <select id="backend-select">
+                <option value="auto">Auto</option>
+                <option value="tensorrt">TensorRT</option>
+                <option value="directml">DirectML</option>
+                <option value="cpu">CPU</option>
+              </select>
+              <button id="model-switch-btn">Switch</button>
+            </div>
+            <div class="hint" id="model-switch-reason"></div>
+          </div>
+
+          <div class="grid">
+            <div class="stat"><div class="label">Model</div><div class="value" id="s-model">—</div></div>
+            <div class="stat"><div class="label">Backend</div><div class="value" id="s-backend">—</div></div>
+          </div>
+
+          <div class="field-card stacked">
+            <div class="field-title">Model Info</div>
+            <div class="field-readonly" id="model-info-text">—</div>
+          </div>
+
+          <div class="field-card stacked">
+            <div class="row" style="justify-content: space-between;">
+              <div class="field-title">Model Notes</div>
+              <button id="model-notes-edit-btn">Edit</button>
+            </div>
+            <textarea id="model-notes-text" readonly></textarea>
+          </div>
+
+          <div class="field-card">
+            <div class="field-info">
+              <div class="field-title">Open Model Folder</div>
+              <div class="field-desc">Opens Model/ in File Explorer on the machine running Axiom — not on this browser.</div>
+            </div>
+            <div class="field-control">
+              <button id="open-model-folder-btn">Open</button>
+            </div>
+          </div>
+
+          <div class="field-group-title">Model HUD Settings</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Game Profile</div>
+                <div class="field-desc">HUD region coords loaded from game.json</div>
+              </div>
+              <div class="field-control">
+                <select id="hud-game-select" data-key="hud_game" data-type="choice" data-custom="1"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">HUD Model</div>
+                <div class="field-desc">YOLO11n .onnx model from Model_Hud/ for V2 weapon detection</div>
+              </div>
+              <div class="field-control">
+                <select id="hud-model-select" data-key="hud_model_path" data-type="text"></select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-capture">
+          <div class="panel-title">Capture</div>
+
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Screenshot Method</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-screenshot_method" data-key="screenshot_method" data-type="choice">
+                  <option value="mss">mss</option>
+                  <option value="dxcam">dxcam</option>
+                  <option value="uvc">uvc</option>
+                  <option value="ndi">ndi</option>
+                  <option value="udp">udp</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Screenshot Interval</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="cap-screenshot_interval" data-key="screenshot_interval" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="cap-uvc-group-title">UVC Camera</div>
+          <div class="field-group" id="cap-uvc-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">UVC Capture Method</div>
+                <div class="field-desc">msmf recommended for 1080p60 on Windows 10/11. 'dshow' unlocks the DirectShow Version and FFmpeg options below.</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc_capture_method" data-key="uvc_capture_method" data-type="choice">
+                  <option value="msmf">msmf</option>
+                  <option value="dshow">dshow</option>
+                  <option value="any">any</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="cap-uvc-dshow-v2-card">
+              <div class="field-info">
+                <div class="field-title">Use Native DirectShow DLL (V2)</div>
+                <div class="field-desc">Off = OpenCV's DirectShow wrapper (V1). On = the native directshow_capture.dll — owns the capture graph directly for lower, OBS-like latency.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="cap-uvc_dshow_backend" data-key="uvc_dshow_backend" data-type="dshow-toggle">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card" id="cap-uvc-ffmpeg-enabled-card">
+              <div class="field-info">
+                <div class="field-title">Use FFmpeg Subprocess</div>
+                <div class="field-desc">Captures via an external ffmpeg.exe process instead of OpenCV.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="cap-uvc_ffmpeg_enabled" data-key="uvc_ffmpeg_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Device</div>
+                <div class="field-desc">Select the UVC capture device</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc-device-select"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Resolution</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc-resolution-select"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">FPS</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc-fps-select"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Video Format</div>
+                <div class="field-desc">MJPEG (compressed) recommended for 1080p60+; YUY2/NV12/YUV420P are raw and need much more USB bandwidth.</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc_video_format" data-key="uvc_video_format" data-type="choice">
+                  <option value="mjpeg">mjpeg</option>
+                  <option value="yuy2">yuy2</option>
+                  <option value="nv12">nv12</option>
+                  <option value="yuv420p">yuv420p</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Crop Mode</div>
+                <div class="field-desc">Dynamic crops to the live Detection Range every frame. Fixed freezes a centered crop at capture-start.</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-uvc_crop_mode" data-key="uvc_crop_mode" data-type="choice">
+                  <option value="dynamic">dynamic</option>
+                  <option value="fixed">fixed</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="cap-uvc-ffmpeg-path-card">
+              <div class="field-info">
+                <div class="field-title">FFmpeg Path</div>
+                <div class="field-desc">Optional override — path to ffmpeg.exe. Leave blank to auto-detect.</div>
+              </div>
+              <div class="field-control">
+                <input type="text" id="cap-uvc_ffmpeg_path" data-key="uvc_ffmpeg_path" data-type="text" placeholder="auto-detect">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Device Resolution &amp; FPS</div>
+                <div class="field-desc">Actual values reported by the driver</div>
+              </div>
+              <div class="field-control">
+                <span class="field-readonly" id="cap-uvc-hw-info">—</span>
+                <button id="cap-uvc-refresh-btn">Refresh Device</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="cap-ndi-group-title">NDI</div>
+          <div class="field-group" id="cap-ndi-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">NDI Stream</div>
+                <div class="field-desc">Select the NDI source to capture</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-ndi-source-select"></select>
+                <button id="cap-ndi-refresh-btn">Refresh</button>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">NDI Bandwidth</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-ndi_bandwidth" data-key="ndi_bandwidth" data-type="choice">
+                  <option value="highest">highest</option>
+                  <option value="lowest">lowest</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Stream Resolution &amp; FPS</div>
+                <div class="field-desc">Actual values from the active NDI source</div>
+              </div>
+              <div class="field-control">
+                <span class="field-readonly" id="cap-ndi-hw-info">—</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="cap-udp-group-title">UDP Stream</div>
+          <div class="field-group" id="cap-udp-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">System IP Address</div>
+                <div class="field-desc" id="cap-udp-system-ip">Stream to: —</div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Bind IP</div>
+                <div class="field-desc">Listen on a specific interface, or 0.0.0.0 for all</div>
+              </div>
+              <div class="field-control">
+                <select id="cap-udp-bind-ip-select" data-key="udp_bind_ip" data-type="choice"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">UDP Port</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="cap-udp_bind_port" data-key="udp_bind_port" data-type="number" min="1" max="65535" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Restart Receiver</div>
+                <div class="field-desc">Stop and re-bind the UDP socket</div>
+              </div>
+              <div class="field-control">
+                <button id="cap-udp-restart-btn">Restart</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-inference">
+          <div class="panel-title">Inference</div>
+          <div class="row control-row">
+            <button id="ai-start-btn">Start AI</button>
+            <button id="ai-stop-btn">Stop AI</button>
+            <div class="control-label" id="ai-control-reason"></div>
+          </div>
+
+          <div class="field-group-title">FOV &amp; Detect Range</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">FOV Size</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_size" data-key="fov_size" data-type="number" min="50" max="500" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">FOV Height</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_height" data-key="fov_height" data-type="number" min="50" max="500" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Follow Mouse</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-fov_follow_mouse" data-key="fov_follow_mouse" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Circular FOV Filter</div>
+                <div class="field-desc">Only track targets inside the FOV ellipse — a circle when Width equals Height — instead of the full rectangular region.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-fov_circle_filter_enabled" data-key="fov_circle_filter_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reduce FOV on Active Target</div>
+                <div class="field-desc">Temporarily shrink the FOV while a target is locked, so a random target near the edge can't steal the lock mid-engagement.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-fov_reduce_on_target_enabled" data-key="fov_reduce_on_target_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-min-size-card">
+              <div class="field-info">
+                <div class="field-title">FOV Min Size</div>
+                <div class="field-desc">How much to shrink the FOV to, as a % of FOV Size/Height, while a target is locked.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_min_size_pct" data-key="fov_min_size_pct" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-min-duration-card">
+              <div class="field-info">
+                <div class="field-title">FOV Min Size Duration</div>
+                <div class="field-desc">How long the shrink holds after acquisition before reverting to full FOV (0 = holds indefinitely while locked).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_min_size_duration" data-key="fov_min_size_duration" data-type="number" min="0" max="10" step="0.1">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Detect Range Size</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-detect_range_size" data-key="detect_range_size" data-type="number" min="100" max="1080" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">General Parameters</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Detect Interval</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-detect_interval" data-key="detect_interval" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Min Confidence</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-min_confidence" data-key="min_confidence" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Semantic FP Filter</div>
+                <div class="field-desc">Discard trees, vehicles, and HUD elements by class name and geometry.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-detect_semantic_filter_enabled" data-key="detect_semantic_filter_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Keep Detecting</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-keep_detecting" data-key="keep_detecting" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Idle Detect Enabled</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-idle_detect_enabled" data-key="idle_detect_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Idle Detect Interval</div></div>
+              <div class="field-control">
+                <input type="number" id="inf-idle_detect_interval" data-key="idle_detect_interval" data-type="number" min="5" max="500" step="1">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Single Target Mode</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-single_target_mode" data-key="single_target_mode" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Inference Performance</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">CUDA IO Binding</div>
+                <div class="field-desc">Zero-copy GPU inference. Effective only with CUDA or TensorRT backend.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-cuda_io_binding_enabled" data-key="cuda_io_binding_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Frame Skip Gate</div>
+                <div class="field-desc">Skip inference when the capture region hasn't changed significantly.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-frame_skip_enabled" data-key="frame_skip_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Skip Threshold</div>
+                <div class="field-desc">Avg pixel diff below this value triggers skip (higher = more skipping).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-frame_skip_threshold" data-key="frame_skip_threshold" data-type="number" min="0.5" max="10" step="0.1">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-aim">
+          <div class="panel-title">Aim</div>
+
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Part</div></div>
+              <div class="field-control">
+                <select id="aim-aim_part" data-key="aim_part" data-type="choice">
+                  <option value="head">Head</option>
+                  <option value="body">Body</option>
+                  <option value="center">Smart (Center-mass)</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Move Method</div>
+                <div class="field-desc">Arduino/Xbox setup (COM port, ViGEmBus connect) isn't available remotely — only pick these if already set up on the host.</div>
+              </div>
+              <div class="field-control">
+                <select id="aim-mouse_move_method" data-key="mouse_move_method" data-type="choice" data-custom="1">
+                  <option value="ddxoft">ddxoft</option>
+                  <option value="mouse_event">mouse_event</option>
+                  <option value="sendinput">sendinput</option>
+                  <option value="arduino">arduino</option>
+                  <option value="makcu">makcu</option>
+                  <option value="xbox">xbox</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Aim Speed (PID)</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Unsafe Mode</div>
+                <div class="field-desc">Lets the P (reaction speed) sliders go past the proven-stable 0.50 cap, up to 1.00. Higher values can cause oscillation/overshoot.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-pid_unsafe_mode" data-key="pid_unsafe_mode" data-type="bool" data-custom="1">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Reaction Speed X (P)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_kp_x" data-key="pid_kp_x" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Error Correction X (I)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_ki_x" data-key="pid_ki_x" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Stability Control X (D)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_kd_x" data-key="pid_kd_x" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Reaction Speed Y (P)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_kp_y" data-key="pid_kp_y" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Error Correction Y (I)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_ki_y" data-key="pid_ki_y" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Stability Control Y (D)</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-pid_kd_y" data-key="pid_kd_y" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Max Move Per Frame</div>
+                <div class="field-desc">Hard cap on PID output per frame, both axes (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-max_move_per_frame_px" data-key="max_move_per_frame_px" data-type="number" min="0" max="500" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Y-Axis Recoil Suppression</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Enable Y-Axis Recoil Reset</div></div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-aim_y_reduce_enabled" data-key="aim_y_reduce_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Y-Axis Reset Delay</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_reduce_delay" data-key="aim_y_reduce_delay" data-type="number" min="0" max="5" step="0.01">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Y Floor</div>
+                <div class="field-desc">Min Y multiplier after ramp — 0.00 = full cut, 1.00 = no suppression</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_reduce_floor" data-key="aim_y_reduce_floor" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Y Ramp Window</div>
+                <div class="field-desc">Time to fade 1.0 → floor after delay (0 = instant cut)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_reduce_ramp" data-key="aim_y_reduce_ramp" data-type="number" min="0" max="2" step="0.01">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Y Settle Threshold</div>
+                <div class="field-desc">Skip suppression while vertical error &gt; this (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_reduce_settle_px" data-key="aim_y_reduce_settle_px" data-type="number" min="0" max="50" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Y Velocity Restore</div>
+                <div class="field-desc">Restore full Y tracking if target moves vertically faster than this (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_vel_restore_px_s" data-key="aim_y_vel_restore_px_s" data-type="number" min="0" max="500" step="1">
+                <span class="field-slider-value">px/s</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Humanization</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Humanization</div>
+                <div class="field-desc">Perturb the final mouse output to look less robotic. Operates only on dx/dy — never touches detection or PID state.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-enabled" data-key="humanization.enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Intensity</div>
+                <div class="field-desc">0% = robotic precision, 100% = fully human-like. Scales every effect below.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-humanization-intensity" data-key="humanization.intensity" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Micro-Jitter</div>
+                <div class="field-desc">Small zero-mean noise added to every move, scaled by movement size.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-micro-jitter-enabled" data-key="humanization.micro_jitter_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-jitter-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Jitter Base</div>
+                  <div class="field-desc">Minimum jitter amplitude added every frame, in pixels.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-jitter-base" data-key="humanization.micro_jitter_base" data-type="number" min="0" max="2" step="0.01">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Jitter Scale</div>
+                  <div class="field-desc">Extra jitter added per pixel of movement, as a fraction of movement size.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-jitter-scale" data-key="humanization.micro_jitter_scale" data-type="number" min="0" max="0.2" step="0.001">
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Apply While Aiming Idle</div>
+                  <div class="field-desc">Also apply Micro-Jitter's tremor while the aim key is held but no target is locked.</div>
+                </div>
+                <div class="field-control">
+                  <label class="switch">
+                    <input type="checkbox" id="aim-humanization-micro-jitter-idle-enabled" data-key="humanization.micro_jitter_idle_enabled" data-type="bool">
+                    <span class="slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Motion Variation</div>
+                <div class="field-desc">Randomize output scale slightly each frame (mean-preserving, no drift).</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-motion-variation-enabled" data-key="humanization.motion_variation_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-motion-variation-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Variation Range</div>
+                  <div class="field-desc">Random output-scale range applied each frame (mean-preserving).</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-motion-variation-range" data-key="humanization.motion_variation_range" data-type="number" min="0" max="0.2" step="0.001">
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Speed Shaping</div>
+                <div class="field-desc">Compress small corrections and pass through large movements unmodified.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-speed-shaping-enabled" data-key="humanization.speed_shaping_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-speed-shaping-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Fine-Control Threshold</div>
+                  <div class="field-desc">Movements below this size are compressed by the Low-Speed Factor.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-low" data-key="humanization.speed_shaping_low" data-type="number" min="0" max="20" step="0.1">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Full-Speed Threshold</div>
+                  <div class="field-desc">Movements above this size pass through unmodified.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-high" data-key="humanization.speed_shaping_high" data-type="number" min="0" max="50" step="0.1">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Low-Speed Factor</div>
+                  <div class="field-desc">Magnitude scale applied to movements below the Fine-Control Threshold.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-low-factor" data-key="humanization.speed_shaping_low_factor" data-type="number" min="0" max="1" step="0.01">
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Micro-Stutter</div>
+                <div class="field-desc">Occasional brief magnitude reduction, modeling muscle hesitation.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-micro-stutter-enabled" data-key="humanization.micro_stutter_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-stutter-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Stutter Chance</div>
+                  <div class="field-desc">Probability per frame of a brief magnitude reduction.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-stutter-prob" data-key="humanization.micro_stutter_prob" data-type="number" min="0" max="0.2" step="0.001">
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Stutter Min</div>
+                  <div class="field-desc">Lower bound of the stutter magnitude factor.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-stutter-min" data-key="humanization.micro_stutter_min" data-type="number" min="0" max="1" step="0.01">
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Stutter Max</div>
+                  <div class="field-desc">Upper bound of the stutter magnitude factor.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-stutter-max" data-key="humanization.micro_stutter_max" data-type="number" min="0" max="1" step="0.01">
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reaction Variability</div>
+                <div class="field-desc">Occasionally skip a frame's mouse injection to simulate human micro-hesitation. Adds real per-frame latency.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-humanization-reaction-variability-enabled" data-key="humanization.reaction_variability_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-group hidden" id="aim-humanization-reaction-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Skip Chance</div>
+                  <div class="field-desc">Probability per frame of skipping the mouse injection entirely.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-reaction-skip-prob" data-key="humanization.reaction_skip_prob" data-type="number" min="0" max="0.1" step="0.001">
+                </div>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reset to Defaults</div>
+                <div class="field-desc">Resets this entire Humanization section — Intensity, every feature toggle, and every fine-tuning field above.</div>
+              </div>
+              <div class="field-control">
+                <button id="aim-humanization-reset-btn">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Target Priority</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Priority Mode</div>
+                <div class="field-desc">How to select the best target</div>
+              </div>
+              <div class="field-control">
+                <select id="aim-target_priority_mode" data-key="target_priority_mode" data-type="choice">
+                  <option value="distance">Distance</option>
+                  <option value="confidence">Confidence</option>
+                  <option value="composite">Composite</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Confidence Weight</div>
+                <div class="field-desc">Used in Composite mode only</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-target_priority_confidence_weight" data-key="target_priority_confidence_weight" data-type="number" min="0" max="1" step="0.01">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Target Tracking</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Velocity Prediction</div>
+                <div class="field-desc">Extrapolate target position forward by the prediction horizon.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-prediction_enabled" data-key="prediction_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Prediction Horizon</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-prediction_horizon_ms" data-key="prediction_horizon_ms" data-type="number" min="5" max="50" step="1">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Max Velocity Cap</div>
+                <div class="field-desc">Velocity spikes above this are treated as detection jumps and reset prediction</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-prediction_max_velocity" data-key="prediction_max_velocity" data-type="number" min="300" max="3000" step="10">
+                <span class="field-slider-value">px/s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">History Frames</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-prediction_history_len" data-key="prediction_history_len" data-type="number" min="2" max="6" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Sticky Target Lock</div>
+                <div class="field-desc">Lock onto a target and hold aim across short detection gaps.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-sticky_lock_enabled" data-key="sticky_lock_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Lock Decay Frames</div>
+                <div class="field-desc">Frames to hold aim after target is lost before releasing the lock</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-lock_decay_frames" data-key="lock_decay_frames" data-type="number" min="3" max="60" step="1">
+                <span class="field-slider-value">fr</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">IoU Match Threshold</div>
+                <div class="field-desc">Minimum overlap required to match the same target across frames</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-lock_iou_threshold" data-key="lock_iou_threshold" data-type="number" min="0.10" max="0.70" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Kalman Filter</div>
+                <div class="field-desc">2D Kalman filter for aim-point smoothing.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-kalman_enabled" data-key="kalman_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Process Noise</div>
+                <div class="field-desc">Lower = smoother but slower to react</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-kalman_process_noise" data-key="kalman_process_noise" data-type="number" min="0.01" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Measurement Noise</div>
+                <div class="field-desc">Lower = reacts faster but noisier</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-kalman_measurement_noise" data-key="kalman_measurement_noise" data-type="number" min="0.01" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Camera Motion Compensation</div>
+                <div class="field-desc">Subtract per-frame global scene shift from aim error to cancel camera shake.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-cam_motion_comp_enabled" data-key="cam_motion_comp_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Compensation Resolution</div>
+                <div class="field-desc">128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)</div>
+              </div>
+              <div class="field-control">
+                <select id="aim-cam_motion_comp_size" data-key="cam_motion_comp_size" data-type="choice">
+                  <option value="128">128</option>
+                  <option value="256">256</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Target Area Settings</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Custom Aim Y Position</div>
+                <div class="field-desc">0% = top of box, 100% = bottom. ~20% = head, ~60% = body.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_custom_y_pct" data-key="aim_custom_y_pct" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Head Width Ratio</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-head_width_ratio" data-key="head_width_ratio" data-type="number" min="0.10" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Head Height Ratio</div>
+                <div class="field-desc">Body Height = 100% − Head Height</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-head_height_ratio" data-key="head_height_ratio" data-type="number" min="0.10" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Body Width Ratio</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-body_width_ratio" data-key="body_width_ratio" data-type="number" min="0.10" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Distance-Adaptive Ratio</div>
+                <div class="field-desc">Scale head ratio inversely with box size — keeps head aim accurate from close to long range.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-aim_adaptive_ratio_enabled" data-key="aim_adaptive_ratio_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reference Box Height</div>
+                <div class="field-desc">Box height (px) where head ratio is nominal.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_adaptive_ratio_ref_h" data-key="aim_adaptive_ratio_ref_h" data-type="number" min="20" max="200" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Posture-Aware Targeting</div>
+                <div class="field-desc">Fall back to center-mass when box is wider than tall (crouch / slide / prone).</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-aim_posture_aware_enabled" data-key="aim_posture_aware_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Crouch Aspect Threshold</div>
+                <div class="field-desc">box_w / box_h above which player is treated as crouching. Default 1.2×.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_crouch_aspect_threshold" data-key="aim_crouch_aspect_threshold" data-type="number" min="0.80" max="2.00" step="0.01">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-trigger">
+          <div class="panel-title">Trigger</div>
+
+          <div class="field-group-title">Auto-Fire</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Auto-Fire Target</div></div>
+              <div class="field-control">
+                <select id="trig-auto_fire_target_part" data-key="auto_fire_target_part" data-type="choice">
+                  <option value="head">Head</option>
+                  <option value="body">Body</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Always Auto-Fire</div>
+                <div class="field-desc">Fire continuously without needing to hold an auto-fire key. Turning this on also disables Keep Detecting While Idle.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="trig-always_auto_fire" data-key="always_auto_fire" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Mouse Click Method</div>
+                <div class="field-desc">Simulated click signal auto-fire uses to pull the trigger.</div>
+              </div>
+              <div class="field-control">
+                <select id="trig-mouse_click_method" data-key="mouse_click_method" data-type="choice">
+                  <option value="mouse_event">mouse_event</option>
+                  <option value="sendinput">sendinput</option>
+                  <option value="ddxoft">ddxoft</option>
+                  <option value="arduino">arduino</option>
+                  <option value="makcu">makcu</option>
+                  <option value="xbox">xbox</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Scope Delay</div>
+                <div class="field-desc">Wait after aiming settles before auto-fire is allowed to pull the trigger.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="trig-auto_fire_delay" data-key="auto_fire_delay" data-type="number" min="0.0" max="2.0" step="0.01">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Fire Interval</div>
+                <div class="field-desc">Minimum time between consecutive auto-fire shots.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="trig-auto_fire_interval" data-key="auto_fire_interval" data-type="number" min="0.01" max="1.0" step="0.01">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-keys">
+          <div class="panel-title">Keys &amp; HW</div>
+          <div class="row control-row">
+            <label class="switch">
+              <input type="checkbox" id="always-aim-toggle">
+              <span class="slider"></span>
+            </label>
+            <div class="control-label">Always Aim</div>
+          </div>
+          <div class="row control-row">
+            <label class="switch">
+              <input type="checkbox" id="makcu-toggle">
+              <span class="slider"></span>
+            </label>
+            <div class="control-label">MAKCU Connect</div>
+          </div>
+
+          <div class="hint">Hotkey fields below are a named-option dropdown, not the Qt app's "press a key" live capture — a remote browser can't safely reproduce that (no global key polling, and browser key/mouse codes don't match this app's own VK scheme).</div>
+
+          <div class="field-group-title" id="keys-aim-group-title">Auto Aim</div>
+          <div class="field-group" id="keys-aim-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Key 1</div></div>
+              <div class="field-control">
+                <select id="keys-aim-key-1" class="vk-select" data-key="AimKeys.0" data-type="number"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Key 2</div></div>
+              <div class="field-control">
+                <select id="keys-aim-key-2" class="vk-select" data-key="AimKeys.1" data-type="number"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Key 3</div></div>
+              <div class="field-control">
+                <select id="keys-aim-key-3" class="vk-select" data-key="AimKeys.2" data-type="number"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Toggle Key</div>
+                <div class="field-desc">Toggle Auto Aim</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-toggle-key" class="vk-select" data-key="aim_toggle_key" data-type="number"></select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="keys-fire-group-title">Keys &amp; Auto Fire</div>
+          <div class="field-group" id="keys-fire-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Auto Fire Key 1</div></div>
+              <div class="field-control">
+                <select id="keys-fire-key-1" class="vk-select" data-key="auto_fire_key" data-type="number"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Auto Fire Key 2</div></div>
+              <div class="field-control">
+                <select id="keys-fire-key-2" class="vk-select" data-key="auto_fire_key2" data-type="number"></select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="keys-makcu-conn-group-title">MAKCU Connection</div>
+          <div class="field-group" id="keys-makcu-conn-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">COM Port</div></div>
+              <div class="field-control">
+                <select id="keys-makcu_com_port" data-key="makcu_com_port" data-type="text"></select>
+                <button id="keys-makcu-port-refresh-btn">Refresh</button>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Baud Rate</div></div>
+              <div class="field-control">
+                <select id="keys-makcu_baud_rate" data-key="makcu_baud_rate" data-type="choice">
+                  <option value="115200">115200</option>
+                  <option value="460800">460800</option>
+                  <option value="1000000">1000000</option>
+                  <option value="2000000">2000000</option>
+                  <option value="4000000">4000000</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title" id="keys-makcu-keys-group-title">MAKCU Keys</div>
+          <div class="field-group" id="keys-makcu-keys-group">
+            <div class="field-card" id="keys-makcu-inference-card">
+              <div class="field-info">
+                <div class="field-title">Inference</div>
+                <div class="field-desc">Hold this mouse button to activate inference</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-makcu-inference-select" data-key="AimKeys.0" data-type="number">
+                  <option value="1">Left</option>
+                  <option value="2">Right</option>
+                  <option value="4">Middle</option>
+                  <option value="5">Side 1</option>
+                  <option value="6">Side 2</option>
+                  <option value="0">None</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-trigger-card">
+              <div class="field-info">
+                <div class="field-title">Auto Aim Key</div>
+                <div class="field-desc">Mouse button that activates Auto Aim</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-makcu_aim_button" data-key="makcu_aim_button" data-type="choice">
+                  <option value="lmb">Left</option>
+                  <option value="rmb">Right</option>
+                  <option value="off">Off</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-aim-mode-card">
+              <div class="field-info">
+                <div class="field-title">Aim Mode</div>
+                <div class="field-desc">Hold: aim while button held  |  Toggle: click to toggle aim on/off</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-makcu_aim_mode" data-key="makcu_aim_mode" data-type="choice">
+                  <option value="hold">Hold</option>
+                  <option value="toggle">Toggle</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-disengage-card">
+              <div class="field-info">
+                <div class="field-title">Disengage Delay</div>
+                <div class="field-desc">Keep aiming after releasing the aim button (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-makcu_disengage_delay" data-key="makcu_disengage_delay" data-type="number" min="0" max="20" step="0.1">
+                <span class="field-slider-value">s</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-visuals">
+          <div class="panel-title">Visuals</div>
+
+          <div class="field-group-title">Display</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show FOV</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_fov" data-key="show_fov" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Boxes</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_boxes" data-key="show_boxes" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Full Bounding Box</div>
+                <div class="field-desc">Show a full rectangle instead of corner brackets</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-box_full_rect" data-key="box_full_rect" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Confidence</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_confidence" data-key="show_confidence" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Detection Range</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_detect_range" data-key="show_detect_range" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Tracer Line</div>
+                <div class="field-desc">Draw a line from screen center to each detected target</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_tracer_line" data-key="show_tracer_line" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Box Color Theme</div>
+                <div class="field-desc">Color preset for detection boxes</div>
+              </div>
+              <div class="field-control">
+                <select id="vis-box_color_theme" data-key="box_color_theme" data-type="choice">
+                  <option value="default">Default</option>
+                  <option value="cyan">Cyan</option>
+                  <option value="red">Red</option>
+                  <option value="yellow">Yellow</option>
+                  <option value="white">White</option>
+                  <option value="purple">Purple</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Chroma Speed</div>
+                <div class="field-desc">Rainbow cycle speed for boxes inside FOV. 0 = off.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-chroma_box_speed" data-key="chroma_box_speed" data-type="number" min="0" max="20" step="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Status Panel</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Status Panel</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_status_panel" data-key="show_status_panel" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Auto Aim row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_auto_aim" data-key="status_panel_show_auto_aim" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Model row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_model" data-key="status_panel_show_model" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Mouse Move Method row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_mouse_move" data-key="status_panel_show_mouse_move" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Mouse Click Method row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_mouse_click" data-key="status_panel_show_mouse_click" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Screenshot Method row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_screenshot_method" data-key="status_panel_show_screenshot_method" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Capture FPS row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_screenshot_fps" data-key="status_panel_show_screenshot_fps" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Inference FPS row</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_detection_fps" data-key="status_panel_show_detection_fps" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Crosshair</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Show Crosshair</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_crosshair" data-key="show_crosshair" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Crosshair Style</div></div>
+              <div class="field-control">
+                <select id="vis-crosshair_style" data-key="crosshair_style" data-type="choice">
+                  <option value="dot">Dot</option>
+                  <option value="cross">Cross</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Crosshair Size</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-crosshair_size" data-key="crosshair_size" data-type="number" min="1" max="20" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Red</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-crosshair_color_r" data-key="crosshair_color_r" data-type="number" min="0" max="255" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Green</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-crosshair_color_g" data-key="crosshair_color_g" data-type="number" min="0" max="255" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Blue</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-crosshair_color_b" data-key="crosshair_color_b" data-type="number" min="0" max="255" step="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Appearance</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Enable Acrylic</div>
+                <div class="field-desc">Only affects the Qt app's own window on the host — takes effect there, not on this browser page.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-enable_acrylic" data-key="enable_acrylic" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Acrylic Window Alpha</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-acrylic_window_alpha" data-key="acrylic_window_alpha" data-type="number" min="60" max="255" step="1">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Web HUD Overlay</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Enable Web HUD</div>
+                <div class="field-desc">Stream the HUD to a browser on this PC or any device on your LAN.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-web_esp_enabled"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">HTTP Port</div>
+                <div class="field-desc">Port for the overlay web page.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-web_esp_http_port" data-key="web_esp_http_port" data-type="number" min="1024" max="65535" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">WebSocket Port</div>
+                <div class="field-desc">Port for the live state stream.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-web_esp_ws_port" data-key="web_esp_ws_port" data-type="number" min="1024" max="65535" step="1">
+              </div>
+            </div>
+            <div class="field-card stacked">
+              <div class="row" style="justify-content: space-between;">
+                <div class="field-title">Connect</div>
+                <button id="vis-web-esp-open-btn">Open</button>
+              </div>
+              <div class="field-desc">Open this URL on the same PC, or share it with a device on your LAN. "Open" opens on the machine running Axiom, not this browser.</div>
+              <div class="field-readonly" id="vis-web-esp-url">—</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-configs">
+          <div class="panel-title">Configs</div>
+
+          <div class="field-card stacked">
+            <div class="row" style="justify-content: space-between;">
+              <div class="field-title">Presets</div>
+              <button id="configs-refresh-btn">Refresh</button>
+            </div>
+            <select id="configs-select" size="8" style="width: 100%; height: auto;"></select>
+          </div>
+
+          <div class="row control-row" style="flex-wrap: wrap;">
+            <button id="configs-create-btn">Create</button>
+            <button id="configs-load-btn">Load</button>
+            <button id="configs-save-btn">Save</button>
+            <button id="configs-rename-btn">Rename</button>
+            <button id="configs-delete-btn">Delete</button>
+            <button id="configs-export-btn">Export</button>
+            <button id="configs-import-btn">Import</button>
+            <input type="file" id="configs-import-file" accept="application/json" class="hidden">
+            <button id="configs-open-folder-btn">Open Folder</button>
+          </div>
+          <div class="hint">"Open Folder" opens the configs directory on the machine running Axiom, not this browser. "Export" downloads the preset to this browser; "Import" reads a file from this browser and saves it as a new preset (never overwrites an existing name — a duplicate is saved as "name_1", etc.).</div>
+          <div class="hint" id="configs-reason"></div>
+        </div>
+
+        <div class="panel" id="panel-convert">
+          <div class="panel-title">Convert</div>
+
+          <div class="field-group-title">Engine Conversion</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Source ONNX Model</div>
+                <div class="field-desc">Select the .onnx model to compile into a TensorRT engine.</div>
+              </div>
+              <div class="field-control">
+                <select id="convert-model-select"></select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">FP16 Precision</div>
+                <div class="field-desc">Half precision — ~2&times; faster on RTX GPUs, negligible accuracy loss.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="convert-trt_fp16_enabled" data-key="trt_fp16_enabled" data-type="bool" data-custom="1" checked>
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Builder Workspace (MiB)</div>
+                <div class="field-desc">GPU memory budget for the build. Increase for larger models.</div>
+              </div>
+              <div class="field-control">
+                <select id="convert-workspace-select">
+                  <option value="1024">1024</option>
+                  <option value="2048" selected>2048</option>
+                  <option value="4096">4096</option>
+                  <option value="8192">8192</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Output Cache Directory</div>
+                <div class="field-desc">Cached under <code>trt_cache/</code> in the app's install directory, on the machine running Axiom.</div>
+              </div>
+              <div class="field-control">
+                <button id="convert-btn">Convert</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-group-title">Build Log</div>
+          <div class="progress-bar hidden" id="convert-progress"><div class="progress-bar-fill"></div></div>
+          <textarea id="convert-log" readonly placeholder="Conversion output will appear here. First build can take 1–5 minutes."></textarea>
+          <div class="hint">The engine is cached in <code>trt_cache/</code>. On the next app launch, TensorRT loads it in under a second instead of rebuilding.</div>
+          <div class="hint" id="convert-reason"></div>
+        </div>
+
+        <div class="panel" id="panel-other">
+          <div class="panel-title">Other</div>
+          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+        </div>
       </div>
-      <div class="hint" id="model-switch-reason"></div>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

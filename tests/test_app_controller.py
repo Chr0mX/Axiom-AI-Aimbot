@@ -11,6 +11,7 @@ importing this module already exercises (see test_module_importable_
 without_windows_deps below).
 """
 
+import os
 import sys
 import threading
 import types
@@ -48,6 +49,7 @@ def test_module_importable_without_windows_deps():
     assert hasattr(app_controller, "disconnect_makcu")
     assert hasattr(app_controller, "resolve_model_path")
     assert hasattr(app_controller, "request_model_change")
+    assert hasattr(app_controller, "list_models")
 
 
 def test_set_always_aim_enables_and_disables_idle_detect():
@@ -260,6 +262,42 @@ class TestResolveModelPath:
         assert app_controller.resolve_model_path("Model/missing.onnx") == (None, "not_found")
 
 
+class TestListModels:
+    """list_models() is pure os.path/glob logic — no onnxruntime/win32api
+    import, no dependency on model_page.py — so every branch is genuinely
+    testable here with no faking, same as TestResolveModelPath above.
+    """
+
+    def test_no_model_dir_returns_empty_list(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        assert app_controller.list_models() == []
+
+    def test_empty_model_dir_returns_empty_list(self, tmp_path, monkeypatch):
+        (tmp_path / "Model").mkdir()
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        assert app_controller.list_models() == []
+
+    def test_returns_sorted_onnx_basenames(self, tmp_path, monkeypatch):
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        (model_dir / "zeta.onnx").write_bytes(b"")
+        (model_dir / "alpha.onnx").write_bytes(b"")
+        (model_dir / "mid.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+
+        assert app_controller.list_models() == ["alpha.onnx", "mid.onnx", "zeta.onnx"]
+
+    def test_ignores_non_onnx_files(self, tmp_path, monkeypatch):
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        (model_dir / "real.onnx").write_bytes(b"")
+        (model_dir / "notes.txt").write_bytes(b"")
+        (model_dir / "real.engine").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+
+        assert app_controller.list_models() == ["real.onnx"]
+
+
 class TestRequestModelChange:
     """request_model_change()'s refusal branches (not_found/invalid_model_path/
     invalid_backend/needs_restart) are reachable with zero faking — they
@@ -395,3 +433,465 @@ class TestRequestModelChange:
         assert calls == ["tensorrt"]
         # Only written to the real config afterward, since needs_build=False.
         assert config.inference_backend == "tensorrt"
+
+
+class _FakeEspServer:
+    """Stand-in for core.esp_server with the same running-state semantics
+    the real module has (module-level state toggled by start()/stop()) —
+    faked via sys.modules so set_web_esp_enabled()/
+    restart_web_esp_if_running() never bind a real socket/thread in this
+    unit test, same "fake the deferred import" technique as win_utils.
+    makcu_mouse above.
+    """
+
+    def __init__(self):
+        self.running = False
+        self.start_calls = []
+        self.stop_calls = 0
+
+    def start(self, config):
+        self.running = True
+        self.start_calls.append(config)
+        return True
+
+    def stop(self):
+        self.running = False
+        self.stop_calls += 1
+
+    def is_running(self):
+        return self.running
+
+
+def _install_fake_esp_server(monkeypatch):
+    """Fakes core.esp_server for the deferred `from core import esp_server`
+    in set_web_esp_enabled()/restart_web_esp_if_running().
+
+    Patching sys.modules["core.esp_server"] alone isn't sufficient once
+    something elsewhere in a full-suite run has done a REAL `from core
+    import esp_server` (test_esp_server.py does, at module level): that
+    binds a real `esp_server` attribute directly on the `core` package
+    object, and `from core import esp_server` resolves via a plain
+    getattr(core, "esp_server") first — succeeding against that cached
+    real attribute — before it would ever fall back to consulting
+    sys.modules. So the package attribute has to be patched too, same
+    two-level fix as vk_codes/get_serial_ports' "module unavailable" tests
+    (see web_control_settings.py's TestListVkOptions/TestGetSerialPorts).
+    """
+    fake = _FakeEspServer()
+    fake_module = types.ModuleType("core.esp_server")
+    fake_module.start = fake.start
+    fake_module.stop = fake.stop
+    fake_module.is_running = fake.is_running
+    monkeypatch.setitem(sys.modules, "core.esp_server", fake_module)
+    import core
+    monkeypatch.setattr(core, "esp_server", fake_module, raising=False)
+    return fake
+
+
+class TestSetWebEspEnabled:
+    def test_enabling_writes_config_and_starts_server(self, monkeypatch):
+        fake = _install_fake_esp_server(monkeypatch)
+        config = _FakeConfig()
+        config.web_esp_enabled = False
+        result = app_controller.set_web_esp_enabled(config, True)
+        assert result is True
+        assert config.web_esp_enabled is True
+        assert fake.start_calls == [config]
+        assert fake.stop_calls == 0
+
+    def test_disabling_writes_config_and_stops_server(self, monkeypatch):
+        fake = _install_fake_esp_server(monkeypatch)
+        fake.running = True
+        config = _FakeConfig()
+        config.web_esp_enabled = True
+        result = app_controller.set_web_esp_enabled(config, False)
+        assert result is False
+        assert config.web_esp_enabled is False
+        assert fake.stop_calls == 1
+        assert fake.start_calls == []
+
+    def test_enabled_flag_coerced_to_real_bool(self, monkeypatch):
+        """A truthy non-bool (e.g. from a loosely-deserialized JSON body)
+        must still be stored as an actual bool on config, not the raw
+        truthy value — mirrors set_always_aim()'s own bool() coercion."""
+        _install_fake_esp_server(monkeypatch)
+        config = _FakeConfig()
+        app_controller.set_web_esp_enabled(config, 1)
+        assert config.web_esp_enabled is True
+
+
+class TestRestartWebEspIfRunning:
+    def test_noop_when_not_running(self, monkeypatch):
+        fake = _install_fake_esp_server(monkeypatch)
+        fake.running = False
+        config = _FakeConfig()
+        result = app_controller.restart_web_esp_if_running(config)
+        assert result is False
+        assert fake.stop_calls == 0
+        assert fake.start_calls == []
+
+    def test_restarts_when_running(self, monkeypatch):
+        fake = _install_fake_esp_server(monkeypatch)
+        fake.running = True
+        config = _FakeConfig()
+        result = app_controller.restart_web_esp_if_running(config)
+        assert result is True
+        assert fake.stop_calls == 1
+        assert fake.start_calls == [config]
+
+
+class _FakePopen:
+    """Stand-in for subprocess.Popen — records the exact cmd it was built
+    with and hands back a canned stdout/returncode, so
+    _run_conversion_worker()'s subprocess plumbing is exercised without
+    ever spawning a real convert_to_engine.py process."""
+
+    def __init__(self, cmd, lines=(), returncode=0, **kwargs):
+        self.cmd = cmd
+        self.stdout = iter(lines)
+        self.returncode = returncode
+
+    def wait(self):
+        pass
+
+
+@pytest.fixture
+def _reset_convert_state():
+    """_convert_state is module-level shared mutable state — snapshot and
+    restore it so tests can freely mutate/inspect it without leaking into
+    each other or into a real (non-test) caller within the same process."""
+    original = dict(app_controller._convert_state)
+    yield
+    app_controller._convert_state.clear()
+    app_controller._convert_state.update(original)
+
+
+class TestStartConversion:
+    def _model_file(self, tmp_path, under_model_dir=False):
+        if under_model_dir:
+            model_dir = tmp_path / "Model"
+            model_dir.mkdir()
+            model_file = model_dir / "real.onnx"
+        else:
+            model_file = tmp_path / "real.onnx"
+        model_file.write_bytes(b"")
+        return str(model_file)
+
+    def test_refuses_missing_model_path(self, _reset_convert_state):
+        config = _FakeConfig()
+        result = app_controller.start_conversion(config, "does/not/exist.onnx")
+        assert result == {"ok": False, "reason": "not_found"}
+        assert app_controller._convert_state["running"] is False
+
+    def test_refuses_when_already_running(self, tmp_path, _reset_convert_state):
+        app_controller._convert_state["running"] = True
+        config = _FakeConfig()
+        result = app_controller.start_conversion(config, self._model_file(tmp_path))
+        assert result == {"ok": False, "reason": "already_running"}
+
+    def test_starts_background_worker_and_pauses_inference(self, tmp_path, monkeypatch, _reset_convert_state):
+        model_file = self._model_file(tmp_path)
+        calls = []
+        started = threading.Event()
+
+        def _fake_worker(config, onnx_path, cache_dir, fp16, workspace_mb):
+            calls.append((onnx_path, fp16, workspace_mb))
+            started.set()
+
+        monkeypatch.setattr(app_controller, "_run_conversion_worker", _fake_worker)
+        config = _FakeConfig()
+        result = app_controller.start_conversion(config, model_file, fp16=False, workspace_mb=4096)
+
+        assert result == {"ok": True}
+        assert config.inference_paused is True
+        assert started.wait(timeout=2), "background worker never ran"
+        assert calls == [(model_file, False, 4096)]
+
+    def test_bad_workspace_value_falls_back_to_2048(self, tmp_path, monkeypatch, _reset_convert_state):
+        model_file = self._model_file(tmp_path)
+        calls = []
+        started = threading.Event()
+
+        def _fake_worker(config, onnx_path, cache_dir, fp16, workspace_mb):
+            calls.append(workspace_mb)
+            started.set()
+
+        monkeypatch.setattr(app_controller, "_run_conversion_worker", _fake_worker)
+        config = _FakeConfig()
+        app_controller.start_conversion(config, model_file, workspace_mb=9999)
+        assert started.wait(timeout=2)
+        assert calls == [2048]
+
+
+class TestRunConversionWorker:
+    """_run_conversion_worker() itself — called directly (not through the
+    background thread start_conversion() spawns) so success/failure/
+    exception outcomes are deterministic instead of racing a real thread.
+    """
+
+    def test_success_updates_config_and_state(self, tmp_path, monkeypatch, _reset_convert_state):
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        onnx_path = str(model_dir / "real.onnx")
+        (model_dir / "real.onnx").write_bytes(b"")
+        cache_dir = str(tmp_path / "trt_cache")
+
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        monkeypatch.setattr(
+            app_controller.subprocess, "Popen",
+            lambda cmd, **k: _FakePopen(cmd, lines=["line1", "line2"], returncode=0),
+        )
+        saved = []
+        fake_config_module = types.ModuleType("core.config")
+        fake_config_module.save_config = lambda cfg: saved.append(cfg) or True
+        monkeypatch.setitem(sys.modules, "core.config", fake_config_module)
+
+        config = _FakeConfig()
+        config.model_path = ""
+        app_controller._run_conversion_worker(config, onnx_path, cache_dir, True, 2048)
+
+        assert config.inference_paused is False
+        assert config.trt_fp16_enabled is True
+        # Re-derived as "Model/real.onnx" (portable relative form), not the
+        # absolute tmp_path — mirrors convert_page.py's own storage format.
+        assert config.model_path == os.path.join("Model", "real.onnx")
+        assert saved == [config]
+        assert app_controller._convert_state["running"] is False
+        assert app_controller._convert_state["done"] is True
+        assert app_controller._convert_state["success"] is True
+        assert app_controller._convert_state["message"] == cache_dir
+        assert app_controller._convert_state["log"] == ["line1", "line2"]
+
+    def test_nonzero_returncode_is_a_failure_not_an_exception(self, tmp_path, monkeypatch, _reset_convert_state):
+        onnx_path = str(tmp_path / "real.onnx")
+        (tmp_path / "real.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        monkeypatch.setattr(
+            app_controller.subprocess, "Popen",
+            lambda cmd, **k: _FakePopen(cmd, lines=["boom"], returncode=1),
+        )
+        config = _FakeConfig()
+        config.model_path = "unchanged"
+        app_controller._run_conversion_worker(config, onnx_path, str(tmp_path / "trt_cache"), True, 2048)
+
+        assert app_controller._convert_state["success"] is False
+        assert "code 1" in app_controller._convert_state["message"]
+        assert config.inference_paused is False
+        # A failed build must never touch model_path/trt_fp16_enabled —
+        # the app keeps running whatever it was running before.
+        assert config.model_path == "unchanged"
+
+    def test_popen_exception_is_caught_and_reported(self, tmp_path, monkeypatch, _reset_convert_state):
+        onnx_path = str(tmp_path / "real.onnx")
+        (tmp_path / "real.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+
+        def _raise(cmd, **k):
+            raise OSError("no such file or directory")
+
+        monkeypatch.setattr(app_controller.subprocess, "Popen", _raise)
+        config = _FakeConfig()
+        app_controller._run_conversion_worker(config, onnx_path, str(tmp_path / "trt_cache"), True, 2048)
+
+        assert app_controller._convert_state["success"] is False
+        assert "OSError" in app_controller._convert_state["message"]
+        assert config.inference_paused is False
+
+    def test_fp16_false_adds_no_fp16_flag(self, tmp_path, monkeypatch, _reset_convert_state):
+        onnx_path = str(tmp_path / "real.onnx")
+        (tmp_path / "real.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        captured = {}
+
+        def _fake_popen(cmd, **k):
+            captured["cmd"] = cmd
+            return _FakePopen(cmd, lines=[], returncode=0)
+
+        monkeypatch.setattr(app_controller.subprocess, "Popen", _fake_popen)
+        config = _FakeConfig()
+        app_controller._run_conversion_worker(config, onnx_path, str(tmp_path / "trt_cache"), False, 2048)
+
+        assert "--no-fp16" in captured["cmd"]
+        assert config.trt_fp16_enabled is False
+
+    def test_save_config_failure_does_not_propagate(self, tmp_path, monkeypatch, _reset_convert_state):
+        """save_config() is wrapped in its own try/except in the worker —
+        a failure to persist must never turn a successful build into a
+        reported failure."""
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        onnx_path = str(model_dir / "real.onnx")
+        (model_dir / "real.onnx").write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+        monkeypatch.setattr(
+            app_controller.subprocess, "Popen",
+            lambda cmd, **k: _FakePopen(cmd, lines=[], returncode=0),
+        )
+        fake_config_module = types.ModuleType("core.config")
+
+        def _raise_save(cfg):
+            raise OSError("disk full")
+
+        fake_config_module.save_config = _raise_save
+        monkeypatch.setitem(sys.modules, "core.config", fake_config_module)
+
+        config = _FakeConfig()
+        app_controller._run_conversion_worker(config, onnx_path, str(tmp_path / "trt_cache"), True, 2048)
+
+        assert app_controller._convert_state["success"] is True
+
+
+class TestGetConversionStatus:
+    def test_reports_current_state(self, _reset_convert_state):
+        app_controller._convert_state.update(
+            running=True, log=["a", "b", "c"], done=False, success=None,
+            message="", model_path="/x/real.onnx",
+        )
+        result = app_controller.get_conversion_status(since=0)
+        assert result["running"] is True
+        assert result["log_lines"] == ["a", "b", "c"]
+        assert result["next_since"] == 3
+
+    def test_since_cursor_returns_only_new_lines(self, _reset_convert_state):
+        app_controller._convert_state.update(log=["a", "b", "c", "d"])
+        result = app_controller.get_conversion_status(since=2)
+        assert result["log_lines"] == ["c", "d"]
+        assert result["next_since"] == 4
+
+    def test_since_beyond_log_length_returns_empty(self, _reset_convert_state):
+        app_controller._convert_state.update(log=["a"])
+        result = app_controller.get_conversion_status(since=999)
+        assert result["log_lines"] == []
+        assert result["next_since"] == 1
+
+    def test_negative_since_clamped_to_zero(self, _reset_convert_state):
+        app_controller._convert_state.update(log=["a", "b"])
+        result = app_controller.get_conversion_status(since=-5)
+        assert result["log_lines"] == ["a", "b"]
+
+
+class TestRestartAxiom:
+    """restart_axiom() — the same subprocess.Popen([sys.executable] +
+    sys.argv) + hard-exit mechanism model_page.py's own _restartApp() uses,
+    just delayed on a background thread so the {"ok": True} response can
+    reach the caller first. _exit_process is monkeypatched rather than
+    os._exit itself (which would actually kill this test process) —
+    see its own docstring for why it's split out as its own function.
+    """
+
+    def test_returns_immediately_with_restarting_in(self, monkeypatch):
+        # Waits for the background thread to finish before returning (even
+        # though this test only asserts the synchronous return value) —
+        # otherwise it outlives this test function and can race a *later*
+        # test's own sys.modules["core.config"] fake, calling that test's
+        # save_config() with this test's config object instead of its own
+        # (a real, reproduced flake this exact fix resolves).
+        exited = threading.Event()
+        monkeypatch.setattr(app_controller.subprocess, "Popen", lambda cmd, **k: None)
+        monkeypatch.setattr(app_controller, "_exit_process", lambda: exited.set())
+        config = _FakeConfig()
+        result = app_controller.restart_axiom(config, delay_seconds=0.01)
+        assert result == {"ok": True, "restarting_in": 0.01}
+        assert exited.wait(timeout=2)
+
+    def test_background_thread_saves_config_then_spawns_and_exits(self, monkeypatch):
+        popen_calls = []
+        saved = []
+        exited = threading.Event()
+
+        monkeypatch.setattr(app_controller.subprocess, "Popen", lambda cmd, **k: popen_calls.append(cmd))
+        monkeypatch.setattr(app_controller, "_exit_process", lambda: exited.set())
+
+        fake_config_module = types.ModuleType("core.config")
+        fake_config_module.save_config = lambda cfg: saved.append(cfg) or True
+        monkeypatch.setitem(sys.modules, "core.config", fake_config_module)
+
+        config = _FakeConfig()
+        app_controller.restart_axiom(config, delay_seconds=0.01)
+
+        assert exited.wait(timeout=2), "background restart thread never ran"
+        assert saved == [config]
+        assert popen_calls == [[sys.executable] + sys.argv]
+
+    def test_save_config_failure_does_not_block_the_actual_restart(self, monkeypatch):
+        """save_config() is wrapped in its own try/except — a failure to
+        persist must never prevent the process from actually restarting."""
+        popen_calls = []
+        exited = threading.Event()
+        monkeypatch.setattr(app_controller.subprocess, "Popen", lambda cmd, **k: popen_calls.append(cmd))
+        monkeypatch.setattr(app_controller, "_exit_process", lambda: exited.set())
+
+        fake_config_module = types.ModuleType("core.config")
+
+        def _raise(cfg):
+            raise OSError("disk full")
+
+        fake_config_module.save_config = _raise
+        monkeypatch.setitem(sys.modules, "core.config", fake_config_module)
+
+        config = _FakeConfig()
+        app_controller.restart_axiom(config, delay_seconds=0.01)
+
+        assert exited.wait(timeout=2)
+        assert len(popen_calls) == 1
+
+
+class TestConfirmModelChangeWithRestart:
+    """confirm_model_change_with_restart() — the confirmed-restart
+    counterpart to request_model_change()'s needs_restart refusal.
+    restart_axiom() itself is monkeypatched here (already covered directly
+    above) so these tests stay focused on the apply-then-restart decision
+    logic, with no background thread/timing involved.
+    """
+
+    def _model_file(self, tmp_path):
+        model_file = tmp_path / "real.onnx"
+        model_file.write_bytes(b"")
+        return str(model_file)
+
+    def test_refuses_missing_model_path(self):
+        config = _FakeConfig()
+        result = app_controller.confirm_model_change_with_restart(config, "does/not/exist.onnx")
+        assert result == {"ok": False, "reason": "not_found"}
+
+    def test_refuses_invalid_backend(self, tmp_path):
+        config = _FakeConfig()
+        result = app_controller.confirm_model_change_with_restart(
+            config, self._model_file(tmp_path), inference_backend="not_a_real_backend")
+        assert result == {"ok": False, "reason": "invalid_backend"}
+
+    def test_refused_call_never_touches_config(self):
+        config = _FakeConfig()
+        config.model_path = "unchanged.onnx"
+        config.inference_backend = "unchanged_backend"
+        app_controller.confirm_model_change_with_restart(config, "does/not/exist.onnx")
+        assert config.model_path == "unchanged.onnx"
+        assert config.inference_backend == "unchanged_backend"
+
+    def test_applies_pending_change_then_calls_restart_axiom(self, tmp_path, monkeypatch):
+        model_file = self._model_file(tmp_path)
+        restart_calls = []
+        monkeypatch.setattr(
+            app_controller, "restart_axiom",
+            lambda cfg: restart_calls.append(cfg) or {"ok": True, "restarting_in": 5.0},
+        )
+
+        config = _FakeConfig()
+        config.model_path = "old.onnx"
+        config.inference_backend = "tensorrt"
+
+        result = app_controller.confirm_model_change_with_restart(
+            config, model_file, inference_backend="directml")
+
+        assert result == {"ok": True, "restarting_in": 5.0}
+        assert config.model_path == model_file
+        assert config.inference_backend == "directml"
+        assert restart_calls == [config]
+
+    def test_backend_none_leaves_existing_backend_untouched(self, tmp_path, monkeypatch):
+        model_file = self._model_file(tmp_path)
+        monkeypatch.setattr(app_controller, "restart_axiom", lambda cfg: {"ok": True, "restarting_in": 5.0})
+        config = _FakeConfig()
+        config.inference_backend = "cpu"
+        app_controller.confirm_model_change_with_restart(config, model_file)
+        assert config.inference_backend == "cpu"

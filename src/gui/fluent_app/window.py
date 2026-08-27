@@ -137,6 +137,36 @@ class AxiomWindow(FluentWindow):
         self.initNavigation()
         self.initBottomNavigation()
 
+        # Re-sync a page's widgets from the live Config every time the user
+        # navigates to it (zero-lag — doesn't wait for the timer below) and
+        # continuously while they're already looking at one (the timer).
+        # Config is a single object shared by reference between this GUI
+        # and web_control_server.py's routes running on their own thread —
+        # a web-triggered change (toggling a setting from the browser, a
+        # completed remote model conversion) writes straight into it, but
+        # nothing previously told this window's widgets to reflect that.
+        # A first attempt only refreshed on navigation, which missed the
+        # common case of both UIs open side by side on the *same* page —
+        # continuous polling is the only way to catch that, matching the
+        # web client's own 1s poll cadence.
+        self.stackedWidget.currentChanged.connect(self._onPageActivated)
+        self._configSyncTimer = QTimer(self)
+        self._configSyncTimer.timeout.connect(self._onConfigSyncTick)
+        self._configSyncTimer.start(1000)
+
+        # A remote conversion (Web Control API's POST /api/control/convert)
+        # runs as a subprocess app_controller.py itself owns, with no Qt
+        # widget of its own tied to it — nothing previously told this
+        # window to reflect one in progress at all, so an operator
+        # physically at the machine had no visibility into it short of
+        # walking through the web page themselves. Riding the same 1s timer
+        # as _onConfigSyncTick above (a second, independent slot — see
+        # _onRemoteConvertTick's own docstring for why it isn't folded into
+        # that method).
+        self._remoteConvertSince = 0
+        self._remoteConvertActive = False
+        self._configSyncTimer.timeout.connect(self._onRemoteConvertTick)
+
         from .components.capture_preview import CapturePreviewPanel
         from PyQt6.QtWidgets import QToolButton
 
@@ -454,7 +484,108 @@ class AxiomWindow(FluentWindow):
         """刷新所有頁面的設定值"""
         if self._config:
             self.setConfig(self._config)
-        
+
+    def _onPageActivated(self, index):
+        """Refreshes just the page becoming visible from the live Config —
+        see the connect() call in __init__ for why this exists (a web
+        control route can change Config on its own thread with nothing
+        else telling this window's widgets to reflect it). Deliberately
+        scoped to one page, not all ten (_refreshAllPages() territory) —
+        cheap, and the user only ever sees the page they just switched to.
+        Zero-lag: this fires the instant navigation happens, rather than
+        waiting for _onConfigSyncTick()'s next tick.
+        """
+        if self._config is None:
+            return
+        widget = self.stackedWidget.widget(index)
+        if widget is not None and hasattr(widget, 'setConfig'):
+            widget.setConfig(self._config)
+
+    def _onConfigSyncTick(self):
+        """Continuously re-syncs the *currently visible* page from the live
+        Config, once a second — catches the case _onPageActivated() can't:
+        the operator already has this exact page open (in Qt) when a web
+        control route changes a field it shows, e.g. both UIs open side by
+        side and a toggle flipped from the browser. Skips the refresh
+        entirely while the keyboard focus is somewhere inside the current
+        page, so an in-progress local edit (typing a value, mid-drag on a
+        slider) is never clobbered by a tick landing at the wrong moment —
+        the same guard the web client's own poll uses for its fields.
+        """
+        if self._config is None:
+            return
+        widget = self.stackedWidget.currentWidget()
+        if widget is None or not hasattr(widget, 'setConfig'):
+            return
+        from PyQt6.QtWidgets import QApplication
+        focused = QApplication.focusWidget()
+        if focused is not None and widget.isAncestorOf(focused):
+            return
+        widget.setConfig(self._config)
+
+    def _onRemoteConvertTick(self):
+        """Mirrors a TensorRT build triggered remotely via the Web Control
+        API's POST /api/control/convert (app_controller.start_conversion())
+        into this window — the one thing that request does that nothing
+        previously reflected on the Qt side at all, since it's a plain
+        background subprocess app_controller.py owns directly, with no Qt
+        widget of its own tied to it.
+
+        The instant one starts, switches to the Convert tab so an operator
+        physically at the machine sees it live rather than only in the
+        browser, then feeds each tick's new log lines into
+        ConvertPage.showRemoteConversionState(). On completion, calls
+        _refreshAllPages() — the same call a LOCAL Convert-tab build already
+        triggers via _onConvertFinished() — so the model/backend change
+        _run_conversion_worker() already applied and saved lands in every
+        page (including the Model page's own cache-status badges), not just
+        the Convert tab: "auto redirect the gui to start the conversion
+        process then wait for it to finish then detect the model swap", per
+        the explicit request this was built for.
+
+        Kept as its own timeout-connected slot rather than folded into
+        _onConfigSyncTick() above: that method's early returns (no config,
+        no setConfig() on the current widget, focus inside the current
+        page) are specifically about not clobbering an in-progress local
+        edit on whichever page happens to be visible — none of that logic
+        applies here, and forcibly switching tabs the instant a remote
+        build starts is the whole point, not something to guard against.
+        A plain Qt signal can have any number of slots connected to it, so
+        this runs independently off the exact same 1s timer with no
+        interference between the two.
+
+        get_conversion_status() is a cheap lock-guarded dict read that's a
+        no-op the overwhelming majority of the time (no build ever in
+        progress), so this adds negligible cost to the existing tick.
+        """
+        if self._config is None:
+            return
+        try:
+            from core import app_controller
+        except Exception:
+            return
+
+        status = app_controller.get_conversion_status(self._remoteConvertSince)
+        self._remoteConvertSince = status["next_since"]
+
+        if not status["running"] and not (status["done"] and self._remoteConvertActive):
+            return
+
+        if not self._remoteConvertActive:
+            self._remoteConvertActive = True
+            self.switchTo(self.convertInterface)
+
+        if hasattr(self.convertInterface, "showRemoteConversionState"):
+            try:
+                self.convertInterface.showRemoteConversionState(status)
+            except Exception:
+                pass
+
+        if status["done"]:
+            self._remoteConvertActive = False
+            self._remoteConvertSince = 0
+            self._refreshAllPages()
+
     def initNavigation(self):
         # Navigation items using translation keys
 

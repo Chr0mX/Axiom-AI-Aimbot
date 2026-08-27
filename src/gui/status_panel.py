@@ -250,6 +250,7 @@ class StatusPanel(QWidget):
     def _update_row_visibility(self):
         """依設定更新狀態面板各元素顯示/隱藏"""
         self.aim_row.setVisible(getattr(self.config, 'status_panel_show_auto_aim', True))
+        self.aim_toggle_row.setVisible(getattr(self.config, 'status_panel_show_aim_toggle', True))
         self.model_row.setVisible(getattr(self.config, 'status_panel_show_model', True))
         self.mouse_row.setVisible(getattr(self.config, 'status_panel_show_mouse_move', True))
         self.mouse_click_row.setVisible(getattr(self.config, 'status_panel_show_mouse_click', True))
@@ -550,6 +551,12 @@ class StatusPanel(QWidget):
         self.aim_layout.addStretch()
         self.aim_layout.addWidget(self.aim_status_label)
 
+        # 3.5 狀態行 - Aim Toggle (the persistent toggle state itself, distinct
+        # from the Auto Aim row above — which reflects whether aim is
+        # *actively* engaged this frame, i.e. AimToggle combined with the
+        # held-key/MAKCU-button state)
+        self.aim_toggle_row = StatusRow(get_text('status_panel_aim_toggle', 'Aim Toggle'))
+
         # 4. 狀態行 - 目前模型
         self.model_row = StatusRow(get_text('status_panel_current_model'))
 
@@ -576,6 +583,7 @@ class StatusPanel(QWidget):
         self.container_layout.addWidget(self.separator)
         self.container_layout.addSpacing(2) 
         self.container_layout.addWidget(self.aim_row)
+        self.container_layout.addWidget(self.aim_toggle_row)
         self.container_layout.addWidget(self.model_row)
         self.container_layout.addWidget(self.mouse_row)
         self.container_layout.addWidget(self.mouse_click_row)
@@ -730,6 +738,17 @@ class StatusPanel(QWidget):
             self.aim_status_label.setStyleSheet(f"color: {FluentColors.to_css_rgba(FluentColors.get_error_color())};")
             self.aim_indicator.set_status(False)
         self.aim_text_label.setText(get_text('auto_aim'))
+
+        # 更新 Aim Toggle — the raw persistent toggle state (config.AimToggle
+        # itself), not the combined current_aim above; flips on the toggle
+        # key regardless of whether the aim/MAKCU button is currently held.
+        self.aim_toggle_row.label.setText(get_text('status_panel_aim_toggle', 'Aim Toggle'))
+        if getattr(self.config, 'AimToggle', False):
+            self.aim_toggle_row.set_value(
+                get_text("status_panel_on"), FluentColors.to_css_rgba(FluentColors.get_success_color()))
+        else:
+            self.aim_toggle_row.set_value(
+                get_text("status_panel_off"), FluentColors.to_css_rgba(FluentColors.get_error_color()))
 
         # 更新 Model
         model_name = os.path.basename(current_model) if current_model else "None"

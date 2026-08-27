@@ -31,8 +31,29 @@ level, so this module stays importable (and start() can fail gracefully
 with a clear log message) on a checkout that predates them being
 vendored in, the same way main.py already wraps esp_server.start() in a
 try/except so one subsystem's absence never blocks the rest of the app.
+
+Deliberately does NOT use `from __future__ import annotations`: every
+POST route's body model (AlwaysAimBody, ModelChangeBody, etc.) is a
+Pydantic BaseModel class defined *locally* inside start() (since
+`from pydantic import BaseModel` is itself deferred to inside start(),
+per the module-stays-importable-without-fastapi goal above). With
+postponed evaluation on, a route handler's `body: ModelChangeBody`
+annotation becomes the *string* "ModelChangeBody", and FastAPI resolves
+that string via the handler function's `__globals__` (this module's
+top-level namespace) — which does not include ModelChangeBody, since
+it's a local variable of start(), not a module global. Pydantic's
+resolver swallows that failure and leaves the annotation as an
+unresolved ForwardRef instead of raising, so FastAPI never recognizes it
+as a BaseModel and silently reclassifies the parameter as a required
+*query* parameter named "body" — every such route then 422s with
+`{"loc": ["query", "body"], "msg": "Field required"}` no matter what the
+client POSTs. Without the future import, `body: ModelChangeBody` is
+evaluated eagerly at function-definition time through the normal closure
+over start()'s locals, so it's already the real class object and needs
+no runtime resolution at all — confirmed directly (this bug reproduces
+with a bare `typing.get_type_hints()` call on a nested function with a
+locally-scoped annotation, no fastapi/pydantic needed to see it).
 """
-from __future__ import annotations
 
 import logging
 import os
@@ -40,7 +61,7 @@ import secrets
 import socket
 import threading
 import time
-from typing import Optional
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -135,11 +156,33 @@ def _build_status(config) -> dict:
         "running": bool(getattr(config, "Running", False)),
         "model": os.path.basename(getattr(config, "model_path", "") or ""),
         "inference_backend": str(getattr(config, "current_provider", "") or getattr(config, "inference_backend", "auto")),
+        # The Model panel's Backend <select> must track config.inference_backend
+        # (the user's selected/persisted backend name) exactly the way
+        # model_page.py's own _loadFromConfig() does, NOT the field above —
+        # that one prefers the live ONNX EP string (e.g.
+        # "TensorrtExecutionProvider") for the plain-text status readout,
+        # which never matches any of the select's four option values and
+        # was leaving the dropdown stuck on its default "Auto".
+        "selected_backend": str(getattr(config, "inference_backend", "auto")),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
-        "makcu_com_port": str(getattr(config, "makcu_com_port", "") or ""),
         "capture_fps": round(cap_fps, 1),
         "inference_fps": round(inf_fps, 1),
+        # Stream/source FPS — only meaningful for the three capture backends
+        # that read from an external device/stream rather than the desktop
+        # itself (uvc/ndi/udp); the client shows a "Stream FPS" stat only
+        # for those three, same condition status_panel.py's own
+        # source_fps_row uses. Two separate fields rather than one merged
+        # value, mirroring esp_server.py's own _build_snapshot() convention:
+        # source_nominal_fps is the device's own reported rate (uvc/ndi),
+        # while udp_recv_fps is the actual assembled-frames/sec rate from
+        # the sender — source_nominal_fps for udp is only the local decode
+        # throughput, not the real stream rate (see status_panel.py's own
+        # comment on this exact distinction).
+        "screenshot_method": str(getattr(config, "screenshot_method", "mss")),
+        "source_fps": round(float(getattr(config, "source_nominal_fps", 0.0)), 1),
+        "udp_recv_fps": round(float(getattr(config, "udp_recv_fps", 0.0)), 1),
+        "udp_dropped_fps": round(float(getattr(config, "udp_dropped_fps", 0.0)), 1),
     }
 
 
@@ -215,6 +258,28 @@ def start(
         model_path: str
         inference_backend: Optional[str] = None
 
+    class ModelNotesBody(BaseModel):
+        model: str
+        text: str
+
+    class WebEspEnabledBody(BaseModel):
+        enabled: bool
+
+    class ConfigNameBody(BaseModel):
+        name: str
+
+    class ConfigRenameBody(BaseModel):
+        old_name: str
+        new_name: str
+
+    class ConfigImportBody(BaseModel):
+        content: str
+
+    class ConvertBody(BaseModel):
+        model_path: str
+        fp16: bool = True
+        workspace_mb: int = 2048
+
     class _ThreadServer(uvicorn.Server):
         def install_signal_handlers(self) -> None:
             # Overridden to a no-op: uvicorn's default installs SIGINT/
@@ -242,6 +307,11 @@ def start(
     @app.get("/api/status", dependencies=[Depends(_check_token)])
     def get_status():
         return _build_status(config)
+
+    @app.get("/api/models", dependencies=[Depends(_check_token)])
+    def get_models():
+        from .app_controller import list_models
+        return {"models": list_models()}
 
     @app.post("/api/control/always_aim", dependencies=[Depends(_check_token)])
     def post_always_aim(body: AlwaysAimBody):
@@ -300,6 +370,183 @@ def start(
     def post_model_change(body: ModelChangeBody):
         from .app_controller import request_model_change
         return request_model_change(config, body.model_path, body.inference_backend)
+
+    @app.post("/api/control/model_restart", dependencies=[Depends(_check_token)])
+    def post_model_restart_route(body: ModelChangeBody):
+        # The confirmed-restart counterpart to /api/control/model above —
+        # only call this after that route has already refused the exact
+        # same body with {"reason": "needs_restart"} AND the client's own
+        # human has explicitly confirmed the restart (a window.confirm()
+        # dialog) — this route does not ask again, it just does it. See
+        # confirm_model_change_with_restart()'s own docstring for why this
+        # is safe to expose as a route at all (still refuses outright for
+        # a genuinely bad model_path/backend).
+        from .app_controller import confirm_model_change_with_restart
+        return confirm_model_change_with_restart(config, body.model_path, body.inference_backend)
+
+    # -----------------------------------------------------------------
+    # Tab settings — generic get/apply covering the Model/Capture/
+    # Inference panels' plain Config fields. See web_control_settings.py's
+    # module docstring for why this is a separate module from
+    # app_controller.py (nothing here is called by a Qt slot).
+    # -----------------------------------------------------------------
+
+    @app.get("/api/settings/{tab}", dependencies=[Depends(_check_token)])
+    def get_settings(tab: Literal["model", "capture", "inference", "aim", "keys", "visuals", "trigger", "convert"]):
+        from .web_control_settings import get_tab_settings
+        return get_tab_settings(config, tab)
+
+    @app.post("/api/settings/{tab}", dependencies=[Depends(_check_token)])
+    def post_settings(tab: Literal["model", "capture", "inference", "aim", "keys", "visuals", "trigger", "convert"], body: dict):
+        from .web_control_settings import apply_tab_settings
+        return apply_tab_settings(config, tab, body)
+
+    @app.get("/api/model_info", dependencies=[Depends(_check_token)])
+    def get_model_info_route(model: str = ""):
+        from .web_control_settings import get_model_info
+        return get_model_info(config, model)
+
+    @app.get("/api/model_notes", dependencies=[Depends(_check_token)])
+    def get_model_notes_route(model: str = ""):
+        from .web_control_settings import get_model_notes
+        return {"text": get_model_notes(model)}
+
+    @app.post("/api/model_notes", dependencies=[Depends(_check_token)])
+    def post_model_notes_route(body: ModelNotesBody):
+        from .web_control_settings import save_model_notes
+        ok = save_model_notes(body.model, body.text)
+        return {"ok": ok}
+
+    @app.post("/api/control/open_model_folder", dependencies=[Depends(_check_token)])
+    def post_open_model_folder():
+        from .web_control_settings import open_model_folder
+        return {"ok": open_model_folder()}
+
+    @app.get("/api/game_profiles", dependencies=[Depends(_check_token)])
+    def get_game_profiles_route():
+        from .web_control_settings import get_game_profiles
+        return get_game_profiles()
+
+    @app.get("/api/hud_models", dependencies=[Depends(_check_token)])
+    def get_hud_models_route():
+        from .web_control_settings import get_hud_models
+        return {"models": get_hud_models()}
+
+    @app.get("/api/uvc_probe", dependencies=[Depends(_check_token)])
+    def get_uvc_probe_route(device: int = 0, method: str = "msmf", width: int = 1920, height: int = 1080):
+        from .web_control_settings import probe_uvc
+        return probe_uvc(device, method, width, height)
+
+    @app.get("/api/ndi_sources", dependencies=[Depends(_check_token)])
+    def get_ndi_sources_route():
+        from .web_control_settings import get_ndi_sources
+        return get_ndi_sources()
+
+    @app.get("/api/vk_options", dependencies=[Depends(_check_token)])
+    def get_vk_options_route():
+        from .web_control_settings import list_vk_options
+        return {"options": list_vk_options()}
+
+    @app.get("/api/serial_ports", dependencies=[Depends(_check_token)])
+    def get_serial_ports_route():
+        from .web_control_settings import get_serial_ports
+        return get_serial_ports()
+
+    @app.post("/api/control/humanization_reset", dependencies=[Depends(_check_token)])
+    def post_humanization_reset_route():
+        from .web_control_settings import reset_humanization
+        return reset_humanization(config)
+
+    # -----------------------------------------------------------------
+    # Visuals — Web ESP overlay start/stop/restart/open. A real service
+    # lifecycle action (not a plain Config write), same tier as
+    # always_aim/ai_start/makcu_connect — see app_controller.py.
+    # -----------------------------------------------------------------
+
+    @app.post("/api/control/web_esp_enabled", dependencies=[Depends(_check_token)])
+    def post_web_esp_enabled_route(body: WebEspEnabledBody):
+        from .app_controller import set_web_esp_enabled
+        running = set_web_esp_enabled(config, body.enabled)
+        return {"ok": True, "running": running}
+
+    @app.post("/api/control/web_esp_restart", dependencies=[Depends(_check_token)])
+    def post_web_esp_restart_route():
+        from .app_controller import restart_web_esp_if_running
+        running = restart_web_esp_if_running(config)
+        return {"ok": True, "running": running}
+
+    @app.post("/api/control/web_esp_open", dependencies=[Depends(_check_token)])
+    def post_web_esp_open_route():
+        from .web_control_settings import open_web_esp_in_browser
+        return {"ok": open_web_esp_in_browser()}
+
+    # -----------------------------------------------------------------
+    # Configs — preset management via core.config_manager.ConfigManager.
+    # -----------------------------------------------------------------
+
+    @app.get("/api/configs", dependencies=[Depends(_check_token)])
+    def get_configs_route():
+        from .web_control_settings import list_config_presets
+        return {"presets": list_config_presets()}
+
+    @app.post("/api/configs/save", dependencies=[Depends(_check_token)])
+    def post_configs_save_route(body: ConfigNameBody):
+        from .web_control_settings import save_config_preset
+        return save_config_preset(config, body.name)
+
+    @app.get("/api/configs/preview", dependencies=[Depends(_check_token)])
+    def get_configs_preview_route(name: str = ""):
+        from .web_control_settings import preview_config_preset
+        return preview_config_preset(config, name)
+
+    @app.post("/api/configs/load", dependencies=[Depends(_check_token)])
+    def post_configs_load_route(body: ConfigNameBody):
+        from .web_control_settings import load_config_preset
+        return load_config_preset(config, body.name)
+
+    @app.post("/api/configs/delete", dependencies=[Depends(_check_token)])
+    def post_configs_delete_route(body: ConfigNameBody):
+        from .web_control_settings import delete_config_preset
+        return delete_config_preset(body.name)
+
+    @app.post("/api/configs/rename", dependencies=[Depends(_check_token)])
+    def post_configs_rename_route(body: ConfigRenameBody):
+        from .web_control_settings import rename_config_preset
+        return rename_config_preset(body.old_name, body.new_name)
+
+    @app.get("/api/configs/export", dependencies=[Depends(_check_token)])
+    def get_configs_export_route(name: str = ""):
+        from .web_control_settings import export_config_preset_content
+        return export_config_preset_content(name)
+
+    @app.post("/api/configs/import", dependencies=[Depends(_check_token)])
+    def post_configs_import_route(body: ConfigImportBody):
+        from .web_control_settings import import_config_preset_content
+        return import_config_preset_content(body.content)
+
+    @app.post("/api/control/open_configs_folder", dependencies=[Depends(_check_token)])
+    def post_open_configs_folder_route():
+        from .web_control_settings import open_configs_folder
+        return {"ok": open_configs_folder()}
+
+    # -----------------------------------------------------------------
+    # TensorRT conversion — the Convert tab's one real action. A build is
+    # a genuine 1-5 minute subprocess (see app_controller.start_conversion()'s
+    # docstring), so this is start-then-poll, not a single blocking route:
+    # POST kicks off the background thread and returns immediately, GET
+    # streams the accumulated log via a since-cursor so a client polling
+    # every ~1s never re-fetches lines it already has.
+    # -----------------------------------------------------------------
+
+    @app.post("/api/control/convert", dependencies=[Depends(_check_token)])
+    def post_convert_route(body: ConvertBody):
+        from .app_controller import start_conversion
+        return start_conversion(config, body.model_path, body.fp16, body.workspace_mb)
+
+    @app.get("/api/convert/status", dependencies=[Depends(_check_token)])
+    def get_convert_status_route(since: int = 0):
+        from .app_controller import get_conversion_status
+        return get_conversion_status(since)
 
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")

@@ -50,10 +50,14 @@ without that landmine.
 from __future__ import annotations
 
 import copy
+import glob
 import logging
 import os
 import queue
+import subprocess
+import sys
 import threading
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -102,6 +106,22 @@ _multi_field_lock = threading.Lock()
 # own connect() has no such guard. Not needed for disconnect_makcu(): its
 # teardown path is idempotent-safe to call repeatedly.
 _makcu_connect_lock = threading.Lock()
+
+# Guards the single global TensorRT-conversion job's shared state (below) —
+# unlike every other module-level lock here, this one protects a plain dict
+# read/written from two different threads (the background subprocess-runner
+# thread appending log lines, and any number of concurrent status-poll
+# callers reading them), not just a multi-field Config write.
+_convert_lock = threading.Lock()
+_convert_state: dict = {
+    "running": False,
+    "log": [],
+    "done": False,
+    "success": None,
+    "message": "",
+    "model_path": "",
+}
+_WORKSPACE_CHOICES_MB = (1024, 2048, 4096, 8192)
 
 
 def stop_ai_threads(config: "Config", join_timeout: float = 3.0) -> None:
@@ -180,6 +200,21 @@ def resolve_model_path(model_path: str) -> tuple[str | None, str | None]:
     if not os.path.exists(resolved):
         return None, "not_found"
     return resolved, None
+
+
+def list_models() -> list[str]:
+    """Sorted list of .onnx basenames in Model/.
+
+    Mirrors model_page.py's _refreshModelList() glob+sort logic
+    conceptually — reimplemented here rather than imported, since
+    model_page.py is a GUI file this module must not depend on, and
+    per CLAUDE.md's Web Control section model_page.py itself stays
+    untouched (same precedent as MAKCU/request_model_change).
+    """
+    model_dir = os.path.join(project_root, "Model")
+    if not os.path.exists(model_dir):
+        return []
+    return sorted(os.path.basename(m) for m in glob.glob(os.path.join(model_dir, "*.onnx")))
 
 
 def start_ai_threads(
@@ -452,3 +487,269 @@ def request_model_change(
         "inference_backend": config.inference_backend,
         "applied_live": bool(getattr(config, "Running", False)),
     }
+
+
+_RESTART_DELAY_SECONDS = 5.0
+
+
+def _exit_process() -> None:  # pragma: no cover - a real process exit isn't meaningfully testable
+    """The actual hard-exit call, split into its own function purely so
+    tests can monkeypatch just this one line rather than the stdlib's
+    os._exit globally."""
+    os._exit(0)
+
+
+def restart_axiom(config: "Config", delay_seconds: float = _RESTART_DELAY_SECONDS) -> dict:
+    """Restarts the whole Axiom process — the same mechanism
+    model_page.py's own _restartApp() uses (called from its
+    _startRestartCountdown()/_onRestartTick() when crossing to/from
+    DirectML locally): save config, spawn a fresh process with the same
+    executable + argv, then hard-exit this one. Web control's version of
+    that same DirectML-crossing restart, just triggered remotely instead
+    of from a local countdown InfoBar.
+
+    This is a real, unattended, irreversible process restart — only ever
+    call it after the caller has already gotten an explicit human
+    confirmation (the web client's own confirm dialog); nothing here asks
+    again. It also tears down this very web-control server, same as
+    exiting the app any other way — the new process's own normal startup
+    brings it back up on its own once it re-reads
+    config.web_control_enabled, so nothing further needs to be arranged
+    here.
+
+    Delayed on a background thread so this function — and the {"ok": True}
+    response reporting it — can return to the caller (and that response
+    can actually reach the client over the socket) before the process
+    exits; an immediate exit would instead look like a connection reset,
+    indistinguishable from a real failure.
+    """
+    def _do_restart():
+        time.sleep(delay_seconds)
+        try:
+            from core.config import save_config
+            save_config(config)
+        except Exception:
+            pass
+        subprocess.Popen([sys.executable] + sys.argv)
+        _exit_process()
+
+    threading.Thread(target=_do_restart, daemon=True, name="webcontrol-restart").start()
+    return {"ok": True, "restarting_in": delay_seconds}
+
+
+def confirm_model_change_with_restart(
+    config: "Config",
+    model_path: str,
+    inference_backend: str | None = None,
+) -> dict:
+    """The confirmed-restart counterpart to request_model_change(): call
+    this only after that function has already refused the identical
+    model_path/inference_backend with {"reason": "needs_restart"} AND the
+    caller's own human has explicitly confirmed the restart (a
+    window.confirm()-style dialog on the web client) — this function does
+    not ask again, it just does it.
+
+    request_model_change() leaves config completely untouched on a
+    needs_restart refusal (restarting into the OLD config would be
+    pointless), so this applies the pending model_path/inference_backend
+    directly — bypassing that refusal, since accepting the restart is
+    exactly what confirming means — then calls restart_axiom(). Still
+    refuses outright (config untouched, no restart scheduled) for a
+    genuinely bad model_path/backend, the same not_found/
+    invalid_model_path/invalid_backend reasons resolve_model_path() and
+    the backend-choice check would give — a confirmed restart is never a
+    license to restart into a broken configuration.
+    """
+    resolved_path, reason = resolve_model_path(model_path)
+    if resolved_path is None:
+        return {"ok": False, "reason": reason}
+
+    if inference_backend is not None and inference_backend not in _VALID_INFERENCE_BACKENDS:
+        return {"ok": False, "reason": "invalid_backend"}
+
+    with _multi_field_lock:
+        config.model_path = model_path
+        if inference_backend is not None:
+            config.inference_backend = inference_backend
+
+    return restart_axiom(config)
+
+
+def set_web_esp_enabled(config: "Config", enabled: bool) -> bool:
+    """Enable/disable the Web ESP overlay server, mirroring
+    visuals_page.py's _onWebEspEnableChanged(): writes config.web_esp_enabled
+    AND starts/stops the actual esp_server live, so the toggle takes effect
+    immediately instead of only on the next app launch. Deliberately not a
+    plain generic-schema field for this reason — see web_control_settings.py's
+    _SCHEMA["visuals"] comment.
+
+    Returns whether the server is running after this call.
+    """
+    from core import esp_server
+
+    config.web_esp_enabled = bool(enabled)
+    if enabled:
+        esp_server.start(config)
+    else:
+        esp_server.stop()
+    return esp_server.is_running()
+
+
+def restart_web_esp_if_running(config: "Config") -> bool:
+    """Mirrors visuals_page.py's _restartWebEspIfRunning(): Web ESP binds its
+    HTTP/WS sockets once in esp_server.start(), so changing a port field
+    while it's already running doesn't rebind on its own — this restarts it
+    on the (already-written) new ports. A no-op if not currently running.
+
+    Returns whether the server is running after this call.
+    """
+    from core import esp_server
+
+    if esp_server.is_running():
+        esp_server.stop()
+        esp_server.start(config)
+    return esp_server.is_running()
+
+
+def start_conversion(config: "Config", model_path: str, fp16: bool = True, workspace_mb: int = 2048) -> dict:
+    """Start a background TensorRT engine build for `model_path`, mirroring
+    convert_page.py's _ConvertWorker/_onConvert(): same convert_to_engine.py
+    subprocess invocation (same --workspace/--no-fp16/--engine-prefix args,
+    same python_exe resolution), but driven by a plain threading.Thread
+    instead of a QThread, so a web route can start/poll it with no Qt
+    dependency. Only one conversion can run at a time — the Qt page enforces
+    this too (_onConvert() no-ops if self._worker.isRunning()).
+
+    A build is a genuine 1-5 minute *subprocess*, so this returns
+    immediately ({"ok": True}) once the background thread is launched; the
+    caller polls get_conversion_status() for progress/completion, same
+    "don't block the caller on a long-running job" shape as ai_start's own
+    background thread.
+
+    Returns {"ok": False, "reason": "already_running"} if a build is already
+    in progress, or the same not_found/invalid_model_path/no_model_path
+    reasons resolve_model_path() would give for a bad model_path.
+    """
+    with _convert_lock:
+        if _convert_state["running"]:
+            return {"ok": False, "reason": "already_running"}
+
+    resolved_path, reason = resolve_model_path(model_path)
+    if resolved_path is None:
+        return {"ok": False, "reason": reason}
+
+    try:
+        workspace_mb = int(workspace_mb)
+    except (TypeError, ValueError):
+        workspace_mb = 2048
+    if workspace_mb not in _WORKSPACE_CHOICES_MB:
+        # Mirrors ConvertPage._onConvert()'s own graceful fallback on a bad
+        # combo value — the web client's workspace select only ever offers
+        # these same four choices, so this is a defensive default, not a
+        # validation error worth rejecting the whole request over.
+        workspace_mb = 2048
+
+    cache_dir = os.path.join(project_root, "trt_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+
+    with _convert_lock:
+        _convert_state.update(
+            running=True, log=[], done=False, success=None, message="",
+            model_path=resolved_path,
+        )
+
+    # Mirrors _onConvert()'s own `self._config.inference_paused = True` —
+    # pause_ai_inference()/resume_ai_inference() themselves stay unwired
+    # (see this module's docstring precedent), this is a direct flag write
+    # exactly like the Qt page already does, not a call through those.
+    config.inference_paused = True
+
+    thread = threading.Thread(
+        target=_run_conversion_worker,
+        args=(config, resolved_path, cache_dir, bool(fp16), workspace_mb),
+        daemon=True,
+        name="webcontrol-convert",
+    )
+    thread.start()
+    return {"ok": True}
+
+
+def _run_conversion_worker(config: "Config", onnx_path: str, cache_dir: str, fp16: bool, workspace_mb: int) -> None:
+    """Runs on its own background thread — never call directly from a
+    request handler. Streams convert_to_engine.py's stdout/stderr line by
+    line into _convert_state["log"] under _convert_lock, exactly like
+    _ConvertWorker.run()'s logLine signal does for the Qt log view."""
+    model_stem = os.path.splitext(os.path.basename(onnx_path))[0]
+    python_exe = os.path.join(project_root, "python", "python.exe")
+    if not os.path.exists(python_exe):
+        python_exe = sys.executable
+    script_path = os.path.join(_src_dir, "core", "convert_to_engine.py")
+
+    cmd = [
+        python_exe, "-u", script_path,
+        "--model", onnx_path,
+        "--output", cache_dir,
+        "--workspace", str(workspace_mb),
+        "--method", "ort",
+        "--engine-prefix", model_stem,
+    ]
+    if not fp16:
+        cmd.append("--no-fp16")
+
+    success = False
+    message = ""
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            with _convert_lock:
+                _convert_state["log"].append(line.rstrip())
+        proc.wait()
+        if proc.returncode == 0:
+            success = True
+            message = cache_dir
+        else:
+            message = f"Process exited with code {proc.returncode} — see log above."
+    except Exception as exc:
+        message = f"{type(exc).__name__}: {exc}"
+    finally:
+        config.inference_paused = False
+        if success:
+            # Mirrors _onConvertFinished()'s success branch: point the
+            # running app at the model we just built an engine for, so
+            # ai_loop.py's hot-swap (now a near-instant cache hit) picks it
+            # up without the operator having to reselect it, and persist it
+            # the same "Model/x.onnx" relative form model_page.py uses so
+            # config.json/presets stay portable across machines.
+            config.trt_fp16_enabled = fp16
+            model_dir = os.path.join(project_root, "Model")
+            converted = onnx_path
+            if os.path.isabs(converted) and os.path.dirname(converted) == model_dir:
+                converted = os.path.join("Model", os.path.basename(converted))
+            config.model_path = converted
+            try:
+                from core.config import save_config
+                save_config(config)
+            except Exception:
+                pass
+        with _convert_lock:
+            _convert_state.update(running=False, done=True, success=success, message=message)
+
+
+def get_conversion_status(since: int = 0) -> dict:
+    """Poll the single global conversion job's state. `since` is the
+    `next_since` value from a previous call — only log lines appended after
+    that point are returned in `log_lines`, so a client polling every ~1s
+    during a multi-minute build never re-fetches the whole log each tick.
+    """
+    with _convert_lock:
+        log = _convert_state["log"]
+        since = max(0, min(int(since or 0), len(log)))
+        return {
+            "running": _convert_state["running"],
+            "done": _convert_state["done"],
+            "success": _convert_state["success"],
+            "message": _convert_state["message"],
+            "model_path": _convert_state["model_path"],
+            "log_lines": log[since:],
+            "next_since": len(log),
+        }
