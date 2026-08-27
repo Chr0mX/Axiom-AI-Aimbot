@@ -1345,9 +1345,17 @@
       });
   }
 
-  convertBtn.addEventListener("click", function () {
-    var name = convertModelSelect.value;
+  // Shared by the Convert button's own click and by the Model tab's
+  // needs_conversion auto-redirect below — factored out so both start a
+  // build the exact same way rather than duplicating the request/response
+  // handling twice. `name` is a bare basename (convertModelSelect's own
+  // option values); fp16/workspaceMb read the Convert panel's own current
+  // toggle/select state when omitted, same values a plain button click
+  // would have used.
+  function startConversionFlow(name, fp16, workspaceMb) {
     if (!name) { convertReason.textContent = "select a model first"; return; }
+    if (fp16 === undefined) fp16 = convertFp16Toggle.checked;
+    if (workspaceMb === undefined) workspaceMb = parseInt(convertWorkspaceSelect.value, 10) || 2048;
     convertLog.value = "";
     convertLogSince = 0;
     convertReason.textContent = "";
@@ -1359,8 +1367,8 @@
         // project_root, not project_root/Model — same "Model/" prefix
         // the Model tab's own Switch button already adds.
         model_path: "Model/" + name,
-        fp16: convertFp16Toggle.checked,
-        workspace_mb: parseInt(convertWorkspaceSelect.value, 10) || 2048,
+        fp16: fp16,
+        workspace_mb: workspaceMb,
       }),
     })
       .then(function (res) { return res.ok ? res.json() : null; })
@@ -1374,6 +1382,10 @@
         pollConvertStatus();
       })
       .catch(function () { convertReason.textContent = "request failed"; });
+  }
+
+  convertBtn.addEventListener("click", function () {
+    startConversionFlow(convertModelSelect.value);
   });
 
   // The backend select offers only 4 options with no separate "CUDA" entry
@@ -1729,7 +1741,24 @@
             offerModelRestartConfirm(modelPath, backendSelect.value);
             return;
           }
-          modelSwitchReason.textContent = describeModelSwitchReason(data.reason);
+          if (data.reason === "needs_conversion") {
+            // Mirrors model_page.py's own _redirectToConvertIfNeeded() —
+            // rather than just telling the operator to go build it
+            // themselves on the Convert tab, redirect there automatically
+            // and start the build immediately, exactly like the Qt app
+            // already does locally for this same case. Once the build
+            // succeeds, _run_conversion_worker() (app_controller.py)
+            // itself already applies + saves config.model_path — no
+            // separate follow-up "switch" call is needed here, same as
+            // the local Qt flow's own _onConvertFinished().
+            modelSwitchReason.textContent = "needs a TensorRT build first — redirecting to Convert…";
+            var bareName = modelSelect.value;
+            activateTab("convert");
+            convertModelSelect.value = bareName;
+            startConversionFlow(bareName);
+          } else {
+            modelSwitchReason.textContent = describeModelSwitchReason(data.reason);
+          }
         } else {
           // Never optimistically write s-model/s-backend here — the next
           // status poll is the sole source of truth for those, same as
