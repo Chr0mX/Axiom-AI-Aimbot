@@ -349,11 +349,35 @@ button:hover { border-color: var(--accent); color: var(--accent); }
    drag, typing in the paired number box, or a server-driven refresh).
    Neither -webkit nor -moz has a cross-browser "fill" pseudo-element, so
    this two-color split is done as a background gradient instead — the
-   standard technique for a themed range input. */
+   standard technique for a themed range input.
+
+   The base <input> itself is sized to match the THUMB (18px), not the
+   thinner 6px line — the line is drawn on a dedicated track
+   pseudo-element instead (::-webkit-slider-runnable-track /
+   ::-moz-range-track below). This is deliberate, and fixes a real,
+   twice-reported bug: WebKit/Blink positions ::-webkit-slider-thumb
+   relative to the INPUT's own box height, not the runnable-track's height
+   — an earlier version of this rule set the input's height to the
+   thinner 6px line and tried to center the 18px thumb over it with a
+   manually-computed `margin-top: -6px` offset, which visibly drifted off
+   true-center in practice regardless of how carefully the box-sizing was
+   accounted for. Making the input's own height exactly equal to the
+   thumb's height removes that fragile math entirely: with
+   input-height == thumb-height there is no vertical gap left to center
+   within, so the correct offset is trivially 0 on every browser, no pixel
+   arithmetic involved. The dedicated track pseudo-element is thinner than
+   the input and is centered within it automatically by the browser. */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 160px;
+  height: 18px;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
   height: 6px;
   border-radius: 3px;
   background: linear-gradient(
@@ -361,24 +385,20 @@ input[type="range"] {
     var(--accent) 0%, var(--accent) var(--range-progress, 0%),
     var(--track-empty) var(--range-progress, 0%), var(--track-empty) 100%
   );
-  outline: none;
-  cursor: pointer;
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   /* The global `* { box-sizing: border-box }` reset (top of this file)
      does NOT reach ::-webkit-slider-thumb — the universal selector never
      matches a pseudo-element unless explicitly listed. Left at the
-     content-box default, this thumb's 2px border would render OUTSIDE the
-     18x18 box (rendering at 22x22), throwing off the margin-top centering
-     math below by exactly that border width and visibly sitting the thumb
-     a couple pixels off the track's true vertical center — a real,
-     reported bug. border-box makes the border render inside the declared
-     18x18, matching what the margin-top math below actually assumes. */
+     content-box default, this thumb's 2px border would render outside the
+     declared 18x18 box; border-box keeps the border inside it instead. */
   box-sizing: border-box;
   width: 18px;
   height: 18px;
-  margin-top: -6px; /* (track height 6px − thumb 18px) / 2, Chromium needs manual centering */
+  /* No manual offset needed — see the height:18px comment on the base
+     rule above: (input-height 18px − thumb-height 18px) / 2 = 0. */
+  margin-top: 0;
   border-radius: 50%;
   background: var(--accent);
   border: 2px solid var(--bg);
@@ -386,10 +406,9 @@ input[type="range"]::-webkit-slider-thumb {
   cursor: pointer;
 }
 input[type="range"]::-moz-range-thumb {
-  /* Same reasoning as the -webkit- rule above — Firefox doesn't need a
-     manual margin-top to center this thumb, but the border would still
-     inflate it to 22x22 without this, making it look a couple pixels
-     larger/less precisely positioned than its Chromium counterpart. */
+  /* Firefox has always auto-centered this thumb over its own track
+     natively (unlike WebKit/Blink above) — box-sizing still matters
+     though, for the same border-inflation reason as the -webkit- rule. */
   box-sizing: border-box;
   width: 18px;
   height: 18px;
@@ -399,10 +418,9 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 0 1px rgba(0, 224, 160, 0.4), 0 0 8px rgba(0, 224, 160, 0.7);
   cursor: pointer;
 }
-/* Firefox draws its own track color per side of the thumb — ::-moz-range-
-   progress / ::-moz-range-track — the gradient above is a Chromium/Safari
-   fallback that Firefox also honors as the base `background`, but these
-   make the fill genuinely native (and interactive-hover-responsive) there. */
+/* Firefox draws its own track color per side of the thumb via these two
+   pseudo-elements, auto-centered within the (now taller) base input the
+   same way ::-webkit-slider-runnable-track is above. */
 input[type="range"]::-moz-range-track {
   height: 6px;
   border-radius: 3px;
