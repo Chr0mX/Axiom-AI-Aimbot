@@ -10,6 +10,12 @@
   --accent: #00e0a0;
   --line: rgba(0, 224, 160, 0.25);
   --bad: #ff6060;
+  /* This client is always dark, no light variant — telling the browser
+     so lets it render every native control (number-input spinner arrows,
+     checkboxes, date pickers, and the scrollbar itself) in its own dark
+     styling instead of the harsh light-mode default it'd otherwise use on
+     a dark page. */
+  color-scheme: dark;
 }
 
 html, body {
@@ -17,6 +23,29 @@ html, body {
   background: var(--bg);
   color: var(--ink);
   font: 14px/1.5 "Segoe UI", "Consolas", "Menlo", monospace, sans-serif;
+  /* Firefox's scrollbar theming knobs — Chromium/Edge/Safari use the
+     ::-webkit-scrollbar pseudo-elements below instead. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-2) var(--surface);
+}
+
+/* Scrollbar — Chromium/Edge/Safari. Thin, rounded, theme-colored, with an
+   accent-tinted hover state instead of the default light-gray bar that
+   otherwise clashes with this page's dark background. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-2);
+  border-radius: 6px;
+  border: 2px solid var(--surface);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
 }
 
 .app {
@@ -158,6 +187,23 @@ input[type="password"], input[type="text"], select {
   color: var(--ink);
   font: inherit;
 }
+/* Number fields get the same dark background/border/radius look as the
+   access-token box above (previously unstyled, falling back to the
+   browser's plain white default) — deliberately its own rule rather than
+   folded into the one above: it must NOT inherit that rule's flex: 1,
+   which would fight .field-control's own sizing (see below) and was one
+   of the sources of the per-row alignment drift. The native up/down
+   spinner arrows are left in place (never hidden) — color-scheme: dark on
+   :root already tints them to match this page instead of the light-mode
+   default. */
+input[type="number"] {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--ink);
+  font: inherit;
+}
 button {
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -249,16 +295,38 @@ button:hover { border-color: var(--accent); color: var(--accent); }
 .field-info { flex: 1; min-width: 0; }
 .field-title { font-size: 13px; font-weight: 600; color: var(--ink); }
 .field-desc { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
-.field-control { flex-shrink: 0; display: flex; align-items: center; gap: 8px; }
+.field-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  /* Right-justified, same as every Qt SettingCard's own widget (always
+     added with Qt.AlignmentFlag.AlignRight) — with a fixed min-width this
+     also lines up every field-card's control column consistently down a
+     whole panel, regardless of how many children one particular row has
+     (a lone toggle vs. a range+number+unit trio). */
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 200px;
+}
 .field-control select,
-.field-control input[type="text"],
+.field-control input[type="text"] {
+  min-width: 140px;
+}
 .field-control input[type="number"] {
   min-width: 140px;
+}
+/* Narrower once a range slider is paired onto it (see
+   enhanceNumberInputsWithSliders() in app.js, which adds this class) —
+   the slider itself is already the wide/precise input, so the number box
+   next to it only needs to comfortably fit typical values + its spinner
+   arrows, not the full 140px a standalone number field wants. */
+.field-control input[type="number"].has-slider {
+  min-width: 70px;
 }
 .field-slider-value {
   font-size: 12px;
   color: var(--ink-soft);
-  min-width: 44px;
+  min-width: 32px;
   text-align: right;
 }
 .field-readonly {

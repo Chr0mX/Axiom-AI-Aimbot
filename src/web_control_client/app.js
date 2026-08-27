@@ -334,6 +334,9 @@
       // been edited. No new server-communication path needed at all.
       numberInput.parentNode.insertBefore(range, numberInput);
       numberInput._pairedRange = range;
+      // Lets styles.css narrow the number box once a slider sits next to
+      // it — see .field-control input[type="number"].has-slider.
+      numberInput.classList.add("has-slider");
 
       range.addEventListener("input", function () {
         numberInput.value = range.value;
@@ -1205,6 +1208,15 @@
   var convertModelListPopulated = false;
   var convertLogSince = 0;
   var convertPolling = false;
+  // True whenever a build might still be in progress and pollConvertStatus()
+  // should keep rescheduling itself — tracked separately from the poll's own
+  // response so a single transient failure (network blip, momentary 401)
+  // can never permanently wedge the follow loop (see pollConvertStatus()'s
+  // own comment for the bug this replaced: an early `if (!data) return`
+  // used to leave convertPolling stuck true forever, silently killing all
+  // log-following for the rest of the page's life after just one failed
+  // poll — this is why "no logs ever showed up" for the reported case).
+  var convertWatching = false;
 
   function populateConvertModelSelect() {
     var current = convertModelSelect.value || modelSelect.value;
@@ -1236,7 +1248,10 @@
     // Resume log-following if a build is already in progress — started
     // from the Qt GUI, from a previous visit to this tab, or still running
     // across a page reload (the server-side job isn't tied to any one
-    // browser tab).
+    // browser tab). Presumed true until the very first response proves
+    // otherwise, at which point pollConvertStatus() itself corrects it
+    // back to false and the chain stops after just one check.
+    convertWatching = true;
     pollConvertStatus();
   }
 
@@ -1254,7 +1269,7 @@
     fetch("/api/convert/status?since=" + convertLogSince, { headers: authHeaders() })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (data) {
-        if (!data) return;
+        if (!data) return; // transport-level failure — convertWatching is left as-is, see below
         convertLogSince = data.next_since;
         if (data.log_lines && data.log_lines.length) {
           data.log_lines.forEach(function (line) {
@@ -1263,22 +1278,26 @@
           convertLog.scrollTop = convertLog.scrollHeight;
         }
         setConvertRunningUi(data.running);
+        convertWatching = data.running;
         if (data.done && data.message) {
           convertReason.textContent = data.success
             ? "✓ Done. Engine cache written to: " + data.message
             : "✗ " + data.message;
         }
-        if (data.running) {
-          // Keep following the log every ~1s for as long as the build
-          // runs — independent of which tab is on-screen, so a build
-          // finishes and its result is ready even if the operator
-          // wandered off to another tab in the meantime.
-          setTimeout(function () { convertPolling = false; pollConvertStatus(); }, 1000);
-        } else {
-          convertPolling = false;
-        }
       })
-      .catch(function () { convertPolling = false; });
+      // A transient failure (network blip, a momentary bad-token response)
+      // must never permanently stop this loop — convertWatching keeps
+      // whatever value it already had, so the next tick just retries
+      // instead of silently giving up on log-following forever.
+      .catch(function () {})
+      .then(function () {
+        convertPolling = false;
+        // Keep following the log every ~1s for as long as a build might
+        // still be running — independent of which tab is on-screen, so a
+        // build finishes and its result is ready even if the operator
+        // wandered off to another tab in the meantime.
+        if (convertWatching) setTimeout(pollConvertStatus, 1000);
+      });
   }
 
   convertBtn.addEventListener("click", function () {
@@ -1306,6 +1325,7 @@
           return;
         }
         setConvertRunningUi(true);
+        convertWatching = true;
         pollConvertStatus();
       })
       .catch(function () { convertReason.textContent = "request failed"; });
@@ -1316,7 +1336,14 @@
   // the "TensorRT" display item) — a "cuda" backend from the server is
   // shown as "TensorRT" here, but never written back as "cuda" in a POST
   // body, matching model_page.py's write-side map which also never writes
-  // "cuda".
+  // "cuda". Driven by s.selected_backend (config.inference_backend, the
+  // user's persisted choice — "auto"/"tensorrt"/"cuda"/"directml"/"cpu"),
+  // never s.inference_backend (the live ONNX EP string like
+  // "TensorrtExecutionProvider" used for the plain-text status readout) —
+  // that string never matches any option value here, which was leaving
+  // this select stuck on its default "Auto" even while TensorRT was
+  // actually active, exactly the way model_page.py's own combo tracks
+  // config.inference_backend rather than the live resolved provider.
   function displayBackend(name) {
     return name === "cuda" ? "tensorrt" : name;
   }
@@ -1362,8 +1389,8 @@
       applyModelSelection(s.model);
       modelFormPrefilled = true;
     }
-    if (s.inference_backend) {
-      var backendDisplay = displayBackend(s.inference_backend);
+    if (s.selected_backend) {
+      var backendDisplay = displayBackend(s.selected_backend);
       var hasOption = Array.prototype.some.call(backendSelect.options, function (opt) {
         return opt.value === backendDisplay;
       });
@@ -1501,6 +1528,33 @@
     runAiControl("/api/control/ai_stop");
   });
 
+  // request_model_change()'s refusal reasons are plain machine-readable
+  // codes (see app_controller.py's own docstring for the full list) —
+  // spelled out here so a refusal reads as an explained limitation rather
+  // than a bare unexplained string. needs_restart in particular mirrors a
+  // real, unavoidable ONNX Runtime constraint: DirectML sessions can't be
+  // hot-swapped, so model_page.py's own _onInferenceBackendChanged()
+  // handles this by restarting the whole app (_startRestartCountdown()) —
+  // something this web client deliberately does NOT attempt to trigger
+  // remotely, since restarting the process would also tear down the very
+  // web-control server serving this page, and doing that unattended (or
+  // from a stray click) is a materially different, riskier feature than
+  // anything else here.
+  var MODEL_SWITCH_REASONS = {
+    no_model_path: "no model selected",
+    invalid_model_path: "not a .onnx file",
+    not_found: "model file not found on the host machine",
+    invalid_backend: "unknown backend",
+    needs_restart: "crossing to/from DirectML needs a full app restart — " +
+      "restart Axiom on the host machine, then switch again (same as the Qt app's own restart prompt for this)",
+    needs_conversion: "this model/backend combination needs a TensorRT build first — " +
+      "use the Convert tab, then switch again",
+  };
+
+  function describeModelSwitchReason(reason) {
+    return MODEL_SWITCH_REASONS[reason] || reason || "failed";
+  }
+
   modelSwitchBtn.addEventListener("click", function () {
     // modelSelect's options are bare basenames (see loadModelList()) —
     // resolve_model_path() joins a relative path directly against
@@ -1534,7 +1588,7 @@
       .then(function (data) {
         if (!data) return;
         if (data.ok === false) {
-          modelSwitchReason.textContent = data.reason || "failed";
+          modelSwitchReason.textContent = describeModelSwitchReason(data.reason);
         } else {
           // Never optimistically write s-model/s-backend here — the next
           // status poll is the sole source of truth for those, same as

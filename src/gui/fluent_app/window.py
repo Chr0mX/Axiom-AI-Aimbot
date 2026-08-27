@@ -137,6 +137,19 @@ class AxiomWindow(FluentWindow):
         self.initNavigation()
         self.initBottomNavigation()
 
+        # Re-sync a page's widgets from the live Config every time the user
+        # navigates to it. Config is a single object shared by reference
+        # between this GUI and web_control_server.py's routes running on
+        # their own thread — a web-triggered change (e.g. toggling a
+        # setting from the browser, or a completed remote model
+        # conversion) writes straight into it, but nothing previously told
+        # this window's widgets to reflect that. Bounded to just the page
+        # becoming visible (not a periodic timer touching all ten pages at
+        # once) — the user just clicked here, so there's no in-progress
+        # edit on this page to clobber, mirroring the same "refresh on
+        # activation" precedent the web client's own activateTab() uses.
+        self.stackedWidget.currentChanged.connect(self._onPageActivated)
+
         from .components.capture_preview import CapturePreviewPanel
         from PyQt6.QtWidgets import QToolButton
 
@@ -454,6 +467,20 @@ class AxiomWindow(FluentWindow):
         """刷新所有頁面的設定值"""
         if self._config:
             self.setConfig(self._config)
+
+    def _onPageActivated(self, index):
+        """Refreshes just the page becoming visible from the live Config —
+        see the connect() call in __init__ for why this exists (a web
+        control route can change Config on its own thread with nothing
+        else telling this window's widgets to reflect it). Deliberately
+        scoped to one page, not all ten (_refreshAllPages() territory) —
+        cheap, and the user only ever sees the page they just switched to.
+        """
+        if self._config is None:
+            return
+        widget = self.stackedWidget.widget(index)
+        if widget is not None and hasattr(widget, 'setConfig'):
+            widget.setConfig(self._config)
         
     def initNavigation(self):
         # Navigation items using translation keys

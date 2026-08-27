@@ -156,6 +156,14 @@ def _build_status(config) -> dict:
         "running": bool(getattr(config, "Running", False)),
         "model": os.path.basename(getattr(config, "model_path", "") or ""),
         "inference_backend": str(getattr(config, "current_provider", "") or getattr(config, "inference_backend", "auto")),
+        # The Model panel's Backend <select> must track config.inference_backend
+        # (the user's selected/persisted backend name) exactly the way
+        # model_page.py's own _loadFromConfig() does, NOT the field above —
+        # that one prefers the live ONNX EP string (e.g.
+        # "TensorrtExecutionProvider") for the plain-text status readout,
+        # which never matches any of the select's four option values and
+        # was leaving the dropdown stuck on its default "Auto".
+        "selected_backend": str(getattr(config, "inference_backend", "auto")),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
         "makcu_com_port": str(getattr(config, "makcu_com_port", "") or ""),

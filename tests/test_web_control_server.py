@@ -210,3 +210,47 @@ class TestBodyModelAnnotationsResolveToRealClasses:
         handler = _routes_by_path(app)["/api/settings/{tab}"]
         annotation = inspect.signature(handler).parameters["body"].annotation
         assert annotation is dict
+
+
+class TestBuildStatus:
+    """_build_status() is a plain module-level function — no FastAPI/
+    pydantic involved at all — so it's directly testable without any of
+    the fake-stack machinery above."""
+
+    def _config(self, **kwargs):
+        return types.SimpleNamespace(**kwargs)
+
+    def test_selected_backend_tracks_config_field_not_current_provider(self):
+        """Regression test: the Model panel's Backend <select> must sync
+        from config.inference_backend (what model_page.py's own
+        _loadFromConfig() uses), not from the live ONNX EP string exposed
+        via the "inference_backend" field below — that string (e.g.
+        "TensorrtExecutionProvider") never matches any of the select's
+        four option values and was leaving the dropdown stuck on "Auto"
+        even while TensorRT was genuinely active.
+        """
+        import core.web_control_server as wcserver
+
+        config = self._config(
+            inference_backend="tensorrt",
+            current_provider="TensorrtExecutionProvider",
+        )
+        status = wcserver._build_status(config)
+        assert status["selected_backend"] == "tensorrt"
+        # The plain-text status readout is untouched — it still prefers
+        # the live provider string, which is correct for *that* field.
+        assert status["inference_backend"] == "TensorrtExecutionProvider"
+
+    def test_selected_backend_defaults_to_auto(self):
+        import core.web_control_server as wcserver
+
+        status = wcserver._build_status(self._config())
+        assert status["selected_backend"] == "auto"
+
+    def test_selected_backend_unaffected_by_missing_current_provider(self):
+        import core.web_control_server as wcserver
+
+        config = self._config(inference_backend="cpu")
+        status = wcserver._build_status(config)
+        assert status["selected_backend"] == "cpu"
+        assert status["inference_backend"] == "cpu"
