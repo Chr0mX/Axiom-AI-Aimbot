@@ -426,6 +426,20 @@ input[type="range"]::-moz-range-progress {
   background: var(--accent);
 }
 
+/* Live capture preview <img> (Capture panel) — the MJPEG stream from
+   GET /api/preview_stream. max-width keeps it from overflowing the
+   panel on a narrow window; background gives it a visible placeholder
+   before the first frame (or while the stream is stopped/off-tab)
+   instead of a jarring blank/broken-image box. */
+.preview-img {
+  width: 100%;
+  max-width: 480px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  display: block;
+}
+
 textarea {
   width: 100%;
   min-height: 120px;

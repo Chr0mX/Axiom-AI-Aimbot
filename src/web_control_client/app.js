@@ -110,6 +110,11 @@
     if (name === "convert") {
       ensureConvertPanelExtras();
     }
+    // Stops the preview stream the instant the operator navigates away
+    // from Capture (updatePreviewStream() checks currentTab itself) —
+    // loadTabSettings("capture")'s own response re-evaluates this again
+    // once it lands, in case screenshot_method also changed meanwhile.
+    updatePreviewStream();
   }
 
   tabButtons.forEach(function (btn) {
@@ -754,6 +759,55 @@
       document.getElementById(id).classList.toggle("hidden", !isUdp);
     });
     if (isUvc) updateUvcSubVisibility();
+    updatePreviewStream();
+  }
+
+  // Manual show/hide on top of the two automatic conditions below — lets
+  // the operator stop the stream (save bandwidth/decode cost) without
+  // having to leave the Capture tab or switch capture methods. Defaults
+  // to shown; resets on page reload (not persisted, matching this
+  // client's general "ephemeral UI state" precedent for things like the
+  // Convert workspace selector).
+  var previewHidden = false;
+  var previewToggleBtn = document.getElementById("cap-preview-toggle-btn");
+  previewToggleBtn.addEventListener("click", function () {
+    previewHidden = !previewHidden;
+    updatePreviewStream();
+  });
+
+  // Starts/stops the live capture-preview <img> (see GET /api/preview_stream
+  // in web_control_server.py). Three independent conditions gate it, checked
+  // fresh every call rather than cached: (1) screenshot_method must be one
+  // of uvc/ndi/udp — mss/dxcam already show the desktop directly to whoever
+  // is at that machine, streaming those adds nothing; (2) the Capture tab
+  // must actually be the one on-screen (currentTab) — there's no reason to
+  // keep decoding an MJPEG stream the operator isn't even looking at; (3)
+  // the operator hasn't manually hidden it via the Hide/Show Preview button.
+  // Setting/clearing img.src (rather than just hiding the element with CSS)
+  // is what actually opens/closes the underlying connection — a hidden
+  // <img> with a live src would keep pulling frames in the background.
+  function updatePreviewStream() {
+    var group = document.getElementById("cap-preview-group");
+    var groupTitle = document.getElementById("cap-preview-group-title");
+    var img = document.getElementById("cap-preview-img");
+    var methodEl = document.getElementById("cap-screenshot_method");
+    var method = methodEl ? methodEl.value : "";
+    var isStream = method === "uvc" || method === "ndi" || method === "udp";
+    group.classList.toggle("hidden", !isStream);
+    groupTitle.classList.toggle("hidden", !isStream);
+    previewToggleBtn.textContent = previewHidden ? "Show Preview" : "Hide Preview";
+    img.classList.toggle("hidden", previewHidden);
+
+    var shouldRun = isStream && currentTab === "capture" && !previewHidden;
+    if (shouldRun) {
+      if (!img.dataset.streaming) {
+        img.src = "/api/preview_stream?preview_token=" + encodeURIComponent(getToken());
+        img.dataset.streaming = "1";
+      }
+    } else if (img.dataset.streaming) {
+      img.removeAttribute("src");
+      delete img.dataset.streaming;
+    }
   }
 
   function updateUvcSubVisibility() {

@@ -548,6 +548,106 @@ def start(
         from .app_controller import get_conversion_status
         return get_conversion_status(since)
 
+    # ------------------------------------------------------------------
+    # Live capture preview (uvc/ndi/udp only — see index.html/app.js's
+    # visibility condition) — streams screen_capture.py's own preview
+    # frame (the exact same one the Qt CapturePreviewPanel already reads
+    # via get_preview_frame()/_preview_lock) to a remote browser as a
+    # throttled MJPEG stream. Built for the "1PC remote-config" case: a
+    # 2nd PC running Axiom fed by UVC/NDI/UDP, configured from a phone or
+    # laptop on the LAN without wanting to remote-desktop into it just to
+    # see the capture framing. Adds zero cost to the actual capture/
+    # inference pipeline — it only ever reads a frame that already gets
+    # written every tick regardless of whether anyone's watching; the
+    # only new cost is the JPEG encode below, and even that only runs for
+    # as long as a client is actually connected (see
+    # _preview_jpeg_frames()'s own docstring for why no separate
+    # viewer-count flag is needed for that).
+    # ------------------------------------------------------------------
+    _PREVIEW_STREAM_FPS = 8.0
+    _PREVIEW_JPEG_QUALITY = 60
+    _PREVIEW_MAX_EDGE_PX = 640
+
+    def _check_preview_token(preview_token: str = "") -> None:
+        # <img src="..."> can't set a custom header, so this one route
+        # accepts the token as a query param instead of X-Axiom-Token — a
+        # deliberate, scoped exception to every other route's
+        # header-only auth (_check_token above), matching the standard
+        # pattern for embedding authenticated media in <img>/<video> tags
+        # (e.g. pre-signed URLs). Same comparison, just a different
+        # source for the value.
+        if not token or preview_token != token:
+            raise HTTPException(status_code=401, detail="invalid or missing preview_token")
+
+    def _preview_jpeg_frames():
+        """Generator body for the MJPEG stream. Starlette's
+        StreamingResponse pulls one chunk at a time (running each next()
+        call, including this function's own time.sleep(), on a worker
+        thread via iterate_in_threadpool() — never blocking the asyncio
+        event loop) and stops + closes this generator (raising
+        GeneratorExit at the current yield) the instant the client
+        disconnects. That lifecycle IS the "only encode while someone's
+        watching" cost control on its own — no separate viewer-count
+        flag needed; the loop below simply never runs at all with no
+        client connected.
+
+        Each concurrent viewer gets its own independent generator/encode
+        loop rather than one shared broadcast — an acceptable trade for
+        this feature's actual use case (one remote operator configuring
+        a single 2nd PC), not worth a proper pub/sub broadcaster the way
+        esp_server.py's WebSocket loop is for its own many-viewer case.
+        """
+        import cv2
+        from core import screen_capture
+
+        interval = 1.0 / _PREVIEW_STREAM_FPS
+        boundary = b"--frame\r\n"
+        try:
+            while True:
+                t0 = time.monotonic()
+                frame = screen_capture.get_preview_frame()
+                if frame is not None:
+                    try:
+                        if frame.ndim == 3 and frame.shape[2] == 4:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+                        h, w = frame.shape[:2]
+                        longest = max(h, w)
+                        if longest > _PREVIEW_MAX_EDGE_PX:
+                            scale = _PREVIEW_MAX_EDGE_PX / float(longest)
+                            frame = cv2.resize(
+                                frame, (max(1, int(w * scale)), max(1, int(h * scale))))
+                        ok, buf = cv2.imencode(
+                            ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, _PREVIEW_JPEG_QUALITY])
+                        if ok:
+                            jpg = buf.tobytes()
+                            yield (
+                                boundary
+                                + b"Content-Type: image/jpeg\r\n"
+                                + b"Content-Length: " + str(len(jpg)).encode("ascii") + b"\r\n\r\n"
+                                + jpg
+                                + b"\r\n"
+                            )
+                    except Exception:
+                        # Never let one bad frame (e.g. a mid-reinit capture
+                        # backend swap) kill the whole stream — just skip it
+                        # and try again next tick.
+                        pass
+                remaining = interval - (time.monotonic() - t0)
+                if remaining > 0:
+                    time.sleep(remaining)
+        except GeneratorExit:
+            # Client disconnected (tab closed, navigated away, method
+            # switched client-side) — nothing to clean up, just stop.
+            return
+
+    @app.get("/api/preview_stream", dependencies=[Depends(_check_preview_token)])
+    def get_preview_stream_route():
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            _preview_jpeg_frames(),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
     if os.path.isdir(_WEB_DIR):
         app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")
     else:
