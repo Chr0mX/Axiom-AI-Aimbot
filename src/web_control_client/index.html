@@ -163,7 +163,10 @@
             <div class="field-card stacked">
               <div class="field-info">
                 <div class="field-title">Capture Preview</div>
-                <div class="field-desc">Live view of the current detection-region frame, streamed from the host machine — confirm framing without remote-desktopping in. Throttled to a low frame rate on its own thread; has no effect on capture/inference performance, and only streams while this tab is open.</div>
+                <div class="field-desc">Live view of the current detection-region frame, streamed from the host machine — confirm framing without remote-desktopping in. Throttled to a low frame rate on its own thread; has no effect on capture/inference performance, and only streams while this tab is open and shown below.</div>
+              </div>
+              <div class="field-control">
+                <button id="cap-preview-toggle-btn">Hide Preview</button>
               </div>
               <img id="cap-preview-img" class="preview-img" alt="Capture preview">
             </div>

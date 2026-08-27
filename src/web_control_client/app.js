@@ -762,13 +762,27 @@
     updatePreviewStream();
   }
 
+  // Manual show/hide on top of the two automatic conditions below — lets
+  // the operator stop the stream (save bandwidth/decode cost) without
+  // having to leave the Capture tab or switch capture methods. Defaults
+  // to shown; resets on page reload (not persisted, matching this
+  // client's general "ephemeral UI state" precedent for things like the
+  // Convert workspace selector).
+  var previewHidden = false;
+  var previewToggleBtn = document.getElementById("cap-preview-toggle-btn");
+  previewToggleBtn.addEventListener("click", function () {
+    previewHidden = !previewHidden;
+    updatePreviewStream();
+  });
+
   // Starts/stops the live capture-preview <img> (see GET /api/preview_stream
-  // in web_control_server.py). Two independent conditions gate it, checked
+  // in web_control_server.py). Three independent conditions gate it, checked
   // fresh every call rather than cached: (1) screenshot_method must be one
   // of uvc/ndi/udp — mss/dxcam already show the desktop directly to whoever
   // is at that machine, streaming those adds nothing; (2) the Capture tab
   // must actually be the one on-screen (currentTab) — there's no reason to
-  // keep decoding an MJPEG stream the operator isn't even looking at.
+  // keep decoding an MJPEG stream the operator isn't even looking at; (3)
+  // the operator hasn't manually hidden it via the Hide/Show Preview button.
   // Setting/clearing img.src (rather than just hiding the element with CSS)
   // is what actually opens/closes the underlying connection — a hidden
   // <img> with a live src would keep pulling frames in the background.
@@ -781,8 +795,10 @@
     var isStream = method === "uvc" || method === "ndi" || method === "udp";
     group.classList.toggle("hidden", !isStream);
     groupTitle.classList.toggle("hidden", !isStream);
+    previewToggleBtn.textContent = previewHidden ? "Show Preview" : "Hide Preview";
+    img.classList.toggle("hidden", previewHidden);
 
-    var shouldRun = isStream && currentTab === "capture";
+    var shouldRun = isStream && currentTab === "capture" && !previewHidden;
     if (shouldRun) {
       if (!img.dataset.streaming) {
         img.src = "/api/preview_stream?preview_token=" + encodeURIComponent(getToken());
