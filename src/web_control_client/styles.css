@@ -10,6 +10,11 @@
   --accent: #00e0a0;
   --line: rgba(0, 224, 160, 0.25);
   --bad: #ff6060;
+  /* A step lighter than --surface-2, used only for a range slider's
+     unfilled track — --surface-2 itself is too close to --surface/--bg
+     to read as a distinct interactive control against the page/card
+     behind it. */
+  --track-empty: #2c2c3a;
   /* This client is always dark, no light variant — telling the browser
      so lets it render every native control (number-input spinner arrows,
      checkboxes, date pickers, and the scrollbar itself) in its own dark
@@ -335,30 +340,63 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   word-break: break-word;
 }
 
+/* Filled-progress slider — a plain flat track on a dark page barely read
+   as interactive at all. The unfilled portion uses --track-empty (a step
+   lighter than every surface tone so it doesn't blend into the card
+   behind it), and the filled portion (0 up to the current value) is
+   solid --accent, updated live via the --range-progress custom property
+   (set in app.js's updateRangeFill(), called on every value change —
+   drag, typing in the paired number box, or a server-driven refresh).
+   Neither -webkit nor -moz has a cross-browser "fill" pseudo-element, so
+   this two-color split is done as a background gradient instead — the
+   standard technique for a themed range input. */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 160px;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--surface-2);
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%, var(--accent) var(--range-progress, 0%),
+    var(--track-empty) var(--range-progress, 0%), var(--track-empty) 100%
+  );
   outline: none;
+  cursor: pointer;
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
+  margin-top: -6px; /* (track height 6px − thumb 18px) / 2, Chromium needs manual centering */
   border-radius: 50%;
   background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 1px rgba(0, 224, 160, 0.4), 0 0 8px rgba(0, 224, 160, 0.7);
   cursor: pointer;
 }
 input[type="range"]::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--bg);
   border-radius: 50%;
   background: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 224, 160, 0.4), 0 0 8px rgba(0, 224, 160, 0.7);
   cursor: pointer;
+}
+/* Firefox draws its own track color per side of the thumb — ::-moz-range-
+   progress / ::-moz-range-track — the gradient above is a Chromium/Safari
+   fallback that Firefox also honors as the base `background`, but these
+   make the fill genuinely native (and interactive-hover-responsive) there. */
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--track-empty);
+}
+input[type="range"]::-moz-range-progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--accent);
 }
 
 textarea {

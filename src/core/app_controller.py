@@ -57,6 +57,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -486,6 +487,92 @@ def request_model_change(
         "inference_backend": config.inference_backend,
         "applied_live": bool(getattr(config, "Running", False)),
     }
+
+
+_RESTART_DELAY_SECONDS = 5.0
+
+
+def _exit_process() -> None:  # pragma: no cover - a real process exit isn't meaningfully testable
+    """The actual hard-exit call, split into its own function purely so
+    tests can monkeypatch just this one line rather than the stdlib's
+    os._exit globally."""
+    os._exit(0)
+
+
+def restart_axiom(config: "Config", delay_seconds: float = _RESTART_DELAY_SECONDS) -> dict:
+    """Restarts the whole Axiom process — the same mechanism
+    model_page.py's own _restartApp() uses (called from its
+    _startRestartCountdown()/_onRestartTick() when crossing to/from
+    DirectML locally): save config, spawn a fresh process with the same
+    executable + argv, then hard-exit this one. Web control's version of
+    that same DirectML-crossing restart, just triggered remotely instead
+    of from a local countdown InfoBar.
+
+    This is a real, unattended, irreversible process restart — only ever
+    call it after the caller has already gotten an explicit human
+    confirmation (the web client's own confirm dialog); nothing here asks
+    again. It also tears down this very web-control server, same as
+    exiting the app any other way — the new process's own normal startup
+    brings it back up on its own once it re-reads
+    config.web_control_enabled, so nothing further needs to be arranged
+    here.
+
+    Delayed on a background thread so this function — and the {"ok": True}
+    response reporting it — can return to the caller (and that response
+    can actually reach the client over the socket) before the process
+    exits; an immediate exit would instead look like a connection reset,
+    indistinguishable from a real failure.
+    """
+    def _do_restart():
+        time.sleep(delay_seconds)
+        try:
+            from core.config import save_config
+            save_config(config)
+        except Exception:
+            pass
+        subprocess.Popen([sys.executable] + sys.argv)
+        _exit_process()
+
+    threading.Thread(target=_do_restart, daemon=True, name="webcontrol-restart").start()
+    return {"ok": True, "restarting_in": delay_seconds}
+
+
+def confirm_model_change_with_restart(
+    config: "Config",
+    model_path: str,
+    inference_backend: str | None = None,
+) -> dict:
+    """The confirmed-restart counterpart to request_model_change(): call
+    this only after that function has already refused the identical
+    model_path/inference_backend with {"reason": "needs_restart"} AND the
+    caller's own human has explicitly confirmed the restart (a
+    window.confirm()-style dialog on the web client) — this function does
+    not ask again, it just does it.
+
+    request_model_change() leaves config completely untouched on a
+    needs_restart refusal (restarting into the OLD config would be
+    pointless), so this applies the pending model_path/inference_backend
+    directly — bypassing that refusal, since accepting the restart is
+    exactly what confirming means — then calls restart_axiom(). Still
+    refuses outright (config untouched, no restart scheduled) for a
+    genuinely bad model_path/backend, the same not_found/
+    invalid_model_path/invalid_backend reasons resolve_model_path() and
+    the backend-choice check would give — a confirmed restart is never a
+    license to restart into a broken configuration.
+    """
+    resolved_path, reason = resolve_model_path(model_path)
+    if resolved_path is None:
+        return {"ok": False, "reason": reason}
+
+    if inference_backend is not None and inference_backend not in _VALID_INFERENCE_BACKENDS:
+        return {"ok": False, "reason": "invalid_backend"}
+
+    with _multi_field_lock:
+        config.model_path = model_path
+        if inference_backend is not None:
+            config.inference_backend = inference_backend
+
+    return restart_axiom(config)
 
 
 def set_web_esp_enabled(config: "Config", enabled: bool) -> bool:

@@ -768,3 +768,130 @@ class TestGetConversionStatus:
         app_controller._convert_state.update(log=["a", "b"])
         result = app_controller.get_conversion_status(since=-5)
         assert result["log_lines"] == ["a", "b"]
+
+
+class TestRestartAxiom:
+    """restart_axiom() — the same subprocess.Popen([sys.executable] +
+    sys.argv) + hard-exit mechanism model_page.py's own _restartApp() uses,
+    just delayed on a background thread so the {"ok": True} response can
+    reach the caller first. _exit_process is monkeypatched rather than
+    os._exit itself (which would actually kill this test process) —
+    see its own docstring for why it's split out as its own function.
+    """
+
+    def test_returns_immediately_with_restarting_in(self, monkeypatch):
+        # Waits for the background thread to finish before returning (even
+        # though this test only asserts the synchronous return value) —
+        # otherwise it outlives this test function and can race a *later*
+        # test's own sys.modules["core.config"] fake, calling that test's
+        # save_config() with this test's config object instead of its own
+        # (a real, reproduced flake this exact fix resolves).
+        exited = threading.Event()
+        monkeypatch.setattr(app_controller.subprocess, "Popen", lambda cmd, **k: None)
+        monkeypatch.setattr(app_controller, "_exit_process", lambda: exited.set())
+        config = _FakeConfig()
+        result = app_controller.restart_axiom(config, delay_seconds=0.01)
+        assert result == {"ok": True, "restarting_in": 0.01}
+        assert exited.wait(timeout=2)
+
+    def test_background_thread_saves_config_then_spawns_and_exits(self, monkeypatch):
+        popen_calls = []
+        saved = []
+        exited = threading.Event()
+
+        monkeypatch.setattr(app_controller.subprocess, "Popen", lambda cmd, **k: popen_calls.append(cmd))
+        monkeypatch.setattr(app_controller, "_exit_process", lambda: exited.set())
+
+        fake_config_module = types.ModuleType("core.config")
+        fake_config_module.save_config = lambda cfg: saved.append(cfg) or True
+        monkeypatch.setitem(sys.modules, "core.config", fake_config_module)
+
+        config = _FakeConfig()
+        app_controller.restart_axiom(config, delay_seconds=0.01)
+
+        assert exited.wait(timeout=2), "background restart thread never ran"
+        assert saved == [config]
+        assert popen_calls == [[sys.executable] + sys.argv]
+
+    def test_save_config_failure_does_not_block_the_actual_restart(self, monkeypatch):
+        """save_config() is wrapped in its own try/except — a failure to
+        persist must never prevent the process from actually restarting."""
+        popen_calls = []
+        exited = threading.Event()
+        monkeypatch.setattr(app_controller.subprocess, "Popen", lambda cmd, **k: popen_calls.append(cmd))
+        monkeypatch.setattr(app_controller, "_exit_process", lambda: exited.set())
+
+        fake_config_module = types.ModuleType("core.config")
+
+        def _raise(cfg):
+            raise OSError("disk full")
+
+        fake_config_module.save_config = _raise
+        monkeypatch.setitem(sys.modules, "core.config", fake_config_module)
+
+        config = _FakeConfig()
+        app_controller.restart_axiom(config, delay_seconds=0.01)
+
+        assert exited.wait(timeout=2)
+        assert len(popen_calls) == 1
+
+
+class TestConfirmModelChangeWithRestart:
+    """confirm_model_change_with_restart() — the confirmed-restart
+    counterpart to request_model_change()'s needs_restart refusal.
+    restart_axiom() itself is monkeypatched here (already covered directly
+    above) so these tests stay focused on the apply-then-restart decision
+    logic, with no background thread/timing involved.
+    """
+
+    def _model_file(self, tmp_path):
+        model_file = tmp_path / "real.onnx"
+        model_file.write_bytes(b"")
+        return str(model_file)
+
+    def test_refuses_missing_model_path(self):
+        config = _FakeConfig()
+        result = app_controller.confirm_model_change_with_restart(config, "does/not/exist.onnx")
+        assert result == {"ok": False, "reason": "not_found"}
+
+    def test_refuses_invalid_backend(self, tmp_path):
+        config = _FakeConfig()
+        result = app_controller.confirm_model_change_with_restart(
+            config, self._model_file(tmp_path), inference_backend="not_a_real_backend")
+        assert result == {"ok": False, "reason": "invalid_backend"}
+
+    def test_refused_call_never_touches_config(self):
+        config = _FakeConfig()
+        config.model_path = "unchanged.onnx"
+        config.inference_backend = "unchanged_backend"
+        app_controller.confirm_model_change_with_restart(config, "does/not/exist.onnx")
+        assert config.model_path == "unchanged.onnx"
+        assert config.inference_backend == "unchanged_backend"
+
+    def test_applies_pending_change_then_calls_restart_axiom(self, tmp_path, monkeypatch):
+        model_file = self._model_file(tmp_path)
+        restart_calls = []
+        monkeypatch.setattr(
+            app_controller, "restart_axiom",
+            lambda cfg: restart_calls.append(cfg) or {"ok": True, "restarting_in": 5.0},
+        )
+
+        config = _FakeConfig()
+        config.model_path = "old.onnx"
+        config.inference_backend = "tensorrt"
+
+        result = app_controller.confirm_model_change_with_restart(
+            config, model_file, inference_backend="directml")
+
+        assert result == {"ok": True, "restarting_in": 5.0}
+        assert config.model_path == model_file
+        assert config.inference_backend == "directml"
+        assert restart_calls == [config]
+
+    def test_backend_none_leaves_existing_backend_untouched(self, tmp_path, monkeypatch):
+        model_file = self._model_file(tmp_path)
+        monkeypatch.setattr(app_controller, "restart_axiom", lambda cfg: {"ok": True, "restarting_in": 5.0})
+        config = _FakeConfig()
+        config.inference_backend = "cpu"
+        app_controller.confirm_model_change_with_restart(config, model_file)
+        assert config.inference_backend == "cpu"

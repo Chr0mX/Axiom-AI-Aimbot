@@ -306,6 +306,19 @@
   // (visuals_page.py never pairs a port number with a slider).
   var SLIDER_EXCLUDED_KEYS = ["web_esp_http_port", "web_esp_ws_port"];
 
+  // Drives the filled-progress look in styles.css (the --range-progress
+  // custom property a linear-gradient background reads) — called on every
+  // value change from any direction (drag, typing in the paired number
+  // box, or a server-driven refresh) so the fill never goes stale.
+  function updateRangeFill(range) {
+    var min = parseFloat(range.min);
+    var max = parseFloat(range.max);
+    var val = parseFloat(range.value);
+    var pct = max > min ? ((val - min) / (max - min)) * 100 : 0;
+    pct = Math.max(0, Math.min(100, pct));
+    range.style.setProperty("--range-progress", pct + "%");
+  }
+
   function enhanceNumberInputsWithSliders() {
     var inputs = document.querySelectorAll('input[type="number"][data-key]');
     Array.prototype.forEach.call(inputs, function (numberInput) {
@@ -322,6 +335,7 @@
       range.step = numberInput.getAttribute("step") || "1";
       range.value = numberInput.value || min;
       range.className = "field-slider";
+      updateRangeFill(range);
 
       // Inserted as a plain sibling inside the number input's own
       // .field-control row (slider, then number, then any unit suffix) —
@@ -340,6 +354,7 @@
 
       range.addEventListener("input", function () {
         numberInput.value = range.value;
+        updateRangeFill(range);
       });
       range.addEventListener("change", function () {
         numberInput.value = range.value;
@@ -347,6 +362,7 @@
       });
       numberInput.addEventListener("input", function () {
         range.value = numberInput.value;
+        updateRangeFill(range);
       });
     });
   }
@@ -363,7 +379,10 @@
       // in sync too — applyGenericValue() sets .value directly rather than
       // dispatching an "input" event, so the slider's own mirroring
       // listener never fires on its own for a server-driven refresh.
-      if (el._pairedRange) el._pairedRange.value = value;
+      if (el._pairedRange) {
+        el._pairedRange.value = value;
+        updateRangeFill(el._pairedRange);
+      }
     }
   }
 
@@ -1531,28 +1550,67 @@
   // request_model_change()'s refusal reasons are plain machine-readable
   // codes (see app_controller.py's own docstring for the full list) —
   // spelled out here so a refusal reads as an explained limitation rather
-  // than a bare unexplained string. needs_restart in particular mirrors a
-  // real, unavoidable ONNX Runtime constraint: DirectML sessions can't be
+  // than a bare unexplained string. needs_restart mirrors a real,
+  // unavoidable ONNX Runtime constraint: DirectML sessions can't be
   // hot-swapped, so model_page.py's own _onInferenceBackendChanged()
-  // handles this by restarting the whole app (_startRestartCountdown()) —
-  // something this web client deliberately does NOT attempt to trigger
-  // remotely, since restarting the process would also tear down the very
-  // web-control server serving this page, and doing that unattended (or
-  // from a stray click) is a materially different, riskier feature than
-  // anything else here.
+  // handles this locally by restarting the whole app
+  // (_startRestartCountdown()) — this entry's text is only shown as a
+  // fallback (offerModelRestartConfirm() below intercepts the real
+  // needs_restart flow with a confirm dialog + an actual remote restart,
+  // via confirm_model_change_with_restart()/POST /api/control/model_restart).
   var MODEL_SWITCH_REASONS = {
     no_model_path: "no model selected",
     invalid_model_path: "not a .onnx file",
     not_found: "model file not found on the host machine",
     invalid_backend: "unknown backend",
-    needs_restart: "crossing to/from DirectML needs a full app restart — " +
-      "restart Axiom on the host machine, then switch again (same as the Qt app's own restart prompt for this)",
+    needs_restart: "crossing to/from DirectML needs a full app restart",
     needs_conversion: "this model/backend combination needs a TensorRT build first — " +
       "use the Convert tab, then switch again",
   };
 
   function describeModelSwitchReason(reason) {
     return MODEL_SWITCH_REASONS[reason] || reason || "failed";
+  }
+
+  // Confirmed-restart flow for the one reason above that a plain retry
+  // can never fix: crossing to/from DirectML needs a real app restart
+  // (see MODEL_SWITCH_REASONS.needs_restart's own text and
+  // confirm_model_change_with_restart()'s docstring in app_controller.py).
+  // window.confirm() is the direct browser-native equivalent of the Qt
+  // app's own restart confirmation — nothing is restarted without it.
+  function offerModelRestartConfirm(modelPath, inferenceBackend) {
+    var confirmed = window.confirm(
+      "Crossing to/from DirectML can't be hot-swapped — Axiom needs to fully " +
+      "restart to apply this (the Qt app does the same restart locally for " +
+      "this exact change).\n\n" +
+      "Restart Axiom now? The app — and this page's connection to it — will " +
+      "drop for a few seconds, then come back on its own."
+    );
+    if (!confirmed) {
+      modelSwitchReason.textContent = "restart declined — model/backend left unchanged";
+      return;
+    }
+    modelSwitchReason.textContent = "restarting Axiom…";
+    fetch("/api/control/model_restart", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ model_path: modelPath, inference_backend: inferenceBackend }),
+    })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data || data.ok === false) {
+          modelSwitchReason.textContent = describeModelSwitchReason(data && data.reason);
+          return;
+        }
+        modelSwitchReason.textContent = "restarting Axiom — this page reconnects automatically once it's back up";
+      })
+      .catch(function () {
+        // The process may already be mid-restart by the time this settles
+        // (the response itself can race the exit) — poll()'s own retry
+        // loop silently recovers once the new process's server responds
+        // again, so there's nothing more to surface here than what's
+        // already showing.
+      });
   }
 
   modelSwitchBtn.addEventListener("click", function () {
@@ -1588,7 +1646,11 @@
       .then(function (data) {
         if (!data) return;
         if (data.ok === false) {
-          modelSwitchReason.textContent = describeModelSwitchReason(data.reason);
+          if (data.reason === "needs_restart") {
+            offerModelRestartConfirm(modelPath, backendSelect.value);
+          } else {
+            modelSwitchReason.textContent = describeModelSwitchReason(data.reason);
+          }
         } else {
           // Never optimistically write s-model/s-backend here — the next
           // status poll is the sole source of truth for those, same as

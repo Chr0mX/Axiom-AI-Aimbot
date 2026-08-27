@@ -357,6 +357,19 @@ def start(
         from .app_controller import request_model_change
         return request_model_change(config, body.model_path, body.inference_backend)
 
+    @app.post("/api/control/model_restart", dependencies=[Depends(_check_token)])
+    def post_model_restart_route(body: ModelChangeBody):
+        # The confirmed-restart counterpart to /api/control/model above —
+        # only call this after that route has already refused the exact
+        # same body with {"reason": "needs_restart"} AND the client's own
+        # human has explicitly confirmed the restart (a window.confirm()
+        # dialog) — this route does not ask again, it just does it. See
+        # confirm_model_change_with_restart()'s own docstring for why this
+        # is safe to expose as a route at all (still refuses outright for
+        # a genuinely bad model_path/backend).
+        from .app_controller import confirm_model_change_with_restart
+        return confirm_model_change_with_restart(config, body.model_path, body.inference_backend)
+
     # -----------------------------------------------------------------
     # Tab settings — generic get/apply covering the Model/Capture/
     # Inference panels' plain Config fields. See web_control_settings.py's
