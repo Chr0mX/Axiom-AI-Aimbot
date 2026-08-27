@@ -115,6 +115,16 @@ def _install_fake_fastapi_stack(monkeypatch):
     staticfiles_mod.StaticFiles = _StaticFiles
     fastapi_mod.staticfiles = staticfiles_mod
 
+    responses_mod = types.ModuleType("fastapi.responses")
+
+    class _FakeStreamingResponse:
+        def __init__(self, content, media_type=None, **kwargs):
+            self.content = content
+            self.media_type = media_type
+
+    responses_mod.StreamingResponse = _FakeStreamingResponse
+    fastapi_mod.responses = responses_mod
+
     pydantic_mod = types.ModuleType("pydantic")
     pydantic_mod.BaseModel = _FakeBaseModel
 
@@ -126,6 +136,7 @@ def _install_fake_fastapi_stack(monkeypatch):
     monkeypatch.setitem(sys.modules, "fastapi.middleware", middleware_mod)
     monkeypatch.setitem(sys.modules, "fastapi.middleware.cors", cors_mod)
     monkeypatch.setitem(sys.modules, "fastapi.staticfiles", staticfiles_mod)
+    monkeypatch.setitem(sys.modules, "fastapi.responses", responses_mod)
     monkeypatch.setitem(sys.modules, "pydantic", pydantic_mod)
     monkeypatch.setitem(sys.modules, "uvicorn", uvicorn_mod)
 
@@ -210,6 +221,31 @@ class TestBodyModelAnnotationsResolveToRealClasses:
         handler = _routes_by_path(app)["/api/settings/{tab}"]
         annotation = inspect.signature(handler).parameters["body"].annotation
         assert annotation is dict
+
+
+class TestPreviewStreamRoute:
+    """GET /api/preview_stream — the MJPEG capture-preview stream for the
+    "1PC remote-config" case (see CLAUDE.md's Web Control API section).
+    The actual JPEG-encoding generator body (_preview_jpeg_frames()) needs
+    cv2, which isn't importable in this sandbox (see this file's own
+    module docstring) — but a generator function's body never runs until
+    it's iterated, and just calling the route handler only *constructs*
+    the generator without ever pulling a value from it, so registration
+    and response shape are still directly testable without cv2 at all.
+    """
+
+    def test_registered_as_get_route(self, started_server):
+        _wcserver, app = started_server
+        assert "/api/preview_stream" in _routes_by_path(app)
+
+    def test_handler_returns_multipart_streaming_response(self, started_server):
+        _wcserver, app = started_server
+        handler = _routes_by_path(app)["/api/preview_stream"]
+        response = handler()
+        assert response.media_type == "multipart/x-mixed-replace; boundary=frame"
+        # Lazy by construction — calling the handler builds the generator
+        # but never advances it, so this never touches cv2/screen_capture.
+        assert inspect.isgenerator(response.content)
 
 
 class TestBuildStatus:

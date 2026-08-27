@@ -153,6 +153,22 @@
             </div>
           </div>
 
+          <!-- Live capture preview — hidden unless screenshot_method is
+               uvc/ndi/udp (mss/dxcam already show the desktop directly to
+               whoever's sitting at that machine, so streaming those adds
+               no value here). Only actually streams while this tab is the
+               one on-screen — see app.js's updatePreviewStream(). -->
+          <div class="field-group-title hidden" id="cap-preview-group-title">Live Preview</div>
+          <div class="field-group hidden" id="cap-preview-group">
+            <div class="field-card stacked">
+              <div class="field-info">
+                <div class="field-title">Capture Preview</div>
+                <div class="field-desc">Live view of the current detection-region frame, streamed from the host machine — confirm framing without remote-desktopping in. Throttled to a low frame rate on its own thread; has no effect on capture/inference performance, and only streams while this tab is open.</div>
+              </div>
+              <img id="cap-preview-img" class="preview-img" alt="Capture preview">
+            </div>
+          </div>
+
           <div class="field-group-title" id="cap-uvc-group-title">UVC Camera</div>
           <div class="field-group" id="cap-uvc-group">
             <div class="field-card">
