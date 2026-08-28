@@ -60,7 +60,7 @@
   "fov_min_size_pct": "FOV Min Size",
   "fov_min_size_pct_desc": "How much to shrink the FOV to, as a percentage of FOV Size/Height, while a target is locked",
   "fov_min_size_duration": "FOV Min Size Duration",
-  "fov_min_size_duration_desc": "How long the shrink holds after a target is acquired before reverting to the full FOV (0 = holds indefinitely while locked)",
+  "fov_min_size_duration_desc": "How long it takes the FOV to gradually shrink down to FOV Min Size after a target is acquired, then holds there for the rest of the engagement (0 = shrinks instantly)",
   "general_params": "General Parameters",
   "weapon_detection_method": "Weapon Detection Method",
   "weapon_detection_method_desc": "Off / OCR (PaddleOCR) / ONNX (HUD weapon detector)",

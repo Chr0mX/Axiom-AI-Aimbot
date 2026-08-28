@@ -378,17 +378,19 @@ class Config:
 
         # Reduce FOV size while actively tracking a locked target, so a
         # random target entering the edge of the (normally larger) FOV can't
-        # steal the lock mid-engagement. Shrinks both fov_size and fov_height
-        # to fov_min_size_pct% of their configured values (same percentage on
+        # steal the lock mid-engagement. Once a target is acquired, both
+        # fov_size and fov_height gradually ramp down (same percentage on
         # each axis, so a rectangular/elliptical FOV keeps its aspect ratio
-        # while shrunk) for up to fov_min_size_duration seconds after a
-        # target is acquired, then reverts to the full FOV — bounded rather
-        # than permanent, so it widens back out to reacquire once the
-        # engagement window passes (e.g. current target moved on or died).
-        # See filter_boxes_by_fov()'s caller in ai_loop.py.
+        # while shrinking) from their full configured values to
+        # fov_min_size_pct% over fov_min_size_duration seconds, then hold at
+        # that minimum for the rest of the engagement — it only widens back
+        # out to full size once the lock is lost (current target moved on or
+        # died) and a new one is acquired. See filter_boxes_by_fov()'s caller
+        # in ai_loop.py and compute_effective_fov()'s docstring for the ramp
+        # itself.
         self.fov_reduce_on_target_enabled: bool = False
-        self.fov_min_size_pct: float = 50.0     # % of fov_size/fov_height to shrink to while active
-        self.fov_min_size_duration: float = 1.0  # seconds the shrink holds after acquisition (0 = indefinite while locked)
+        self.fov_min_size_pct: float = 50.0     # % of fov_size/fov_height the ramp shrinks down to
+        self.fov_min_size_duration: float = 1.0  # seconds the ramp takes to reach fov_min_size_pct (0 = instant)
 
         # Runtime state — not serialized (see _FIELD_MAP: neither key appears
         # there). The FOV width/height actually in effect THIS frame

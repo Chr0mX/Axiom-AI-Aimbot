@@ -693,8 +693,8 @@ def ai_logic_loop(
                 # already locked coming into this frame" decides whether to keep
                 # other, farther-out detections from ever reaching target
                 # selection at all this frame. See compute_effective_fov()'s own
-                # docstring for the fov_reduce_since/fov_reduce_expired state
-                # machine this drives.
+                # docstring for the fov_reduce_since-driven shrink ramp this
+                # feeds.
                 _effective_fov_size, _effective_fov_height = compute_effective_fov(
                     config, state, current_time)
                 # Published every frame (not just while shrunk) so the in-game

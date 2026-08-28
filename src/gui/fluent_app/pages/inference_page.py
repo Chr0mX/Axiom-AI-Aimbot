@@ -108,7 +108,7 @@ class InferencePage(BasePage):
             decimals=1,
             step=0.1,
             suffix="s",
-            description=t("fov_min_size_duration_desc", "How long the shrink holds after a target is acquired before reverting to the full FOV (0 = holds indefinitely while locked)"),
+            description=t("fov_min_size_duration_desc", "How long it takes the FOV to gradually shrink down to FOV Min Size after a target is acquired, then holds there for the rest of the engagement (0 = shrinks instantly)"),
             parent=self.fovGroup
         )
 
@@ -498,7 +498,7 @@ class InferencePage(BasePage):
         self.fovMinSizeCard.titleLabel.setText(t("fov_min_size_pct", "FOV Min Size"))
         self.fovMinSizeCard.contentLabel.setText(t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Size/Height, while a target is locked"))
         self.fovMinSizeDurationCard.titleLabel.setText(t("fov_min_size_duration", "FOV Min Size Duration"))
-        self.fovMinSizeDurationCard.contentLabel.setText(t("fov_min_size_duration_desc", "How long the shrink holds after a target is acquired before reverting to the full FOV (0 = holds indefinitely while locked)"))
+        self.fovMinSizeDurationCard.contentLabel.setText(t("fov_min_size_duration_desc", "How long it takes the FOV to gradually shrink down to FOV Min Size after a target is acquired, then holds there for the rest of the engagement (0 = shrinks instantly)"))
         self.detectRangeCard.titleLabel.setText(t("detect_range_size"))
         self.detectRangeCard.contentLabel.setText(t("detect_range_note"))
 
