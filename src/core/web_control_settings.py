@@ -795,7 +795,7 @@ def open_web_esp_in_browser() -> bool:
 # onnxruntime — safe to import directly rather than defer). A fresh
 # instance is created per call rather than threading the Qt app's real one
 # through web_control_server.start(): ConfigManager holds no state beyond
-# a directory path, so a throwaway instance pointed at the same "config"
+# a directory path, so a throwaway instance pointed at the same "presets"
 # directory behaves identically — every operation is plain file I/O.
 # ---------------------------------------------------------------------------
 
@@ -839,6 +839,55 @@ def delete_config_preset(name: str) -> dict:
 def rename_config_preset(old_name: str, new_name: str) -> dict:
     ok = _config_manager().rename_config(old_name, new_name)
     return {"ok": ok}
+
+
+_PRESET_SLOT_COUNT = 5
+
+
+def get_preset_slots(config) -> list[str]:
+    """The web control client's "Quick Presets" sidebar section — 5
+    one-click shortcuts to a saved aim preset, each independently
+    assignable. Defensively padded/truncated to exactly _PRESET_SLOT_COUNT
+    regardless of what's actually stored on config.preset_slots (a stale
+    config.json from a version with a different slot count, or a
+    hand-edited file, shouldn't be able to desync the client's fixed
+    5-button layout)."""
+    slots = list(getattr(config, "preset_slots", None) or [])
+    slots = slots[:_PRESET_SLOT_COUNT]
+    slots += [""] * (_PRESET_SLOT_COUNT - len(slots))
+    return slots
+
+
+def set_preset_slot(config, index: int, name: str) -> dict:
+    """Assigns (or clears, if `name` is empty) which saved preset one of
+    the 5 quick-load slots points at. This only records the *assignment* —
+    loading a slot is a separate action the client already does via the
+    existing POST /api/configs/load with the assigned name, same route the
+    Configs tab's own Load button uses.
+
+    A non-empty `name` must match a real saved preset (list_config_presets())
+    — refuses outright rather than silently storing a dangling reference
+    that would fail confusingly later when the operator actually clicks
+    Load. Persists via core.config.save_config() (deferred import, this
+    module's usual convention) since preset_slots is Web-Control UI state
+    on the real Config, not preset data itself.
+    """
+    if not isinstance(index, int) or not (0 <= index < _PRESET_SLOT_COUNT):
+        return {"ok": False, "reason": "invalid_index"}
+    name = name or ""
+    if name and name not in list_config_presets():
+        return {"ok": False, "reason": "not_found"}
+
+    slots = get_preset_slots(config)
+    slots[index] = name
+    config.preset_slots = slots
+
+    try:
+        from core.config import save_config
+        save_config(config)
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 def open_configs_folder() -> bool:

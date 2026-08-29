@@ -61,6 +61,7 @@ class TestConfigManagerSaveLoad:
             cm = ConfigManager(tmpdir)
             c = _make_config()
             c.fov_size = 777
+            c.pid_kp_x = 0.42
             c.status_panel_show_mouse_click = False
             cm.save_config(c, "test_profile")
             filepath = os.path.join(tmpdir, "test_profile.json")
@@ -68,8 +69,13 @@ class TestConfigManagerSaveLoad:
                 data = json.load(f)
             assert data['name'] == "test_profile"
             assert 'config' in data
+            # A preset is aim-only, not a full config snapshot: aim/tracking
+            # fields round-trip...
             assert data['config']['fov_size'] == 777
-            assert data['config']['status_panel_show_mouse_click'] is False
+            assert data['config']['pid_kp_x'] == 0.42
+            # ...but a display-prefixed field never makes it into the file
+            # at all, regardless of its value.
+            assert 'status_panel_show_mouse_click' not in data['config']
 
     def test_load_config_restores_values(self):
         from core.config_manager import ConfigManager
@@ -232,12 +238,17 @@ class TestConfigManagerPreview:
         with tempfile.TemporaryDirectory() as tmpdir:
             cm = ConfigManager(tmpdir)
             tuned = _make_config()
-            tuned.model_path = "Model/SomeOther.onnx"
+            # detect_range_size (aim.detect_range_size) — model_path isn't
+            # aim-scoped anymore and would never appear in a preset diff at
+            # all now. Deliberately not an fov_*/pid_*/etc. field, which
+            # _PRESET_DIFF_GROUPS would fold into a named group instead of
+            # reporting standalone.
+            tuned.detect_range_size = 321
             cm.save_config(tuned, "tuned")
 
             current = _make_config()
             result = cm.preview_config_changes(current, "tuned")
-            assert result == ["model path"]
+            assert result == ["detect range size"]
 
     def test_groups_multiple_pid_changes_together(self):
         from core.config_manager import ConfigManager
@@ -353,3 +364,145 @@ class TestConfigManagerExportImport:
             cm = ConfigManager(tmpdir)
             result = cm.import_config("/nonexistent/file.json")
             assert result is None
+
+
+class TestConfigManagerAimOnlyScope:
+    """A preset is aim settings, not a full config snapshot — every attr
+    under the aim./tracking. _FIELD_MAP prefix, plus humanization. Both
+    directions (save and load) are covered so the invariant holds no
+    matter how a given preset file was produced."""
+
+    def test_save_only_includes_aim_and_tracking_fields(self):
+        from core.config_manager import ConfigManager, _AIM_PRESET_FIELDS
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            c = _make_config()
+            cm.save_config(c, "scoped")
+            with open(os.path.join(tmpdir, "scoped.json"), encoding="utf-8") as f:
+                saved = json.load(f)["config"]
+
+            # Every key present is either a known aim/tracking field or the
+            # separately-handled humanization block — nothing else leaked in.
+            assert set(saved.keys()) - {"humanization"} <= _AIM_PRESET_FIELDS
+            # And it isn't trivially empty — the scope actually captured something real.
+            assert "fov_size" in saved
+            assert "pid_kp_x" in saved
+            assert "humanization" in saved
+
+    def test_save_excludes_non_aim_fields(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            c = _make_config()
+            cm.save_config(c, "scoped")
+            with open(os.path.join(tmpdir, "scoped.json"), encoding="utf-8") as f:
+                saved = json.load(f)["config"]
+
+            for non_aim in (
+                "screenshot_method", "mouse_move_method", "model_path",
+                "auto_fire_delay", "web_control_port", "crosshair_color_r",
+                "model_input_size",
+            ):
+                assert non_aim not in saved
+
+    def test_load_applies_aim_fields_from_a_hand_crafted_file(self):
+        """Baseline: a file written the new (aim-only) way loads normally."""
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            with open(os.path.join(tmpdir, "handmade.json"), "w", encoding="utf-8") as f:
+                json.dump({"config": {"fov_size": 999}}, f)
+
+            current = _make_config()
+            assert cm.load_config(current, "handmade") is True
+            assert current.fov_size == 999
+
+    def test_load_ignores_non_aim_keys_in_an_old_format_file(self):
+        """The scoping is enforced on load too, not just on save — a preset
+        file that still carries non-aim keys (an old-format file saved
+        before this change, or a hand-edited/imported one) can't leak them
+        onto the live config."""
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            with open(os.path.join(tmpdir, "oldformat.json"), "w", encoding="utf-8") as f:
+                json.dump({"config": {
+                    "fov_size": 999,
+                    "screenshot_method": "udp",
+                    "mouse_move_method": "makcu",
+                }}, f)
+
+            current = _make_config()
+            original_screenshot_method = current.screenshot_method
+            original_mouse_method = current.mouse_move_method
+            assert cm.load_config(current, "oldformat") is True
+
+            assert current.fov_size == 999  # aim field: applied
+            # non-aim fields: left completely untouched
+            assert current.screenshot_method == original_screenshot_method
+            assert current.mouse_move_method == original_mouse_method
+
+    def test_preview_diff_never_reports_a_non_aim_field(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            with open(os.path.join(tmpdir, "oldformat.json"), "w", encoding="utf-8") as f:
+                json.dump({"config": {"screenshot_method": "udp"}}, f)
+
+            current = _make_config()
+            result = cm.preview_config_changes(current, "oldformat")
+            assert result == []  # the only key in the file is non-aim, so no visible diff
+
+
+class TestConfigManagerLegacyDirMigration:
+    """One-time migration from the pre-rename config/ directory into the
+    new default presets/ directory."""
+
+    def test_default_configs_dir_is_presets(self, monkeypatch, tmp_path):
+        from core.config_manager import ConfigManager
+        monkeypatch.chdir(tmp_path)
+        cm = ConfigManager()
+        assert cm.configs_dir == "presets"
+        assert os.path.isdir(tmp_path / "presets")
+
+    def test_migrates_existing_legacy_presets(self, monkeypatch, tmp_path):
+        from core.config_manager import ConfigManager
+        monkeypatch.chdir(tmp_path)
+        legacy_dir = tmp_path / "config"
+        legacy_dir.mkdir()
+        (legacy_dir / "my_old_preset.json").write_text(
+            json.dumps({"name": "my_old_preset", "config": {"fov_size": 111}}),
+            encoding="utf-8",
+        )
+
+        cm = ConfigManager()  # default "presets" — doesn't exist yet, triggers migration
+        assert "my_old_preset" in cm.get_config_list()
+        # The old directory is left alone, not deleted.
+        assert (legacy_dir / "my_old_preset.json").exists()
+
+    def test_never_overwrites_an_existing_preset_of_the_same_name(self, monkeypatch, tmp_path):
+        from core.config_manager import ConfigManager
+        monkeypatch.chdir(tmp_path)
+        legacy_dir = tmp_path / "config"
+        legacy_dir.mkdir()
+        (legacy_dir / "shared_name.json").write_text(
+            json.dumps({"name": "shared_name", "config": {"fov_size": 111}}), encoding="utf-8")
+
+        new_dir = tmp_path / "presets"
+        new_dir.mkdir()
+        (new_dir / "shared_name.json").write_text(
+            json.dumps({"name": "shared_name", "config": {"fov_size": 222}}), encoding="utf-8")
+
+        ConfigManager()  # presets/ already exists -> migration doesn't even run
+        with open(new_dir / "shared_name.json", encoding="utf-8") as f:
+            assert json.load(f)["config"]["fov_size"] == 222  # untouched
+
+    def test_no_migration_attempted_when_no_legacy_dir_exists(self, monkeypatch, tmp_path):
+        from core.config_manager import ConfigManager
+        monkeypatch.chdir(tmp_path)
+        # No config/ dir at all — must not raise, and nothing resembling a
+        # migrated preset should appear (only the seeded bundled built-ins,
+        # a separate pre-existing mechanism unrelated to this migration).
+        cm = ConfigManager()
+        assert "my_old_preset" not in cm.get_config_list()
+        assert not (tmp_path / "config").exists()

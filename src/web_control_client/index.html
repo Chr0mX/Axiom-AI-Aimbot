@@ -52,6 +52,38 @@
             <div class="stat hidden" id="s-stream-fps-stat"><div class="label" id="s-stream-fps-label">Stream FPS</div><div class="value" id="s-stream-fps">—</div></div>
           </div>
         </div>
+
+        <!-- Quick one-click preset shortcuts — each slot independently
+             assignable to a saved aim preset via its own <select>; Load
+             fires immediately (no confirmation prompt, unlike the Configs
+             tab's own deliberate-action Load) via the same
+             POST /api/configs/load that tab already uses. -->
+        <div class="sidebar-section">
+          <div class="card-title">Quick Presets</div>
+          <div class="field-group">
+            <div class="row">
+              <select id="preset-slot-0" data-slot="0"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-0" data-slot="0" disabled>Load</button>
+            </div>
+            <div class="row">
+              <select id="preset-slot-1" data-slot="1"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-1" data-slot="1" disabled>Load</button>
+            </div>
+            <div class="row">
+              <select id="preset-slot-2" data-slot="2"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-2" data-slot="2" disabled>Load</button>
+            </div>
+            <div class="row">
+              <select id="preset-slot-3" data-slot="3"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-3" data-slot="3" disabled>Load</button>
+            </div>
+            <div class="row">
+              <select id="preset-slot-4" data-slot="4"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-4" data-slot="4" disabled>Load</button>
+            </div>
+          </div>
+          <div class="hint">Pick a preset per slot, then <b>Load</b> for an instant swap — no confirmation prompt.</div>
+        </div>
       </div>
 
       <div class="main">

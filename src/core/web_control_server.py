@@ -272,6 +272,10 @@ def start(
         old_name: str
         new_name: str
 
+    class PresetSlotBody(BaseModel):
+        index: int
+        name: str
+
     class ConfigImportBody(BaseModel):
         content: str
 
@@ -528,6 +532,22 @@ def start(
     def post_open_configs_folder_route():
         from .web_control_settings import open_configs_folder
         return {"ok": open_configs_folder()}
+
+    # Quick Presets — 5 one-click shortcuts in the web client's sidebar,
+    # each independently assignable to a saved aim preset. Assignment is
+    # persisted here; the actual load reuses POST /api/configs/load above
+    # directly (a bare load with no confirmation step, same route the
+    # Configs tab's own Load button calls after its own client-side
+    # diff-preview confirm — there's no separate "load a slot" route).
+    @app.get("/api/preset_slots", dependencies=[Depends(_check_token)])
+    def get_preset_slots_route():
+        from .web_control_settings import get_preset_slots
+        return {"slots": get_preset_slots(config)}
+
+    @app.post("/api/preset_slots", dependencies=[Depends(_check_token)])
+    def post_preset_slots_route(body: PresetSlotBody):
+        from .web_control_settings import set_preset_slot
+        return set_preset_slot(config, body.index, body.name)
 
     # -----------------------------------------------------------------
     # TensorRT conversion — the Convert tab's one real action. A build is

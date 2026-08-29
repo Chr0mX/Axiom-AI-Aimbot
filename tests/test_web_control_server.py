@@ -193,6 +193,7 @@ class TestBodyModelAnnotationsResolveToRealClasses:
             ("/api/configs/rename", "ConfigRenameBody"),
             ("/api/configs/import", "ConfigImportBody"),
             ("/api/control/convert", "ConvertBody"),
+            ("/api/preset_slots", "PresetSlotBody"),
         ],
     )
     def test_body_param_is_a_real_class_not_a_string(self, started_server, path, model_name):
@@ -246,6 +247,51 @@ class TestPreviewStreamRoute:
         # Lazy by construction — calling the handler builds the generator
         # but never advances it, so this never touches cv2/screen_capture.
         assert inspect.isgenerator(response.content)
+
+
+def _route_by_method_and_path(app, method, path):
+    """_routes_by_path() keys a dict by path alone, so a GET and a POST
+    sharing the same path (e.g. /api/preset_slots) collide — this looks up
+    a specific (method, path) pair straight from app.routes instead."""
+    for registered_method, registered_path, func in app.routes:
+        if registered_method == method and registered_path == path:
+            return func
+    raise KeyError((method, path))
+
+
+class TestPresetSlotRoutes:
+    """GET/POST /api/preset_slots — the Quick Presets sidebar's 5 assignable
+    shortcut slots (see CLAUDE.md's Web Control API section). Both routes
+    share one path distinguished only by HTTP method, so
+    _route_by_method_and_path() above is used instead of _routes_by_path()."""
+
+    def test_get_route_registered_and_delegates_to_get_preset_slots(self, started_server, monkeypatch):
+        _wcserver, app = started_server
+        calls = []
+        monkeypatch.setattr(
+            "core.web_control_settings.get_preset_slots",
+            lambda config: calls.append(config) or ["a", "", "", "", ""],
+        )
+        handler = _route_by_method_and_path(app, "GET", "/api/preset_slots")
+        assert handler() == {"slots": ["a", "", "", "", ""]}
+        assert len(calls) == 1
+
+    def test_post_route_registered_and_delegates_to_set_preset_slot(self, started_server, monkeypatch):
+        _wcserver, app = started_server
+        calls = []
+        monkeypatch.setattr(
+            "core.web_control_settings.set_preset_slot",
+            lambda config, index, name: calls.append((index, name)) or {"ok": True},
+        )
+        handler = _route_by_method_and_path(app, "POST", "/api/preset_slots")
+        # PresetSlotBody is a local class defined inside start() (not a
+        # module global), so it's only reachable via the handler's own
+        # resolved parameter annotation — same technique
+        # TestBodyModelAnnotationsResolveToRealClasses uses above.
+        body_cls = inspect.signature(handler).parameters["body"].annotation
+        body = body_cls(index=3, name="my_preset")
+        assert handler(body) == {"ok": True}
+        assert calls == [(3, "my_preset")]
 
 
 class TestBuildStatus:

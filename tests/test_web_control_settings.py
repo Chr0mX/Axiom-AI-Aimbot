@@ -876,6 +876,109 @@ class TestExportImportConfigPreset:
         assert fresh.fov_size == 456
 
 
+class TestPresetSlots:
+    """get_preset_slots()/set_preset_slot() — the web control client's
+    5-button "Quick Presets" sidebar. Persistence goes through
+    core.config.save_config(), so it's patched to a tmp-dir config.json the
+    same way test_app_controller.py patches it for other Config-writing
+    functions; preset-name validation goes through wcs._config_manager(),
+    patched exactly like TestConfigPresets/TestExportImportConfigPreset
+    above."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_config_manager(self, tmp_path, monkeypatch):
+        from core.config_manager import ConfigManager
+        self.configs_dir = tmp_path / "config"
+        monkeypatch.setattr(wcs, "_config_manager", lambda: ConfigManager(str(self.configs_dir)))
+
+    def _real_config(self):
+        from unittest.mock import patch
+        from core.config import Config
+        with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+            return Config()
+
+    def test_default_slots_are_five_blank_strings(self):
+        config = self._real_config()
+        assert wcs.get_preset_slots(config) == ["", "", "", "", ""]
+
+    def test_get_pads_a_short_list(self):
+        config = self._real_config()
+        config.preset_slots = ["only_one"]
+        assert wcs.get_preset_slots(config) == ["only_one", "", "", "", ""]
+
+    def test_get_truncates_a_long_list(self):
+        config = self._real_config()
+        config.preset_slots = ["a", "b", "c", "d", "e", "f", "g"]
+        assert wcs.get_preset_slots(config) == ["a", "b", "c", "d", "e"]
+
+    def test_get_handles_missing_attribute(self):
+        config = self._real_config()
+        del config.preset_slots
+        assert wcs.get_preset_slots(config) == ["", "", "", "", ""]
+
+    def test_set_rejects_negative_index(self):
+        config = self._real_config()
+        result = wcs.set_preset_slot(config, -1, "")
+        assert result == {"ok": False, "reason": "invalid_index"}
+
+    def test_set_rejects_index_out_of_range(self):
+        config = self._real_config()
+        result = wcs.set_preset_slot(config, 5, "")
+        assert result == {"ok": False, "reason": "invalid_index"}
+
+    def test_set_rejects_non_int_index(self):
+        config = self._real_config()
+        result = wcs.set_preset_slot(config, "0", "")
+        assert result == {"ok": False, "reason": "invalid_index"}
+
+    def test_set_rejects_a_name_that_is_not_a_saved_preset(self):
+        config = self._real_config()
+        result = wcs.set_preset_slot(config, 0, "no_such_preset")
+        assert result == {"ok": False, "reason": "not_found"}
+        assert wcs.get_preset_slots(config)[0] == ""
+
+    def test_set_assigns_a_real_preset_name(self, monkeypatch):
+        config = self._real_config()
+        wcs.save_config_preset(config, "my_aim_preset")
+
+        saved = {}
+        monkeypatch.setattr(
+            "core.config.save_config",
+            lambda cfg: saved.update(called=True, slots=list(cfg.preset_slots)),
+        )
+
+        result = wcs.set_preset_slot(config, 2, "my_aim_preset")
+        assert result == {"ok": True}
+        assert config.preset_slots[2] == "my_aim_preset"
+        assert config.preset_slots == ["", "", "my_aim_preset", "", ""]
+        assert saved.get("called") is True
+
+    def test_set_empty_name_clears_a_slot_without_needing_a_real_preset(self, monkeypatch):
+        config = self._real_config()
+        wcs.save_config_preset(config, "my_aim_preset")
+        monkeypatch.setattr("core.config.save_config", lambda cfg: None)
+        wcs.set_preset_slot(config, 1, "my_aim_preset")
+
+        result = wcs.set_preset_slot(config, 1, "")
+        assert result == {"ok": True}
+        assert config.preset_slots[1] == ""
+
+    def test_set_survives_save_config_raising(self, monkeypatch):
+        """A persistence failure must not surface as a route-level error —
+        the in-memory assignment (and the eventual real config.json write on
+        some later successful save) is what matters, matching this module's
+        existing best-effort save pattern elsewhere."""
+        config = self._real_config()
+        wcs.save_config_preset(config, "my_aim_preset")
+        monkeypatch.setattr(
+            "core.config.save_config",
+            lambda cfg: (_ for _ in ()).throw(RuntimeError("disk full")),
+        )
+        result = wcs.set_preset_slot(config, 0, "my_aim_preset")
+        assert result == {"ok": True}
+        assert config.preset_slots[0] == "my_aim_preset"
+
+
 class TestTriggerSchema:
     def test_get_tab_settings_returns_every_schema_key(self):
         config = _config()
