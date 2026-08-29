@@ -356,13 +356,12 @@ class TestReduceBoxesForSingleTarget:
 
 
 class TestComputeEffectiveFov:
-    """"Reduce FOV on Active Target" — regression coverage for the exact bug
-    this was rewritten to fix: once the shrink window's fov_min_size_duration
-    elapses, the FOV must revert to full size and *stay* there for the rest
-    of the current lock, not re-arm a fresh shrink window on the very next
-    frame just because state.locked_box is still non-None (both "never
-    armed" and "just expired" used to look identical: fov_reduce_since == 0.0
-    while locked_box is still set)."""
+    """"Reduce FOV on Active Target" — a gradual ramp, not an instant snap:
+    once a target locks, the FOV starts at the full configured size and
+    linearly shrinks down to fov_min_size_pct% over fov_min_size_duration
+    seconds, then holds at that minimum for the rest of the current lock —
+    it only ever widens back out once the lock is lost and a new target is
+    acquired."""
 
     @staticmethod
     def _config(**overrides):
@@ -379,12 +378,11 @@ class TestComputeEffectiveFov:
     def test_disabled_feature_leaves_fov_untouched_and_resets_state(self, ai_loop_utils):
         from core.ai_loop_state import LoopState
         config = self._config(fov_reduce_on_target_enabled=False)
-        state = LoopState(locked_box=[0, 0, 10, 10], fov_reduce_since=5.0, fov_reduce_expired=True)
+        state = LoopState(locked_box=[0, 0, 10, 10], fov_reduce_since=5.0)
         size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=10.0)
         assert (size, height) == (200, 200)
-        # Defensive reset, so re-enabling later never inherits a stale window.
+        # Defensive reset, so re-enabling later never inherits a stale ramp.
         assert state.fov_reduce_since == 0.0
-        assert state.fov_reduce_expired is False
 
     def test_no_lock_leaves_fov_full(self, ai_loop_utils):
         from core.ai_loop_state import LoopState
@@ -393,68 +391,67 @@ class TestComputeEffectiveFov:
         size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=50.0)
         assert (size, height) == (200, 200)
 
-    def test_lock_acquired_shrinks_immediately(self, ai_loop_utils):
+    def test_lock_acquired_starts_at_full_size(self, ai_loop_utils):
+        """The ramp starts from 100% the instant a target locks — it must
+        not jump straight to the minimum on the very first frame."""
         from core.ai_loop_state import LoopState
         config = self._config()
         state = LoopState(locked_box=[0, 0, 10, 10])
         size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)
-        assert (size, height) == (100, 100)
+        assert (size, height) == (200, 200)
         assert state.fov_reduce_since == 100.0
 
-    def test_shrink_holds_for_the_configured_duration(self, ai_loop_utils):
+    def test_shrinks_linearly_partway_through_the_ramp(self, ai_loop_utils):
+        from core.ai_loop_state import LoopState
+        config = self._config()  # 50% min, 1.0s duration
+        state = LoopState(locked_box=[0, 0, 10, 10])
+        ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)  # acquire
+        # Halfway through the 1.0s ramp: halfway between 100% and 50% = 75%.
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=100.5)
+        assert (size, height) == (150, 150)
+
+    def test_reaches_minimum_at_duration_and_stays_there(self, ai_loop_utils):
         from core.ai_loop_state import LoopState
         config = self._config()
         state = LoopState(locked_box=[0, 0, 10, 10])
         ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)  # acquire
-        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=100.9)
-        assert (size, height) == (100, 100)  # still within the 1.0s duration
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=101.0)  # duration reached
+        assert (size, height) == (100, 100)
 
-    def test_reverts_to_full_after_duration_and_stays_there(self, ai_loop_utils):
-        from core.ai_loop_state import LoopState
-        config = self._config()
-        state = LoopState(locked_box=[0, 0, 10, 10])
-        ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)  # acquire, shrinks
-        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=101.1)  # duration elapsed
-        assert (size, height) == (200, 200)
-        assert state.fov_reduce_expired is True
-
-        # Same lock, many frames later — must NOT shrink again. This is
-        # exactly the scenario that used to loop forever: every one of
-        # these calls used to see fov_reduce_since == 0.0 with locked_box
-        # still set and misread it as a brand-new acquisition.
-        for t in (101.2, 102.0, 105.0, 130.0):
+        # Same lock, many frames later — must stay at the minimum, never
+        # widen back out while still locked.
+        for t in (101.1, 102.0, 105.0, 130.0):
             size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=t)
-            assert (size, height) == (200, 200), f"re-armed at t={t}"
+            assert (size, height) == (100, 100), f"drifted from minimum at t={t}"
 
-    def test_losing_and_reacquiring_the_lock_arms_a_fresh_window(self, ai_loop_utils):
+    def test_losing_and_reacquiring_the_lock_starts_a_fresh_ramp(self, ai_loop_utils):
         from core.ai_loop_state import LoopState
         config = self._config()
         state = LoopState(locked_box=[0, 0, 10, 10])
         ai_loop_utils.compute_effective_fov(config, state, current_time=100.0)
-        ai_loop_utils.compute_effective_fov(config, state, current_time=101.1)  # expires
-        assert state.fov_reduce_expired is True
+        ai_loop_utils.compute_effective_fov(config, state, current_time=101.1)  # ramp complete, at minimum
 
         state.locked_box = None  # target genuinely lost
         size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=101.2)
         assert (size, height) == (200, 200)
-        assert state.fov_reduce_expired is False
         assert state.fov_reduce_since == 0.0
 
         state.locked_box = [5, 5, 15, 15]  # a new target
         size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=101.2)
-        assert (size, height) == (100, 100)  # shrinks again — a fresh window
+        assert (size, height) == (200, 200)  # fresh ramp starts back at full size
 
-    def test_zero_duration_holds_indefinitely_while_locked(self, ai_loop_utils):
+    def test_zero_duration_shrinks_instantly(self, ai_loop_utils):
         from core.ai_loop_state import LoopState
         config = self._config(fov_min_size_duration=0.0)
         state = LoopState(locked_box=[0, 0, 10, 10])
-        ai_loop_utils.compute_effective_fov(config, state, current_time=50.0)
+        size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=50.0)
+        assert (size, height) == (100, 100)  # already at minimum on the very first frame
         size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=999.0)
         assert (size, height) == (100, 100)
 
     def test_rectangular_fov_shrinks_both_axes_by_the_same_percentage(self, ai_loop_utils):
         from core.ai_loop_state import LoopState
-        config = self._config(fov_size=200, fov_height=100, fov_min_size_pct=25.0)
+        config = self._config(fov_size=200, fov_height=100, fov_min_size_pct=25.0, fov_min_size_duration=0.0)
         state = LoopState(locked_box=[0, 0, 10, 10])
         size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=1.0)
         assert (size, height) == (50, 25)

@@ -27,19 +27,20 @@ class LoopState:
     locked_confidence: float = 0.0
     no_detection_frames: int = 0
 
-    # FOV-reduce-on-target — 0.0 means "no active shrink window right now."
-    # Set once, on the None→non-None edge of locked_box, not every frame —
-    # see ai_loop.py's fov filtering call site for why that distinction
-    # matters (same class of continuous-reset bug already fixed once for the
-    # MAKCU disengage delay). fov_reduce_expired distinguishes "never armed
-    # yet this lock" from "armed, ran its full fov_min_size_duration, and
-    # should now stay at full FOV for the rest of this lock" — both read as
-    # fov_reduce_since == 0.0, so without this separate flag the window would
-    # immediately re-arm on the very next frame (the target is still locked,
-    # so the None→non-None edge looks like it's happening again) instead of
-    # actually staying expired until the lock is lost and re-acquired.
+    # FOV-reduce-on-target — the timestamp the current lock's shrink ramp
+    # started at; 0.0 means "no ramp running right now." Set once, on the
+    # None→non-None edge of locked_box, not every frame the target stays
+    # locked — see ai_loop.py's fov filtering call site for why that
+    # distinction matters (same class of continuous-reset bug already fixed
+    # once for the MAKCU disengage delay: setting it every frame would pin
+    # elapsed-time-since-acquisition near zero forever and the ramp could
+    # never progress). Left non-zero for the entire lock once armed — the
+    # FOV ramps from full size down to fov_min_size_pct% over
+    # fov_min_size_duration seconds, then simply stays at the minimum
+    # (compute_effective_fov() clamps ramp progress at 1.0) for the rest of
+    # the lock; only losing the lock resets this back to 0.0 so the next
+    # acquisition starts its own fresh ramp from full size.
     fov_reduce_since: float = 0.0
-    fov_reduce_expired: bool = False
 
     # Y-reduce velocity gate — track target Y position across frames to estimate vy.
     aim_y_last_target_y: float = 0.0

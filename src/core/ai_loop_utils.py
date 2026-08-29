@@ -135,31 +135,23 @@ def compute_effective_fov(config: Config, state: LoopState, current_time: float)
     on Active Target" (fov_reduce_on_target_enabled) on top of the
     configured fov_size/fov_height.
 
-    Mutates state.fov_reduce_since / state.fov_reduce_expired to track the
-    shrink window across frames:
+    This is a gradual ramp, not an instant snap: once a target locks, the
+    FOV starts at the full configured fov_size/fov_height and linearly
+    shrinks down to fov_min_size_pct% of that over fov_min_size_duration
+    seconds, then holds at that minimum for the rest of the current lock
+    (fov_min_size_duration <= 0 means an instant drop straight to the
+    minimum, no ramp).
 
-    - fov_reduce_since == 0.0 and not fov_reduce_expired: no window armed
-      for the current lock yet. The None -> non-None edge of
-      state.locked_box arms one exactly once (not every frame the target
-      stays locked — see LoopState.fov_reduce_since for why that
-      distinction matters).
-    - fov_reduce_since > 0.0: an armed window, still within
-      fov_min_size_duration (or fov_min_size_duration <= 0, meaning "hold
-      indefinitely while locked") — FOV is shrunk to fov_min_size_pct%.
-    - fov_reduce_expired: the window ran its full duration and reverted.
-      Stays this way for the rest of the *current* lock. Without this
-      separate flag, the very next frame reads "window just expired" as
-      indistinguishable from "no window has ever started" (both leave
-      fov_reduce_since at 0.0 while state.locked_box is still non-None),
-      re-arms immediately, and the FOV shrinks again — an unbroken
-      shrink/revert loop that (at any real frame rate, since the reverted
-      frame lasts a single tick) looks exactly like "the FOV shrinks
-      instantly and never actually respects the configured duration."
-
-    Both flags reset to their "no window" state once state.locked_box goes
-    back to None, so the next fresh acquisition always gets its own full
-    window — and also reset (defensively) whenever the feature itself is
-    off, so re-enabling it later never inherits a stale window from
+    Mutates state.fov_reduce_since to track the ramp across frames: the
+    None -> non-None edge of state.locked_box arms it exactly once (set to
+    current_time), not every frame the target stays locked — see
+    LoopState.fov_reduce_since for why that distinction matters. Ramp
+    progress is then just (current_time - fov_reduce_since) / duration,
+    clamped to [0, 1], so it naturally reaches 1.0 (full min-size) and
+    simply stays there — no separate "expired" bookkeeping needed. Losing
+    the lock resets fov_reduce_since back to 0.0 so the next acquisition
+    starts its own fresh ramp from full size; the feature being off does
+    the same, so re-enabling it later never inherits a stale ramp from
     however long ago it was last on.
     """
     effective_size = int(getattr(config, 'fov_size', 0) or 0)
@@ -167,25 +159,25 @@ def compute_effective_fov(config: Config, state: LoopState, current_time: float)
 
     if not getattr(config, 'fov_reduce_on_target_enabled', False):
         state.fov_reduce_since = 0.0
-        state.fov_reduce_expired = False
         return effective_size, effective_height
 
-    if getattr(state, 'locked_box', None) is not None:
-        if state.fov_reduce_since == 0.0 and not state.fov_reduce_expired:
-            state.fov_reduce_since = current_time
-    else:
+    if getattr(state, 'locked_box', None) is None:
         state.fov_reduce_since = 0.0
-        state.fov_reduce_expired = False  # lock lost — next acquisition starts a fresh window
+        return effective_size, effective_height
 
-    if state.fov_reduce_since > 0.0:
-        duration = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
-        if duration <= 0.0 or current_time - state.fov_reduce_since < duration:
-            pct = max(1.0, min(100.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0)))
-            effective_size = max(1, int(effective_size * pct / 100.0))
-            effective_height = max(1, int(effective_height * pct / 100.0))
-        else:
-            state.fov_reduce_since = 0.0
-            state.fov_reduce_expired = True  # ran its course — stays expired until the lock is lost
+    if state.fov_reduce_since == 0.0:
+        state.fov_reduce_since = current_time
+
+    duration = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
+    if duration <= 0.0:
+        progress = 1.0
+    else:
+        progress = max(0.0, min(1.0, (current_time - state.fov_reduce_since) / duration))
+
+    pct = max(1.0, min(100.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0)))
+    current_pct = 100.0 - (100.0 - pct) * progress
+    effective_size = max(1, int(effective_size * current_pct / 100.0))
+    effective_height = max(1, int(effective_height * current_pct / 100.0))
 
     return effective_size, effective_height
 
