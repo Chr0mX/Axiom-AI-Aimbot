@@ -797,6 +797,15 @@ def open_web_esp_in_browser() -> bool:
 # through web_control_server.start(): ConfigManager holds no state beyond
 # a directory path, so a throwaway instance pointed at the same "presets"
 # directory behaves identically — every operation is plain file I/O.
+#
+# configs_page.py's two-_ManagerBox split (see its own module docstring)
+# is mirrored here by two factories — _config_manager() (aim-only,
+# "presets") and _full_config_manager() (aim_only=False, "configs") — and
+# two parallel sets of thin one-line wrappers below: the *_preset ones
+# operate on the aim-only manager (unchanged from before), the *_full_config
+# ones on the full-snapshot one. Each pair is intentionally still a
+# separate named function rather than a shared generic wrapper, matching
+# every other thin single-purpose helper in this module.
 # ---------------------------------------------------------------------------
 
 def _config_manager():
@@ -804,8 +813,17 @@ def _config_manager():
     return ConfigManager()
 
 
+def _full_config_manager():
+    from core.config_manager import ConfigManager
+    return ConfigManager(configs_dir="configs", aim_only=False)
+
+
 def list_config_presets() -> list[str]:
     return _config_manager().get_config_list()
+
+
+def list_full_configs() -> list[str]:
+    return _full_config_manager().get_config_list()
 
 
 def save_config_preset(config, name: str) -> dict:
@@ -814,6 +832,13 @@ def save_config_preset(config, name: str) -> dict:
     the selected one; the GUI's distinction is just which confirmation
     dialog it shows first, not a different underlying call)."""
     ok = _config_manager().save_config(config, name)
+    return {"ok": ok}
+
+
+def save_full_config(config, name: str) -> dict:
+    """Full-config counterpart of save_config_preset() — saves every
+    setting, not just aim-related ones."""
+    ok = _full_config_manager().save_config(config, name)
     return {"ok": ok}
 
 
@@ -826,8 +851,21 @@ def preview_config_preset(config, name: str) -> dict:
     return {"ok": True, "changes": changes}
 
 
+def preview_full_config(config, name: str) -> dict:
+    """Full-config counterpart of preview_config_preset()."""
+    changes = _full_config_manager().preview_config_changes(config, name)
+    if changes is None:
+        return {"ok": False, "reason": "read_failed"}
+    return {"ok": True, "changes": changes}
+
+
 def load_config_preset(config, name: str) -> dict:
     ok = _config_manager().load_config(config, name)
+    return {"ok": ok}
+
+
+def load_full_config(config, name: str) -> dict:
+    ok = _full_config_manager().load_config(config, name)
     return {"ok": ok}
 
 
@@ -836,8 +874,18 @@ def delete_config_preset(name: str) -> dict:
     return {"ok": ok}
 
 
+def delete_full_config(name: str) -> dict:
+    ok = _full_config_manager().delete_config(name)
+    return {"ok": ok}
+
+
 def rename_config_preset(old_name: str, new_name: str) -> dict:
     ok = _config_manager().rename_config(old_name, new_name)
+    return {"ok": ok}
+
+
+def rename_full_config(old_name: str, new_name: str) -> dict:
+    ok = _full_config_manager().rename_config(old_name, new_name)
     return {"ok": ok}
 
 
@@ -890,11 +938,10 @@ def set_preset_slot(config, index: int, name: str) -> dict:
     return {"ok": True}
 
 
-def open_configs_folder() -> bool:
-    """Opens the configs directory in the host machine's file explorer —
-    same "opens on the host, not the remote browser" caveat as
+def _open_folder(mgr) -> bool:
+    """Opens a ConfigManager's directory in the host machine's file
+    explorer — same "opens on the host, not the remote browser" caveat as
     open_model_folder()."""
-    mgr = _config_manager()
     if not os.path.isdir(mgr.configs_dir):
         return False
     if not hasattr(os, "startfile"):
@@ -903,13 +950,20 @@ def open_configs_folder() -> bool:
     return True
 
 
-def export_config_preset_content(name: str) -> dict:
-    """Returns a preset's raw JSON file content for the browser to
+def open_configs_folder() -> bool:
+    return _open_folder(_config_manager())
+
+
+def open_full_configs_folder() -> bool:
+    return _open_folder(_full_config_manager())
+
+
+def _export_content(mgr, name: str) -> dict:
+    """Returns a saved file's raw JSON content for the browser to
     download — the natural web equivalent of the GUI's Export (which opens
     a save-path dialog on the host, meaningless remotely, since the server
     already has the file — the browser downloading it to the client's own
     machine is actually the more useful direction for a remote operator)."""
-    mgr = _config_manager()
     if name not in mgr.get_config_list():
         return {"ok": False, "reason": "not_found"}
     path = os.path.join(mgr.configs_dir, f"{name}.json")
@@ -921,7 +975,15 @@ def export_config_preset_content(name: str) -> dict:
     return {"ok": True, "name": name, "content": content}
 
 
-def import_config_preset_content(content: str) -> dict:
+def export_config_preset_content(name: str) -> dict:
+    return _export_content(_config_manager(), name)
+
+
+def export_full_config_content(name: str) -> dict:
+    return _export_content(_full_config_manager(), name)
+
+
+def _import_content(mgr, content: str) -> dict:
     """Web equivalent of ConfigManager.import_config(path) — that method
     takes a HOST-side file path, which a browser's file picker can never
     hand to a network request (browsers only ever expose the *content* of
@@ -940,9 +1002,8 @@ def import_config_preset_content(content: str) -> dict:
 
     name = _sanitize_config_name(data.get("name", "imported_config")) or "imported_config"
 
-    mgr = _config_manager()
-    # Ensure uniqueness — never overwrite an existing preset on import,
-    # same as ConfigManager.import_config()'s own _1/_2/... suffix loop.
+    # Ensure uniqueness — never overwrite an existing file on import, same
+    # as ConfigManager.import_config()'s own _1/_2/... suffix loop.
     original_name = name
     counter = 1
     existing = set(mgr.get_config_list())
@@ -958,3 +1019,11 @@ def import_config_preset_content(content: str) -> dict:
     except OSError:
         return {"ok": False, "reason": "write_failed"}
     return {"ok": True, "name": name}
+
+
+def import_config_preset_content(content: str) -> dict:
+    return _import_content(_config_manager(), content)
+
+
+def import_full_config_content(content: str) -> dict:
+    return _import_content(_full_config_manager(), content)

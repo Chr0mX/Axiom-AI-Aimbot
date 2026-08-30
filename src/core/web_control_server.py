@@ -533,6 +533,59 @@ def start(
         from .web_control_settings import open_configs_folder
         return {"ok": open_configs_folder()}
 
+    # Full config snapshots — the counterpart to the aim-only preset routes
+    # just above, backed by a separate ConfigManager(aim_only=False)
+    # instance (see web_control_settings.py's own module docstring on the
+    # two-manager split). Reuses the exact same body models
+    # (ConfigNameBody/ConfigRenameBody/ConfigImportBody) since the request
+    # shapes are identical — only which manager the handler delegates to
+    # differs, mirroring configs_page.py's own two-_ManagerBox split in the
+    # Qt app.
+    @app.get("/api/full_configs", dependencies=[Depends(_check_token)])
+    def get_full_configs_route():
+        from .web_control_settings import list_full_configs
+        return {"presets": list_full_configs()}
+
+    @app.post("/api/full_configs/save", dependencies=[Depends(_check_token)])
+    def post_full_configs_save_route(body: ConfigNameBody):
+        from .web_control_settings import save_full_config
+        return save_full_config(config, body.name)
+
+    @app.get("/api/full_configs/preview", dependencies=[Depends(_check_token)])
+    def get_full_configs_preview_route(name: str = ""):
+        from .web_control_settings import preview_full_config
+        return preview_full_config(config, name)
+
+    @app.post("/api/full_configs/load", dependencies=[Depends(_check_token)])
+    def post_full_configs_load_route(body: ConfigNameBody):
+        from .web_control_settings import load_full_config
+        return load_full_config(config, body.name)
+
+    @app.post("/api/full_configs/delete", dependencies=[Depends(_check_token)])
+    def post_full_configs_delete_route(body: ConfigNameBody):
+        from .web_control_settings import delete_full_config
+        return delete_full_config(body.name)
+
+    @app.post("/api/full_configs/rename", dependencies=[Depends(_check_token)])
+    def post_full_configs_rename_route(body: ConfigRenameBody):
+        from .web_control_settings import rename_full_config
+        return rename_full_config(body.old_name, body.new_name)
+
+    @app.get("/api/full_configs/export", dependencies=[Depends(_check_token)])
+    def get_full_configs_export_route(name: str = ""):
+        from .web_control_settings import export_full_config_content
+        return export_full_config_content(name)
+
+    @app.post("/api/full_configs/import", dependencies=[Depends(_check_token)])
+    def post_full_configs_import_route(body: ConfigImportBody):
+        from .web_control_settings import import_full_config_content
+        return import_full_config_content(body.content)
+
+    @app.post("/api/control/open_full_configs_folder", dependencies=[Depends(_check_token)])
+    def post_open_full_configs_folder_route():
+        from .web_control_settings import open_full_configs_folder
+        return {"ok": open_full_configs_folder()}
+
     # Quick Presets — 5 one-click shortcuts in the web client's sidebar,
     # each independently assignable to a saved aim preset. Assignment is
     # persisted here; the actual load reuses POST /api/configs/load above

@@ -194,6 +194,9 @@ class TestBodyModelAnnotationsResolveToRealClasses:
             ("/api/configs/import", "ConfigImportBody"),
             ("/api/control/convert", "ConvertBody"),
             ("/api/preset_slots", "PresetSlotBody"),
+            ("/api/full_configs/save", "ConfigNameBody"),
+            ("/api/full_configs/rename", "ConfigRenameBody"),
+            ("/api/full_configs/import", "ConfigImportBody"),
         ],
     )
     def test_body_param_is_a_real_class_not_a_string(self, started_server, path, model_name):
@@ -292,6 +295,39 @@ class TestPresetSlotRoutes:
         body = body_cls(index=3, name="my_preset")
         assert handler(body) == {"ok": True}
         assert calls == [(3, "my_preset")]
+
+
+class TestFullConfigRoutes:
+    """GET/POST /api/full_configs/* — the full-config-snapshot counterpart
+    to /api/configs/* (see CLAUDE.md's Web Control API section and
+    configs_page.py's two-_ManagerBox split). None of these paths collide
+    with their /api/configs/* siblings, so plain _routes_by_path() is
+    sufficient (unlike /api/preset_slots, which shares one path across
+    GET/POST)."""
+
+    def test_list_route_delegates_to_list_full_configs(self, started_server, monkeypatch):
+        _wcserver, app = started_server
+        monkeypatch.setattr("core.web_control_settings.list_full_configs", lambda: ["a", "b"])
+        handler = _routes_by_path(app)["/api/full_configs"]
+        assert handler() == {"presets": ["a", "b"]}
+
+    def test_save_route_delegates_to_save_full_config(self, started_server, monkeypatch):
+        _wcserver, app = started_server
+        calls = []
+        monkeypatch.setattr(
+            "core.web_control_settings.save_full_config",
+            lambda config, name: calls.append(name) or {"ok": True},
+        )
+        handler = _routes_by_path(app)["/api/full_configs/save"]
+        body_cls = inspect.signature(handler).parameters["body"].annotation
+        assert handler(body_cls(name="my_config")) == {"ok": True}
+        assert calls == ["my_config"]
+
+    def test_open_folder_route_delegates_to_open_full_configs_folder(self, started_server, monkeypatch):
+        _wcserver, app = started_server
+        monkeypatch.setattr("core.web_control_settings.open_full_configs_folder", lambda: True)
+        handler = _routes_by_path(app)["/api/control/open_full_configs_folder"]
+        assert handler() == {"ok": True}
 
 
 class TestBuildStatus:
