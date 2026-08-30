@@ -501,8 +501,7 @@ class TestConfigManagerLegacyDirMigration:
         from core.config_manager import ConfigManager
         monkeypatch.chdir(tmp_path)
         # No config/ dir at all — must not raise, and nothing resembling a
-        # migrated preset should appear (only the seeded bundled built-ins,
-        # a separate pre-existing mechanism unrelated to this migration).
+        # migrated preset should appear.
         cm = ConfigManager()
-        assert "my_old_preset" not in cm.get_config_list()
+        assert cm.get_config_list() == []
         assert not (tmp_path / "config").exists()

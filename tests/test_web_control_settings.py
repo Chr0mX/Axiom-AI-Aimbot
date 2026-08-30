@@ -681,10 +681,11 @@ class TestConfigPresets:
     pure-Python module (no Qt/onnxruntime), so real ConfigManager instances
     are used here rather than faked, pointed at a tmp_path directory via
     monkeypatching wcs._config_manager() (the same one-ConfigManager-per-
-    call factory the real routes use). A fresh ConfigManager always seeds
-    the bundled "Apex MAKCU UDP Precision" built-in preset into any empty
-    directory (see ConfigManager._seed_builtin_presets()) — tests account
-    for that rather than assuming an empty list.
+    call factory the real routes use). src/core/presets/ currently ships no
+    bundled built-in presets (the one that used to live there, "Apex MAKCU
+    UDP Precision", was removed), so a fresh ConfigManager's
+    _seed_builtin_presets() is a no-op and a brand-new directory starts
+    genuinely empty.
     """
 
     @pytest.fixture(autouse=True)
@@ -702,9 +703,8 @@ class TestConfigPresets:
         with patch("core.config._get_screen_size", return_value=(1920, 1080)):
             return Config()
 
-    def test_list_config_presets_includes_seeded_builtin(self):
-        presets = wcs.list_config_presets()
-        assert "Apex MAKCU UDP Precision" in presets
+    def test_fresh_directory_has_no_presets(self):
+        assert wcs.list_config_presets() == []
 
     def test_save_then_list(self):
         result = wcs.save_config_preset(self._real_config(), "my_preset")

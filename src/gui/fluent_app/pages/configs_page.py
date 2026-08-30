@@ -375,9 +375,9 @@ class ConfigsPage(BasePage):
                 try:
                     if self._configManager.delete_config(name):
                         self._refreshConfigList()
-                        self._showInfo(t("config_success"), t("config_deleted", "Config deleted"))
+                        self._showInfo(t("config_success"), t("config_deleted", "Preset deleted"))
                     else:
-                        self._showInfo(t("config_error"), t("config_delete_failed", "Failed to delete config"), False)
+                        self._showInfo(t("config_error"), t("config_delete_failed", "Failed to delete preset"), False)
                 except Exception as e:
                     self._showInfo(t("config_error"), str(e), False)
 
@@ -396,7 +396,7 @@ class ConfigsPage(BasePage):
                         self._refreshConfigList()
                         self._showInfo(t("config_success"), t("config_saved"))
                     else:
-                        self._showInfo(t("config_error"), t("config_rename_failed", "Failed to rename config"), False)
+                        self._showInfo(t("config_error"), t("config_rename_failed", "Failed to rename preset"), False)
                 except Exception as e:
                     self._showInfo(t("config_error"), str(e), False)
     

@@ -1097,7 +1097,7 @@
   document.getElementById("configs-refresh-btn").addEventListener("click", refreshConfigsList);
 
   document.getElementById("configs-create-btn").addEventListener("click", function () {
-    var name = window.prompt("New config name:");
+    var name = window.prompt("New preset name:");
     if (!name) return;
     fetch("/api/configs/save", {
       method: "POST",
