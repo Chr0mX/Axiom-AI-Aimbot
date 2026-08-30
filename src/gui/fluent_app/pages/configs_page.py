@@ -1,5 +1,5 @@
 # configs_page.py
-"""參數管理頁面 - 兩個區塊：Config（完整設定快照）與 Preset（僅瞄準相關設定）"""
+"""Configs page — two boxes: Config (full settings snapshot) and Preset (aim-only settings)."""
 
 import os
 from PyQt6.QtCore import Qt
@@ -517,19 +517,19 @@ class ConfigsPage(BasePage):
         qconfig.themeChanged.connect(self._applyPanelStyles)
 
     def setConfig(self, config):
-        """設定 Config 實例"""
+        """Binds the live Config instance."""
         self._config = config
         self.configBox.setConfig(config)
         self.presetBox.setConfig(config)
         self._applyPanelStyles()
 
     def setConfigManager(self, manager):
-        """設定 ConfigManager 實例（aim-only Preset）"""
+        """Binds the aim-only Preset ConfigManager instance."""
         self._configManager = manager
         self.presetBox.setConfigManager(manager)
 
     def setFullConfigManager(self, manager):
-        """設定 ConfigManager 實例（完整 Config 快照）"""
+        """Binds the full-config-snapshot ConfigManager instance."""
         self._fullConfigManager = manager
         self.configBox.setConfigManager(manager)
 
@@ -540,7 +540,7 @@ class ConfigsPage(BasePage):
         self.presetBox.applyPanelStyles(self._config)
 
     def retranslateUi(self):
-        """刷新翻譯"""
+        """Refreshes translated text on both boxes."""
         super().retranslateUi()
         self.configBox.retranslateUi()
         self.presetBox.retranslateUi()

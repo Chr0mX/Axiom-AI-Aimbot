@@ -1,5 +1,5 @@
 # config_manager.py
-"""參數配置管理模組 - 純業務邏輯，無 GUI 依賴"""
+"""Config/preset management module — pure business logic, no GUI dependency."""
 
 from __future__ import annotations
 
@@ -153,7 +153,7 @@ if TYPE_CHECKING:
 
 
 class ConfigManager:
-    """參數配置管理器
+    """Config/preset manager.
 
     Handles save/load/delete/rename/import/export for named settings files —
     either aim-only *presets* or full *config* snapshots, selected by
@@ -163,7 +163,7 @@ class ConfigManager:
     else (file I/O, name sanitizing, diff preview) is identical.
 
     Attributes:
-        configs_dir: 參數配置儲存目錄路徑
+        configs_dir: filesystem path to the config/preset storage directory
         aim_only: True (the default) = an *aim preset* — scoped to
             `_AIM_PRESET_FIELDS` plus `humanization`, matching the
             project-root `presets/` directory. False = a *full config*
@@ -179,7 +179,7 @@ class ConfigManager:
         self.ensure_configs_directory()
 
     def ensure_configs_directory(self) -> None:
-        """確保參數配置目錄存在"""
+        """Ensures the config/preset storage directory exists."""
         if not os.path.exists(self.configs_dir):
             os.makedirs(self.configs_dir)
             # Legacy-dir migration and built-in seeding are both aim-preset
@@ -238,29 +238,29 @@ class ConfigManager:
                 logger.warning("Failed to seed built-in preset '%s': %s", fn, e)
             
     def get_config_list(self) -> List[str]:
-        """獲取所有參數配置列表"""
+        """Returns the list of all saved config/preset names."""
         if not os.path.exists(self.configs_dir):
             return []
         
         configs = []
         for file in os.listdir(self.configs_dir):
             if file.endswith('.json'):
-                config_name = file[:-5]  # 移除.json後綴
+                config_name = file[:-5]  # Strip the .json suffix
                 configs.append(config_name)
         return sorted(configs)
     
     def save_config(self, config_instance: Config, config_name: str) -> bool:
-        """保存當前配置為參數配置"""
+        """Saves the current config as a named config/preset file."""
         config_name = _sanitize_config_name(config_name)
         if not config_name:
             return False
         config_path = os.path.join(self.configs_dir, f"{config_name}.json")
 
-        # 創建參數配置數據
+        # Build the config/preset data payload
         config_data = {
             'name': config_name,
             'created_time': datetime.now().isoformat(),
-            'description': f"參數配置 - {config_name}",
+            'description': f"{'Preset' if self.aim_only else 'Config'} - {config_name}",
             'config': self._get_config_data(config_instance)
         }
         
@@ -273,7 +273,7 @@ class ConfigManager:
             return False
     
     def _get_config_data(self, config_instance: Config) -> Dict[str, Any]:
-        """從配置實例獲取配置數據
+        """Reads the config/preset data from a Config instance.
 
         Scope depends on `self.aim_only`. When True (an *aim preset*), this
         is deliberately not a full config snapshot — it's scoped to
@@ -316,7 +316,7 @@ class ConfigManager:
         return data
 
     def load_config(self, config_instance: Config, config_name: str) -> bool:
-        """載入參數配置"""
+        """Loads a named config/preset file onto a Config instance."""
         config_name = _sanitize_config_name(config_name)
         if not config_name:
             return False
@@ -395,7 +395,7 @@ class ConfigManager:
         return _describe_changed_attrs(changed_attrs)
 
     def delete_config(self, config_name: str) -> bool:
-        """刪除參數配置"""
+        """Deletes a named config/preset file."""
         config_name = _sanitize_config_name(config_name)
         if not config_name:
             return False
@@ -411,7 +411,7 @@ class ConfigManager:
         return False
     
     def rename_config(self, old_name: str, new_name: str) -> bool:
-        """重命名參數配置"""
+        """Renames a config/preset file."""
         old_name = _sanitize_config_name(old_name)
         new_name = _sanitize_config_name(new_name)
         if not old_name or not new_name:
@@ -421,16 +421,16 @@ class ConfigManager:
 
         if os.path.exists(old_path) and not os.path.exists(new_path):
             try:
-                # 讀取舊文件並更新名稱
+                # Read the old file and update its stored name
                 with open(old_path, 'r', encoding='utf-8') as f:
                     config_data = json.load(f)
                 config_data['name'] = new_name
-                
-                # 寫入新文件
+
+                # Write the new file
                 with open(new_path, 'w', encoding='utf-8') as f:
                     json.dump(config_data, f, ensure_ascii=False, indent=2)
-                
-                # 刪除舊文件
+
+                # Remove the old file
                 os.remove(old_path)
                 return True
             except (OSError, json.JSONDecodeError) as e:
@@ -439,7 +439,7 @@ class ConfigManager:
         return False
     
     def export_config(self, config_name: str, export_path: str) -> bool:
-        """匯出參數配置"""
+        """Exports a config/preset file to an external path."""
         config_name = _sanitize_config_name(config_name)
         if not config_name:
             return False
@@ -456,32 +456,32 @@ class ConfigManager:
     
     def import_config(self, import_path: str) -> Optional[str]:
         """
-        匯入參數配置
-        
+        Imports a config/preset file from an external path.
+
         Returns:
-            成功時返回參數名稱，失敗時返回 None
+            The config/preset name on success, or None on failure.
         """
         if not os.path.exists(import_path):
             return None
-            
+
         try:
-            # 讀取匯入的配置
+            # Read the imported file
             with open(import_path, 'r', encoding='utf-8') as f:
                 config_data = json.load(f)
-            
-            # 獲取配置名稱 (untrusted — comes from the imported file's own content)
+
+            # Derive the name to save under (untrusted — comes from the imported file's own content)
             config_name = _sanitize_config_name(config_data.get('name', 'imported_config'))
             if not config_name:
                 config_name = 'imported_config'
 
-            # 確保名稱唯一
+            # Ensure the name is unique among existing files
             original_name = config_name
             counter = 1
             while os.path.exists(os.path.join(self.configs_dir, f"{config_name}.json")):
                 config_name = f"{original_name}_{counter}"
                 counter += 1
-            
-            # 更新名稱並保存
+
+            # Update the stored name and save
             config_data['name'] = config_name
             config_path = os.path.join(self.configs_dir, f"{config_name}.json")
             

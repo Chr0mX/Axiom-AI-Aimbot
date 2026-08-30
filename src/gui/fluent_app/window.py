@@ -476,13 +476,13 @@ class AxiomWindow(FluentWindow):
             self._previewArrow.setToolTip("Collapse navigation")
     
     def setConfigManager(self, manager):
-        """設定 ConfigManager 實例（aim-only Preset）"""
+        """Binds the aim-only Preset ConfigManager instance."""
         self._configManager = manager
         if hasattr(self.configInterface, 'setConfigManager'):
             self.configInterface.setConfigManager(manager)
 
     def setFullConfigManager(self, manager):
-        """設定 ConfigManager 實例（完整 Config 快照）"""
+        """Binds the full-config-snapshot ConfigManager instance."""
         self._fullConfigManager = manager
         if hasattr(self.configInterface, 'setFullConfigManager'):
             self.configInterface.setFullConfigManager(manager)
