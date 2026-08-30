@@ -40,6 +40,36 @@
     }
   }
 
+  // Generic per-viewer localStorage helpers, same "wrap every access in
+  // try/catch" posture as getToken()/setToken() above (private browsing,
+  // cleared site data, or storage-blocking browser settings must never
+  // break the page — they just mean nothing persisted this time). Used
+  // below to remember which tab was last open and the Quick Presets
+  // sidebar's last-known state, so a page reload/browser reset doesn't
+  // visually reset to defaults while waiting on the network — the real
+  // source of truth is always the server; this is only a fast local cache
+  // for the instant a fresh page starts rendering.
+  function getLocalJSON(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setLocalJSON(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (e) {
+      // Ignored — see getLocalJSON()'s own comment.
+    }
+  }
+
+  var LAST_TAB_KEY = "axiom_last_tab";
+  var PRESET_NAMES_CACHE_KEY = "axiom_preset_names_cache";
+  var PRESET_SLOTS_CACHE_KEY = "axiom_preset_slots_cache";
+
   tokenInput.value = getToken();
 
   tokenSaveBtn.addEventListener("click", function () {
@@ -86,6 +116,12 @@
 
   function activateTab(name) {
     currentTab = name;
+    // Remembered client-side so the next page load (a plain refresh, or a
+    // full browser reset that clears nothing but this origin's storage
+    // state) reopens on the same tab instead of always starting back on
+    // Model — see the restore call near the bottom of this file's startup
+    // block.
+    setLocalJSON(LAST_TAB_KEY, name);
     tabButtons.forEach(function (btn) {
       btn.classList.toggle("active", btn.getAttribute("data-tab") === name);
     });
@@ -1308,6 +1344,10 @@
   }
 
   function populatePresetSlotSelects(names) {
+    // Cached so the next page load can rebuild these <option> lists
+    // immediately, before GET /api/configs has even round-tripped — see
+    // the restore call near the bottom of this file's startup block.
+    setLocalJSON(PRESET_NAMES_CACHE_KEY, names || []);
     presetSlotSelects.forEach(function (sel) {
       if (document.activeElement === sel) return; // don't clobber a mid-pick
       var current = sel.value;
@@ -1323,6 +1363,14 @@
     });
   }
 
+  // Reads the 5 selects' current values back out, for caching after any
+  // successful change — a plain array is easier to restore from than
+  // re-deriving it, and this only ever runs after a real assignment
+  // succeeds, so it always reflects genuine server-confirmed state.
+  function currentPresetSlotValues() {
+    return presetSlotSelects.map(function (sel) { return sel ? sel.value : ""; });
+  }
+
   function fetchPresetSlotAssignments() {
     fetch("/api/preset_slots", { headers: authHeaders() })
       .then(function (res) { return res.ok ? res.json() : null; })
@@ -1334,6 +1382,7 @@
           sel.value = name || "";
           presetSlotLoadBtns[i].disabled = !name;
         });
+        setLocalJSON(PRESET_SLOTS_CACHE_KEY, data.slots);
       })
       .catch(function () {});
   }
@@ -1350,6 +1399,7 @@
         .then(function (data) {
           if (data && data.ok) {
             presetSlotLoadBtns[i].disabled = !name;
+            setLocalJSON(PRESET_SLOTS_CACHE_KEY, currentPresetSlotValues());
           } else {
             // Refused (e.g. the picked name no longer exists) — resync
             // this row from the server's actual current assignment rather
@@ -1984,11 +2034,45 @@
   // own load), so its tab settings + HUD extras are fetched explicitly here.
   loadTabSettings("model");
   ensureModelPanelExtras();
+
+  // Seed the Quick Presets sidebar from its last-known cached state before
+  // the real fetches below even land, so a page reload shows the same
+  // options/selections instantly instead of a brief flash back to "—
+  // unassigned —" while waiting on the network — the cache is just a fast
+  // local mirror of server state, never the source of truth itself; the
+  // real refreshConfigsList()/fetchPresetSlotAssignments() calls right
+  // after this immediately re-confirm (and correct, if anything changed
+  // server-side since the last visit) whatever this seeds.
+  var cachedPresetNames = getLocalJSON(PRESET_NAMES_CACHE_KEY);
+  if (cachedPresetNames) populatePresetSlotSelects(cachedPresetNames);
+  var cachedPresetSlots = getLocalJSON(PRESET_SLOTS_CACHE_KEY);
+  if (cachedPresetSlots) {
+    cachedPresetSlots.forEach(function (name, i) {
+      var sel = presetSlotSelects[i];
+      if (!sel) return;
+      sel.value = name || "";
+      if (presetSlotLoadBtns[i]) presetSlotLoadBtns[i].disabled = !name;
+    });
+  }
+
   // Quick Presets lives in the sidebar, visible regardless of which tab is
   // open — fetch its preset list + slot assignments once at startup too,
   // not gated on the Configs tab ever being activated.
   refreshConfigsList();
   fetchPresetSlotAssignments();
+
+  // Reopen on whichever tab was last active, rather than always starting
+  // back on Model — activateTab() itself handles the visibility toggle and
+  // fires that tab's own settings fetch; a missing/unrecognized/"model"
+  // cached value is simply left alone, since Model's own fetches just ran
+  // above.
+  var lastTab = getLocalJSON(LAST_TAB_KEY);
+  var validTabNames = [];
+  tabButtons.forEach(function (btn) { validTabNames.push(btn.getAttribute("data-tab")); });
+  if (lastTab && lastTab !== "model" && validTabNames.indexOf(lastTab) !== -1) {
+    activateTab(lastTab);
+  }
+
   poll();
   setInterval(poll, POLL_MS);
 })();
