@@ -61,6 +61,21 @@ _PRESET_DIFF_GROUPS: List[tuple] = [
     ('target_priority_', 'Target Priority'),
     ('sticky_lock_', 'Sticky Lock'),
     ('fov_', 'FOV'),
+    # These groups are only ever reachable through a *full* Config
+    # ConfigManager (aim_only=False) — an aim preset can never contain a
+    # non-aim field in the first place, so they were dead weight while this
+    # table only served aim presets. Restored now that _describe_changed_attrs()
+    # is shared by both scopes.
+    ('makcu_', 'MAKCU'),
+    ('uvc_', 'UVC Capture'),
+    ('ndi_', 'NDI Capture'),
+    ('udp_', 'UDP Capture'),
+    ('web_esp_', 'Web ESP'),
+    ('hud_', 'HUD Detection'),
+    ('xbox_', 'Xbox Controller'),
+    ('arduino_', 'Arduino'),
+    ('ddxoft_', 'ddxoft'),
+    ('crosshair_color_', 'Crosshair Color'),
 ]
 
 
@@ -139,27 +154,45 @@ if TYPE_CHECKING:
 
 class ConfigManager:
     """參數配置管理器
-    
-    處理參數配置檔案的保存、載入、刪除、重命名、匯入匯出等操作。
-    配置檔案以 JSON 格式儲存在指定目錄中。
-    
+
+    Handles save/load/delete/rename/import/export for named settings files —
+    either aim-only *presets* or full *config* snapshots, selected by
+    `aim_only`. Both scopes share this one class and every method below,
+    since the only real difference between them is which fields
+    `_get_config_data()`/`load_config()` are willing to touch; everything
+    else (file I/O, name sanitizing, diff preview) is identical.
+
     Attributes:
         configs_dir: 參數配置儲存目錄路徑
+        aim_only: True (the default) = an *aim preset* — scoped to
+            `_AIM_PRESET_FIELDS` plus `humanization`, matching the
+            project-root `presets/` directory. False = a *full config*
+            snapshot — every `_FIELD_MAP` field, matching a separate
+            project-root `configs/` directory. The GUI's Configs page shows
+            both as two distinct sections against two separate
+            ConfigManager instances — see configs_page.py.
     """
-    
-    def __init__(self, configs_dir: str = "presets") -> None:
+
+    def __init__(self, configs_dir: str = "presets", aim_only: bool = True) -> None:
         self.configs_dir = configs_dir
+        self.aim_only = aim_only
         self.ensure_configs_directory()
 
     def ensure_configs_directory(self) -> None:
         """確保參數配置目錄存在"""
         if not os.path.exists(self.configs_dir):
             os.makedirs(self.configs_dir)
-            # Only worth scanning for legacy config/ files the very first
-            # time this directory is created — once presets/ exists, either
-            # the migration already ran or the user genuinely never had one.
-            self._migrate_legacy_config_dir()
-        self._seed_builtin_presets()
+            # Legacy-dir migration and built-in seeding are both aim-preset
+            # concepts specifically — the old config/ directory historically
+            # fed into what's now the aim-only presets/ dir, and the only
+            # bundled built-in file that ever existed was itself an aim
+            # preset. A full-config instance (aim_only=False) is a brand
+            # new directory with nothing to migrate from and no bundled
+            # example to seed, so both are skipped entirely for it.
+            if self.aim_only:
+                self._migrate_legacy_config_dir()
+        if self.aim_only:
+            self._seed_builtin_presets()
 
     def _migrate_legacy_config_dir(self) -> None:
         """One-time migration for anyone upgrading from before the preset
@@ -242,37 +275,46 @@ class ConfigManager:
     def _get_config_data(self, config_instance: Config) -> Dict[str, Any]:
         """從配置實例獲取配置數據
 
-        A *preset* is deliberately not a full config snapshot — it's scoped
-        to `_AIM_PRESET_FIELDS` (every `_FIELD_MAP` attr under the `aim.`/
+        Scope depends on `self.aim_only`. When True (an *aim preset*), this
+        is deliberately not a full config snapshot — it's scoped to
+        `_AIM_PRESET_FIELDS` (every `_FIELD_MAP` attr under the `aim.`/
         `tracking.` JSON prefix) plus the `humanization` dataclass block,
         the same "aim settings, not every setting" boundary
-        `config_manager.py`'s module docstring/comments describe. Still
-        derived from `_FIELD_MAP` — the same single source of truth
-        `Config.to_dict()`/`from_dict()` use for config.json — rather than a
-        separately hand-maintained key list, so the aim-scoped subset can't
-        drift out of sync with newly added aim-prefixed Config fields
-        either. Output stays a flat {attr_name: value} dict (the format
-        existing preset files already use on disk); `load_config()` filters
-        through this same set again before applying it (so an old-format or
-        hand-edited/imported file that still carries non-aim keys can't
-        leak them onto the live config), and `Config.from_dict()` itself
-        simply skips any key that is absent, so older/smaller presets still
-        load fine without clobbering unrelated current values.
+        `config_manager.py`'s module docstring/comments describe. When
+        False (a *full config* snapshot), every `_FIELD_MAP` attr is
+        included instead — the complete settings surface, matching what
+        `config.json` itself persists.
+
+        Either way this is still derived from `_FIELD_MAP` — the same
+        single source of truth `Config.to_dict()`/`from_dict()` use for
+        config.json — rather than a separately hand-maintained key list, so
+        neither scope can drift out of sync with newly added Config fields.
+        Output stays a flat {attr_name: value} dict (the format existing
+        preset/config files already use on disk); `load_config()` filters
+        through this same scope again before applying it (so an
+        old-format or hand-edited/imported aim-preset file that still
+        carries non-aim keys can't leak them onto the live config), and
+        `Config.from_dict()` itself simply skips any key that is absent, so
+        older/smaller files still load fine without clobbering unrelated
+        current values.
         """
+        field_names = _AIM_PRESET_FIELDS if self.aim_only else _FIELD_MAP.keys()
         data: Dict[str, Any] = {
             attr: getattr(config_instance, attr)
-            for attr in _AIM_PRESET_FIELDS
+            for attr in field_names
             if hasattr(config_instance, attr)
         }
 
         # humanization is aim-behavior-shaping (post-PID mouse-output
         # shaping — see ai_aiming.py) but isn't a flat _FIELD_MAP entry at
         # all; Config.to_dict()/from_dict() special-case it the same way.
+        # Included in both scopes — it's aim-relevant either way, and a full
+        # config snapshot should obviously carry it too.
         if hasattr(config_instance, 'humanization'):
             data['humanization'] = dataclasses.asdict(config_instance.humanization)
 
         return data
-    
+
     def load_config(self, config_instance: Config, config_name: str) -> bool:
         """載入參數配置"""
         config_name = _sanitize_config_name(config_name)
@@ -287,14 +329,17 @@ class ConfigManager:
             with open(config_path, 'r', encoding='utf-8') as f:
                 raw = json.load(f)
 
-            # Preset files wrap settings under a 'config' key; support both wrapped and flat.
+            # Preset/config files wrap settings under a 'config' key; support both wrapped and flat.
             config_data = raw.get('config', raw)
-            # Enforce the aim-only scope on the way in too, not just on the
-            # way out via _get_config_data() — a preset file saved before
-            # this scoping existed, or hand-edited/imported, could still
-            # carry non-aim keys; this is what keeps loading ANY preset
-            # file aim-only regardless of how it was produced.
-            config_data = _filter_to_aim_preset_fields(config_data)
+            if self.aim_only:
+                # Enforce the aim-only scope on the way in too, not just on
+                # the way out via _get_config_data() — a preset file saved
+                # before this scoping existed, or hand-edited/imported,
+                # could still carry non-aim keys; this is what keeps
+                # loading ANY preset file aim-only regardless of how it was
+                # produced. A full-config instance applies everything the
+                # file contains, unfiltered — that's the whole point of it.
+                config_data = _filter_to_aim_preset_fields(config_data)
             config_instance.from_dict(config_data)
             return True
         except (OSError, json.JSONDecodeError) as e:

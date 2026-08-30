@@ -454,6 +454,112 @@ class TestConfigManagerAimOnlyScope:
             assert result == []  # the only key in the file is non-aim, so no visible diff
 
 
+class TestConfigManagerFullConfigScope:
+    """aim_only=False — a *full config* snapshot, the counterpart to an aim
+    preset. Same class, same file-format, same every method; only
+    _get_config_data()/load_config() scope differently. Covers the exact
+    opposite invariants from TestConfigManagerAimOnlyScope: non-aim fields
+    ARE included on save, and nothing gets filtered out on load."""
+
+    def test_save_includes_every_field_map_field(self):
+        from core.config_manager import ConfigManager
+        from core.config import _FIELD_MAP
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir, aim_only=False)
+            c = _make_config()
+            cm.save_config(c, "full")
+            with open(os.path.join(tmpdir, "full.json"), encoding="utf-8") as f:
+                saved = json.load(f)["config"]
+
+            # Every _FIELD_MAP attr the live Config actually has is present —
+            # not just the aim/tracking subset.
+            for attr in _FIELD_MAP:
+                if hasattr(c, attr):
+                    assert attr in saved, f"{attr} missing from a full config save"
+            assert "humanization" in saved
+
+    def test_save_includes_non_aim_fields(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir, aim_only=False)
+            c = _make_config()
+            cm.save_config(c, "full")
+            with open(os.path.join(tmpdir, "full.json"), encoding="utf-8") as f:
+                saved = json.load(f)["config"]
+
+            for non_aim in (
+                "screenshot_method", "mouse_move_method", "model_path",
+                "auto_fire_delay", "web_control_port",
+            ):
+                assert non_aim in saved
+
+    def test_load_applies_non_aim_fields_unfiltered(self):
+        """The opposite of the aim-only invariant: a full config load must
+        NOT filter out non-aim keys — that's the whole point of it."""
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir, aim_only=False)
+            with open(os.path.join(tmpdir, "handmade.json"), "w", encoding="utf-8") as f:
+                json.dump({"config": {
+                    "fov_size": 999,
+                    "screenshot_method": "udp",
+                    "mouse_move_method": "makcu",
+                }}, f)
+
+            current = _make_config()
+            assert cm.load_config(current, "handmade") is True
+            assert current.fov_size == 999
+            assert current.screenshot_method == "udp"
+            assert current.mouse_move_method == "makcu"
+
+    def test_preview_diff_reports_a_non_aim_field(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir, aim_only=False)
+            with open(os.path.join(tmpdir, "oldformat.json"), "w", encoding="utf-8") as f:
+                json.dump({"config": {"screenshot_method": "udp"}}, f)
+
+            current = _make_config()
+            current.screenshot_method = "mss"
+            result = cm.preview_config_changes(current, "oldformat")
+            assert len(result) == 1  # non-aim fields ARE visible in a full-config diff
+
+    def test_full_config_manager_does_not_seed_or_migrate(self, monkeypatch, tmp_path):
+        """A full-config instance has no bundled built-in to seed and no
+        legacy directory to migrate from — both are aim-preset-specific
+        concepts (see ConfigManager.ensure_configs_directory())."""
+        from core.config_manager import ConfigManager
+        monkeypatch.chdir(tmp_path)
+        legacy_dir = tmp_path / "config"
+        legacy_dir.mkdir()
+        (legacy_dir / "old_preset.json").write_text(
+            json.dumps({"name": "old_preset", "config": {"fov_size": 111}}), encoding="utf-8")
+
+        cm = ConfigManager("configs", aim_only=False)
+        assert cm.get_config_list() == []
+
+    def test_default_aim_only_manager_is_unaffected_by_a_sibling_full_manager(self):
+        """Two ConfigManager instances pointed at different directories
+        with different scopes must never interfere with each other."""
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as preset_dir, tempfile.TemporaryDirectory() as full_dir:
+            preset_cm = ConfigManager(preset_dir)  # aim_only=True, the default
+            full_cm = ConfigManager(full_dir, aim_only=False)
+            c = _make_config()
+            c.screenshot_method = "udp"
+
+            preset_cm.save_config(c, "same_name")
+            full_cm.save_config(c, "same_name")
+
+            with open(os.path.join(preset_dir, "same_name.json"), encoding="utf-8") as f:
+                preset_saved = json.load(f)["config"]
+            with open(os.path.join(full_dir, "same_name.json"), encoding="utf-8") as f:
+                full_saved = json.load(f)["config"]
+
+            assert "screenshot_method" not in preset_saved
+            assert full_saved["screenshot_method"] == "udp"
+
+
 class TestConfigManagerLegacyDirMigration:
     """One-time migration from the pre-rename config/ directory into the
     new default presets/ directory."""

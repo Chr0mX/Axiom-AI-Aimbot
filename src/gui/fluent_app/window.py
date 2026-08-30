@@ -33,7 +33,8 @@ class AxiomWindow(FluentWindow):
 
         # Config references
         self._config = None
-        self._configManager = None
+        self._configManager = None       # aim-only Preset manager
+        self._fullConfigManager = None   # full Config manager
         self._isApplyingAcrylic = False
         self._pendingAcrylicApply = False
         self._transparencyEnsured = False
@@ -475,11 +476,17 @@ class AxiomWindow(FluentWindow):
             self._previewArrow.setToolTip("Collapse navigation")
     
     def setConfigManager(self, manager):
-        """設定 ConfigManager 實例"""
+        """設定 ConfigManager 實例（aim-only Preset）"""
         self._configManager = manager
         if hasattr(self.configInterface, 'setConfigManager'):
             self.configInterface.setConfigManager(manager)
-    
+
+    def setFullConfigManager(self, manager):
+        """設定 ConfigManager 實例（完整 Config 快照）"""
+        self._fullConfigManager = manager
+        if hasattr(self.configInterface, 'setFullConfigManager'):
+            self.configInterface.setFullConfigManager(manager)
+
     def _refreshAllPages(self):
         """刷新所有頁面的設定值"""
         if self._config:
