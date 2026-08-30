@@ -26,6 +26,7 @@ Thumbs.db
 # Logs and local config
 *.log
 presets/*.json
+configs/*.json
 *.config
 config.json
 user_config.json

@@ -404,7 +404,8 @@ def main():
     
     # 注入配置實例給 GUI
     settings_window.setConfig(config)
-    settings_window.setConfigManager(ConfigManager())
+    settings_window.setConfigManager(ConfigManager())  # aim-only Preset manager (presets/)
+    settings_window.setFullConfigManager(ConfigManager(configs_dir="configs", aim_only=False))
     
     if settings_window:
         settings_window.show()
