@@ -339,6 +339,49 @@ def _preprocess(roi: np.ndarray, inp_w: int, inp_h: int) -> np.ndarray:
     return rgb.transpose(2, 0, 1)[np.newaxis]   # [1, 3, inp_h, inp_w]
 
 
+def _nms_class_agnostic(boxes: np.ndarray, scores: np.ndarray, iou_thresh: float = 0.5) -> list[int]:
+    """Greedy IoU suppression across ALL classes, not just within one.
+
+    Ultralytics' end-to-end export runs NMS inside the graph, but per
+    Ultralytics' own default that NMS is class-aware — it only suppresses
+    overlapping boxes that share a class, not overlapping boxes of
+    different classes. For an ambiguous small HUD icon, several distinct
+    weapon/attachment classes can each cross the confidence threshold for
+    the exact same region and all survive as separate, heavily-overlapping
+    boxes (visible as stacked/duplicate boxes in the ROI preview, and as
+    the wrong class occasionally winning "highest score" for that region).
+    This collapses each such overlapping cluster down to just its single
+    highest-confidence detection, regardless of which class it is.
+
+    boxes: [N, 4] x1,y1,x2,y2. Returns kept indices (into boxes/scores),
+    sorted score-descending.
+    """
+    if len(scores) == 0:
+        return []
+    order = np.argsort(scores)[::-1]
+    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    areas = np.maximum(0.0, x2 - x1) * np.maximum(0.0, y2 - y1)
+    suppressed = np.zeros(len(order), dtype=bool)
+    keep: list[int] = []
+    for i in range(len(order)):
+        if suppressed[i]:
+            continue
+        idx = order[i]
+        keep.append(int(idx))
+        rest = order[i + 1:]
+        if len(rest) == 0:
+            continue
+        xx1 = np.maximum(x1[idx], x1[rest])
+        yy1 = np.maximum(y1[idx], y1[rest])
+        xx2 = np.minimum(x2[idx], x2[rest])
+        yy2 = np.minimum(y2[idx], y2[rest])
+        inter = np.maximum(0.0, xx2 - xx1) * np.maximum(0.0, yy2 - yy1)
+        union = areas[idx] + areas[rest] - inter
+        iou = np.where(union > 0, inter / union, 0.0)
+        suppressed[i + 1:][iou > iou_thresh] = True
+    return keep
+
+
 def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
                  class_names: list[str] | None,
                  is_end2end: bool = False) -> tuple[list[str], list[tuple]]:
@@ -399,7 +442,8 @@ def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
         passing_idx = np.where(mask)[0]
         scores_f = scores[mask]
         class_ids_f = class_ids[mask]
-        order = np.argsort(scores_f)[::-1][:_MAX_RESULT_LINES]
+        boxes_f = data[passing_idx, :4]
+        order = _nms_class_agnostic(boxes_f, scores_f, iou_thresh=0.5)[:_MAX_RESULT_LINES]
         lines: list[str] = []
         boxes_out: list[tuple] = []
         for i in order:
