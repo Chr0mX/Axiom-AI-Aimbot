@@ -228,6 +228,9 @@ _FIELD_MAP = {
     'hud_confidence':             'ocr.hud_confidence',
     'hud_game':                   'ocr.hud_game',
     'hud_roi_coords':             'ocr.hud_roi_coords',
+    'hud_udp_enabled':            'ocr.hud_udp_enabled',
+    'hud_udp_bind_ip':            'ocr.hud_udp_bind_ip',
+    'hud_udp_bind_port':          'ocr.hud_udp_bind_port',
 }
 
 
@@ -661,6 +664,19 @@ class Config:
         self.hud_confidence: float = 0.10                # V2 minimum detection confidence
         self.hud_game: str = "Apex Legends"              # selected game profile key from game.json
         self.hud_roi_coords: str = "1490,953,1870,1041"  # HUD ROI as "x1,y1,x2,y2" (from game.json)
+        # Dedicated second UDP stream for the HUD strip — for a 2PC/OBS setup
+        # where the main `screenshot_method == 'udp'` stream is itself already
+        # a small center crop (e.g. a 640x640 aim FOV) that excludes the HUD
+        # region entirely. When enabled, a *second* udp_stream_filter OBS
+        # filter instance (independent crop rect + independent target port,
+        # stacked on the same source) sends the HUD strip to its own port,
+        # and hud_inference.py reads it directly instead of cropping
+        # hud_roi_coords out of the shared screen_capture preview frame
+        # (which, in that setup, never contains the HUD pixels at all).
+        # No effect on mss/dxcam/uvc/ndi, or on a udp stream sent uncropped.
+        self.hud_udp_enabled: bool = False
+        self.hud_udp_bind_ip: str = "0.0.0.0"
+        self.hud_udp_bind_port: int = 5601
 
         # Humanization post-processing layer (operates only on final dx/dy output)
         self.humanization: HumanizationConfig = HumanizationConfig()

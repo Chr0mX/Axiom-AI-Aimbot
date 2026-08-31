@@ -210,6 +210,32 @@ class TestConfigSerialization:
         assert c.fov_min_size_pct == 50.0
         assert c.fov_min_size_duration == 1.0
 
+    def test_hud_udp_fields_defaults(self):
+        c = _make_config()
+        assert c.hud_udp_enabled is False
+        assert c.hud_udp_bind_ip == "0.0.0.0"
+        assert c.hud_udp_bind_port == 5601
+
+    def test_hud_udp_fields_round_trip(self):
+        """A dedicated second UDP stream for the HUD strip (for a 2PC/OBS
+        setup where the main udp stream is itself already a center crop
+        that excludes the HUD region) — persisted under the ocr.* section,
+        independent of hud_roi_coords."""
+        c = _make_config()
+        c.hud_udp_enabled = True
+        c.hud_udp_bind_ip = "192.168.1.50"
+        c.hud_udp_bind_port = 5602
+        d = c.to_dict()
+        assert d['ocr']['hud_udp_enabled'] is True
+        assert d['ocr']['hud_udp_bind_ip'] == "192.168.1.50"
+        assert d['ocr']['hud_udp_bind_port'] == 5602
+
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.hud_udp_enabled is True
+        assert c2.hud_udp_bind_ip == "192.168.1.50"
+        assert c2.hud_udp_bind_port == 5602
+
     def test_fov_effective_size_is_runtime_only_not_persisted(self):
         """fov_effective_size/_height default to fov_size/fov_height but
         must never appear in the persisted schema — they're written every
