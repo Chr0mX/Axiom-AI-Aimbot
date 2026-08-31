@@ -40,6 +40,14 @@ logger = logging.getLogger(__name__)
 
 _HUD_ROI_DEFAULT_STR = "1490,953,1870,1041"
 _IDLE_TEARDOWN_S = 5.0  # seconds before releasing an idle child process
+# _postprocess() used to cap this at 5 -- fine when the only consumer cared
+# about "the single most likely weapon," but a categorized status readout
+# (weapon + fire mode + up to 6 attachment slots, see hud_categories.py) can
+# have that many simultaneous above-threshold detections in one frame, each
+# in its own distinct screen position. A flat top-5-by-raw-score cap would
+# silently drop a legitimate lower-scoring category (e.g. a dim Turbo icon)
+# whenever enough higher-scoring ones (weapon, optic) were also present.
+_MAX_RESULT_LINES = 20
 
 
 def _parse_roi(coords: str) -> dict[str, int] | None:
@@ -314,7 +322,7 @@ def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
     scores_f = scores[mask]
     class_ids_f = class_ids[mask]
 
-    order = np.argsort(scores_f)[::-1][:5]
+    order = np.argsort(scores_f)[::-1][:_MAX_RESULT_LINES]
     lines: list[str] = []
     boxes_out: list[tuple] = []
     for i in order:
