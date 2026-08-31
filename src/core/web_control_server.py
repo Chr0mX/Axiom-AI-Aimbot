@@ -314,8 +314,9 @@ def start(
 
     @app.get("/api/models", dependencies=[Depends(_check_token)])
     def get_models():
-        from .app_controller import list_models
-        return {"models": list_models()}
+        from .app_controller import list_models, get_model_cache_status
+        cache_status = get_model_cache_status(config)
+        return {"models": list_models(), **cache_status}
 
     @app.post("/api/control/always_aim", dependencies=[Depends(_check_token)])
     def post_always_aim(body: AlwaysAimBody):

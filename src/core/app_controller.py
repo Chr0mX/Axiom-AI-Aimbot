@@ -217,6 +217,28 @@ def list_models() -> list[str]:
     return sorted(os.path.basename(m) for m in glob.glob(os.path.join(model_dir, "*.onnx")))
 
 
+def get_model_cache_status(config: "Config") -> dict:
+    """Per-model TensorRT-engine-cached status for every name list_models()
+    returns, plus whether TensorRT is the active backend right now.
+
+    Mirrors model_page.py's own _computeEngineCacheStatus()/
+    _isTensorRtActive() exactly (same session_utils functions, same
+    "only meaningful while TensorRT is actually the effective backend"
+    condition) so the web client's Model panel can show the identical
+    ✓/⬇ badge instead of a plain filename list. Deferred import — same
+    reasoning as every other session_utils use in this module.
+    """
+    from .session_utils import find_trt_engine_cache, effective_first_provider
+
+    names = list_models()
+    cached = {name: find_trt_engine_cache(name) is not None for name in names}
+    try:
+        trt_active = effective_first_provider(config) == "TensorrtExecutionProvider"
+    except Exception:
+        trt_active = False
+    return {"cached": cached, "trt_active": trt_active}
+
+
 def start_ai_threads(
     config: "Config",
     overlay_boxes_queue: queue.Queue,

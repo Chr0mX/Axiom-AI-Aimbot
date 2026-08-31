@@ -298,6 +298,75 @@ class TestListModels:
         assert app_controller.list_models() == ["real.onnx"]
 
 
+class TestGetModelCacheStatus:
+    """get_model_cache_status() mirrors model_page.py's own
+    _computeEngineCacheStatus()/_isTensorRtActive() — same fake-core.session_utils-
+    in-sys.modules technique as TestRequestModelChange below (find_trt_engine_cache/
+    effective_first_provider live in session_utils.py, which imports onnxruntime
+    at module top level and so can't be imported for real in this sandbox).
+    """
+
+    def _fake_session_utils(self, monkeypatch, cached_names=(), trt_active=True, raise_on_provider=False):
+        fake_module = types.ModuleType("core.session_utils")
+
+        def _fake_find_trt_engine_cache(name):
+            return f"trt_cache/{name}.engine" if name in cached_names else None
+
+        def _fake_effective_first_provider(cfg):
+            if raise_on_provider:
+                raise RuntimeError("boom")
+            return "TensorrtExecutionProvider" if trt_active else "CPUExecutionProvider"
+
+        fake_module.find_trt_engine_cache = _fake_find_trt_engine_cache
+        fake_module.effective_first_provider = _fake_effective_first_provider
+        monkeypatch.setitem(sys.modules, "core.session_utils", fake_module)
+
+    def _model_dir(self, tmp_path, monkeypatch, names):
+        model_dir = tmp_path / "Model"
+        model_dir.mkdir()
+        for name in names:
+            (model_dir / name).write_bytes(b"")
+        monkeypatch.setattr(app_controller, "project_root", str(tmp_path))
+
+    def test_reports_cached_and_uncached_models(self, tmp_path, monkeypatch):
+        self._model_dir(tmp_path, monkeypatch, ["cached.onnx", "uncached.onnx"])
+        self._fake_session_utils(monkeypatch, cached_names={"cached.onnx"}, trt_active=True)
+
+        result = app_controller.get_model_cache_status(_FakeConfig())
+
+        assert result == {
+            "cached": {"cached.onnx": True, "uncached.onnx": False},
+            "trt_active": True,
+        }
+
+    def test_trt_active_false_when_backend_isnt_tensorrt(self, tmp_path, monkeypatch):
+        self._model_dir(tmp_path, monkeypatch, ["a.onnx"])
+        self._fake_session_utils(monkeypatch, cached_names=set(), trt_active=False)
+
+        result = app_controller.get_model_cache_status(_FakeConfig())
+
+        assert result["trt_active"] is False
+
+    def test_no_models_returns_empty_cached_dict(self, tmp_path, monkeypatch):
+        self._model_dir(tmp_path, monkeypatch, [])
+        self._fake_session_utils(monkeypatch, trt_active=True)
+
+        result = app_controller.get_model_cache_status(_FakeConfig())
+
+        assert result == {"cached": {}, "trt_active": True}
+
+    def test_provider_lookup_failure_falls_back_to_false(self, tmp_path, monkeypatch):
+        """effective_first_provider() raising (e.g. a malformed config) must
+        never propagate — trt_active just reads as False, same as the Qt
+        page's own _isTensorRtActive() try/except."""
+        self._model_dir(tmp_path, monkeypatch, ["a.onnx"])
+        self._fake_session_utils(monkeypatch, raise_on_provider=True)
+
+        result = app_controller.get_model_cache_status(_FakeConfig())
+
+        assert result["trt_active"] is False
+
+
 class TestRequestModelChange:
     """request_model_change()'s refusal branches (not_found/invalid_model_path/
     invalid_backend/needs_restart) are reachable with zero faking — they
