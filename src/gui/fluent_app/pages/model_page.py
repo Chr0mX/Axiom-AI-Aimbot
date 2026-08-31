@@ -280,7 +280,7 @@ class ModelPage(BasePage):
             "Read the HUD strip from its own UDP stream/port instead of the "
             "main capture frame — needed when the main UDP stream is itself "
             "a center crop that excludes the HUD",
-            self.hudModelGroup,
+            parent=self.hudModelGroup,
         )
 
         self.hudUdpPortCard = SliderSpinCard(
