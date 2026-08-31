@@ -145,7 +145,7 @@ class VisualsPage(BasePage):
         self.statusPanelElementsLayout.setHorizontalSpacing(10)
         self.statusPanelElementsLayout.setVerticalSpacing(4)
 
-        self.spAutoAimCheck = CheckBox(self._shortText("auto_aim"), self.statusPanelElementsWidget)
+        self.spAutoAimCheck = CheckBox(self._shortText("aim_status", "Aim Status"), self.statusPanelElementsWidget)
         self.spAimToggleCheck = CheckBox(t("status_panel_aim_toggle", "Aim Toggle"), self.statusPanelElementsWidget)
         self.spModelCheck = CheckBox(self._shortText("status_panel_current_model"), self.statusPanelElementsWidget)
         self.spMouseMoveCheck = CheckBox(self._shortText("mouse_move_method"), self.statusPanelElementsWidget)
@@ -692,7 +692,7 @@ class VisualsPage(BasePage):
         self.chromaSpeedCard.contentLabel.setText(t("chroma_box_speed_hint", "Rainbow cycle speed for boxes inside FOV. 0 = off."))
         self.statusPanelElementsCard.titleLabel.setText(t("status_panel_elements", "Status Panel Elements"))
         self.statusPanelElementsCard.contentLabel.setText(t("status_panel_elements_hint", "Choose which rows are shown in status panel"))
-        self.spAutoAimCheck.setText(self._shortText("auto_aim"))
+        self.spAutoAimCheck.setText(self._shortText("aim_status", "Aim Status"))
         self.spAimToggleCheck.setText(t("status_panel_aim_toggle", "Aim Toggle"))
         self.spModelCheck.setText(self._shortText("status_panel_current_model"))
         self.spMouseMoveCheck.setText(self._shortText("mouse_move_method"))

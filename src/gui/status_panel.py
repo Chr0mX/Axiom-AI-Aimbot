@@ -541,7 +541,7 @@ class StatusPanel(QWidget):
         self.aim_layout.setSpacing(8)
         
         self.aim_indicator = StatusIndicator()
-        self.aim_text_label = QLabel(get_text('auto_aim'))
+        self.aim_text_label = QLabel(get_text('aim_status'))
         self.aim_text_label.setObjectName("statusLabel")
         self.aim_status_label = QLabel()
         self.aim_status_label.setObjectName("statusValue")
@@ -552,7 +552,7 @@ class StatusPanel(QWidget):
         self.aim_layout.addWidget(self.aim_status_label)
 
         # 3.5 狀態行 - Aim Toggle (the persistent toggle state itself, distinct
-        # from the Auto Aim row above — which reflects whether aim is
+        # from the Aim Status row above — which reflects whether aim is
         # *actively* engaged this frame, i.e. AimToggle combined with the
         # held-key/MAKCU-button state)
         self.aim_toggle_row = StatusRow(get_text('status_panel_aim_toggle', 'Aim Toggle'))
@@ -728,16 +728,16 @@ class StatusPanel(QWidget):
         # 檢查是否需要更新 UI 文本 (例如語言改變或狀態改變)
         # 為了簡化，簡單比較關鍵值，或者直接更新所有文字(開銷很小)
         
-        # 更新 Auto Aim
+        # 更新 Aim Status
         if current_aim:
-            self.aim_status_label.setText(get_text("status_panel_on"))
+            self.aim_status_label.setText(get_text("status_panel_aiming"))
             self.aim_status_label.setStyleSheet(f"color: {FluentColors.to_css_rgba(FluentColors.get_success_color())};")
             self.aim_indicator.set_status(True)
         else:
-            self.aim_status_label.setText(get_text("status_panel_off"))
+            self.aim_status_label.setText(get_text("status_panel_idle"))
             self.aim_status_label.setStyleSheet(f"color: {FluentColors.to_css_rgba(FluentColors.get_error_color())};")
             self.aim_indicator.set_status(False)
-        self.aim_text_label.setText(get_text('auto_aim'))
+        self.aim_text_label.setText(get_text('aim_status'))
 
         # 更新 Aim Toggle — the raw persistent toggle state (config.AimToggle
         # itself), not the combined current_aim above; flips on the toggle
