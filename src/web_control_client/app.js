@@ -178,6 +178,25 @@
   var modelListLoaded = false;
   var pendingModelSelection = null;
   var allModelNames = []; // master list — modelSearchInput filters a view of this
+  // {basename: already_has_a_cached_.engine} and "is TensorRT the active
+  // backend right now" — both come from GET /api/models alongside `models`
+  // itself (app_controller.get_model_cache_status(), mirroring
+  // model_page.py's own _computeEngineCacheStatus()/_isTensorRtActive()).
+  // Badges are meaningless noise under any other backend, same as the Qt
+  // combo hiding its icons entirely in that case.
+  var modelCacheStatus = {};
+  var modelTrtActive = false;
+
+  // ✓/⬇ prefix mirroring model_page.py's _applyModelBadges() (FluentIcon.ACCEPT /
+  // FluentIcon.CLOUD_DOWNLOAD as per-item combo icons there) — a plain HTML
+  // <option> has no icon slot, so the equivalent glyph is prepended to the
+  // visible label instead. The <option>'s own value stays the bare filename
+  // either way, so nothing downstream (selection matching, POST bodies) needs
+  // to know about this cosmetic prefix.
+  function formatModelOptionLabel(name) {
+    if (!modelTrtActive) return name;
+    return (modelCacheStatus[name] ? "✓ " : "⬇ ") + name;
+  }
 
   function applyModelSelection(name) {
     if (!name) return;
@@ -204,14 +223,24 @@
       })
       .then(function (data) {
         if (!data || !data.models) return;
+        // Preserve whatever's currently selected across the rebuild below —
+        // this function is also called after a successful switch (to
+        // refresh the ✓/⬇ badges for the newly-active backend), where
+        // silently resetting the visible selection back to the first
+        // option would look like the switch didn't actually take.
+        var currentSelection = modelListLoaded ? modelSelect.value : "";
         allModelNames = data.models;
+        modelCacheStatus = data.cached || {};
+        modelTrtActive = !!data.trt_active;
         modelSelect.innerHTML = "";
         data.models.forEach(function (name) {
           var opt = document.createElement("option");
           opt.value = name;
-          opt.textContent = name;
+          opt.textContent = formatModelOptionLabel(name);
           modelSelect.appendChild(opt);
         });
+        if (currentSelection) modelSelect.value = currentSelection;
+        updateModelCacheLegend();
         modelListLoaded = true;
         modelSwitchBtn.disabled = false;
         if (pendingModelSelection) {
@@ -220,6 +249,20 @@
         }
       })
       .catch(function () {});
+  }
+
+  // Explains the ✓/⬇ prefix — only shown while it's actually meaningful,
+  // mirroring model_page.py's own modelCard subtitle toggle
+  // (_updateModelCardLegend()).
+  function updateModelCacheLegend() {
+    var el = document.getElementById("model-cache-legend");
+    if (!el) return;
+    if (modelTrtActive) {
+      el.textContent = "✓ = TensorRT engine already cached  ·  ⬇ = needs a one-time build (1-5 min)";
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
   }
 
   // Live-filters modelSelect to entries matching the search box (case-
@@ -237,7 +280,7 @@
       if (!query || name.toLowerCase().indexOf(query) !== -1) {
         var opt = document.createElement("option");
         opt.value = name;
-        opt.textContent = name;
+        opt.textContent = formatModelOptionLabel(name);
         modelSelect.appendChild(opt);
         if (name === current) matchedCurrent = true;
       }
@@ -245,7 +288,7 @@
     if (!matchedCurrent && current) {
       var opt2 = document.createElement("option");
       opt2.value = current;
-      opt2.textContent = current;
+      opt2.textContent = formatModelOptionLabel(current);
       modelSelect.appendChild(opt2);
     }
     modelSelect.value = current;
@@ -1581,6 +1624,11 @@
           convertReason.textContent = data.success
             ? "✓ Done. Engine cache written to: " + data.message
             : "✗ " + data.message;
+          // A successful build just created a new cached .engine — refresh
+          // so the Model tab's ✓/⬇ badges pick it up (whether this build
+          // was started from here, the Qt GUI, or auto-redirected via
+          // needs_conversion) instead of showing stale ⬇ until next reload.
+          if (data.success) loadModelList();
         }
       })
       // A transient failure (network blip, a momentary bad-token response)
@@ -2042,6 +2090,10 @@
           modelSwitchReason.textContent = data.applied_live
             ? "applied — live"
             : "applied — takes effect on next AI start";
+          // Which backend is effective just changed — refetch so the ✓/⬇
+          // badges and legend reflect it immediately rather than the
+          // pre-switch backend's cache status (or lack of badges at all).
+          loadModelList();
         }
         modelSwitchPending = false;
       })
