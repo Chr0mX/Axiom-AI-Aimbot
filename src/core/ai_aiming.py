@@ -132,24 +132,6 @@ def calculate_aim_target(
 _ACQUISITION_GUARD_S = 0.024
 
 
-def _kalman_noise_scale(confidence: float, box_height: float, ref_height: float) -> float:
-    """Scale factor for KalmanFilter2D's measurement noise (R), so a low-
-    confidence or small/distant detection is trusted less and the filter
-    leans more on its own motion model instead of chasing that detection's
-    jitter. 1.0 = no change (a confident, near-reference-size box).
-
-    confidence: this frame's selected-target confidence (0-1).
-    box_height: the selected box's pixel height.
-    ref_height: a "typical/near" box height to normalize against (reuses
-        config.aim_adaptive_ratio_ref_h — the same reference height already
-        used for distance-adaptive aim-point ratio elsewhere in this file).
-    """
-    conf = max(0.05, min(1.0, float(confidence)))
-    conf_scale = 1.0 / conf
-    size_scale = max(1.0, float(ref_height) / max(1.0, float(box_height)))
-    return min(8.0, conf_scale * size_scale)
-
-
 def _adaptive_sticky_iou(base_iou: float, box: list, fov_size: float) -> float:
     # Replaces fixed lock_iou_threshold with area-scaled version.
     # Ported from Someone_idea/sticky_aim.py StickyTargetLock._adaptive_iou_threshold().
@@ -359,18 +341,10 @@ def process_aiming(
             kf = _get_kalman(config)
             if _in_acquisition:
                 kf.reset()
-                state.kalman_last_t = 0.0
-            _kdt = (current_time - state.kalman_last_t) if state.kalman_last_t > 0.0 else None
-            state.kalman_last_t = current_time
-            _noise_scale = 1.0
-            if getattr(config, 'kalman_adaptive_noise_enabled', False):
-                _ref_h = float(getattr(config, 'aim_adaptive_ratio_ref_h', 80.0))
-                _noise_scale = _kalman_noise_scale(_conf, selected_box[3] - selected_box[1], _ref_h)
-            pred_x, pred_y = kf.update(pred_x, pred_y, dt=_kdt, measurement_noise_scale=_noise_scale)
+            pred_x, pred_y = kf.update(pred_x, pred_y)
         else:
             if _kalman is not None:
                 _kalman.reset()
-            state.kalman_last_t = 0.0
 
         if _cam_comp:
             target_x, target_y = pred_x + state.cam_drift_x, pred_y + state.cam_drift_y

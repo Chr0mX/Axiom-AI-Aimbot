@@ -77,13 +77,6 @@ class LoopState:
     # feature is off, this always tracks the true lock-acquisition time.
     lock_acquired_t: float = 0.0
 
-    # Elapsed-time tracking for KalmanFilter2D's per-update dt (fixes the
-    # filter's own dt being hardcoded at construction and never revisited) —
-    # 0.0 means "no previous update to diff against," matching aim_y_last_target_t's
-    # own "0.0 = not yet primed" convention. Reset alongside kalman resets
-    # (target loss, kalman_enabled toggled off, acquisition-guard re-bootstrap).
-    kalman_last_t: float = 0.0
-
     # Sub-pixel carry — accumulates the fractional remainder that integer truncation
     # discards each frame so micro-corrections are never silently lost and the
     # crosshair converges exactly onto the aim point. Applies to all mouse backends.
