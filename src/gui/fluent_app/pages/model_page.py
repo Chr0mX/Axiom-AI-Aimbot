@@ -14,12 +14,13 @@ from qfluentwidgets import (
     CardWidget,
     SettingCardGroup,
     FluentIcon,
-    ComboBox, PrimaryPushButton, PushButton, SettingCard,
+    ComboBox, PrimaryPushButton, PushButton, SettingCard, SwitchSettingCard,
     InfoBar, InfoBarPosition, SearchLineEdit,
 )
 
 from ..base_page import BasePage
 from ..language_manager import t
+from ..components.slider_spin_card import SliderSpinCard
 
 
 # ──────────────────────────────────────────────
@@ -267,6 +268,30 @@ class ModelPage(BasePage):
         self.hudModelCard.hBoxLayout.addWidget(self.hudModelCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.hudModelCard.hBoxLayout.addSpacing(16)
 
+        # Dedicated second UDP stream for the HUD strip — for a 2PC/OBS setup
+        # where the main UDP capture stream is already a small center crop
+        # (e.g. a 640x640/320x320 aim FOV) that doesn't include the HUD
+        # region. When enabled, a second udp_stream_filter OBS filter
+        # instance (its own crop rect, its own target port, stacked on the
+        # same source) sends the HUD strip here instead.
+        self.hudUdpEnabledCard = SwitchSettingCard(
+            FluentIcon.WIFI,
+            "Separate HUD UDP Stream",
+            "Read the HUD strip from its own UDP stream/port instead of the "
+            "main capture frame — needed when the main UDP stream is itself "
+            "a center crop that excludes the HUD",
+            self.hudModelGroup,
+        )
+
+        self.hudUdpPortCard = SliderSpinCard(
+            FluentIcon.CONNECT,
+            "HUD UDP Port",
+            1, 65535,
+            suffix="",
+            description="Port a second udp_stream_filter OBS instance sends the HUD-crop stream to",
+            parent=self.hudModelGroup,
+        )
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -282,6 +307,8 @@ class ModelPage(BasePage):
 
         self.hudModelGroup.addSettingCard(self.hudGameCard)
         self.hudModelGroup.addSettingCard(self.hudModelCard)
+        self.hudModelGroup.addSettingCard(self.hudUdpEnabledCard)
+        self.hudModelGroup.addSettingCard(self.hudUdpPortCard)
         self.addContent(self.hudModelGroup)
 
         self.scrollLayout.addStretch(1)
@@ -297,6 +324,8 @@ class ModelPage(BasePage):
         self.openModelFolderBtn.clicked.connect(self._openModelFolder)
         self.hudGameCombo.currentTextChanged.connect(self._onHudGameChanged)
         self.hudModelCombo.currentTextChanged.connect(self._onHudModelChanged)
+        self.hudUdpEnabledCard.checkedChanged.connect(self._onHudUdpEnabledChanged)
+        self.hudUdpPortCard.valueChanged.connect(self._onHudUdpPortChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -385,6 +414,9 @@ class ModelPage(BasePage):
             if self._config:
                 self._config.hud_model_path = os.path.join("Model_Hud", self.hudModelCombo.itemText(0))
         self.hudModelCombo.blockSignals(False)
+
+        self.hudUdpEnabledCard.setChecked(bool(getattr(self._config, 'hud_udp_enabled', False)))
+        self.hudUdpPortCard.setValue(int(getattr(self._config, 'hud_udp_bind_port', 5601)))
 
         # Kick off model inspection and load notes after config load
         self._updateModelInfo(self._config.model_path)
@@ -770,6 +802,15 @@ class ModelPage(BasePage):
         if self._config and text:
             self._config.hud_model_path = os.path.join("Model_Hud", text)
 
+    def _onHudUdpEnabledChanged(self, checked):
+        if self._config:
+            self._config.hud_udp_enabled = bool(checked)
+
+    def _onHudUdpPortChanged(self, value):
+        if self._isLoadingConfig or not self._config:
+            return
+        self._config.hud_udp_bind_port = int(value)
+
     def _onInferenceBackendChanged(self, text):
         if not self._config:
             return
@@ -829,3 +870,10 @@ class ModelPage(BasePage):
         self.hudModelGroup.titleLabel.setText("Model HUD Settings")
         self.hudGameCard.titleLabel.setText("Game Profile")
         self.hudModelCard.titleLabel.setText("HUD Model")
+        self.hudUdpEnabledCard.titleLabel.setText("Separate HUD UDP Stream")
+        self.hudUdpEnabledCard.contentLabel.setText(
+            "Read the HUD strip from its own UDP stream/port instead of the "
+            "main capture frame — needed when the main UDP stream is itself "
+            "a center crop that excludes the HUD"
+        )
+        self.hudUdpPortCard.titleLabel.setText("HUD UDP Port")
