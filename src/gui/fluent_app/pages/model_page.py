@@ -167,6 +167,7 @@ class ModelPage(BasePage):
         self._inspect_worker = None
         self._all_model_files = []  # master list; modelSearchEdit filters a view of this
         self._model_engine_cached: dict = {}  # {model_basename: has_cached_.engine}, set by _refreshModelList()
+        self._last_inspected_key = None  # (inspect_path, mtime) of the last file actually inspected
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -394,8 +395,19 @@ class ModelPage(BasePage):
     # ──────────────────────────────────────────────
 
     def _updateModelInfo(self, model_path: str) -> None:
-        """Inspect the selected model in a QThread and update the info card via signal."""
+        """Inspect the selected model in a QThread and update the info card via signal.
+
+        Called from _loadFromConfig(), which itself runs on every setConfig()
+        — including window.py's _onConfigSyncTick(), which re-calls
+        setConfig() on this page once a second the whole time it's the
+        visible page. Without the cache-key check below, that meant
+        spawning a brand new inspection worker (and, for a cached TensorRT
+        engine, constructing a fresh trt.Runtime — see model_detect.py's own
+        comment on why that spammed the console) every single second even
+        though nothing about the model had changed.
+        """
         if not model_path:
+            self._last_inspected_key = None
             self.modelInfoCard.contentLabel.setText(t("model_no_model", "No model selected."))
             return
 
@@ -421,6 +433,18 @@ class ModelPage(BasePage):
                 engine_files = glob.glob(os.path.join(trt_cache, f"{model_stem}*.engine"))
                 if engine_files:
                     inspect_path = sorted(engine_files)[-1]
+
+        # Skip re-inspecting a file we already have the answer for — keyed on
+        # mtime too (not just the path) so a fresh TensorRT build that
+        # overwrites the same .engine filename still gets picked up.
+        try:
+            inspect_mtime = os.path.getmtime(inspect_path)
+        except OSError:
+            inspect_mtime = None
+        inspect_key = (inspect_path, inspect_mtime)
+        if inspect_key == self._last_inspected_key:
+            return
+        self._last_inspected_key = inspect_key
 
         self.modelInfoCard.contentLabel.setText(t("model_inspecting", "Inspecting…"))
 
