@@ -8,16 +8,111 @@ import subprocess
 import time
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout
+from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, FluentIcon,
     ComboBox, PushButton, SettingCard, BodyLabel, SegmentedWidget,
-    CaptionLabel, SwitchButton, LineEdit,
+    CaptionLabel, SwitchButton, LineEdit, CardWidget,
 )
 from ..components.slider_spin_card import SliderSpinCard
 from ..base_page import BasePage
 from ..language_manager import t
 from ..theme_colors import ThemeColors
+from core.hud_categories import CATEGORY_ORDER, CATEGORY_LABELS, parse_hud_status
+
+# Apex's own real item-rarity colors — a fixed game-domain palette, not a UI
+# theme element (analogous to crosshair_color_r/g/b or the Web ESP overlay's
+# BOX_THEMES: literal RGB the user never toggles between light/dark, so this
+# deliberately does NOT go through ThemeColors).
+_RARITY_SWATCH_COLORS: dict[str, str] = {
+    "common": "#d1d1d1",
+    "rare": "#4185f4",
+    "epic": "#b641f4",
+    "legendary": "#e8a339",
+}
+
+
+class _WeaponStatusPanel(CardWidget):
+    """Read-only per-category HUD status readout (weapon / fire mode /
+    attachments), populated from hud_inference.get_hud_results() via
+    hud_categories.parse_hud_status(). Only meaningful for second_inference_mode
+    == 'v2_onnx' (the YOLO icon detector) — v1_ocr/off keep using the plain
+    ocrResultCard/ocrResultLabel instead, since OCR's raw text lines don't map
+    to these categories at all.
+
+    Each field is a disabled ComboBox (greyed, non-interactive — the simplest
+    way to get read-only "dropdown" chrome without a hand-rolled style) with a
+    small rarity-colored swatch beside it for the attachment-type fields;
+    Weapon and Fire Mode carry no rarity, so they show no swatch."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._fields: dict[str, tuple[QFrame, ComboBox]] = {}
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 12, 16, 12)
+        outer.setSpacing(10)
+        outer.addWidget(CaptionLabel("Weapon Status"))
+
+        weapon_row = QHBoxLayout()
+        weapon_row.setSpacing(8)
+        weapon_row.addWidget(BodyLabel("Weapon"))
+        self._weaponCombo = ComboBox()
+        self._weaponCombo.setEnabled(False)
+        self._weaponCombo.addItem("—")
+        weapon_row.addWidget(self._weaponCombo, 1)
+        outer.addLayout(weapon_row)
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(8)
+        attachment_categories = [c for c in CATEGORY_ORDER if c != "weapon"]
+        cols = 4
+        for i, category in enumerate(attachment_categories):
+            row, col = divmod(i, cols)
+            cell = QVBoxLayout()
+            cell.setSpacing(2)
+            cell.addWidget(CaptionLabel(CATEGORY_LABELS[category]))
+            field_row = QHBoxLayout()
+            field_row.setSpacing(6)
+            swatch = QFrame()
+            swatch.setFixedSize(14, 14)
+            swatch.setStyleSheet("background: transparent; border-radius: 3px;")
+            field_row.addWidget(swatch)
+            combo = ComboBox()
+            combo.setEnabled(False)
+            combo.addItem("None")
+            combo.setMinimumWidth(110)
+            field_row.addWidget(combo, 1)
+            cell.addLayout(field_row)
+            grid.addLayout(cell, row, col)
+            self._fields[category] = (swatch, combo)
+        outer.addLayout(grid)
+
+    def setStatus(self, status: dict) -> None:
+        """status: hud_categories.parse_hud_status()'s return value."""
+        weapon = status.get("weapon")
+        self._setCombo(self._weaponCombo, weapon["value"] if weapon else "—")
+        for category, (swatch, combo) in self._fields.items():
+            entry = status.get(category)
+            self._setCombo(combo, entry["value"] if entry else "None")
+            rarity = entry["rarity"] if entry else None
+            color = _RARITY_SWATCH_COLORS.get(rarity)
+            swatch.setStyleSheet(
+                f"background: {color}; border: 1px solid rgba(0,0,0,0.3); border-radius: 3px;"
+                if color else "background: transparent; border-radius: 3px;"
+            )
+
+    @staticmethod
+    def _setCombo(combo: ComboBox, text: str) -> None:
+        # Rebuilding on every tick (this refreshes every 500ms) would steal
+        # focus/flicker for no reason when nothing actually changed.
+        if combo.count() == 1 and combo.itemText(0) == text:
+            return
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(text)
+        combo.blockSignals(False)
 
 
 def _get_local_ips() -> list[str]:
@@ -525,6 +620,12 @@ class CapturePage(BasePage):
         self.ocrResultCard.hBoxLayout.addWidget(self.ocrResultLabel, 1, Qt.AlignmentFlag.AlignRight)
         self.ocrResultCard.hBoxLayout.addSpacing(16)
 
+        # Categorized weapon/fire-mode/attachment status — only shown for
+        # second_inference_mode == 'v2_onnx' (see _refreshOcrDisplay); hidden
+        # otherwise, with ocrResultCard's plain text line shown in its place.
+        self.weaponStatusWidget = _WeaponStatusPanel(self)
+        self.weaponStatusWidget.setVisible(False)
+
         self.ocrRoiFrame = QFrame(self)
         self.ocrRoiFrame.setObjectName("ocrRoiFrame")
         self.ocrRoiFrame.setStyleSheet(
@@ -611,6 +712,7 @@ class CapturePage(BasePage):
         self.ocrGroup.addSettingCard(self.ocrScanCard)
         self.ocrGroup.addSettingCard(self.ocrResultCard)
         self.addContent(self.ocrGroup)
+        self.addContent(self.weaponStatusWidget)
         self.addContent(self.ocrRoiFrame)
 
         self.scrollLayout.addStretch(1)
@@ -1379,15 +1481,28 @@ class CapturePage(BasePage):
 
     def _refreshOcrDisplay(self):
         mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
+
+        if mode == 'v2_onnx':
+            # Categorized status (weapon/fire-mode/attachments) replaces the
+            # plain "Detected" line entirely for this mode — hud_categories
+            # can only make sense of the YOLO detector's own class names, not
+            # OCR's raw text.
+            self.ocrResultCard.setVisible(False)
+            self.weaponStatusWidget.setVisible(True)
+            from core.hud_inference import get_hud_results
+            lines = get_hud_results()
+            self.weaponStatusWidget.setStatus(parse_hud_status(lines))
+            if getattr(self, 'ocrLiveToggle', None) and self.ocrLiveToggle.isChecked():
+                self._updateRoiPreview()
+            return
+
+        self.weaponStatusWidget.setVisible(False)
+        self.ocrResultCard.setVisible(True)
+
         if mode == 'v1_ocr':
             from core.ocr_inference import get_ocr_results
             lines = get_ocr_results()
-        elif mode == 'v2_onnx':
-            from core.hud_inference import get_hud_results
-            lines = get_hud_results()
         else:
-            if self.ocrResultLabel.text() not in ("—", "Scanning..."):
-                pass
             return
         if lines:
             self.ocrResultLabel.setText("\n".join(lines))
