@@ -7,8 +7,19 @@ Mirrors ocr_inference.py: the ONNX Runtime session and all pre/post-processing
 run in a separate child process so the main inference loop and Qt UI are never
 blocked by this work.
 
-ROI: read from config.hud_roi_coords ("x1,y1,x2,y2"), defaulting to
-     "1490,953,1870,1041" (Apex Legends HUD strip, 1080p reference).
+ROI: normally cropped from the shared screen_capture preview frame using
+     config.hud_roi_coords ("x1,y1,x2,y2"), defaulting to "1490,953,1870,1041"
+     (Apex Legends HUD strip, 1080p reference). When config.hud_udp_enabled is
+     set, that shared preview frame is bypassed entirely in favor of a
+     *second*, independent UDP JPEG stream (its own UdpJpegReceiver, bound to
+     hud_udp_bind_ip/hud_udp_bind_port) — for a 2PC/OBS setup where the main
+     screenshot_method='udp' stream is itself already a small center crop
+     (e.g. the aim FOV) that excludes the HUD region entirely, and so never
+     contains the HUD pixels hud_roi_coords would otherwise crop out of it.
+     In that mode, the received frame already *is* the HUD ROI (the crop
+     happens OBS-side, via a second udp_stream_filter filter instance on the
+     same source with its own crop rect and its own target port) —
+     hud_roi_coords is not applied to it.
 Model input: 320 x 320 NCHW float32, letterboxed with grey fill (114).
 Output: YOLO11n format [1, 4+num_classes, num_anchors] — transposed and decoded here.
 
@@ -84,6 +95,19 @@ _proc: mp.Process | None = None
 _proc_stop = None
 _frame_q = None     # mp.Queue(maxsize=1)  parent → child: (roi_bgra, model_path, confidence)
 _result_q = None    # mp.Queue(maxsize=4)  child → parent: (list[str], list[tuple])
+
+# ── Dedicated second UDP stream for the HUD strip (hud_udp_enabled) ──────────
+# Only relevant for a 2PC/OBS setup where the *main* screenshot_method='udp'
+# stream is itself already a small center crop (e.g. the 640x640/320x320 aim
+# FOV) that excludes the HUD region entirely — the shared
+# screen_capture.get_preview_frame() this module otherwise reads from simply
+# never contains the HUD pixels in that case. When hud_udp_enabled, a second
+# udp_stream_filter OBS filter instance (independent crop rect + independent
+# target port, stacked on the same source) sends the HUD strip to its own
+# port, and this module owns its own UdpJpegReceiver for it — completely
+# independent of whatever screen_capture.py's main capture backend is doing.
+_hud_udp_receiver = None            # UdpJpegReceiver | None
+_hud_udp_signature: tuple | None = None   # (bind_ip, bind_port) the receiver above was built with
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -174,6 +198,40 @@ def _kill_proc() -> None:
     _result_q = None
 
 
+def _ensure_hud_udp_receiver(config: "Config") -> None:
+    """(Re)build the dedicated HUD UDP receiver if not already running with
+    the current bind_ip/bind_port. Called from the feeder only while
+    hud_udp_enabled and HUD inference is active."""
+    global _hud_udp_receiver, _hud_udp_signature
+    bind_ip = str(getattr(config, "hud_udp_bind_ip", "0.0.0.0"))
+    bind_port = int(getattr(config, "hud_udp_bind_port", 5601))
+    signature = (bind_ip, bind_port)
+    if _hud_udp_receiver is not None and _hud_udp_signature == signature:
+        return
+    _kill_hud_udp_receiver()
+    try:
+        from .udp_receiver import UdpJpegReceiver
+        _hud_udp_receiver = UdpJpegReceiver(bind_ip=bind_ip, bind_port=bind_port)
+        _hud_udp_receiver.start()
+        _hud_udp_signature = signature
+        logger.info("[HUD] dedicated UDP receiver bound to %s:%d", bind_ip, bind_port)
+    except Exception as exc:
+        logger.error("[HUD] Failed to start dedicated HUD UDP receiver: %s", exc)
+        _hud_udp_receiver = None
+        _hud_udp_signature = None
+
+
+def _kill_hud_udp_receiver() -> None:
+    global _hud_udp_receiver, _hud_udp_signature
+    if _hud_udp_receiver is not None:
+        try:
+            _hud_udp_receiver.stop()
+        except Exception:
+            pass
+    _hud_udp_receiver = None
+    _hud_udp_signature = None
+
+
 def start(config: "Config") -> None:
     """Start the HUD feeder thread. Child process is spawned lazily on first use. No-op if running."""
     global _stop_event, _feeder_thread
@@ -188,11 +246,12 @@ def start(config: "Config") -> None:
 
 
 def stop() -> None:
-    """Stop feeder thread and HUD child process."""
+    """Stop feeder thread, HUD child process, and the dedicated HUD UDP receiver (if any)."""
     global _stop_event, _feeder_thread
     if _stop_event is not None:
         _stop_event.set()
     _kill_proc()
+    _kill_hud_udp_receiver()
     if _feeder_thread is not None and _feeder_thread.is_alive():
         _feeder_thread.join(timeout=2.0)
     _stop_event = None
@@ -503,6 +562,24 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
 
 # ── Parent feeder thread ──────────────────────────────────────────────────────
 
+def _get_udp_hud_frame(config: "Config") -> np.ndarray | None:
+    """Decode the dedicated HUD UDP receiver's latest JPEG straight to BGR.
+
+    Unlike _crop_roi() below, no cropping is applied here — the second
+    udp_stream_filter OBS instance already sends exactly the HUD strip (its
+    own crop rect, its own port), so the whole decoded frame *is* the ROI.
+    hud_roi_coords (a full-screen-relative rectangle) doesn't apply to it.
+    """
+    import cv2
+    if _hud_udp_receiver is None:
+        return None
+    jpeg_bytes, _frame_id = _hud_udp_receiver.get_latest_frame_with_id()
+    if jpeg_bytes is None:
+        return None
+    arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+
 def _feeder(config: "Config", stop_event: threading.Event) -> None:
     from .screen_capture import get_preview_frame
 
@@ -523,6 +600,7 @@ def _feeder(config: "Config", stop_event: threading.Event) -> None:
             _scan_flag.clear()
 
         active = (enabled or forced) and bool(hud_model_rel)
+        udp_mode = bool(getattr(config, "hud_udp_enabled", False))
 
         if active:
             # Detect and log child crashes before respawning
@@ -530,25 +608,38 @@ def _feeder(config: "Config", stop_event: threading.Event) -> None:
                 logger.warning("[HUD] child process died (exit=%s); respawning", _proc.exitcode)
                 _kill_proc()
             _ensure_proc()
+            if udp_mode:
+                _ensure_hud_udp_receiver(config)
+            elif _hud_udp_receiver is not None:
+                # Toggled off mid-session — release it immediately rather
+                # than waiting out the idle-teardown timer below.
+                _kill_hud_udp_receiver()
             _idle_since = None
-        elif _proc is not None:
-            # Release idle child after timeout
-            if _idle_since is None:
-                _idle_since = t0
-            elif (t0 - _idle_since) > _IDLE_TEARDOWN_S:
-                _kill_proc()
-                _idle_since = None
+        else:
+            # Release idle child process / UDP receiver after timeout
+            if _proc is not None or _hud_udp_receiver is not None:
+                if _idle_since is None:
+                    _idle_since = t0
+                elif (t0 - _idle_since) > _IDLE_TEARDOWN_S:
+                    _kill_proc()
+                    _kill_hud_udp_receiver()
+                    _idle_since = None
 
         if active:
-            coords_str = getattr(config, "hud_roi_coords", _HUD_ROI_DEFAULT_STR) or _HUD_ROI_DEFAULT_STR
-            roi_dict = _parse_roi(coords_str) or _parse_roi(_HUD_ROI_DEFAULT_STR)
             model_path = (hud_model_rel if os.path.isabs(hud_model_rel)
                           else os.path.join(_project_root, hud_model_rel))
             confidence = float(getattr(config, "hud_confidence", 0.10))
-            frame = get_preview_frame()
-            if frame is not None and roi_dict is not None:
+
+            if udp_mode:
+                roi = _get_udp_hud_frame(config)
+            else:
+                coords_str = getattr(config, "hud_roi_coords", _HUD_ROI_DEFAULT_STR) or _HUD_ROI_DEFAULT_STR
+                roi_dict = _parse_roi(coords_str) or _parse_roi(_HUD_ROI_DEFAULT_STR)
+                frame = get_preview_frame()
+                roi = _crop_roi(frame, roi_dict, log_once) if (frame is not None and roi_dict is not None) else None
+
+            if roi is not None:
                 try:
-                    roi = _crop_roi(frame, roi_dict, log_once)
                     with _roi_image_lock:
                         _roi_image = roi.copy()
                     if _frame_q is not None:

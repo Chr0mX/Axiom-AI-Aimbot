@@ -524,6 +524,30 @@ class CapturePage(BasePage):
         self.udpRefreshCard.hBoxLayout.addWidget(self.udpRefreshBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.udpRefreshCard.hBoxLayout.addSpacing(16)
 
+        # Dedicated second UDP stream for the HUD strip — for a 2PC/OBS setup
+        # where the main UDP stream above is itself already a small center
+        # crop (e.g. a 640x640/320x320 aim FOV) that doesn't include the HUD
+        # region. When enabled, a second udp_stream_filter OBS filter
+        # instance (its own crop rect, its own target port, stacked on the
+        # same source) sends the HUD strip here instead.
+        self.hudUdpEnabledCard = SwitchSettingCard(
+            FluentIcon.WIFI,
+            "Separate HUD UDP Stream",
+            "Read the HUD strip from its own UDP stream/port instead of the "
+            "main capture frame above — needed when the main UDP stream is "
+            "itself a center crop that excludes the HUD",
+            parent=self.udpGroup,
+        )
+
+        self.hudUdpPortCard = SliderSpinCard(
+            FluentIcon.CONNECT,
+            "HUD UDP Port",
+            1, 65535,
+            suffix="",
+            description="Port a second udp_stream_filter OBS instance sends the HUD-crop stream to",
+            parent=self.udpGroup,
+        )
+
         # === Preview ===
         self.previewGroup = SettingCardGroup(t("preview_group", "Preview"), self.scrollWidget)
 
@@ -672,6 +696,8 @@ class CapturePage(BasePage):
         self.udpGroup.addSettingCard(self.udpBindIpCard)
         self.udpGroup.addSettingCard(self.udpPortCard)
         self.udpGroup.addSettingCard(self.udpRefreshCard)
+        self.udpGroup.addSettingCard(self.hudUdpEnabledCard)
+        self.udpGroup.addSettingCard(self.hudUdpPortCard)
         self.addContent(self.udpGroup)
         self.udpGroup.setVisible(False)
 
@@ -720,6 +746,8 @@ class CapturePage(BasePage):
         self.udpBindIpCombo.currentTextChanged.connect(self._onUdpBindIpChanged)
         self.udpPortCard.valueChanged.connect(self._onUdpPortChanged)
         self.udpRefreshBtn.clicked.connect(self._onUdpRefreshClicked)
+        self.hudUdpEnabledCard.checkedChanged.connect(self._onHudUdpEnabledChanged)
+        self.hudUdpPortCard.valueChanged.connect(self._onHudUdpPortChanged)
         self.ocrFpsCard.valueChanged.connect(self._onOcrFpsChanged)
         self.ocrScanBtn.clicked.connect(self._onOcrScanClicked)
 
@@ -817,6 +845,8 @@ class CapturePage(BasePage):
             if idx >= 0:
                 self.udpBindIpCombo.setCurrentIndex(idx)
             self.udpPortCard.setValue(int(getattr(self._config, 'udp_bind_port', 5600)))
+            self.hudUdpEnabledCard.setChecked(bool(getattr(self._config, 'hud_udp_enabled', False)))
+            self.hudUdpPortCard.setValue(int(getattr(self._config, 'hud_udp_bind_port', 5601)))
 
             self.ocrFpsCard.setValue(int(getattr(self._config, 'second_inference_fps', 2)))
 
@@ -1351,6 +1381,15 @@ class CapturePage(BasePage):
             self._config.udp_force_restart = True
             print('[Capture][UDP] Restart requested — receiver will reinitialize within ~0.5s.')
 
+    def _onHudUdpEnabledChanged(self, checked):
+        if self._config:
+            self._config.hud_udp_enabled = bool(checked)
+
+    def _onHudUdpPortChanged(self, value):
+        if self._isLoadingConfig or not self._config:
+            return
+        self._config.hud_udp_bind_port = int(value)
+
     def _onOcrFpsChanged(self, value: int):
         if self._isLoadingConfig or not self._config:
             return
@@ -1568,6 +1607,13 @@ class CapturePage(BasePage):
         self.udpPortCard.titleLabel.setText("UDP Port")
         self.udpRefreshCard.titleLabel.setText("Restart Receiver")
         self.udpRefreshCard.contentLabel.setText("Stop and re-bind the UDP socket")
+        self.hudUdpEnabledCard.titleLabel.setText("Separate HUD UDP Stream")
+        self.hudUdpEnabledCard.contentLabel.setText(
+            "Read the HUD strip from its own UDP stream/port instead of the "
+            "main capture frame above — needed when the main UDP stream is "
+            "itself a center crop that excludes the HUD"
+        )
+        self.hudUdpPortCard.titleLabel.setText("HUD UDP Port")
         self.udpRefreshBtn.setText(t("refresh"))
         self.previewGroup.titleLabel.setText(t("preview_group", "Preview"))
         self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
