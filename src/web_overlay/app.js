@@ -400,9 +400,9 @@
     const latStr = latencyMs != null ? `${latencyMs}ms` : "—";
 
     const lines = [
-      { text: aim ? "● Aim ON" : "● Aim OFF",
+      { text: `Aim Toggle  ${aim ? "● ON" : "● OFF"}`,
         color: aim ? GREEN : RED },
-      { text: `Aim Status  ${firing ? "● Active" : "● Idle"}`,
+      { text: `Aim Status  ${firing ? "● Aiming" : "● Idle"}`,
         color: firing ? GREEN : RED },
       { text: `Model: ${model}`,                    color: NEUTRAL },
       { text: `Capture Method: ${capMethod}`,        color: NEUTRAL },

@@ -42,7 +42,7 @@
           <div class="grid">
             <div class="stat"><div class="label">Inference Running</div><div class="value" id="s-running">—</div></div>
             <div class="stat"><div class="label">Aim Toggle</div><div class="value" id="s-active">—</div></div>
-            <div class="stat"><div class="label">Auto Aim</div><div class="value" id="s-firing">—</div></div>
+            <div class="stat"><div class="label">Aim Status</div><div class="value" id="s-firing">—</div></div>
             <div class="stat"><div class="label">Mouse Method</div><div class="value" id="s-mouse">—</div></div>
             <div class="stat"><div class="label">Capture FPS</div><div class="value" id="s-capfps">—</div></div>
             <div class="stat"><div class="label">Inference FPS</div><div class="value" id="s-inffps">—</div></div>
@@ -1254,7 +1254,7 @@
 
           <div class="hint">Hotkey fields below are a named-option dropdown, not the Qt app's "press a key" live capture — a remote browser can't safely reproduce that (no global key polling, and browser key/mouse codes don't match this app's own VK scheme).</div>
 
-          <div class="field-group-title" id="keys-aim-group-title">Auto Aim</div>
+          <div class="field-group-title" id="keys-aim-group-title">Aim Activation</div>
           <div class="field-group" id="keys-aim-group">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Aim Key 1</div></div>
@@ -1277,7 +1277,7 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Toggle Key</div>
-                <div class="field-desc">Toggle Auto Aim</div>
+                <div class="field-desc">Toggle Aim On/Off</div>
               </div>
               <div class="field-control">
                 <select id="keys-toggle-key" class="vk-select" data-key="aim_toggle_key" data-type="number"></select>
@@ -1344,8 +1344,8 @@
             </div>
             <div class="field-card" id="keys-makcu-trigger-card">
               <div class="field-info">
-                <div class="field-title">Auto Aim Key</div>
-                <div class="field-desc">Mouse button that activates Auto Aim</div>
+                <div class="field-title">Aim Trigger Button</div>
+                <div class="field-desc">Mouse button that activates aiming</div>
               </div>
               <div class="field-control">
                 <select id="keys-makcu_aim_button" data-key="makcu_aim_button" data-type="choice">
@@ -1463,7 +1463,7 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Auto Aim row</div></div>
+              <div class="field-info"><div class="field-title">Aim Status row</div></div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="vis-status_panel_show_auto_aim" data-key="status_panel_show_auto_aim" data-type="bool"><span class="slider"></span></label>
               </div>

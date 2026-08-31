@@ -1717,7 +1717,7 @@
   function applyStatus(s) {
     document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
-    document.getElementById("s-firing").textContent = s.aim_firing ? "ON" : "OFF";
+    document.getElementById("s-firing").textContent = s.aim_firing ? "Aiming" : "Idle";
     document.getElementById("s-model").textContent = s.model || "—";
     document.getElementById("s-backend").textContent = s.inference_backend || "—";
     document.getElementById("s-mouse").textContent = s.mouse_move_method || "—";

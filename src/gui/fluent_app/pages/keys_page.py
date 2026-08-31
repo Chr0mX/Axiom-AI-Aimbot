@@ -354,7 +354,7 @@ class KeysPage(BasePage):
         self.keyConflictCard.setVisible(False)
 
         # === 瞄準按鍵 ===
-        self.aimKeysGroup = SettingCardGroup(t("auto_aim"), self.scrollWidget)
+        self.aimKeysGroup = SettingCardGroup(t("aim_activation", "Aim Activation"), self.scrollWidget)
 
         self.alwaysAimCard = SwitchSettingCard(
             FluentIcon.FINGERPRINT,
@@ -401,7 +401,7 @@ class KeysPage(BasePage):
         self.toggleKeyCard = SettingCard(
             FluentIcon.POWER_BUTTON,
             t("toggle_key"),
-            t("toggle_auto_aim"),
+            t("toggle_aim"),
             self.aimKeysGroup
         )
         self.toggleKeyCard.hBoxLayout.addWidget(self.toggleKeyBtn, 0, Qt.AlignmentFlag.AlignRight)
@@ -527,8 +527,8 @@ class KeysPage(BasePage):
             self.makcuTriggerCombo.addItem(label)
         self.makcuTriggerCard = SettingCard(
             FluentIcon.FINGERPRINT,
-            t("makcu_auto_aim_key", "Auto Aim Key"),
-            t("makcu_auto_aim_key_desc", "Mouse button that activates Auto Aim"),
+            t("makcu_aim_trigger_key", "Aim Trigger Button"),
+            t("makcu_aim_trigger_key_desc", "Mouse button that activates aiming"),
             self.makcuKeysGroup
         )
         self.makcuTriggerCard.hBoxLayout.addWidget(self.makcuTriggerCombo, 0, Qt.AlignmentFlag.AlignRight)
@@ -754,7 +754,7 @@ class KeysPage(BasePage):
             if not always_aim:
                 trigger_to_vk = {"lmb": 0x01, "rmb": 0x02, "off": None}
                 trigger = getattr(self._config, 'makcu_aim_button', 'lmb').lower()
-                alt_groups.append([(t("makcu_auto_aim_key", "Auto Aim Key"), trigger_to_vk.get(trigger))])
+                alt_groups.append([(t("makcu_aim_trigger_key", "Aim Trigger Button"), trigger_to_vk.get(trigger))])
         else:
             aim_labels = (t("aim_key_1"), t("aim_key_2"), t("aim_key_3"))
             aim_group = [(label, self._config.AimKeys[i] or None)
@@ -1055,7 +1055,7 @@ class KeysPage(BasePage):
         self.keyConflictCard.titleLabel.setText(t("key_conflict_title", "Key Conflict"))
 
         # 群組標題
-        self.aimKeysGroup.titleLabel.setText(t("auto_aim"))
+        self.aimKeysGroup.titleLabel.setText(t("aim_activation", "Aim Activation"))
         self.fireKeysGroup.titleLabel.setText(t("keys_and_auto_fire"))
         self.makcuConnGroup.titleLabel.setText(t("makcu_connection_group", "MAKCU Connection"))
         self.makcuKeysGroup.titleLabel.setText(t("makcu_keys_group", "MAKCU Keys"))
@@ -1076,7 +1076,7 @@ class KeysPage(BasePage):
         self.aimKey2Card.titleLabel.setText(t("aim_key_2"))
         self.aimKey3Card.titleLabel.setText(t("aim_key_3"))
         self.toggleKeyCard.titleLabel.setText(t("toggle_key"))
-        self.toggleKeyCard.contentLabel.setText(t("toggle_auto_aim"))
+        self.toggleKeyCard.contentLabel.setText(t("toggle_aim"))
 
         # 自動射擊按鍵
         self.fireKey1Card.titleLabel.setText(t("auto_fire_key_1"))
@@ -1085,8 +1085,8 @@ class KeysPage(BasePage):
         # MAKCU Keys
         self.makcuInferenceCard.titleLabel.setText(t("makcu_key_inference", "Inference"))
         self.makcuInferenceCard.contentLabel.setText(t("makcu_key_inference_desc", "Hold this mouse button to activate inference"))
-        self.makcuTriggerCard.titleLabel.setText(t("makcu_auto_aim_key", "Auto Aim Key"))
-        self.makcuTriggerCard.contentLabel.setText(t("makcu_auto_aim_key_desc", "Mouse button that activates Auto Aim"))
+        self.makcuTriggerCard.titleLabel.setText(t("makcu_aim_trigger_key", "Aim Trigger Button"))
+        self.makcuTriggerCard.contentLabel.setText(t("makcu_aim_trigger_key_desc", "Mouse button that activates aiming"))
         self.makcuAimModeCard.titleLabel.setText(t("makcu_aim_mode", "Aim Mode"))
         self.makcuAimModeCard.contentLabel.setText(t("makcu_aim_mode_desc", "Hold: aim while button held  |  Toggle: click to toggle aim on/off"))
         self.makcuDisengageDelayCard.titleLabel.setText(t("makcu_disengage_delay", "Disengage Delay"))
