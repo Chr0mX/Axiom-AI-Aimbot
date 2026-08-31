@@ -236,6 +236,21 @@ class TestConfigSerialization:
         assert c2.hud_udp_bind_ip == "192.168.1.50"
         assert c2.hud_udp_bind_port == 5602
 
+    def test_kalman_adaptive_noise_enabled_default_and_round_trip(self):
+        """Off by default (no behavior change for existing configs/presets
+        until explicitly enabled) — persisted under aim.kalman.*, the same
+        prefix as the other kalman_* fields."""
+        c = _make_config()
+        assert c.kalman_adaptive_noise_enabled is False
+
+        c.kalman_adaptive_noise_enabled = True
+        d = c.to_dict()
+        assert d['aim']['kalman']['adaptive_noise_enabled'] is True
+
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.kalman_adaptive_noise_enabled is True
+
     def test_fov_effective_size_is_runtime_only_not_persisted(self):
         """fov_effective_size/_height default to fov_size/fov_height but
         must never appear in the persisted schema — they're written every

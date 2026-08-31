@@ -124,6 +124,7 @@ _FIELD_MAP = {
     'kalman_enabled':             'aim.kalman.enabled',
     'kalman_process_noise':       'aim.kalman.process_noise',
     'kalman_measurement_noise':   'aim.kalman.measurement_noise',
+    'kalman_adaptive_noise_enabled': 'aim.kalman.adaptive_noise_enabled',
     'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
     'cam_motion_comp_size':       'aim.cam_motion_comp.size',
     'aim_deadzone_enabled':       'aim.deadzone.enabled',
@@ -559,6 +560,13 @@ class Config:
         self.kalman_enabled: bool = False
         self.kalman_process_noise: float = 0.01   # lower = smoother / lags more
         self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier
+        # Scale Kalman measurement noise up for low-confidence/small (distant)
+        # detections, so the filter trusts noisy/uncertain measurements less
+        # and leans more on its own motion model instead of chasing their
+        # jitter. Off by default — existing configs/presets see no behavior
+        # change until explicitly enabled. See ai_aiming.py's
+        # _kalman_noise_scale().
+        self.kalman_adaptive_noise_enabled: bool = False
 
         # Frame skip gate
         self.frame_skip_enabled: bool = False
