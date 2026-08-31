@@ -33,7 +33,8 @@ class AxiomWindow(FluentWindow):
 
         # Config references
         self._config = None
-        self._configManager = None
+        self._configManager = None       # aim-only Preset manager
+        self._fullConfigManager = None   # full Config manager
         self._isApplyingAcrylic = False
         self._pendingAcrylicApply = False
         self._transparencyEnsured = False
@@ -43,7 +44,12 @@ class AxiomWindow(FluentWindow):
 
         # Window Setup
         self.setWindowTitle(f"Axiom v{__version__}")
-        self.resize(1100, 750)
+        # 1100x750 was cramped enough to clip/wrap SettingCard titles and
+        # descriptions on several pages (long PID/humanization/target-area
+        # labels in particular) — 1280x820 gives every card's text room to
+        # lay out on one line while still fitting comfortably on a common
+        # 1366x768 laptop display.
+        self.resize(1280, 820)
 
         # Track current theme state
         # Respect the global qfluentwidgets theme (which may have been set by the wizard)
@@ -475,11 +481,17 @@ class AxiomWindow(FluentWindow):
             self._previewArrow.setToolTip("Collapse navigation")
     
     def setConfigManager(self, manager):
-        """設定 ConfigManager 實例"""
+        """Binds the aim-only Preset ConfigManager instance."""
         self._configManager = manager
         if hasattr(self.configInterface, 'setConfigManager'):
             self.configInterface.setConfigManager(manager)
-    
+
+    def setFullConfigManager(self, manager):
+        """Binds the full-config-snapshot ConfigManager instance."""
+        self._fullConfigManager = manager
+        if hasattr(self.configInterface, 'setFullConfigManager'):
+            self.configInterface.setFullConfigManager(manager)
+
     def _refreshAllPages(self):
         """刷新所有頁面的設定值"""
         if self._config:
@@ -517,10 +529,21 @@ class AxiomWindow(FluentWindow):
         widget = self.stackedWidget.currentWidget()
         if widget is None or not hasattr(widget, 'setConfig'):
             return
-        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication, QAbstractSlider
         focused = QApplication.focusWidget()
         if focused is not None and widget.isAncestorOf(focused):
-            return
+            # A slider keeps keyboard focus after every completed drag (Qt
+            # doesn't clear it just because the mouse released, or because
+            # the page was navigated away from and back) — so the common
+            # case of "last thing I touched on this page was a slider" would
+            # otherwise wedge this guard on indefinitely, silently dropping
+            # every tick's refresh (e.g. a preset loaded from the Web Control
+            # client) until something else happens to steal focus. Only a
+            # slider actively mid-drag right now (isSliderDown()) is a real
+            # in-progress edit worth protecting; merely holding stale focus
+            # from an earlier interaction is not.
+            if not (isinstance(focused, QAbstractSlider) and not focused.isSliderDown()):
+                return
         widget.setConfig(self._config)
 
     def _onRemoteConvertTick(self):

@@ -142,6 +142,7 @@
     }
     if (name === "configs") {
       refreshConfigsList();
+      refreshFullConfigsList();
     }
     if (name === "convert") {
       ensureConvertPanelExtras();
@@ -1097,231 +1098,278 @@
   });
 
   // ---------------------------------------------------------------------
-  // Configs panel — preset CRUD via ConfigManager, plus content-based
+  // Configs panel — TWO independent CRUD boxes sharing one generic wiring
+  // function, wireConfigCrudPanel(): a "Config" box (full settings
+  // snapshots, /api/full_configs/*) and a "Preset" box (aim-only,
+  // /api/configs/*, unchanged from before) — mirroring configs_page.py's
+  // own two-_ManagerBox split in the Qt app. Plus content-based
   // Export/Import since a browser can't supply a host-side file path (see
   // web_control_settings.py's export_config_preset_content()/
   // import_config_preset_content() docstrings). window.prompt()/confirm()
   // stand in for configs_page.py's QInputDialog/QMessageBox — the direct
   // browser-native equivalent for this plain, no-framework client.
   // ---------------------------------------------------------------------
-  var configsSelect = document.getElementById("configs-select");
-  var configsReason = document.getElementById("configs-reason");
+  function wireConfigCrudPanel(cfg) {
+    var selectEl = document.getElementById(cfg.selectId);
+    var reasonEl = document.getElementById(cfg.reasonId);
 
-  function refreshConfigsList() {
-    fetch("/api/configs", { headers: authHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (!data || !data.presets) return;
-        var current = configsSelect.value;
-        configsSelect.innerHTML = "";
-        data.presets.forEach(function (name) {
-          var opt = document.createElement("option");
-          opt.value = name;
-          opt.textContent = name;
-          configsSelect.appendChild(opt);
-        });
-        var has = Array.prototype.some.call(configsSelect.options, function (o) { return o.value === current; });
-        if (has) configsSelect.value = current;
-        // The Quick Presets sidebar section reuses this exact fetch rather
-        // than making its own — one master list, same "allModelNames"
-        // precedent the Model/Convert tabs already share.
-        populatePresetSlotSelects(data.presets);
-      })
-      .catch(function () {});
-  }
-
-  document.getElementById("configs-refresh-btn").addEventListener("click", refreshConfigsList);
-
-  document.getElementById("configs-create-btn").addEventListener("click", function () {
-    var name = window.prompt("New config name:");
-    if (!name) return;
-    fetch("/api/configs/save", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ name: name }),
-    })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (!data || data.ok === false) {
-          configsReason.textContent = (data && data.reason) || "failed to create";
-        } else {
-          configsReason.textContent = "created \"" + name + "\"";
-          refreshConfigsList();
-        }
-      })
-      .catch(function () { configsReason.textContent = "request failed"; });
-  });
-
-  document.getElementById("configs-save-btn").addEventListener("click", function () {
-    var name = configsSelect.value;
-    if (!name) { configsReason.textContent = "select a config first"; return; }
-    if (!window.confirm('Overwrite "' + name + '" with the current live settings?')) return;
-    fetch("/api/configs/save", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ name: name }),
-    })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        configsReason.textContent = (data && data.ok) ? "saved \"" + name + "\"" : ((data && data.reason) || "failed to save");
-      })
-      .catch(function () { configsReason.textContent = "request failed"; });
-  });
-
-  document.getElementById("configs-load-btn").addEventListener("click", function () {
-    var name = configsSelect.value;
-    if (!name) { configsReason.textContent = "select a config first"; return; }
-    // Dry-run preview first (mirrors configs_page.py's Load button — see
-    // ConfigManager.preview_config_changes()) so the operator sees what
-    // would actually change before it's applied, instead of silently
-    // overwriting the live config.
-    fetch("/api/configs/preview?name=" + encodeURIComponent(name), { headers: authHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        var changes = data && data.changes;
-        var proceed = true;
-        if (changes && changes.length) {
-          proceed = window.confirm('Loading "' + name + '" will change:\n\n' + changes.join("\n") + "\n\nProceed?");
-        }
-        // changes === [] (identical to current) or preview unavailable
-        // (null) both fall through to loading directly, same as the Qt
-        // page's own fallback behavior.
-        if (!proceed) return;
-        fetch("/api/configs/load", {
-          method: "POST",
-          headers: authHeaders(),
-          body: JSON.stringify({ name: name }),
+    function refreshList() {
+      fetch(cfg.apiBase, { headers: authHeaders() })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (!data || !data.presets) return;
+          var current = selectEl.value;
+          selectEl.innerHTML = "";
+          data.presets.forEach(function (name) {
+            var opt = document.createElement("option");
+            opt.value = name;
+            opt.textContent = name;
+            selectEl.appendChild(opt);
+          });
+          var has = Array.prototype.some.call(selectEl.options, function (o) { return o.value === current; });
+          if (has) selectEl.value = current;
+          if (cfg.onListRefreshed) cfg.onListRefreshed(data.presets);
         })
-          .then(function (res) { return res.ok ? res.json() : null; })
-          .then(function (loadData) {
-            if (loadData && loadData.ok) {
-              configsReason.textContent = "loaded \"" + name + "\"";
-              // The just-loaded preset can touch fields on any tab —
-              // resync every generic-schema tab's settings so the whole
-              // client reflects the new live config, not just Configs.
-              ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(loadTabSettings);
-            } else {
-              configsReason.textContent = (loadData && loadData.reason) || "failed to load";
-            }
-          })
-          .catch(function () { configsReason.textContent = "request failed"; });
-      })
-      .catch(function () { configsReason.textContent = "request failed"; });
-  });
+        .catch(function () {});
+    }
 
-  document.getElementById("configs-rename-btn").addEventListener("click", function () {
-    var oldName = configsSelect.value;
-    if (!oldName) { configsReason.textContent = "select a config first"; return; }
-    var newName = window.prompt("Rename \"" + oldName + "\" to:", oldName);
-    if (!newName || newName === oldName) return;
-    fetch("/api/configs/rename", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ old_name: oldName, new_name: newName }),
-    })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (data && data.ok) {
-          configsReason.textContent = "renamed to \"" + newName + "\"";
-          refreshConfigsList();
-        } else {
-          configsReason.textContent = (data && data.reason) || "failed to rename";
-        }
-      })
-      .catch(function () { configsReason.textContent = "request failed"; });
-  });
+    document.getElementById(cfg.refreshBtnId).addEventListener("click", refreshList);
 
-  document.getElementById("configs-delete-btn").addEventListener("click", function () {
-    var name = configsSelect.value;
-    if (!name) { configsReason.textContent = "select a config first"; return; }
-    if (!window.confirm('Delete "' + name + '"? This cannot be undone.')) return;
-    fetch("/api/configs/delete", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ name: name }),
-    })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (data && data.ok) {
-          configsReason.textContent = "deleted \"" + name + "\"";
-          refreshConfigsList();
-        } else {
-          configsReason.textContent = (data && data.reason) || "failed to delete";
-        }
-      })
-      .catch(function () { configsReason.textContent = "request failed"; });
-  });
-
-  // Export downloads the preset's raw JSON via a Blob + temporary <a
-  // download> link — this page is the app's own hosted static client, not
-  // a sandboxed Artifact, so a download link works normally here.
-  document.getElementById("configs-export-btn").addEventListener("click", function () {
-    var name = configsSelect.value;
-    if (!name) { configsReason.textContent = "select a config first"; return; }
-    fetch("/api/configs/export?name=" + encodeURIComponent(name), { headers: authHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (!data || data.ok === false) {
-          configsReason.textContent = (data && data.reason) || "failed to export";
-          return;
-        }
-        var blob = new Blob([data.content], { type: "application/json" });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = name + ".json";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        configsReason.textContent = "exported \"" + name + "\"";
-      })
-      .catch(function () { configsReason.textContent = "request failed"; });
-  });
-
-  // Import reads the chosen file's content client-side (FileReader) and
-  // POSTs it as JSON text — there's no host-side path a browser could send
-  // instead, see import_config_preset_content()'s docstring.
-  var configsImportFile = document.getElementById("configs-import-file");
-  document.getElementById("configs-import-btn").addEventListener("click", function () {
-    configsImportFile.click();
-  });
-
-  configsImportFile.addEventListener("change", function () {
-    var file = configsImportFile.files && configsImportFile.files[0];
-    configsImportFile.value = ""; // allow re-selecting the same file later
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      fetch("/api/configs/import", {
+    document.getElementById(cfg.createBtnId).addEventListener("click", function () {
+      var name = window.prompt("New " + cfg.noun + " name:");
+      if (!name) return;
+      fetch(cfg.apiBase + "/save", {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ content: reader.result }),
+        body: JSON.stringify({ name: name }),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (!data || data.ok === false) {
+            reasonEl.textContent = (data && data.reason) || "failed to create";
+          } else {
+            reasonEl.textContent = "created \"" + name + "\"";
+            refreshList();
+          }
+        })
+        .catch(function () { reasonEl.textContent = "request failed"; });
+    });
+
+    document.getElementById(cfg.saveBtnId).addEventListener("click", function () {
+      var name = selectEl.value;
+      if (!name) { reasonEl.textContent = "select a " + cfg.noun + " first"; return; }
+      if (!window.confirm('Overwrite "' + name + '" with the current live settings?')) return;
+      fetch(cfg.apiBase + "/save", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ name: name }),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          reasonEl.textContent = (data && data.ok) ? "saved \"" + name + "\"" : ((data && data.reason) || "failed to save");
+        })
+        .catch(function () { reasonEl.textContent = "request failed"; });
+    });
+
+    document.getElementById(cfg.loadBtnId).addEventListener("click", function () {
+      var name = selectEl.value;
+      if (!name) { reasonEl.textContent = "select a " + cfg.noun + " first"; return; }
+      // Dry-run preview first (mirrors configs_page.py's Load button — see
+      // ConfigManager.preview_config_changes()) so the operator sees what
+      // would actually change before it's applied, instead of silently
+      // overwriting the live config.
+      fetch(cfg.apiBase + "/preview?name=" + encodeURIComponent(name), { headers: authHeaders() })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          var changes = data && data.changes;
+          var proceed = true;
+          if (changes && changes.length) {
+            proceed = window.confirm('Loading "' + name + '" will change:\n\n' + changes.join("\n") + "\n\nProceed?");
+          }
+          // changes === [] (identical to current) or preview unavailable
+          // (null) both fall through to loading directly, same as the Qt
+          // page's own fallback behavior.
+          if (!proceed) return;
+          fetch(cfg.apiBase + "/load", {
+            method: "POST",
+            headers: authHeaders(),
+            body: JSON.stringify({ name: name }),
+          })
+            .then(function (res) { return res.ok ? res.json() : null; })
+            .then(function (loadData) {
+              if (loadData && loadData.ok) {
+                reasonEl.textContent = "loaded \"" + name + "\"";
+                // The just-loaded preset/config can touch fields on any
+                // tab — resync every generic-schema tab so the whole
+                // client reflects the new live config, not just Configs.
+                ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(loadTabSettings);
+              } else {
+                reasonEl.textContent = (loadData && loadData.reason) || "failed to load";
+              }
+            })
+            .catch(function () { reasonEl.textContent = "request failed"; });
+        })
+        .catch(function () { reasonEl.textContent = "request failed"; });
+    });
+
+    document.getElementById(cfg.renameBtnId).addEventListener("click", function () {
+      var oldName = selectEl.value;
+      if (!oldName) { reasonEl.textContent = "select a " + cfg.noun + " first"; return; }
+      var newName = window.prompt("Rename \"" + oldName + "\" to:", oldName);
+      if (!newName || newName === oldName) return;
+      fetch(cfg.apiBase + "/rename", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ old_name: oldName, new_name: newName }),
       })
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (data) {
           if (data && data.ok) {
-            configsReason.textContent = "imported as \"" + data.name + "\"";
-            refreshConfigsList();
+            reasonEl.textContent = "renamed to \"" + newName + "\"";
+            refreshList();
           } else {
-            configsReason.textContent = (data && data.reason) || "failed to import";
+            reasonEl.textContent = (data && data.reason) || "failed to rename";
           }
         })
-        .catch(function () { configsReason.textContent = "request failed"; });
-    };
-    reader.onerror = function () { configsReason.textContent = "failed to read file"; };
-    reader.readAsText(file);
-  });
+        .catch(function () { reasonEl.textContent = "request failed"; });
+    });
 
-  // Opens on the HOST machine running Axiom, not this remote browser tab
-  // — same caveat as Model panel's Open Model Folder button.
-  document.getElementById("configs-open-folder-btn").addEventListener("click", function () {
-    var btn = document.getElementById("configs-open-folder-btn");
-    btn.disabled = true;
-    fetch("/api/control/open_configs_folder", { method: "POST", headers: authHeaders() })
-      .catch(function () {})
-      .then(function () { btn.disabled = false; });
+    document.getElementById(cfg.deleteBtnId).addEventListener("click", function () {
+      var name = selectEl.value;
+      if (!name) { reasonEl.textContent = "select a " + cfg.noun + " first"; return; }
+      if (!window.confirm('Delete "' + name + '"? This cannot be undone.')) return;
+      fetch(cfg.apiBase + "/delete", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ name: name }),
+      })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (data && data.ok) {
+            reasonEl.textContent = "deleted \"" + name + "\"";
+            refreshList();
+          } else {
+            reasonEl.textContent = (data && data.reason) || "failed to delete";
+          }
+        })
+        .catch(function () { reasonEl.textContent = "request failed"; });
+    });
+
+    // Export downloads the raw JSON via a Blob + temporary <a download>
+    // link — this page is the app's own hosted static client, not a
+    // sandboxed Artifact, so a download link works normally here.
+    document.getElementById(cfg.exportBtnId).addEventListener("click", function () {
+      var name = selectEl.value;
+      if (!name) { reasonEl.textContent = "select a " + cfg.noun + " first"; return; }
+      fetch(cfg.apiBase + "/export?name=" + encodeURIComponent(name), { headers: authHeaders() })
+        .then(function (res) { return res.ok ? res.json() : null; })
+        .then(function (data) {
+          if (!data || data.ok === false) {
+            reasonEl.textContent = (data && data.reason) || "failed to export";
+            return;
+          }
+          var blob = new Blob([data.content], { type: "application/json" });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement("a");
+          a.href = url;
+          a.download = name + ".json";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          reasonEl.textContent = "exported \"" + name + "\"";
+        })
+        .catch(function () { reasonEl.textContent = "request failed"; });
+    });
+
+    // Import reads the chosen file's content client-side (FileReader) and
+    // POSTs it as JSON text — there's no host-side path a browser could
+    // send instead, see import_config_preset_content()'s docstring.
+    var importFileEl = document.getElementById(cfg.importFileId);
+    document.getElementById(cfg.importBtnId).addEventListener("click", function () {
+      importFileEl.click();
+    });
+
+    importFileEl.addEventListener("change", function () {
+      var file = importFileEl.files && importFileEl.files[0];
+      importFileEl.value = ""; // allow re-selecting the same file later
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function () {
+        fetch(cfg.apiBase + "/import", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ content: reader.result }),
+        })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (data) {
+            if (data && data.ok) {
+              reasonEl.textContent = "imported as \"" + data.name + "\"";
+              refreshList();
+            } else {
+              reasonEl.textContent = (data && data.reason) || "failed to import";
+            }
+          })
+          .catch(function () { reasonEl.textContent = "request failed"; });
+      };
+      reader.onerror = function () { reasonEl.textContent = "failed to read file"; };
+      reader.readAsText(file);
+    });
+
+    // Opens on the HOST machine running Axiom, not this remote browser tab
+    // — same caveat as Model panel's Open Model Folder button.
+    document.getElementById(cfg.openFolderBtnId).addEventListener("click", function () {
+      var btn = document.getElementById(cfg.openFolderBtnId);
+      btn.disabled = true;
+      fetch(cfg.openFolderRoute, { method: "POST", headers: authHeaders() })
+        .catch(function () {})
+        .then(function () { btn.disabled = false; });
+    });
+
+    return { refreshList: refreshList };
+  }
+
+  var _presetPanel = wireConfigCrudPanel({
+    apiBase: "/api/configs",
+    noun: "preset",
+    selectId: "configs-select",
+    reasonId: "configs-reason",
+    refreshBtnId: "configs-refresh-btn",
+    createBtnId: "configs-create-btn",
+    saveBtnId: "configs-save-btn",
+    loadBtnId: "configs-load-btn",
+    renameBtnId: "configs-rename-btn",
+    deleteBtnId: "configs-delete-btn",
+    exportBtnId: "configs-export-btn",
+    importBtnId: "configs-import-btn",
+    importFileId: "configs-import-file",
+    openFolderBtnId: "configs-open-folder-btn",
+    openFolderRoute: "/api/control/open_configs_folder",
+    // The Quick Presets sidebar section reuses this exact fetch rather
+    // than making its own — one master list, same "allModelNames"
+    // precedent the Model/Convert tabs already share.
+    onListRefreshed: function (names) { populatePresetSlotSelects(names); },
   });
+  function refreshConfigsList() { _presetPanel.refreshList(); }
+
+  var _fullConfigPanel = wireConfigCrudPanel({
+    apiBase: "/api/full_configs",
+    noun: "config",
+    selectId: "full-configs-select",
+    reasonId: "full-configs-reason",
+    refreshBtnId: "full-configs-refresh-btn",
+    createBtnId: "full-configs-create-btn",
+    saveBtnId: "full-configs-save-btn",
+    loadBtnId: "full-configs-load-btn",
+    renameBtnId: "full-configs-rename-btn",
+    deleteBtnId: "full-configs-delete-btn",
+    exportBtnId: "full-configs-export-btn",
+    importBtnId: "full-configs-import-btn",
+    importFileId: "full-configs-import-file",
+    openFolderBtnId: "full-configs-open-folder-btn",
+    openFolderRoute: "/api/control/open_full_configs_folder",
+  });
+  function refreshFullConfigsList() { _fullConfigPanel.refreshList(); }
 
   // ---------------------------------------------------------------------
   // Quick Presets — 5 one-click shortcuts below the sidebar's Status

@@ -681,10 +681,11 @@ class TestConfigPresets:
     pure-Python module (no Qt/onnxruntime), so real ConfigManager instances
     are used here rather than faked, pointed at a tmp_path directory via
     monkeypatching wcs._config_manager() (the same one-ConfigManager-per-
-    call factory the real routes use). A fresh ConfigManager always seeds
-    the bundled "Apex MAKCU UDP Precision" built-in preset into any empty
-    directory (see ConfigManager._seed_builtin_presets()) — tests account
-    for that rather than assuming an empty list.
+    call factory the real routes use). src/core/presets/ currently ships no
+    bundled built-in presets (the one that used to live there, "Apex MAKCU
+    UDP Precision", was removed), so a fresh ConfigManager's
+    _seed_builtin_presets() is a no-op and a brand-new directory starts
+    genuinely empty.
     """
 
     @pytest.fixture(autouse=True)
@@ -702,9 +703,8 @@ class TestConfigPresets:
         with patch("core.config._get_screen_size", return_value=(1920, 1080)):
             return Config()
 
-    def test_list_config_presets_includes_seeded_builtin(self):
-        presets = wcs.list_config_presets()
-        assert "Apex MAKCU UDP Precision" in presets
+    def test_fresh_directory_has_no_presets(self):
+        assert wcs.list_config_presets() == []
 
     def test_save_then_list(self):
         result = wcs.save_config_preset(self._real_config(), "my_preset")
@@ -874,6 +874,171 @@ class TestExportImportConfigPreset:
         fresh.fov_size = 1
         wcs.load_config_preset(fresh, "round_trip_source")
         assert fresh.fov_size == 456
+
+
+class TestFullConfigs:
+    """Full-config-snapshot CRUD wrappers — the counterpart to
+    TestConfigPresets above, pointed at wcs._full_config_manager() instead
+    of wcs._config_manager(). Same ConfigManager class, aim_only=False, so
+    every test here mirrors one in TestConfigPresets but additionally
+    proves a non-aim field (screenshot_method) round-trips — the one thing
+    an aim-only preset could never do."""
+
+    @pytest.fixture(autouse=True)
+    def _patch_full_config_manager(self, tmp_path, monkeypatch):
+        from core.config_manager import ConfigManager
+        self.configs_dir = tmp_path / "configs"
+        monkeypatch.setattr(
+            wcs, "_full_config_manager",
+            lambda: ConfigManager(str(self.configs_dir), aim_only=False),
+        )
+
+    def _real_config(self):
+        from unittest.mock import patch
+        from core.config import Config
+        with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+            return Config()
+
+    def test_fresh_directory_has_no_configs(self):
+        assert wcs.list_full_configs() == []
+
+    def test_save_then_list(self):
+        result = wcs.save_full_config(self._real_config(), "my_config")
+        assert result == {"ok": True}
+        assert "my_config" in wcs.list_full_configs()
+
+    def test_save_includes_a_non_aim_field(self):
+        config = self._real_config()
+        config.screenshot_method = "udp"
+        wcs.save_full_config(config, "with_non_aim")
+        result = wcs.export_full_config_content("with_non_aim")
+        import json
+        parsed = json.loads(result["content"])
+        assert parsed["config"]["screenshot_method"] == "udp"
+
+    def test_load_applies_non_aim_field(self):
+        saved = self._real_config()
+        saved.screenshot_method = "ndi"
+        wcs.save_full_config(saved, "custom")
+
+        target = self._real_config()
+        target.screenshot_method = "mss"
+        result = wcs.load_full_config(target, "custom")
+        assert result == {"ok": True}
+        assert target.screenshot_method == "ndi"
+
+    def test_load_missing_config_fails(self):
+        result = wcs.load_full_config(self._real_config(), "no_such_config")
+        assert result == {"ok": False}
+
+    def test_delete_removes_config(self):
+        wcs.save_full_config(self._real_config(), "to_delete")
+        assert wcs.delete_full_config("to_delete") == {"ok": True}
+        assert "to_delete" not in wcs.list_full_configs()
+
+    def test_rename_updates_list(self):
+        wcs.save_full_config(self._real_config(), "old_name")
+        result = wcs.rename_full_config("old_name", "new_name")
+        assert result == {"ok": True}
+        configs = wcs.list_full_configs()
+        assert "new_name" in configs
+        assert "old_name" not in configs
+
+    def test_preview_reports_a_non_aim_change(self):
+        config = self._real_config()
+        config.screenshot_method = "mss"
+        wcs.save_full_config(config, "baseline")
+        config.screenshot_method = "udp"
+        result = wcs.preview_full_config(config, "baseline")
+        assert result["ok"] is True
+        assert len(result["changes"]) >= 1
+
+    def test_open_full_configs_folder_missing_dir_returns_false(self):
+        import shutil
+        shutil.rmtree(self.configs_dir, ignore_errors=True)
+        assert wcs.open_full_configs_folder() is False
+
+    def test_open_full_configs_folder_no_startfile_returns_false(self, monkeypatch):
+        wcs.save_full_config(self._real_config(), "anything")
+        monkeypatch.delattr("os.startfile", raising=False)
+        assert wcs.open_full_configs_folder() is False
+
+    def test_independent_from_the_aim_only_manager(self, tmp_path, monkeypatch):
+        """A preset saved through the aim-only manager and a config saved
+        through the full manager, same name, must never collide — they're
+        pointed at separate directories entirely."""
+        from core.config_manager import ConfigManager
+        preset_dir = tmp_path / "presets_side"
+        monkeypatch.setattr(wcs, "_config_manager", lambda: ConfigManager(str(preset_dir)))
+
+        config = self._real_config()
+        config.fov_size = 111
+        wcs.save_config_preset(config, "shared_name")
+        config.fov_size = 222
+        wcs.save_full_config(config, "shared_name")
+
+        assert "shared_name" in wcs.list_config_presets()
+        assert "shared_name" in wcs.list_full_configs()
+
+        preset_target = self._real_config()
+        wcs.load_config_preset(preset_target, "shared_name")
+        assert preset_target.fov_size == 111
+
+        full_target = self._real_config()
+        wcs.load_full_config(full_target, "shared_name")
+        assert full_target.fov_size == 222
+
+
+class TestExportImportFullConfig:
+    @pytest.fixture(autouse=True)
+    def _patch_full_config_manager(self, tmp_path, monkeypatch):
+        from core.config_manager import ConfigManager
+        self.configs_dir = tmp_path / "configs"
+        monkeypatch.setattr(
+            wcs, "_full_config_manager",
+            lambda: ConfigManager(str(self.configs_dir), aim_only=False),
+        )
+
+    def _real_config(self):
+        from unittest.mock import patch
+        from core.config import Config
+        with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+            return Config()
+
+    def test_export_missing_config_returns_not_found(self):
+        result = wcs.export_full_config_content("does_not_exist")
+        assert result == {"ok": False, "reason": "not_found"}
+
+    def test_import_uses_name_field_from_content(self):
+        import json
+        content = json.dumps({"name": "imported_config", "config": {"fov_size": 111, "screenshot_method": "udp"}})
+        result = wcs.import_full_config_content(content)
+        assert result == {"ok": True, "name": "imported_config"}
+        assert "imported_config" in wcs.list_full_configs()
+
+    def test_import_never_overwrites_existing_config(self):
+        import json
+        wcs.save_full_config(self._real_config(), "dup_name")
+        content = json.dumps({"name": "dup_name", "config": {"fov_size": 999}})
+        result = wcs.import_full_config_content(content)
+        assert result["ok"] is True
+        assert result["name"] == "dup_name_1"
+
+    def test_export_then_import_round_trips_a_non_aim_field(self):
+        config = self._real_config()
+        config.screenshot_method = "udp"
+        wcs.save_full_config(config, "round_trip_source")
+        exported = wcs.export_full_config_content("round_trip_source")
+        assert exported["ok"] is True
+
+        wcs.delete_full_config("round_trip_source")
+        imported = wcs.import_full_config_content(exported["content"])
+        assert imported["ok"] is True
+
+        fresh = self._real_config()
+        fresh.screenshot_method = "mss"
+        wcs.load_full_config(fresh, "round_trip_source")
+        assert fresh.screenshot_method == "udp"
 
 
 class TestPresetSlots:

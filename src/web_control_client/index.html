@@ -1611,6 +1611,30 @@
         <div class="panel" id="panel-configs">
           <div class="panel-title">Configs</div>
 
+          <div class="field-group-title">Config (full settings snapshot)</div>
+          <div class="field-card stacked">
+            <div class="row" style="justify-content: space-between;">
+              <div class="field-title">Configs</div>
+              <button id="full-configs-refresh-btn">Refresh</button>
+            </div>
+            <select id="full-configs-select" size="8" style="width: 100%; height: auto;"></select>
+          </div>
+
+          <div class="row control-row" style="flex-wrap: wrap;">
+            <button id="full-configs-create-btn">Create</button>
+            <button id="full-configs-load-btn">Load</button>
+            <button id="full-configs-save-btn">Save</button>
+            <button id="full-configs-rename-btn">Rename</button>
+            <button id="full-configs-delete-btn">Delete</button>
+            <button id="full-configs-export-btn">Export</button>
+            <button id="full-configs-import-btn">Import</button>
+            <input type="file" id="full-configs-import-file" accept="application/json" class="hidden">
+            <button id="full-configs-open-folder-btn">Open Folder</button>
+          </div>
+          <div class="hint">A config is a full settings snapshot — every setting, not just aiming. "Open Folder" opens the configs directory on the machine running Axiom, not this browser. "Export" downloads the config to this browser; "Import" reads a file from this browser and saves it as a new config (never overwrites an existing name — a duplicate is saved as "name_1", etc.).</div>
+          <div class="hint" id="full-configs-reason"></div>
+
+          <div class="field-group-title">Preset (aim-only settings)</div>
           <div class="field-card stacked">
             <div class="row" style="justify-content: space-between;">
               <div class="field-title">Presets</div>
@@ -1630,7 +1654,7 @@
             <input type="file" id="configs-import-file" accept="application/json" class="hidden">
             <button id="configs-open-folder-btn">Open Folder</button>
           </div>
-          <div class="hint">"Open Folder" opens the configs directory on the machine running Axiom, not this browser. "Export" downloads the preset to this browser; "Import" reads a file from this browser and saves it as a new preset (never overwrites an existing name — a duplicate is saved as "name_1", etc.).</div>
+          <div class="hint">A preset only saves/loads aim-related settings, letting you swap aiming behavior without touching anything else. "Open Folder" opens the presets directory on the machine running Axiom, not this browser. "Export" downloads the preset to this browser; "Import" reads a file from this browser and saves it as a new preset (never overwrites an existing name — a duplicate is saved as "name_1", etc.).</div>
           <div class="hint" id="configs-reason"></div>
         </div>
 

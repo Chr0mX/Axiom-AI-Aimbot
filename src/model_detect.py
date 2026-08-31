@@ -180,6 +180,32 @@ def inspect_onnx(path: str) -> dict:
     }
 
 
+# A process-wide TensorRT `Runtime` (and the `Logger` it was built with),
+# lazily created on first use and reused by every later inspect_engine()
+# call. TensorRT's own logger is a process-wide singleton registered the
+# first time ANY builder/runtime/refitter is constructed anywhere in the
+# process (nvinfer1::getLogger()) — a fresh trt.Runtime(trt.Logger(...))
+# on every call (as this used to do) is a *new* Python object each time,
+# which never matches whatever got registered first, so TensorRT logs
+# "The logger passed into createInferRuntime differs from one already
+# registered..." and ignores it, on every single call. Reusing one cached
+# Runtime instance means only the very first call in the process can ever
+# possibly trigger that warning (if something else, e.g. an active ONNX
+# Runtime TensorRT session, already registered a different logger first) —
+# every call after that reuses the exact same object, so it can't happen
+# again. Deserializing a different engine file just calls
+# deserialize_cuda_engine() again on the same Runtime; nothing about the
+# Runtime itself is tied to one specific engine file.
+_trt_runtime = None
+
+
+def _get_trt_runtime(trt_module):
+    global _trt_runtime
+    if _trt_runtime is None:
+        _trt_runtime = trt_module.Runtime(trt_module.Logger(trt_module.Logger.WARNING))
+    return _trt_runtime
+
+
 def inspect_engine(path: str) -> dict:
     """Inspect a TensorRT engine file."""
     try:
@@ -208,8 +234,7 @@ def inspect_engine(path: str) -> dict:
             "Run: src\\python\\python.exe src\\install_tensorrt_local.py"
         )
 
-    logger  = trt.Logger(trt.Logger.WARNING)
-    runtime = trt.Runtime(logger)
+    runtime = _get_trt_runtime(trt)
 
     with open(path, "rb") as f:
         engine = runtime.deserialize_cuda_engine(f.read())
