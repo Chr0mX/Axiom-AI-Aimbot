@@ -72,7 +72,13 @@ class SliderSpinCard(SettingCard):
         self.slider.blockSignals(True)
         self.spinBox.blockSignals(True)
         self.slider.setValue(value)
-        self.spinBox.setValue(value)
+        # QSlider.setValue() silently clamps to [min, max] — re-read the
+        # slider's own post-clamp value rather than trusting the raw 'value'
+        # passed in, so the SpinBox can never disagree with where the thumb
+        # actually landed (e.g. a stale/out-of-range value from an older
+        # preset file no longer produces a slider/SpinBox mismatch).
+        clamped = self.slider.value()
+        self.spinBox.setValue(clamped)
         self.slider.blockSignals(False)
         self.spinBox.blockSignals(False)
 
@@ -152,7 +158,10 @@ class SliderDoubleSpinCard(SettingCard):
         self.slider.blockSignals(True)
         self.spinBox.blockSignals(True)
         self.slider.setValue(int(value * self._multiplier))
-        self.spinBox.setValue(value)
+        # Same clamp re-read as SliderSpinCard.setValue() above — derive the
+        # DoubleSpinBox's value from where the slider's integer range actually
+        # clamped it to, not the raw float, so the two can't disagree.
+        self.spinBox.setValue(self.slider.value() / self._multiplier)
         self.slider.blockSignals(False)
         self.spinBox.blockSignals(False)
 
@@ -212,7 +221,12 @@ class SliderLabelCard(SettingCard):
         """設定值"""
         self.slider.blockSignals(True)
         self.slider.setValue(value)
-        self.label.setText(self._format_func(value))
+        # Format from the slider's own post-clamp value, not the raw 'value'
+        # passed in — QSlider.setValue() silently clamps to [min, max], so an
+        # out-of-range value (e.g. a stale/older preset file) would otherwise
+        # leave the label showing a number the thumb's actual position
+        # disagrees with.
+        self.label.setText(self._format_func(self.slider.value()))
         self.slider.blockSignals(False)
 
     def value(self) -> int:
