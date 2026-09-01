@@ -267,6 +267,13 @@ class ConfigManager:
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config_data, f, ensure_ascii=False, indent=2)
+            # The live config now *is* this named preset/config — mirrors a
+            # typical "Save As" (see load_config()'s matching update, and
+            # Config.active_preset_name/active_config_name's docstring).
+            if self.aim_only:
+                config_instance.active_preset_name = config_name
+            else:
+                config_instance.active_config_name = config_name
             return True
         except OSError as e:
             logger.error("Failed to save preset '%s': %s", config_name, e)
@@ -341,6 +348,19 @@ class ConfigManager:
                 # file contains, unfiltered — that's the whole point of it.
                 config_data = _filter_to_aim_preset_fields(config_data)
             config_instance.from_dict(config_data)
+            # Record what's now active for the status panel (Config.
+            # active_preset_name/active_config_name). A full-config load
+            # (aim_only=False) touches every aim./tracking.* field too, so
+            # it can silently override whatever preset previously set
+            # them — clear active_preset_name so the status panel doesn't
+            # keep crediting a preset whose settings may no longer be in
+            # effect. An aim-preset load never touches non-aim fields, so
+            # it has no equivalent reason to touch active_config_name.
+            if self.aim_only:
+                config_instance.active_preset_name = config_name
+            else:
+                config_instance.active_config_name = config_name
+                config_instance.active_preset_name = ""
             return True
         except (OSError, json.JSONDecodeError) as e:
             logger.error("Failed to load preset '%s': %s", config_name, e)
