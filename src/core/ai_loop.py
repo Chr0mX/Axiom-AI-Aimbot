@@ -446,11 +446,19 @@ def ai_logic_loop(
                         sy = frame.shape[0] / float(cmc_size)
                         state.cam_shift_x = max(-30.0, min(30.0, float(shift[0]) * sx))
                         state.cam_shift_y = max(-30.0, min(30.0, float(shift[1]) * sy))
+                        # Running integral of the per-frame shift — see
+                        # LoopState.cam_drift_x/y — so process_aiming can
+                        # compensate the predictor/Kalman's position history,
+                        # not just this frame's PID error.
+                        state.cam_drift_x += state.cam_shift_x
+                        state.cam_drift_y += state.cam_shift_y
                     _cmc_prev[0] = gray
                 else:
                     _cmc_prev[0] = None
                     state.cam_shift_x = 0.0
                     state.cam_shift_y = 0.0
+                    state.cam_drift_x = 0.0
+                    state.cam_drift_y = 0.0
 
                 _frame_is_square = frame.shape[0] == frame.shape[1]
                 tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(

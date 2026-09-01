@@ -122,6 +122,16 @@ def calculate_aim_target(
     return target_x, target_y
 
 
+# How long after a fresh target lock to keep re-bootstrapping the predictor/
+# Kalman filter instead of letting them accumulate normally (see
+# process_aiming()'s "Acquisition-phase guard" below). Matches the fixed
+# window a comparable third-party inference platform's own anchor-prediction
+# design uses for the same purpose; not exposed as a config field since it's
+# a low-level implementation constant, not a user-facing tuning knob (same
+# precedent as _adaptive_sticky_iou's own hardcoded area thresholds).
+_ACQUISITION_GUARD_S = 0.024
+
+
 def _adaptive_sticky_iou(base_iou: float, box: list, fov_size: float) -> float:
     # Replaces fixed lock_iou_threshold with area-scaled version.
     # Ported from Someone_idea/sticky_aim.py StickyTargetLock._adaptive_iou_threshold().
@@ -262,11 +272,48 @@ def process_aiming(
         _iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
         if _prev_locked_box is None or _box_iou(_prev_locked_box, selected_box) < _iou_thresh:
             state.aim_y_last_target_t = 0.0
+            # Same "is this genuinely a new target" edge as above — arms the
+            # acquisition-phase guard below (state.lock_acquired_t) exactly
+            # once per fresh lock, not every frame the target stays locked.
+            state.lock_acquired_t = current_time
 
         if sticky:
             state.no_detection_frames = 0
             config.display_locked_box = list(selected_box)
             config.display_locked_box_is_decaying = False
+
+        # --- Camera-drift-compensated coordinate frame for prediction/smoothing ---
+        # The predictor and Kalman filter both estimate target velocity from
+        # how its position changes frame-to-frame. Feeding them the raw
+        # detected position lets the aimbot's own correction — or camera
+        # shake/recoil — look exactly like target motion to that estimate,
+        # worst of all right after a fresh lock when the camera is still
+        # rotating hard toward the target. state.cam_drift_x/y is a running
+        # integral of the phase-correlation-measured background shift (see
+        # ai_loop.py's _preprocess_worker), so subtracting it here yields a
+        # world-relative position whose frame-to-frame deltas reflect only
+        # real target motion; it's added back below before the PID error is
+        # computed, which must stay in real, current screen coordinates. This
+        # is independent of (and in addition to) the existing per-frame
+        # cam_shift_x/y subtraction on the error itself further down, which
+        # damps this frame's shake in the PID rather than the prediction
+        # history — the two serve different purposes and don't double-count.
+        _cam_comp = getattr(config, 'cam_motion_comp_enabled', False)
+        if _cam_comp:
+            pred_x = target_x - state.cam_drift_x
+            pred_y = target_y - state.cam_drift_y
+        else:
+            pred_x, pred_y = target_x, target_y
+
+        # --- Acquisition-phase guard ---
+        # For a short window right after a fresh lock, the crosshair is still
+        # snapping onto the target under our own correction — that
+        # transition looks exactly like target motion to a naive velocity
+        # estimate. Keep re-bootstrapping the predictor/Kalman (reset, then
+        # treat this frame's position as a fresh zero-velocity start) until
+        # the window elapses, so neither ever computes a velocity across the
+        # lock-acquisition jump itself.
+        _in_acquisition = (current_time - state.lock_acquired_t) < _ACQUISITION_GUARD_S
 
         # --- Velocity prediction (optional) ---
         # Extrapolates the aim point forward by prediction_horizon_ms to
@@ -281,8 +328,10 @@ def process_aiming(
         # feeling permanently a step behind.
         if getattr(config, 'prediction_enabled', False):
             predictor = _get_predictor(config)
+            if _in_acquisition:
+                predictor.reset()
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
-            target_x, target_y = predictor.update(target_x, target_y, time.perf_counter(), horizon_s)
+            pred_x, pred_y = predictor.update(pred_x, pred_y, time.perf_counter(), horizon_s)
         else:
             if _predictor is not None:
                 _predictor.reset()
@@ -290,16 +339,23 @@ def process_aiming(
         # --- Kalman filter aim-point smoothing (optional) ---
         if getattr(config, 'kalman_enabled', False):
             kf = _get_kalman(config)
-            target_x, target_y = kf.update(target_x, target_y)
+            if _in_acquisition:
+                kf.reset()
+            pred_x, pred_y = kf.update(pred_x, pred_y)
         else:
             if _kalman is not None:
                 _kalman.reset()
+
+        if _cam_comp:
+            target_x, target_y = pred_x + state.cam_drift_x, pred_y + state.cam_drift_y
+        else:
+            target_x, target_y = pred_x, pred_y
 
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
 
         # --- Camera motion compensation — cancel shake-induced scene shift ---
-        if getattr(config, 'cam_motion_comp_enabled', False):
+        if _cam_comp:
             errorX -= state.cam_shift_x
             errorY -= state.cam_shift_y
 

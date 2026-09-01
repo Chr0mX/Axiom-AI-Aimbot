@@ -203,6 +203,177 @@ class TestVelocityPrediction:
         assert dx == 10, f"Raw tracking should not extrapolate when prediction is disabled: dx={dx}"
 
 
+class TestCamDriftCompensation:
+    """state.cam_drift_x/y (a running integral of the phase-correlation-
+    measured background shift) must be subtracted from the raw target
+    position before it reaches the velocity predictor/Kalman filter, and
+    added back before the PID error is computed. Without this, the aimbot's
+    own camera correction (or shake/recoil) looks exactly like target motion
+    to the predictor, which then extrapolates *ahead* of a purely
+    self-induced apparent shift — a phantom lead on top of a real one."""
+
+    @staticmethod
+    def _reset_singletons(monkeypatch):
+        import core.ai_aiming as aiming_mod
+        monkeypatch.setattr(aiming_mod, "_predictor", None)
+        monkeypatch.setattr(aiming_mod, "_kalman", None)
+
+    def test_uncompensated_drift_is_extrapolated_as_phantom_velocity(self, sent_moves, monkeypatch):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        self._reset_singletons(monkeypatch)
+        config = _make_config(
+            prediction_enabled=True, prediction_horizon_ms=100.0,
+            prediction_max_velocity=5000.0, cam_motion_comp_enabled=False,
+        )
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        perf_times = iter([0.0, 0.1])
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: next(perf_times))
+
+        box_a = [400.0, 400.0, 600.0, 600.0]  # center (500, 500) -- on crosshair
+        process_aiming(config, [box_a], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        # Raw target shifts +50px, e.g. purely from the aimbot's own big
+        # correction moving the camera -- the target never actually moved.
+        box_b = [450.0, 400.0, 650.0, 600.0]  # center (550, 500)
+        sent_moves.clear()
+        process_aiming(config, [box_b], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.1, confidences=[0.9])
+
+        assert len(sent_moves) == 1
+        dx, dy, _ = sent_moves[0]
+        # vx = 50px/0.1s = 500px/s; predicted = 550 + 500*0.1 = 600 -> error 100.
+        # Without compensation, the self-induced shift stacks a phantom
+        # extrapolated lead on top of the raw 50px error.
+        assert dx == 100, f"Expected uncompensated phantom-velocity extrapolation: dx={dx}"
+
+    def test_compensated_drift_is_not_extrapolated(self, sent_moves, monkeypatch):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        self._reset_singletons(monkeypatch)
+        config = _make_config(
+            prediction_enabled=True, prediction_horizon_ms=100.0,
+            prediction_max_velocity=5000.0, cam_motion_comp_enabled=True,
+        )
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        perf_times = iter([0.0, 0.1])
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: next(perf_times))
+
+        box_a = [400.0, 400.0, 600.0, 600.0]  # center (500, 500)
+        process_aiming(config, [box_a], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        # Same +50px raw shift as above, but this time state.cam_drift_x
+        # reflects that the *entire* shift is accounted for by camera drift
+        # (in real usage this is accumulated continuously by
+        # ai_loop.py's _preprocess_worker; simulated directly here).
+        state.cam_drift_x = 50.0
+        box_b = [450.0, 400.0, 650.0, 600.0]  # center (550, 500)
+        sent_moves.clear()
+        process_aiming(config, [box_b], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.1, confidences=[0.9])
+
+        assert len(sent_moves) == 1
+        dx, dy, _ = sent_moves[0]
+        # Compensated position stays flat at 500 both frames (500-0, 550-50)
+        # -> predictor sees zero velocity -> no extrapolation -> error is
+        # just the raw, currently-needed correction (550-500=50), matching
+        # what the crosshair actually needs to do right now.
+        assert dx == 50, f"Compensated drift should not be extrapolated as motion: dx={dx}"
+
+
+class TestAcquisitionPhaseGuard:
+    """For _ACQUISITION_GUARD_S after a fresh lock, the predictor/Kalman must
+    keep re-bootstrapping instead of accumulating normally, so the
+    crosshair's own snap onto a brand-new target is never misread as the
+    target moving. Without this, a target picked up mid-snap can produce a
+    large, wrong velocity estimate from a single early sample pair."""
+
+    def test_guard_prevents_extrapolation_from_the_acquisition_jump(self, sent_moves, monkeypatch):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        monkeypatch.setattr(aiming_mod, "_predictor", None)
+        monkeypatch.setattr(aiming_mod, "_kalman", None)
+        config = _make_config(
+            prediction_enabled=True, prediction_horizon_ms=100.0,
+            prediction_max_velocity=5000.0,
+        )
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        perf_times = iter([0.0, 0.005])
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: next(perf_times))
+
+        box_1 = [100.0, 400.0, 300.0, 600.0]  # center (200, 500) -- fresh lock
+        process_aiming(config, [box_1], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        # 5ms later (well inside the 24ms guard window) the same target has
+        # genuinely moved 5px -- but the guard must still treat this as
+        # another bootstrap rather than compute a velocity from it.
+        box_2 = [105.0, 400.0, 305.0, 600.0]  # center (205, 500)
+        sent_moves.clear()
+        process_aiming(config, [box_2], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.005, confidences=[0.9])
+
+        assert len(sent_moves) == 1
+        dx, dy, _ = sent_moves[0]
+        # No extrapolation: dx must equal the raw error (205-500=-295), not
+        # a value inflated by treating the 5px/5ms jump as 1000px/s velocity.
+        assert dx == -295, f"Acquisition guard did not suppress phantom velocity: dx={dx}"
+
+    def test_without_the_guard_the_same_jump_is_extrapolated(self, sent_moves, monkeypatch):
+        """Contrast case: confirms the assertion above isn't trivially true —
+        with the guard window disabled, the identical two frames DO produce
+        a materially different (extrapolated) result."""
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        monkeypatch.setattr(aiming_mod, "_predictor", None)
+        monkeypatch.setattr(aiming_mod, "_kalman", None)
+        monkeypatch.setattr(aiming_mod, "_ACQUISITION_GUARD_S", 0.0)
+        config = _make_config(
+            prediction_enabled=True, prediction_horizon_ms=100.0,
+            prediction_max_velocity=5000.0,
+        )
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+        perf_times = iter([0.0, 0.005])
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: next(perf_times))
+
+        box_1 = [100.0, 400.0, 300.0, 600.0]
+        process_aiming(config, [box_1], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.0, confidences=[0.9])
+
+        box_2 = [105.0, 400.0, 305.0, 600.0]
+        sent_moves.clear()
+        process_aiming(config, [box_2], 500, 500, pid_x, pid_y, "sendinput", state,
+                        current_time=1000.005, confidences=[0.9])
+
+        assert len(sent_moves) == 1
+        dx, dy, _ = sent_moves[0]
+        # vx = 5px/0.005s = 1000px/s; predicted = 205 + 1000*0.1 = 305 ->
+        # error 305-500=-195, materially different from the guarded -295.
+        assert dx == -195, f"Expected the disabled guard to extrapolate the jump: dx={dx}"
+
+
 class TestDeadzonePreviousErrorFreshness:
     """previous_error must not go stale while the deadzone suppresses
     movement, or the derivative term sees a multi-frame-old error (and
