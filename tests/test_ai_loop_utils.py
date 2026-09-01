@@ -126,6 +126,33 @@ class TestGetCaptureDimensions:
         assert ai_loop_utils.get_capture_dimensions(config) == (2560, 1440)
 
 
+class TestApplyCamShiftDeadzone:
+    """Gates what accumulates into state.cam_drift_x/y (see ai_loop.py's
+    _preprocess_worker) — a real per-frame phase-correlation measurement
+    below the noise floor must be zeroed rather than accumulated, since
+    the drift integral feeds a frame-to-frame-differenced, then
+    horizon-extrapolated, signal that amplifies whatever noise rides on
+    it (a reported wobble in the camera-drift-compensated prediction
+    feature). state.cam_shift_x/y itself is untouched by this — this
+    helper only ever gates a value the caller separately decides to
+    accumulate or not."""
+
+    def test_below_threshold_zeroed(self, ai_loop_utils):
+        assert ai_loop_utils.apply_cam_shift_deadzone(0.3, 0.5) == 0.0
+        assert ai_loop_utils.apply_cam_shift_deadzone(-0.3, 0.5) == 0.0
+
+    def test_at_threshold_passes_through(self, ai_loop_utils):
+        assert ai_loop_utils.apply_cam_shift_deadzone(0.5, 0.5) == 0.5
+        assert ai_loop_utils.apply_cam_shift_deadzone(-0.5, 0.5) == -0.5
+
+    def test_above_threshold_passes_through_unchanged(self, ai_loop_utils):
+        assert ai_loop_utils.apply_cam_shift_deadzone(12.5, 0.5) == 12.5
+        assert ai_loop_utils.apply_cam_shift_deadzone(-12.5, 0.5) == -12.5
+
+    def test_zero_value_zeroed(self, ai_loop_utils):
+        assert ai_loop_utils.apply_cam_shift_deadzone(0.0, 0.5) == 0.0
+
+
 class TestCalculateDetectionRegion:
     """detection_size must be clamped against both capture dimensions, not
     just height — a capture source narrower than tall (portrait UVC/NDI/UDP

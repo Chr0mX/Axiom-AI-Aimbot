@@ -77,6 +77,27 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
     return int(getattr(config, 'width', 1920)), int(getattr(config, 'height', 1080))
 
 
+def apply_cam_shift_deadzone(value: float, threshold: float) -> float:
+    """Zero out `value` if its magnitude is below `threshold`; otherwise
+    return it unchanged.
+
+    Used by ai_loop.py's _preprocess_worker to gate what accumulates into
+    state.cam_drift_x/y (the running integral of the phase-correlation-
+    measured per-frame shift that ai_aiming.py's camera-drift-compensated
+    prediction subtracts from the raw target position before it reaches the
+    velocity predictor/Kalman filter). That integral feeds a
+    frame-to-frame-differenced, then horizon-extrapolated, signal, so
+    phase correlation's own measurement noise floor (quantization from the
+    cam_motion_comp_size downsample, sensor/compression noise) gets
+    amplified in a way the existing one-frame PID-error use of
+    state.cam_shift_x/y itself (unfiltered, not differenced or
+    extrapolated) never showed. Deadzoning here — only accumulating a
+    shift big enough to plausibly be real motion — fixed a reported wobble
+    without touching that unrelated, unfiltered PID-error path.
+    """
+    return value if abs(value) >= threshold else 0.0
+
+
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:
     """Update crosshair position"""
 
