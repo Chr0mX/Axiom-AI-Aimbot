@@ -29,6 +29,25 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
             crop_size = int(getattr(config, 'detect_range_size', 0) or 0) & ~1
             if crop_size > 0:
                 return crop_size, crop_size
+        # Prefer the actual negotiated resolution over the user-configured
+        # request. Most UVC/webcam drivers only support a fixed set of
+        # standard modes and silently negotiate to the nearest one if the
+        # exact requested uvc_width/uvc_height isn't available, so the real
+        # captured frame can differ from what was asked for. Using the
+        # requested size here desyncs every downstream consumer of these
+        # dimensions from the actual frame — most visibly the Web ESP web
+        # overlay, whose "screen" w/h the browser client scales every drawn
+        # box/FOV/crosshair against (esp_server.py's _build_snapshot() /
+        # app.js's scale calc), but also update_crosshair_position()'s
+        # crosshair-center assumption and calculate_detection_region()'s
+        # actual model-input crop. Same "actual over requested" pattern the
+        # udp branch below already uses for udp_width/udp_height. 0 means
+        # not yet negotiated (no frame received yet); fall back to the
+        # requested value only in that case.
+        cap_w = int(getattr(config, 'uvc_actual_width', 0) or 0)
+        cap_h = int(getattr(config, 'uvc_actual_height', 0) or 0)
+        if cap_w > 0 and cap_h > 0:
+            return cap_w, cap_h
         cap_w = int(getattr(config, 'uvc_width', 0) or 0)
         cap_h = int(getattr(config, 'uvc_height', 0) or 0)
         if cap_w > 0 and cap_h > 0:
