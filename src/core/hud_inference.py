@@ -20,8 +20,15 @@ ROI: normally cropped from the shared screen_capture preview frame using
      happens OBS-side, via a second udp_stream_filter filter instance on the
      same source with its own crop rect and its own target port) —
      hud_roi_coords is not applied to it.
-Model input: 320 x 320 NCHW float32, letterboxed with grey fill (114).
-Output: YOLO11n format [1, 4+num_classes, num_anchors] — transposed and decoded here.
+Model input: 320 x 320 NCHW float32, letterboxed with grey fill (114). (best.onnx
+     itself uses a 1280 x 1280 input — the actual dims are always read from the
+     loaded model's own input metadata, this is just the historical default.)
+Output: two genuinely different shapes are handled, auto-detected per model
+     (see _postprocess()): legacy raw-grid YOLO (v8/v11-style)
+     [1, 4+num_classes, num_anchors], needing our own argmax/threshold/NMS; and
+     Ultralytics end-to-end exports (YOLO26, or any -nms-baked-in graph)
+     [1, max_det, 6], already NMS'd with each row [x1, y1, x2, y2, confidence,
+     class_id] in absolute input-pixel space and nothing left to decode.
 
 Public API (identical shape to ocr_inference.py):
   start(config)           — spawn child process + feeder thread (no-op if running)
@@ -332,14 +339,124 @@ def _preprocess(roi: np.ndarray, inp_w: int, inp_h: int) -> np.ndarray:
     return rgb.transpose(2, 0, 1)[np.newaxis]   # [1, 3, inp_h, inp_w]
 
 
-def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
-                 class_names: list[str] | None) -> tuple[list[str], list[tuple]]:
-    """Decode YOLO11n output; return (lines, boxes).
+def _nms_class_agnostic(boxes: np.ndarray, scores: np.ndarray, iou_thresh: float = 0.5) -> list[int]:
+    """Greedy IoU suppression across ALL classes, not just within one.
 
-    boxes: list of (x1, y1, x2, y2, class_id, score) in model-input space (0–320).
-    Handles both [1, 4+C, A] and [1, A, 4+C] output formats.
+    Ultralytics' end-to-end export runs NMS inside the graph, but per
+    Ultralytics' own default that NMS is class-aware — it only suppresses
+    overlapping boxes that share a class, not overlapping boxes of
+    different classes. For an ambiguous small HUD icon, several distinct
+    weapon/attachment classes can each cross the confidence threshold for
+    the exact same region and all survive as separate, heavily-overlapping
+    boxes (visible as stacked/duplicate boxes in the ROI preview, and as
+    the wrong class occasionally winning "highest score" for that region).
+    This collapses each such overlapping cluster down to just its single
+    highest-confidence detection, regardless of which class it is.
+
+    boxes: [N, 4] x1,y1,x2,y2. Returns kept indices (into boxes/scores),
+    sorted score-descending.
+    """
+    if len(scores) == 0:
+        return []
+    order = np.argsort(scores)[::-1]
+    x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+    areas = np.maximum(0.0, x2 - x1) * np.maximum(0.0, y2 - y1)
+    suppressed = np.zeros(len(order), dtype=bool)
+    keep: list[int] = []
+    for i in range(len(order)):
+        if suppressed[i]:
+            continue
+        idx = order[i]
+        keep.append(int(idx))
+        rest = order[i + 1:]
+        if len(rest) == 0:
+            continue
+        xx1 = np.maximum(x1[idx], x1[rest])
+        yy1 = np.maximum(y1[idx], y1[rest])
+        xx2 = np.minimum(x2[idx], x2[rest])
+        yy2 = np.minimum(y2[idx], y2[rest])
+        inter = np.maximum(0.0, xx2 - xx1) * np.maximum(0.0, yy2 - yy1)
+        union = areas[idx] + areas[rest] - inter
+        iou = np.where(union > 0, inter / union, 0.0)
+        suppressed[i + 1:][iou > iou_thresh] = True
+    return keep
+
+
+def _postprocess(output: np.ndarray, num_classes: int, threshold: float,
+                 class_names: list[str] | None,
+                 is_end2end: bool = False) -> tuple[list[str], list[tuple]]:
+    """Decode a HUD-detector output; return (lines, boxes).
+
+    boxes: list of (x1, y1, x2, y2, class_id, score) in model-input space.
+
+    Two genuinely different shapes are handled, selected by is_end2end (see
+    _child_main's model-load block for how that's decided):
+    - Legacy raw-grid YOLO (v8/v11-style) — [1, 4+C, anchors] or
+      [1, anchors, 4+C]: per-anchor center-box (cx,cy,w,h) plus a per-class
+      score block; we do our own argmax + threshold + top-K here.
+    - Ultralytics end-to-end export (YOLO26, or any -nms-baked-in graph) —
+      [1, max_det, 6]: NMS already ran inside the graph, so each row is
+      already [x1, y1, x2, y2, confidence, class_id] in absolute
+      input-pixel space. Treating this like the legacy format silently
+      misreads column 5 (the real class_id) as a second "class score" and
+      re-derives bogus center-box coordinates from what are already
+      corner coordinates — this was a real, shipped bug (best.onnx is a
+      YOLO26s end2end export) that produced a fixed, wrong num_classes and
+      garbage out-of-bounds boxes.
     """
     data = output[0]
+
+    if is_end2end:
+        # [max_det, 6]: x1, y1, x2, y2, score, class_id — already NMS'd,
+        # already absolute pixel coords. Some exports pad unused detection
+        # slots with all-zero/near-zero-confidence rows, which the plain
+        # score filter below already drops.
+        if data.shape[-1] != 6 and data.shape[0] == 6:
+            data = data.T
+        scores = data[:, 4].astype(np.float64)
+        class_ids = np.round(data[:, 5]).astype(np.int64)
+
+        top_score = float(scores.max()) if len(scores) > 0 else 0.0
+        if len(scores) > 0 and class_names:
+            top_idx = np.argsort(scores)[::-1][:3]
+            top_str = "  ".join(
+                f"{class_names[int(class_ids[i])] if 0 <= int(class_ids[i]) < len(class_names) else class_ids[i]}="
+                f"{float(scores[i]):.3f}"
+                for i in top_idx
+            )
+            print(f"[HUD child] threshold={threshold}  top3: {top_str}")
+        else:
+            print(f"[HUD child] max_score={top_score:.3f} threshold={threshold} dets={len(scores)}")
+
+        mask = scores >= threshold
+        if not mask.any():
+            if top_score > 0.001 and class_names:
+                best_i = int(np.argmax(scores))
+                best_cid = int(class_ids[best_i])
+                best_name = class_names[best_cid] if 0 <= best_cid < len(class_names) else str(best_cid)
+                x1, y1, x2, y2 = (float(v) for v in data[best_i, :4])
+                hint_box = [(x1, y1, x2, y2, best_cid, -top_score)]
+                return [f"[below threshold] best: {best_name} {top_score:.1%}  (threshold={threshold:.0%})"], hint_box
+            return [], []
+
+        passing_idx = np.where(mask)[0]
+        scores_f = scores[mask]
+        class_ids_f = class_ids[mask]
+        boxes_f = data[passing_idx, :4]
+        order = _nms_class_agnostic(boxes_f, scores_f, iou_thresh=0.5)[:_MAX_RESULT_LINES]
+        lines: list[str] = []
+        boxes_out: list[tuple] = []
+        for i in order:
+            orig = passing_idx[i]
+            cid = int(class_ids_f[i])
+            score = float(scores_f[i])
+            x1, y1, x2, y2 = (float(v) for v in data[orig, :4])
+            name = class_names[cid] if (class_names and 0 <= cid < len(class_names)) else str(cid)
+            lines.append(f"{name}: {int(score * 100)}%")
+            boxes_out.append((x1, y1, x2, y2, cid, score))
+        return lines, boxes_out
+
+    # ---- legacy raw-grid path ----
     # Auto-detect: if rows < cols it's [4+C, A] → transpose to [A, 4+C]
     if data.shape[0] < data.shape[1]:
         data = data.T
@@ -450,6 +567,7 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
     current_model_path: str = ""
     class_names: list[str] | None = None
     num_classes: int = 0
+    is_end2end: bool = False
     input_name: str = ""
     inp_w: int = 320
     inp_h: int = 320
@@ -471,6 +589,7 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
             current_model_path = model_path
             class_names = None
             num_classes = 0
+            is_end2end = False
             if model_path and os.path.isfile(model_path):
                 try:
                     opts = ort.SessionOptions()
@@ -490,11 +609,6 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
                     except Exception:
                         inp_h, inp_w = 320, 320
 
-                    out_shape = session.get_outputs()[0].shape
-                    if len(out_shape) >= 3:
-                        d1, d2 = int(out_shape[1]), int(out_shape[2])
-                        num_classes = min(d1, d2) - 4  # smaller dim = 4+C
-
                     meta = session.get_modelmeta().custom_metadata_map
                     if "names" in meta:
                         import ast
@@ -507,11 +621,34 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
                         except Exception:
                             pass
 
-                    if num_classes <= 0 and class_names:
+                    out_shape = session.get_outputs()[0].shape
+                    smaller_dim = None
+                    if len(out_shape) >= 3:
+                        d1, d2 = int(out_shape[1]), int(out_shape[2])
+                        smaller_dim = min(d1, d2)
+                        num_classes = smaller_dim - 4  # legacy raw-grid assumption: smaller dim = 4+C
+
+                    # Ultralytics end-to-end exports (YOLO26, or any model with
+                    # NMS baked into the graph) emit a fixed [1, max_det, 6]
+                    # output — nothing like the raw [1, 4+C, anchors] grid the
+                    # min(d1,d2)-4 line above assumes. Detect it from the
+                    # model's own "end2end" metadata (what Ultralytics embeds),
+                    # falling back to a shape heuristic (output's smaller dim
+                    # is a fixed 6 while the model has way more than 2 real
+                    # classes) in case that metadata key is ever stripped.
+                    end2end_flag = str(meta.get("end2end", "")).strip().lower() in ("true", "1", "yes")
+                    is_end2end = end2end_flag or (
+                        smaller_dim == 6 and bool(class_names) and len(class_names) > 2
+                    )
+
+                    if is_end2end:
+                        num_classes = len(class_names) if class_names else 0
+                    elif num_classes <= 0 and class_names:
                         num_classes = len(class_names)
 
                     print(f"[HUD child] Loaded: {os.path.basename(model_path)}"
-                          f"  classes={num_classes}  input={inp_w}×{inp_h}")
+                          f"  classes={num_classes}  input={inp_w}×{inp_h}"
+                          f"  end2end={is_end2end}")
                 except Exception as exc:
                     err = f"[HUD Error] Model load failed: {exc}"
                     print(err)
@@ -539,10 +676,10 @@ def _child_main(frame_q, result_q, proc_stop) -> None:
             outputs = session.run(None, {input_name: blob})
             output = outputs[0]
 
-            if num_classes <= 0:
+            if not is_end2end and num_classes <= 0:
                 num_classes = output.shape[1] - 4
 
-            lines, boxes = _postprocess(output, num_classes, confidence, class_names)
+            lines, boxes = _postprocess(output, num_classes, confidence, class_names, is_end2end)
             try:
                 result_q.put_nowait((lines, boxes, inp_w, inp_h))
             except queue.Full:
