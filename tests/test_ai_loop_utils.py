@@ -63,6 +63,69 @@ class TestFindClosestTarget:
         assert picked_confs == [0.5]
 
 
+class TestGetCaptureDimensions:
+    """The 'uvc' branch must prefer the actual negotiated resolution
+    (uvc_actual_width/height, published by UVCCapture from its own live
+    handle) over the user-configured request (uvc_width/height). Most
+    UVC/webcam drivers only support a fixed set of standard modes and
+    silently negotiate to the nearest one if the exact requested size isn't
+    available, so the two can genuinely differ — using the stale requested
+    value desyncs the Web ESP web overlay's box/FOV/crosshair scaling (and
+    the crosshair-center/detection-region math) from the real captured
+    frame. Mirrors the udp branch's existing actual-over-requested pattern."""
+
+    def test_uvc_prefers_actual_negotiated_over_requested(self, ai_loop_utils):
+        from types import SimpleNamespace
+        config = SimpleNamespace(
+            screenshot_method='uvc', uvc_crop_mode='dynamic',
+            uvc_width=1920, uvc_height=1080,
+            uvc_actual_width=1280, uvc_actual_height=720,
+        )
+        assert ai_loop_utils.get_capture_dimensions(config) == (1280, 720)
+
+    def test_uvc_falls_back_to_requested_when_not_yet_negotiated(self, ai_loop_utils):
+        """uvc_actual_width/height == 0 means the device hasn't reported a
+        real frame yet (UVCCapture not yet initialized as the live backend)
+        -- must fall back to the requested size rather than (0, 0)."""
+        from types import SimpleNamespace
+        config = SimpleNamespace(
+            screenshot_method='uvc', uvc_crop_mode='dynamic',
+            uvc_width=1920, uvc_height=1080,
+            uvc_actual_width=0, uvc_actual_height=0,
+        )
+        assert ai_loop_utils.get_capture_dimensions(config) == (1920, 1080)
+
+    def test_uvc_missing_actual_fields_falls_back_to_requested(self, ai_loop_utils):
+        """A bare/stub config predating uvc_actual_width/height must behave
+        exactly like the 0/not-yet-negotiated case, not raise."""
+        from types import SimpleNamespace
+        config = SimpleNamespace(
+            screenshot_method='uvc', uvc_crop_mode='dynamic',
+            uvc_width=1280, uvc_height=720,
+        )
+        assert ai_loop_utils.get_capture_dimensions(config) == (1280, 720)
+
+    def test_uvc_fixed_crop_mode_still_wins_over_actual_and_requested(self, ai_loop_utils):
+        from types import SimpleNamespace
+        config = SimpleNamespace(
+            screenshot_method='uvc', uvc_crop_mode='fixed', detect_range_size=321,
+            uvc_width=1920, uvc_height=1080,
+            uvc_actual_width=1280, uvc_actual_height=720,
+        )
+        # & ~1 rounds the odd size down to the nearest even number.
+        assert ai_loop_utils.get_capture_dimensions(config) == (320, 320)
+
+    def test_udp_actual_over_requested_unaffected_by_this_change(self, ai_loop_utils):
+        from types import SimpleNamespace
+        config = SimpleNamespace(screenshot_method='udp', udp_width=640, udp_height=640)
+        assert ai_loop_utils.get_capture_dimensions(config) == (640, 640)
+
+    def test_mss_falls_back_to_desktop_dimensions(self, ai_loop_utils):
+        from types import SimpleNamespace
+        config = SimpleNamespace(screenshot_method='mss', width=2560, height=1440)
+        assert ai_loop_utils.get_capture_dimensions(config) == (2560, 1440)
+
+
 class TestCalculateDetectionRegion:
     """detection_size must be clamped against both capture dimensions, not
     just height — a capture source narrower than tall (portrait UVC/NDI/UDP
