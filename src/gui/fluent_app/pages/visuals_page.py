@@ -109,6 +109,15 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Show Predicted Aim-Point Marker
+        self.showAimPredictionCard = SwitchSettingCard(
+            FluentIcon.CERTIFICATE,
+            t("show_aim_prediction_marker", "Predicted Aim Point"),
+            t("show_aim_prediction_marker_hint",
+              "Draw a second marker at the locked target's post-prediction point (only while Target Tracking's prediction or Kalman is on)"),
+            parent=self.displayGroup
+        )
+
         # Confidence Box Color Theme
         self.boxThemeCombo = ComboBox()
         self.boxThemeCombo.addItems(["Default", "Cyan", "Red", "Yellow", "White", "Purple"])
@@ -322,6 +331,7 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.showConfidenceCard)
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
         self.displayGroup.addSettingCard(self.showTracerLineCard)
+        self.displayGroup.addSettingCard(self.showAimPredictionCard)
         self.displayGroup.addSettingCard(self.boxThemeCard)
         self.displayGroup.addSettingCard(self.chromaSpeedCard)
         self.addContent(self.displayGroup)
@@ -365,6 +375,7 @@ class VisualsPage(BasePage):
         self.showStatusCard.checkedChanged.connect(self._onShowStatusChanged)
         self.showDetectRangeCard.checkedChanged.connect(self._onShowDetectRangeChanged)
         self.showTracerLineCard.checkedChanged.connect(self._onShowTracerLineChanged)
+        self.showAimPredictionCard.checkedChanged.connect(self._onShowAimPredictionChanged)
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
         self.spAutoAimCheck.stateChanged.connect(self._onStatusPanelAutoAimChanged)
@@ -410,6 +421,7 @@ class VisualsPage(BasePage):
         self.showStatusCard.setChecked(self._config.show_status_panel)
         self.showDetectRangeCard.setChecked(self._config.show_detect_range)
         self.showTracerLineCard.setChecked(bool(getattr(self._config, 'show_tracer_line', False)))
+        self.showAimPredictionCard.setChecked(bool(getattr(self._config, 'show_aim_prediction_marker', True)))
         theme_text = str(getattr(self._config, 'box_color_theme', 'default')).capitalize()
         _valid_themes = ("Default", "Cyan", "Red", "Yellow", "White", "Purple")
         self.boxThemeCombo.setCurrentText(theme_text if theme_text in _valid_themes else "Default")
@@ -478,6 +490,10 @@ class VisualsPage(BasePage):
     def _onShowTracerLineChanged(self, checked):
         if self._config:
             self._config.show_tracer_line = checked
+
+    def _onShowAimPredictionChanged(self, checked):
+        if self._config:
+            self._config.show_aim_prediction_marker = checked
 
     def _onBoxThemeChanged(self, text):
         if self._config:
@@ -694,6 +710,9 @@ class VisualsPage(BasePage):
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
         self.showTracerLineCard.titleLabel.setText(t("show_tracer_line", "Tracer Line"))
         self.showTracerLineCard.contentLabel.setText(t("show_tracer_line_hint", "Draw a line from screen center to each detected target"))
+        self.showAimPredictionCard.titleLabel.setText(t("show_aim_prediction_marker", "Predicted Aim Point"))
+        self.showAimPredictionCard.contentLabel.setText(t("show_aim_prediction_marker_hint",
+            "Draw a second marker at the locked target's post-prediction point (only while Target Tracking's prediction or Kalman is on)"))
         self.boxThemeCard.titleLabel.setText(t("box_color_theme", "Box Color Theme"))
         self.boxThemeCard.contentLabel.setText(t("box_color_theme_hint", "Color preset for detection boxes"))
         self.chromaSpeedCard.titleLabel.setText(t("chroma_box_speed", "Chroma Speed"))

@@ -351,6 +351,21 @@ def process_aiming(
         else:
             target_x, target_y = pred_x, pred_y
 
+        # --- Publish the post-prediction point for overlay.py ---
+        # overlay.py's own per-box aim marker is always the raw,
+        # pre-prediction point (it recomputes calculate_aim_target() itself
+        # from the live box list, with no access to this frame's Kalman/
+        # VelocityPredictor output). Publish the actual locked target's
+        # post-prediction point here so a second, distinctly-colored marker
+        # can show what prediction_enabled/kalman_enabled are actually doing
+        # — active only when at least one of them is on; with both off,
+        # pred_x/pred_y equal the raw point exactly, so a second marker at
+        # the same spot would just be visual noise.
+        config.aim_predicted_x = target_x
+        config.aim_predicted_y = target_y
+        config.aim_prediction_active = bool(getattr(config, 'prediction_enabled', False)) or \
+            bool(getattr(config, 'kalman_enabled', False))
+
         errorX = target_x - crosshair_x
         errorY = target_y - crosshair_y
 

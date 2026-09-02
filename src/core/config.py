@@ -137,6 +137,7 @@ _FIELD_MAP = {
     'aim_posture_aware_enabled':  'aim.target_area.posture_aware.enabled',
     'aim_crouch_aspect_threshold':'aim.target_area.posture_aware.crouch_aspect',
     'aim_custom_y_pct':           'aim.target_area.custom_y_pct',
+    'aim_target_class_ids':       'aim.target_class_ids',
 
     # --- autofire ---
     'auto_fire_key':              'autofire.key',
@@ -178,6 +179,7 @@ _FIELD_MAP = {
     'show_detect_range':          'display.show_detect_range',
     'show_confidence':            'display.show_confidence',
     'show_tracer_line':           'display.show_tracer_line',
+    'show_aim_prediction_marker': 'display.show_aim_prediction_marker',
     'box_color_theme':            'display.box_color_theme',
     'chroma_box_speed':           'display.chroma_box_speed',
     'show_status_panel':          'display.status_panel.show',
@@ -442,6 +444,22 @@ class Config:
         self.aim_posture_aware_enabled: bool = False
         self.aim_crouch_aspect_threshold: float = 1.2  # box_w/box_h above which = crouching
         self.aim_custom_y_pct: float = 30.0  # Custom aim Y as % of box height (0=top, 100=bottom)
+
+        # Target class multi-select — which of the currently loaded model's
+        # own class IDs are valid aim targets (e.g. keep class 0 "enemy" but
+        # never class 1 "teammate" on a multi-class model). An empty list
+        # (the default) means no restriction: every class is a valid target,
+        # so a single-class model needs no config at all and existing users
+        # see no behavior change. The GUI populates its multi-select from the
+        # currently loaded model's own class names — see
+        # detection_semantics.sync_detection_class_names_from_backend(),
+        # which fills the runtime-only config._detect_class_names dict this
+        # list's IDs are meant to index into. Applied unconditionally in
+        # filter_detections_by_target_class() — independent of, and always
+        # on regardless of, detect_semantic_filter_enabled below, since
+        # "which classes count as a target at all" is a deliberate user
+        # choice, not a false-positive heuristic.
+        self.aim_target_class_ids: List[int] = []
         
         # PID 控制器參數 (分離 X 和 Y 軸)
         self.pid_kp_x: float = 0.26      # 水平 P: 比例 - 主要影響反應速度
@@ -474,6 +492,13 @@ class Config:
 
         # Tracer line from screen center to detected targets
         self.show_tracer_line: bool = True
+
+        # Raw-vs-predicted aim point marker — see aim_predicted_x/y below.
+        # Diagnostic only: draws a second marker at the locked target's
+        # post-prediction/Kalman point so the effect of prediction_enabled/
+        # kalman_enabled is visible, distinct from the existing per-box aim
+        # marker (which is always the raw, pre-prediction point).
+        self.show_aim_prediction_marker: bool = True
 
         # Crosshair overlay
         self.show_crosshair: bool = False
@@ -648,6 +673,19 @@ class Config:
         # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
         self.display_locked_box: list | None = None
         self.display_locked_box_is_decaying: bool = False
+
+        # Runtime-only (unpersisted, same pattern as fov_effective_size) —
+        # the locked target's aim point AFTER cam-drift compensation and
+        # prediction/Kalman smoothing, published every frame process_aiming()
+        # runs one of those. overlay.py draws this as a second marker,
+        # distinct from its own always-raw per-box marker, so the two are
+        # visually comparable. aim_prediction_active is False (and the x/y
+        # fields go stale, same staleness contract as display_locked_box
+        # during a sticky-lock decay window) whenever prediction_enabled and
+        # kalman_enabled are both off, or the lock is fully released.
+        self.aim_predicted_x: float = 0.0
+        self.aim_predicted_y: float = 0.0
+        self.aim_prediction_active: bool = False
 
         # 延遲/性能統計（預設關閉，避免輸出干擾）
         self.enable_latency_stats: bool = False

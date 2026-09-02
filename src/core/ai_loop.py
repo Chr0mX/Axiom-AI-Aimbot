@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 from . import ai_aiming
 from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
+from .detection_semantics import filter_detections_by_target_class
 from .ai_loop_utils import (
     apply_cam_shift_deadzone,
     calculate_detection_region,
@@ -697,6 +698,15 @@ def ai_logic_loop(
                     logger.error("ONNX inference error: %s", e)
                     continue
 
+                # --- Target class selection (multi-select which of the loaded
+                # model's own classes are valid aim targets, e.g. "enemy" but
+                # never "teammate"). Independent of, and always applied
+                # regardless of, the semantic FP filter below — a deliberate
+                # user choice, not a false-positive heuristic. Cheap no-op
+                # when aim_target_class_ids is empty (the default). ---
+                boxes, confidences, class_ids = filter_detections_by_target_class(
+                    boxes, confidences, class_ids, config)
+
                 # --- Semantic FP filter (new feature from Someone_idea) ---
                 if getattr(config, 'detect_semantic_filter_enabled', False):
                     from .detection_semantics import filter_detections_by_semantic_class
@@ -789,6 +799,7 @@ def ai_logic_loop(
                         state.aim_carry_y = 0.0
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
+                        config.aim_prediction_active = False
                         # Target lost — clear stale prediction/Kalman state so a
                         # newly-acquired target isn't corrupted by the old one's history.
                         if ai_aiming._predictor is not None:

@@ -347,6 +347,16 @@ class ThemeColors:
         default_dark=(255, 80, 80, 220)
     )
 
+    # Second, distinctly-colored marker at the locked target's post-
+    # prediction/Kalman point (see overlay.py's show_aim_prediction_marker) —
+    # cyan rather than OVERLAY_AIM_MARKER's red so the two are unambiguous
+    # even drawn on top of each other.
+    OVERLAY_PREDICTED_AIM_MARKER = ColorPairWithAlpha.from_config(
+        "overlay_colors", "predicted_aim_marker",
+        default_light=(80, 210, 255, 230),
+        default_dark=(80, 210, 255, 230)
+    )
+
     # ============================================================
     # 狀態面板 (Status Panel) 顏色
     # ============================================================

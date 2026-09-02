@@ -333,6 +333,45 @@ class TestConfigSerialization:
         c2.from_dict(d)
         assert c2.status_panel_show_preset_config is False
 
+    def test_aim_target_class_ids_defaults_empty_and_round_trips(self):
+        """Empty list is the "no restriction" default — every class is a
+        valid target, so a single-class model needs no config at all."""
+        c = _make_config()
+        assert c.aim_target_class_ids == []
+        c.aim_target_class_ids = [0, 2]
+        d = c.to_dict()
+        assert d['aim']['target_class_ids'] == [0, 2]
+
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.aim_target_class_ids == [0, 2]
+
+    def test_show_aim_prediction_marker_defaults_true_and_round_trips(self):
+        c = _make_config()
+        assert c.show_aim_prediction_marker is True
+        c.show_aim_prediction_marker = False
+        d = c.to_dict()
+        assert d['display']['show_aim_prediction_marker'] is False
+
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.show_aim_prediction_marker is False
+
+    def test_aim_prediction_runtime_fields_default_and_are_not_persisted(self):
+        """aim_predicted_x/y and aim_prediction_active are runtime-only —
+        published every frame by ai_aiming.process_aiming(), same pattern as
+        fov_effective_size — and must never round-trip through to_dict()."""
+        c = _make_config()
+        assert c.aim_predicted_x == 0.0
+        assert c.aim_predicted_y == 0.0
+        assert c.aim_prediction_active is False
+
+        c.aim_predicted_x = 123.0
+        c.aim_prediction_active = True
+        d = c.to_dict()
+        assert 'aim_predicted_x' not in json.dumps(d)
+        assert 'aim_prediction_active' not in json.dumps(d)
+
 
 # ============================================================
 # 3. save_config / load_config 檔案讀寫測試
