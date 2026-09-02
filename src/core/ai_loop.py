@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 from . import ai_aiming
 from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
-from .detection_semantics import filter_detections_by_target_class
+from .detection_semantics import filter_detections_by_target_class, sync_detection_class_names_from_backend
 from .ai_loop_utils import (
     apply_cam_shift_deadzone,
     calculate_detection_region,
@@ -274,6 +274,15 @@ def ai_logic_loop(
     if _init_size:
         config.model_input_size = _init_size
         logger.info("[AI Loop] Initial model input size: %d", _init_size)
+
+    # Populate config._detect_class_names from the *initial* session too —
+    # previously this only happened inside the hot-swap path below, so the
+    # Aim page's Target Classes selector (and the semantic-filter's
+    # class-name deny list) stayed empty until the user swapped the model
+    # at least once, even though the very first model loaded already has
+    # class names to read. A real, reported bug: a multi-class model
+    # selected from a fresh app start showed no class selector at all.
+    sync_detection_class_names_from_backend(model, config)
 
     pid_x = PIDController(config.pid_kp_x, config.pid_ki_x, config.pid_kd_x)
     pid_y = PIDController(config.pid_kp_y, config.pid_ki_y, config.pid_kd_y)
@@ -533,7 +542,6 @@ def ai_logic_loop(
                             break
                     # Refresh ONNX class-name metadata for semantic FP filter (Someone_idea).
                     try:
-                        from .detection_semantics import sync_detection_class_names_from_backend
                         sync_detection_class_names_from_backend(model, config)
                     except Exception:
                         pass
