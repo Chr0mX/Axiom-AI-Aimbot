@@ -220,6 +220,12 @@ class _TargetClassSelector(QWidget):
         self.setVisible(True)
         for cid in sorted(names.keys()):
             row = SettingCard(FluentIcon.PEOPLE, f"{names[cid]}  (#{cid})", "", self)
+            # SettingCard defaults to a 50px fixed height for a no-content
+            # row (70px only when a description is set) — noticeably
+            # thinner than every other row on this page, which all have a
+            # description. There's nothing meaningful to put in this row's
+            # content, so raise the fixed height directly instead.
+            row.setFixedHeight(60)
             box = CheckBox("", row)
             box.setChecked((not selected) or cid in selected)
             box.stateChanged.connect(self._onCheckChanged)
