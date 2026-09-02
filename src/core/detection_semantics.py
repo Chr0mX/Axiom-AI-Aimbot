@@ -4,13 +4,16 @@ Ported from Someone_idea/detection_semantics.py.
 Filters detections that match vegetation, vehicles, signs, and HUD elements
 using three layers: ONNX class-name allow/deny lists, aspect-ratio geometry
 heuristics, and minimum bounding-box size thresholds.
+
+Also holds `filter_detections_by_target_class()` — a separate, always-on
+target-class multi-select (`config.aim_target_class_ids`), independent of
+`detect_semantic_filter_enabled`: a deliberate "which classes are valid
+targets" choice, not a false-positive heuristic.
 """
 from __future__ import annotations
 
 import logging
 from typing import List, Tuple
-
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +187,53 @@ def filter_detections_by_semantic_class(
     dropped = len(boxes) - len(out_b)
     if dropped > 0:
         logger.debug('Semantic filter: dropped %d detection(s)', dropped)
+
+    return out_b, out_c, out_i
+
+
+def filter_detections_by_target_class(
+    boxes: list,
+    confidences: list,
+    class_ids: list,
+    config,
+) -> Tuple[list, list, list]:
+    """Drop detections whose class isn't in the user's selected target set.
+
+    `config.aim_target_class_ids` is a multi-select list of class IDs (from
+    the currently loaded model's own class names — see
+    `sync_detection_class_names_from_backend()`, which populates the
+    runtime-only `config._detect_class_names` dict these IDs index into)
+    that the user has chosen as valid aim targets — e.g. keep class 0
+    ("enemy") but never class 1 ("teammate") on a multi-class model. An
+    empty list (the default) means no restriction: every class is a valid
+    target, so a single-class model needs no config at all and existing
+    users see no behavior change.
+
+    Unlike `filter_detections_by_semantic_class()` above (a heuristic
+    false-positive removal, gated behind `detect_semantic_filter_enabled`),
+    this is a deliberate user choice about which classes count as a target
+    at all, so it always runs regardless of that flag — the two are
+    independent concerns and must not be coupled to one enable switch.
+    """
+    target_ids = getattr(config, 'aim_target_class_ids', None)
+    if not target_ids or not boxes:
+        return boxes or [], confidences or [], list(class_ids) if class_ids else []
+
+    target_set = {int(c) for c in target_ids}
+    cids = list(class_ids) if class_ids else [0] * len(boxes)
+
+    out_b, out_c, out_i = [], [], []
+    for i, box in enumerate(boxes):
+        cid = int(cids[i]) if i < len(cids) else 0
+        if cid not in target_set:
+            continue
+        out_b.append(box)
+        out_c.append(float(confidences[i]) if i < len(confidences) else 0.0)
+        out_i.append(cid)
+
+    dropped = len(boxes) - len(out_b)
+    if dropped > 0:
+        logger.debug('Target-class filter: dropped %d detection(s) outside aim_target_class_ids', dropped)
 
     return out_b, out_c, out_i
 

@@ -102,6 +102,14 @@ class OverlayColors:
             return ThemeColors.OVERLAY_AIM_MARKER.qcolor()
         return QColor(255, 80, 80, 220)
 
+    @staticmethod
+    def get_predicted_aim_marker_color() -> QColor:
+        """Locked target's post-prediction/Kalman marker color — distinct
+        from get_aim_marker_color() (always the raw, pre-prediction point)."""
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_PREDICTED_AIM_MARKER.qcolor()
+        return QColor(80, 210, 255, 230)
+
 
 # Predefined box color themes (name → RGBA tuple)
 _BOX_THEMES = {
@@ -403,6 +411,25 @@ class PyQtOverlay(QWidget):
                 painter.setPen(pen_aim_x)
                 painter.drawLine(tx - r, ty - r, tx + r, ty + r)
                 painter.drawLine(tx + r, ty - r, tx - r, ty + r)
+
+        # Predicted aim-point marker — the locked target's point AFTER
+        # cam-drift compensation and prediction_enabled/kalman_enabled
+        # smoothing (published by ai_aiming.process_aiming(), since overlay.py
+        # has no access to that frame's Kalman/VelocityPredictor state).
+        # Drawn as a hollow circle (not an X) specifically so it's never
+        # confused with the always-raw per-box X markers above, even where
+        # the two nearly coincide. Only ever active while a lock exists and
+        # at least one of prediction_enabled/kalman_enabled is on; with both
+        # off, the predicted point equals the raw one exactly, so
+        # aim_prediction_active stays False and nothing extra is drawn.
+        if (getattr(self.config, 'show_aim_prediction_marker', True)
+                and getattr(self.config, 'aim_prediction_active', False)):
+            px = int(getattr(self.config, 'aim_predicted_x', 0.0))
+            py = int(getattr(self.config, 'aim_predicted_y', 0.0))
+            pred_color = OverlayColors.get_predicted_aim_marker_color()
+            painter.setPen(QPen(pred_color, 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(px - 7, py - 7, 14, 14)
 
         # 繪製追蹤線（從螢幕中心到目標）
         if getattr(self.config, 'show_tracer_line', False):

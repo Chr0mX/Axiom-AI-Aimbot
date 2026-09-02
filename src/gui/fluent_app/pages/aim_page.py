@@ -15,7 +15,7 @@ from qfluentwidgets import (
     FluentIcon,
     ComboBox, SettingCard,
     SegmentedWidget,
-    BodyLabel, PushButton,
+    BodyLabel, PushButton, CheckBox,
 )
 from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
 
@@ -146,6 +146,146 @@ class _ArduinoConnectWorker(QThread):
         except Exception:
             ok = False
         self.finishedResult.emit(ok)
+
+
+class _TargetClassSelector(QWidget):
+    """Dynamic multi-select checkbox list for `config.aim_target_class_ids`.
+
+    Rebuilt from scratch whenever the loaded model's own class-name dict
+    (`config._detect_class_names`, populated by
+    `detection_semantics.sync_detection_class_names_from_backend()` on each
+    model load/hot-swap) changes — the valid class IDs and names are
+    entirely model-specific, so this can't be a static, hand-authored list
+    of checkboxes the way every other card on this page is.
+
+    One `SettingCard` row per class (class name as title, an empty-text
+    `CheckBox` right-aligned in its control column via `hBoxLayout`) —
+    reuses the exact component/layout every other row on this page already
+    uses, rather than a hand-rolled left-aligned checkbox stack, so spacing
+    and alignment matches the rest of Target Area Settings instead of
+    looking like a different control.
+
+    Hidden entirely for a single-class (or nameless) model — there's
+    nothing meaningful to multi-select when every detection is already the
+    only class there is; the page hides this widget's own header card to
+    match (see AimPage._loadFromConfig()), same "hidden rather than greyed
+    out" precedent as the Humanization sub-sliders.
+    """
+
+    selectionChanged = pyqtSignal(list)  # emitted with the new aim_target_class_ids
+
+    _ROW_HEIGHT = 60  # matches each row's own setFixedHeight() below
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._vbox = QVBoxLayout(self)
+        self._vbox.setContentsMargins(0, 0, 0, 0)
+        self._vbox.setSpacing(0)
+        self._rows: dict[int, SettingCard] = {}
+        self._checks: dict[int, CheckBox] = {}
+        self._names_key: tuple | None = None
+        self.setFixedHeight(0)
+        self.setVisible(False)
+
+    def refresh(self, class_names: dict | None, selected_ids: list) -> None:
+        """Rebuild (only if the class set actually changed) and resync
+        checked state from `selected_ids` (an empty list means every class
+        is checked — see aim_target_class_ids's own "no restriction"
+        semantics). Returns True while >= 2 classes are available (i.e.
+        whether this widget — and the caller's header card — should show
+        at all), False otherwise.
+
+        The caller (AimPage._loadFromConfig()) must call
+        targetAreaGroup.adjustSize() itself right after this returns —
+        this widget cannot reliably make that happen on its own. It's a
+        direct child of targetAreaGroup's own SettingCardGroup.cardLayout
+        (an ExpandLayout, qfluentwidgets), which does NOT recompute the
+        group's height from a child's sizeHint the normal Qt way — it
+        only reacts to a live Resize *event* on that specific child via an
+        installed event filter, and even then only nudges the group's
+        height by that event's raw delta rather than recomputing it
+        properly. Relying on that path (tried first) intermittently
+        produced a group sized smaller than its actual content — this
+        widget's own height is now set deterministically via
+        setFixedHeight() (not sizeHint()/adjustSize(), which routes back
+        through the same unreliable machinery), and the real fix is the
+        caller invoking the proven, already-correct
+        SettingCardGroup.adjustSize() (heightForWidth() + resize())
+        directly instead of hoping the event filter propagates it."""
+        names = class_names or {}
+        key = tuple(sorted((int(k), str(v)) for k, v in names.items()))
+        selected = {int(i) for i in (selected_ids or [])}
+
+        if key == self._names_key:
+            # Same class set as last time (the common case — this runs on
+            # every ~1s live-config-sync tick) — just resync checked state,
+            # e.g. after a preset/config load, without tearing down widgets.
+            # Re-assert visibility every tick too (cheap, idempotent) rather
+            # than trusting a single setVisible() call from the last rebuild
+            # survives indefinitely — removes any chance of this widget
+            # getting stuck hidden across ticks for a reason unrelated to
+            # the class set itself.
+            has_classes = len(names) >= 2
+            self.setVisible(has_classes)
+            for cid, box in self._checks.items():
+                box.blockSignals(True)
+                box.setChecked((not selected) or cid in selected)
+                box.blockSignals(False)
+            return has_classes
+
+        self._names_key = key
+        for row in self._rows.values():
+            row.setParent(None)
+            row.deleteLater()
+        self._rows.clear()
+        self._checks.clear()
+
+        if len(names) < 2:
+            # A single-class (or nameless) model has nothing to multi-select.
+            self.setFixedHeight(0)
+            self.setVisible(False)
+            return False
+
+        self.setVisible(True)
+        for cid in sorted(names.keys()):
+            row = SettingCard(FluentIcon.PEOPLE, f"{names[cid]}  (#{cid})", "", self)
+            # SettingCard defaults to a 50px fixed height for a no-content
+            # row (70px only when a description is set) — noticeably
+            # thinner than every other row on this page, which all have a
+            # description. There's nothing meaningful to put in this row's
+            # content, so raise the fixed height directly instead.
+            row.setFixedHeight(self._ROW_HEIGHT)
+            box = CheckBox("", row)
+            box.setChecked((not selected) or cid in selected)
+            box.stateChanged.connect(self._onCheckChanged)
+            row.hBoxLayout.addWidget(box, 0, Qt.AlignmentFlag.AlignRight)
+            row.hBoxLayout.addSpacing(16)
+            self._vbox.addWidget(row)
+            self._rows[cid] = row
+            self._checks[cid] = box
+        # Deterministic total height — see this method's own docstring for
+        # why this doesn't rely on sizeHint()/adjustSize() at all.
+        self.setFixedHeight(len(self._rows) * self._ROW_HEIGHT)
+        return True
+
+    def _onCheckChanged(self, _state) -> None:
+        all_ids = sorted(self._checks.keys())
+        checked = sorted(cid for cid, box in self._checks.items() if box.isChecked())
+        if not checked:
+            # Refuse to let every class be unchecked — that would silently
+            # mean "no valid targets at all" with no visual indicator why
+            # detection stopped working. Re-check whichever box the user
+            # just unchecked instead.
+            sender = self.sender()
+            if sender is not None:
+                sender.blockSignals(True)
+                sender.setChecked(True)
+                sender.blockSignals(False)
+            return
+        # All classes checked is the canonical "no restriction" empty list —
+        # keeps a model swap to one with MORE classes than were enumerated
+        # here from silently excluding a class the user never saw.
+        self.selectionChanged.emit([] if len(checked) == len(all_ids) else checked)
 
 
 class AimPage(BasePage):
@@ -864,6 +1004,20 @@ class AimPage(BasePage):
             parent=self.targetAreaGroup
         )
 
+        # Target class multi-select — header card + the dynamic checkbox
+        # list itself. Both start hidden; _loadFromConfig() shows them only
+        # once the loaded model actually reports >= 2 class names (see
+        # _TargetClassSelector.refresh()'s return value).
+        self.targetClassCard = SettingCard(
+            FluentIcon.PEOPLE,
+            t("aim_target_class_ids", "Target Classes"),
+            t("aim_target_class_ids_desc",
+              "Choose which detected classes count as a valid aim target (e.g. never aim at a teammate class). All checked = no restriction."),
+            parent=self.targetAreaGroup
+        )
+        self.targetClassCard.setVisible(False)
+        self.targetClassSelector = _TargetClassSelector(self.targetAreaGroup)
+
     def _initLayout(self):
         """Layout all controls"""
         # General
@@ -986,6 +1140,8 @@ class AimPage(BasePage):
         self.targetAreaGroup.addSettingCard(self.adaptiveRatioRefHCard)
         self.targetAreaGroup.addSettingCard(self.postureAwareCard)
         self.targetAreaGroup.addSettingCard(self.crouchAspectCard)
+        self.targetAreaGroup.addSettingCard(self.targetClassCard)
+        self.targetAreaGroup.addSettingCard(self.targetClassSelector)
         self.addContent(self.targetAreaGroup)
 
         self.scrollLayout.addStretch(1)
@@ -1078,6 +1234,7 @@ class AimPage(BasePage):
         self.adaptiveRatioRefHCard.valueChanged.connect(self._onAdaptiveRatioRefHChanged)
         self.postureAwareCard.checkedChanged.connect(self._onPostureAwareChanged)
         self.crouchAspectCard.valueChanged.connect(self._onCrouchAspectChanged)
+        self.targetClassSelector.selectionChanged.connect(self._onTargetClassSelectionChanged)
 
     def _loadFromConfig(self):
         """Load values from Config"""
@@ -1184,6 +1341,25 @@ class AimPage(BasePage):
             self.postureAwareCard.setChecked(posture_on)
             self.crouchAspectCard.setValue(int(getattr(self._config, 'aim_crouch_aspect_threshold', 1.2) * 100))
             self.crouchAspectCard.setEnabled(posture_on)
+
+            # Target class multi-select — class names are entirely
+            # model-specific (config._detect_class_names, runtime-only,
+            # populated on model load/hot-swap), so both the header card and
+            # the checkbox list itself only show once the loaded model
+            # actually reports >= 2 classes.
+            has_classes = self.targetClassSelector.refresh(
+                getattr(self._config, '_detect_class_names', None),
+                getattr(self._config, 'aim_target_class_ids', []))
+            self.targetClassCard.setVisible(has_classes)
+            # targetClassSelector's own height changes (see its refresh()
+            # docstring for why it can't reliably make this happen on its
+            # own) — explicitly recompute targetAreaGroup's real height via
+            # the same heightForWidth()-based call SettingCardGroup.
+            # addSettingCard() already makes for every other card here,
+            # rather than relying on ExpandLayout's fragile event-filter-only
+            # auto-growth. Cheap and idempotent to call even when nothing
+            # changed this tick.
+            self.targetAreaGroup.adjustSize()
         finally:
             self._isLoadingConfig = False
 
@@ -1838,6 +2014,10 @@ class AimPage(BasePage):
         if self._config:
             self._config.aim_crouch_aspect_threshold = value / 100.0
 
+    def _onTargetClassSelectionChanged(self, ids):
+        if self._config:
+            self._config.aim_target_class_ids = list(ids)
+
     def retranslateUi(self):
         """Refresh translations"""
         super().retranslateUi()
@@ -1978,6 +2158,9 @@ class AimPage(BasePage):
         self.postureAwareCard.contentLabel.setText(t("aim_posture_aware_desc", "Fall back to center-mass when box is wider than tall (crouch / slide / prone)."))
         self.crouchAspectCard.titleLabel.setText(t("aim_crouch_aspect_threshold", "Crouch Aspect Threshold"))
         self.crouchAspectCard.contentLabel.setText(t("aim_crouch_aspect_desc", "box_w / box_h above which player is treated as crouching. Default 1.2×."))
+        self.targetClassCard.titleLabel.setText(t("aim_target_class_ids", "Target Classes"))
+        self.targetClassCard.contentLabel.setText(t("aim_target_class_ids_desc",
+            "Choose which detected classes count as a valid aim target (e.g. never aim at a teammate class). All checked = no restriction."))
 
         current_aim = self.aimPartCombo.currentIndex()
         self.aimPartCombo.clear()

@@ -8,6 +8,7 @@ from core.detection_semantics import (
     _looks_like_vehicle,
     _semantic_keep_label,
     filter_detections_by_semantic_class,
+    filter_detections_by_target_class,
 )
 
 
@@ -18,6 +19,7 @@ class _FakeConfig:
     detect_min_bbox_short_side_px = 0.0
     detect_min_bbox_max_side_frac = 0.0
     _detect_class_names = None
+    aim_target_class_ids = []
 
 
 class TestSemanticKeepLabel:
@@ -141,3 +143,56 @@ class TestFilterDetectionsBySemanticClass:
         confs = [0.9, 0.9]
         out_b, out_c, out_i = filter_detections_by_semantic_class(boxes, confs, [0, 0], cfg)
         assert out_b == [[0, 0, 100, 100]]
+
+
+class TestFilterDetectionsByTargetClass:
+    """aim_target_class_ids — a deliberate user multi-select, independent of
+    detect_semantic_filter_enabled (this function never reads that flag at
+    all — see ai_loop.py, which calls it unconditionally every frame)."""
+
+    def test_empty_selection_is_passthrough(self):
+        """The default ([]) means no restriction — every class is a valid
+        target, so a single-class model needs no config at all."""
+        cfg = _FakeConfig()
+        boxes = [[0, 0, 10, 10], [20, 20, 30, 30]]
+        confs = [0.7, 0.9]
+        cids = [0, 1]
+        out_b, out_c, out_i = filter_detections_by_target_class(boxes, confs, cids, cfg)
+        assert out_b == boxes and out_c == confs and out_i == cids
+
+    def test_empty_boxes_passthrough(self):
+        out_b, out_c, out_i = filter_detections_by_target_class([], [], [], _FakeConfig())
+        assert out_b == [] and out_c == [] and out_i == []
+
+    def test_restricts_to_selected_classes(self):
+        cfg = _FakeConfig()
+        cfg.aim_target_class_ids = [0]  # e.g. "enemy" only, never "teammate"
+        boxes = [[0, 0, 10, 10], [20, 20, 30, 30], [40, 40, 50, 50]]
+        confs = [0.7, 0.9, 0.5]
+        cids = [0, 1, 0]
+        out_b, out_c, out_i = filter_detections_by_target_class(boxes, confs, cids, cfg)
+        assert out_b == [[0, 0, 10, 10], [40, 40, 50, 50]]
+        assert out_c == [0.7, 0.5]
+        assert out_i == [0, 0]
+
+    def test_missing_attribute_defaults_to_no_restriction(self):
+        """A config predating this field (or a plain stand-in that never
+        set it) must behave exactly like an explicit empty list."""
+        class _NoAttrConfig:
+            pass
+        boxes = [[0, 0, 10, 10]]
+        out_b, out_c, out_i = filter_detections_by_target_class(boxes, [0.5], [7], _NoAttrConfig())
+        assert out_b == boxes
+        assert out_i == [7]
+
+    def test_independent_of_semantic_filter_enabled_flag(self):
+        """This function has no detect_semantic_filter_enabled gate at all —
+        confirm it still restricts classes with that flag left unset/False,
+        unlike filter_detections_by_semantic_class()."""
+        cfg = _FakeConfig()
+        cfg.aim_target_class_ids = [1]
+        assert not hasattr(cfg, 'detect_semantic_filter_enabled')
+        boxes = [[0, 0, 10, 10], [20, 20, 30, 30]]
+        out_b, out_c, out_i = filter_detections_by_target_class(boxes, [0.5, 0.5], [0, 1], cfg)
+        assert out_b == [[20, 20, 30, 30]]
+        assert out_i == [1]
