@@ -23,6 +23,7 @@ from . import ai_aiming
 from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
 from .ai_loop_utils import (
+    apply_cam_shift_deadzone,
     calculate_detection_region,
     clear_queues,
     compute_effective_fov,
@@ -50,6 +51,13 @@ if TYPE_CHECKING:
 
 # EMA smoothing factor for latency stats (internal; not user-configurable).
 _LATENCY_STATS_ALPHA = 0.2
+
+# Per-axis noise floor (screen px) below which a frame's phase-correlation
+# shift is treated as measurement noise rather than real camera motion, and
+# is not accumulated into state.cam_drift_x/y. See
+# ai_loop_utils.apply_cam_shift_deadzone()'s docstring for why this only
+# gates the drift integral and not state.cam_shift_x/y itself.
+_CAM_DRIFT_DEADZONE_PX = 0.5
 
 
 def _probe_model_input_size(session, abs_model_path: str) -> int:
@@ -446,11 +454,21 @@ def ai_logic_loop(
                         sy = frame.shape[0] / float(cmc_size)
                         state.cam_shift_x = max(-30.0, min(30.0, float(shift[0]) * sx))
                         state.cam_shift_y = max(-30.0, min(30.0, float(shift[1]) * sy))
+                        # Running integral of the per-frame shift — see
+                        # LoopState.cam_drift_x/y — so process_aiming can
+                        # compensate the predictor/Kalman's position history,
+                        # not just this frame's PID error. Deadzoned per axis
+                        # before accumulating — see apply_cam_shift_deadzone()'s
+                        # docstring for why.
+                        state.cam_drift_x += apply_cam_shift_deadzone(state.cam_shift_x, _CAM_DRIFT_DEADZONE_PX)
+                        state.cam_drift_y += apply_cam_shift_deadzone(state.cam_shift_y, _CAM_DRIFT_DEADZONE_PX)
                     _cmc_prev[0] = gray
                 else:
                     _cmc_prev[0] = None
                     state.cam_shift_x = 0.0
                     state.cam_shift_y = 0.0
+                    state.cam_drift_x = 0.0
+                    state.cam_drift_y = 0.0
 
                 _frame_is_square = frame.shape[0] == frame.shape[1]
                 tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(

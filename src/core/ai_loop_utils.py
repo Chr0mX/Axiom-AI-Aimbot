@@ -29,6 +29,25 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
             crop_size = int(getattr(config, 'detect_range_size', 0) or 0) & ~1
             if crop_size > 0:
                 return crop_size, crop_size
+        # Prefer the actual negotiated resolution over the user-configured
+        # request. Most UVC/webcam drivers only support a fixed set of
+        # standard modes and silently negotiate to the nearest one if the
+        # exact requested uvc_width/uvc_height isn't available, so the real
+        # captured frame can differ from what was asked for. Using the
+        # requested size here desyncs every downstream consumer of these
+        # dimensions from the actual frame — most visibly the Web ESP web
+        # overlay, whose "screen" w/h the browser client scales every drawn
+        # box/FOV/crosshair against (esp_server.py's _build_snapshot() /
+        # app.js's scale calc), but also update_crosshair_position()'s
+        # crosshair-center assumption and calculate_detection_region()'s
+        # actual model-input crop. Same "actual over requested" pattern the
+        # udp branch below already uses for udp_width/udp_height. 0 means
+        # not yet negotiated (no frame received yet); fall back to the
+        # requested value only in that case.
+        cap_w = int(getattr(config, 'uvc_actual_width', 0) or 0)
+        cap_h = int(getattr(config, 'uvc_actual_height', 0) or 0)
+        if cap_w > 0 and cap_h > 0:
+            return cap_w, cap_h
         cap_w = int(getattr(config, 'uvc_width', 0) or 0)
         cap_h = int(getattr(config, 'uvc_height', 0) or 0)
         if cap_w > 0 and cap_h > 0:
@@ -56,6 +75,27 @@ def get_capture_dimensions(config: Config) -> Tuple[int, int]:
     # deliberately calls this against a bare `class Empty: pass` to prove
     # the snapshot builder never crashes on a missing/incomplete config.
     return int(getattr(config, 'width', 1920)), int(getattr(config, 'height', 1080))
+
+
+def apply_cam_shift_deadzone(value: float, threshold: float) -> float:
+    """Zero out `value` if its magnitude is below `threshold`; otherwise
+    return it unchanged.
+
+    Used by ai_loop.py's _preprocess_worker to gate what accumulates into
+    state.cam_drift_x/y (the running integral of the phase-correlation-
+    measured per-frame shift that ai_aiming.py's camera-drift-compensated
+    prediction subtracts from the raw target position before it reaches the
+    velocity predictor/Kalman filter). That integral feeds a
+    frame-to-frame-differenced, then horizon-extrapolated, signal, so
+    phase correlation's own measurement noise floor (quantization from the
+    cam_motion_comp_size downsample, sensor/compression noise) gets
+    amplified in a way the existing one-frame PID-error use of
+    state.cam_shift_x/y itself (unfiltered, not differenced or
+    extrapolated) never showed. Deadzoning here — only accumulating a
+    shift big enough to plausibly be real motion — fixed a reported wobble
+    without touching that unrelated, unfiltered PID-error path.
+    """
+    return value if abs(value) >= threshold else 0.0
 
 
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:

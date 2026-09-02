@@ -51,6 +51,32 @@ class LoopState:
     cam_shift_x: float = 0.0
     cam_shift_y: float = 0.0
 
+    # Running integral of cam_shift_x/y — a free-running "camera position
+    # relative to an arbitrary reference frame," accumulated once per
+    # _preprocess_worker tick alongside cam_shift_x/y itself. process_aiming
+    # subtracts this from the raw detected target position before handing it
+    # to the velocity predictor/Kalman filter, so their frame-to-frame deltas
+    # reflect true target motion rather than apparent motion caused by the
+    # aimbot's own correction or camera shake/recoil; the same drift is added
+    # back before the PID error is computed (which must stay in real, current
+    # screen coordinates). Its absolute value is meaningless — only frame-to-
+    # frame consistency matters — so no reset is needed on target loss, only
+    # when cam_motion_comp_enabled itself is off (mirrors cam_shift_x/y).
+    cam_drift_x: float = 0.0
+    cam_drift_y: float = 0.0
+
+    # Timestamp the current lock was acquired — set once on a genuinely new
+    # target (the same "is this a continuation of the previous pick"
+    # _box_iou() check already used for aim_y_last_target_t below), not every
+    # frame the target stays locked. Drives process_aiming()'s brief
+    # acquisition-phase guard: for _ACQUISITION_GUARD_S after this timestamp,
+    # the predictor/Kalman are kept re-bootstrapping instead of accumulating
+    # normally, so the crosshair's own snap onto a fresh target is never
+    # misread as the target moving. Unconditional (not gated by any feature
+    # flag) — unlike fov_reduce_since, which resets to 0 whenever its own
+    # feature is off, this always tracks the true lock-acquisition time.
+    lock_acquired_t: float = 0.0
+
     # Sub-pixel carry — accumulates the fractional remainder that integer truncation
     # discards each frame so micro-corrections are never silently lost and the
     # crosshair converges exactly onto the aim point. Applies to all mouse backends.
