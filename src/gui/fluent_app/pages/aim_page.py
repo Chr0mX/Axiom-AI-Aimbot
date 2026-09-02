@@ -174,6 +174,8 @@ class _TargetClassSelector(QWidget):
 
     selectionChanged = pyqtSignal(list)  # emitted with the new aim_target_class_ids
 
+    _ROW_HEIGHT = 60  # matches each row's own setFixedHeight() below
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._vbox = QVBoxLayout(self)
@@ -182,6 +184,7 @@ class _TargetClassSelector(QWidget):
         self._rows: dict[int, SettingCard] = {}
         self._checks: dict[int, CheckBox] = {}
         self._names_key: tuple | None = None
+        self.setFixedHeight(0)
         self.setVisible(False)
 
     def refresh(self, class_names: dict | None, selected_ids: list) -> None:
@@ -190,7 +193,25 @@ class _TargetClassSelector(QWidget):
         is checked — see aim_target_class_ids's own "no restriction"
         semantics). Returns True while >= 2 classes are available (i.e.
         whether this widget — and the caller's header card — should show
-        at all), False otherwise."""
+        at all), False otherwise.
+
+        The caller (AimPage._loadFromConfig()) must call
+        targetAreaGroup.adjustSize() itself right after this returns —
+        this widget cannot reliably make that happen on its own. It's a
+        direct child of targetAreaGroup's own SettingCardGroup.cardLayout
+        (an ExpandLayout, qfluentwidgets), which does NOT recompute the
+        group's height from a child's sizeHint the normal Qt way — it
+        only reacts to a live Resize *event* on that specific child via an
+        installed event filter, and even then only nudges the group's
+        height by that event's raw delta rather than recomputing it
+        properly. Relying on that path (tried first) intermittently
+        produced a group sized smaller than its actual content — this
+        widget's own height is now set deterministically via
+        setFixedHeight() (not sizeHint()/adjustSize(), which routes back
+        through the same unreliable machinery), and the real fix is the
+        caller invoking the proven, already-correct
+        SettingCardGroup.adjustSize() (heightForWidth() + resize())
+        directly instead of hoping the event filter propagates it."""
         names = class_names or {}
         key = tuple(sorted((int(k), str(v)) for k, v in names.items()))
         selected = {int(i) for i in (selected_ids or [])}
@@ -221,8 +242,8 @@ class _TargetClassSelector(QWidget):
 
         if len(names) < 2:
             # A single-class (or nameless) model has nothing to multi-select.
+            self.setFixedHeight(0)
             self.setVisible(False)
-            self._notifyParentGroupResized()  # shrink targetAreaGroup back down
             return False
 
         self.setVisible(True)
@@ -233,7 +254,7 @@ class _TargetClassSelector(QWidget):
             # thinner than every other row on this page, which all have a
             # description. There's nothing meaningful to put in this row's
             # content, so raise the fixed height directly instead.
-            row.setFixedHeight(60)
+            row.setFixedHeight(self._ROW_HEIGHT)
             box = CheckBox("", row)
             box.setChecked((not selected) or cid in selected)
             box.stateChanged.connect(self._onCheckChanged)
@@ -242,26 +263,10 @@ class _TargetClassSelector(QWidget):
             self._vbox.addWidget(row)
             self._rows[cid] = row
             self._checks[cid] = box
-        self._notifyParentGroupResized()
+        # Deterministic total height — see this method's own docstring for
+        # why this doesn't rely on sizeHint()/adjustSize() at all.
+        self.setFixedHeight(len(self._rows) * self._ROW_HEIGHT)
         return True
-
-    def _notifyParentGroupResized(self) -> None:
-        """This widget is added directly to targetAreaGroup's own
-        SettingCardGroup.cardLayout (an ExpandLayout, qfluentwidgets) via
-        addSettingCard(). ExpandLayout doesn't proactively query a managed
-        widget's sizeHint -- it installs an event filter on each one and
-        only grows the group when it actually observes a Resize *event* on
-        that widget (see ExpandLayout.eventFilter/__doLayout, which reads
-        each child's live .height()). Since this widget's own height never
-        changes on its own just because rows were added to its internal
-        layout, the rows render past where the group (and therefore the
-        page's own scroll extent) already ends -- present, but unreachable
-        by scrolling. adjustSize() (plain QWidget, resizes to this widget's
-        own layout-computed sizeHint) is what actually fires that Resize
-        event, which ExpandLayout's filter then propagates upward into
-        targetAreaGroup automatically -- no direct call to the parent
-        group needed at all."""
-        self.adjustSize()
 
     def _onCheckChanged(self, _state) -> None:
         all_ids = sorted(self._checks.keys())
@@ -1346,6 +1351,15 @@ class AimPage(BasePage):
                 getattr(self._config, '_detect_class_names', None),
                 getattr(self._config, 'aim_target_class_ids', []))
             self.targetClassCard.setVisible(has_classes)
+            # targetClassSelector's own height changes (see its refresh()
+            # docstring for why it can't reliably make this happen on its
+            # own) — explicitly recompute targetAreaGroup's real height via
+            # the same heightForWidth()-based call SettingCardGroup.
+            # addSettingCard() already makes for every other card here,
+            # rather than relying on ExpandLayout's fragile event-filter-only
+            # auto-growth. Cheap and idempotent to call even when nothing
+            # changed this tick.
+            self.targetAreaGroup.adjustSize()
         finally:
             self._isLoadingConfig = False
 
