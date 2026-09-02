@@ -611,3 +611,67 @@ class TestConfigManagerLegacyDirMigration:
         cm = ConfigManager()
         assert cm.get_config_list() == []
         assert not (tmp_path / "config").exists()
+
+
+class TestConfigManagerActiveNameTracking:
+    """save_config()/load_config() record which preset/config is now
+    active on the live Config (Config.active_preset_name/
+    active_config_name), so the status panel can show it — see
+    status_panel.py's Preset/Config row."""
+
+    def test_save_aim_preset_sets_active_preset_name(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)  # aim_only=True default
+            c = _make_config()
+            cm.save_config(c, "my_preset")
+            assert c.active_preset_name == "my_preset"
+            assert c.active_config_name == ""  # untouched by a preset save
+
+    def test_load_aim_preset_sets_active_preset_name(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            saver = _make_config()
+            cm.save_config(saver, "saved_preset")
+
+            c = _make_config()
+            c.active_config_name = "some_full_config"  # pre-existing, must survive
+            assert cm.load_config(c, "saved_preset") is True
+            assert c.active_preset_name == "saved_preset"
+            # An aim-preset load never touches non-aim fields, so it has no
+            # reason to clear a full config's name either.
+            assert c.active_config_name == "some_full_config"
+
+    def test_save_full_config_sets_active_config_name(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir, aim_only=False)
+            c = _make_config()
+            cm.save_config(c, "my_full_config")
+            assert c.active_config_name == "my_full_config"
+
+    def test_load_full_config_sets_active_config_name_and_clears_preset(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir, aim_only=False)
+            saver = _make_config()
+            cm.save_config(saver, "saved_full")
+
+            c = _make_config()
+            c.active_preset_name = "some_preset"  # must be cleared
+            assert cm.load_config(c, "saved_full") is True
+            assert c.active_config_name == "saved_full"
+            # A full-config load can silently override every aim/tracking
+            # field a preset previously set — so the preset credit is
+            # cleared rather than left stale.
+            assert c.active_preset_name == ""
+
+    def test_failed_load_does_not_touch_active_names(self):
+        from core.config_manager import ConfigManager
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cm = ConfigManager(tmpdir)
+            c = _make_config()
+            c.active_preset_name = "unchanged"
+            assert cm.load_config(c, "does_not_exist") is False
+            assert c.active_preset_name == "unchanged"

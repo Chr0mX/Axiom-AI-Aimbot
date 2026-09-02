@@ -304,6 +304,35 @@ class TestConfigSerialization:
         assert c2.mouse_click_method == "xbox"
         assert c2.aim_y_reduce_enabled is True
 
+    def test_active_preset_config_name_fields_round_trip(self):
+        """Set by ConfigManager.save_config()/load_config(), not by hand,
+        but they're plain persisted Config fields like any other — see
+        Config.active_preset_name's docstring."""
+        c = _make_config()
+        assert c.active_preset_name == ""
+        assert c.active_config_name == ""
+        c.active_preset_name = "My Preset"
+        c.active_config_name = "My Full Config"
+        d = c.to_dict()
+        assert d['ui']['active_preset_name'] == "My Preset"
+        assert d['ui']['active_config_name'] == "My Full Config"
+
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.active_preset_name == "My Preset"
+        assert c2.active_config_name == "My Full Config"
+
+    def test_status_panel_show_preset_config_defaults_true_and_round_trips(self):
+        c = _make_config()
+        assert c.status_panel_show_preset_config is True
+        c.status_panel_show_preset_config = False
+        d = c.to_dict()
+        assert d['display']['status_panel']['show_preset_config'] is False
+
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.status_panel_show_preset_config is False
+
 
 # ============================================================
 # 3. save_config / load_config 檔案讀寫測試

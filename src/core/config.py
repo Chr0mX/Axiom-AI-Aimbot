@@ -183,6 +183,7 @@ _FIELD_MAP = {
     'show_status_panel':          'display.status_panel.show',
     'status_panel_show_auto_aim': 'display.status_panel.show_auto_aim',
     'status_panel_show_aim_toggle': 'display.status_panel.show_aim_toggle',
+    'status_panel_show_preset_config': 'display.status_panel.show_preset_config',
     'status_panel_show_model':    'display.status_panel.show_model',
     'status_panel_show_mouse_move': 'display.status_panel.show_mouse_move',
     'status_panel_show_mouse_click': 'display.status_panel.show_mouse_click',
@@ -220,6 +221,8 @@ _FIELD_MAP = {
     'acrylic_window_alpha':       'ui.acrylic_window_alpha',
     'acrylic_element_alpha':      'ui.acrylic_element_alpha',
     'show_console':               'ui.show_console',
+    'active_preset_name':         'ui.active_preset_name',
+    'active_config_name':         'ui.active_config_name',
 
     # --- ocr / 2nd inference ---
     'second_inference_mode':      'ocr.mode',
@@ -528,6 +531,7 @@ class Config:
         self.show_status_panel: bool = True
         self.status_panel_show_auto_aim: bool = True
         self.status_panel_show_aim_toggle: bool = True
+        self.status_panel_show_preset_config: bool = True
         self.status_panel_show_model: bool = True
         self.status_panel_show_mouse_move: bool = False
         self.status_panel_show_mouse_click: bool = False
@@ -535,6 +539,22 @@ class Config:
         self.status_panel_show_screenshot_fps: bool = True
         self.status_panel_show_detection_fps: bool = True
         self.show_console: bool = True  # 終端視窗
+
+        # Name of the most recently loaded/saved aim preset or full config
+        # (ConfigManager, aim_only=True/False respectively) — surfaced on
+        # the status panel so it's visible which one is currently active.
+        # Set by ConfigManager.load_config()/save_config(), not derived
+        # every frame like e.g. fov_effective_size, so persisting it (unlike
+        # those runtime-only fields) is meaningful: it survives a restart.
+        # A full-config load also clears active_preset_name, since loading
+        # one can silently override aim/tracking fields a preset previously
+        # set — see config_manager.py's load_config() docstring. Known gap:
+        # renaming/deleting the currently-active preset/config via
+        # rename_config()/delete_config() (name-only, no live Config
+        # reference) does not update or clear this — it goes stale until
+        # the next load.
+        self.active_preset_name: str = ""
+        self.active_config_name: str = ""
 
         # 主題設定
         self.dark_mode: bool = False  # 深色主題

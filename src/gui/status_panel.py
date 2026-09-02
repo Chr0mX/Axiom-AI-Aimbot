@@ -251,6 +251,7 @@ class StatusPanel(QWidget):
         """依設定更新狀態面板各元素顯示/隱藏"""
         self.aim_row.setVisible(getattr(self.config, 'status_panel_show_auto_aim', True))
         self.aim_toggle_row.setVisible(getattr(self.config, 'status_panel_show_aim_toggle', True))
+        self.preset_config_row.setVisible(getattr(self.config, 'status_panel_show_preset_config', True))
         self.model_row.setVisible(getattr(self.config, 'status_panel_show_model', True))
         self.mouse_row.setVisible(getattr(self.config, 'status_panel_show_mouse_move', True))
         self.mouse_click_row.setVisible(getattr(self.config, 'status_panel_show_mouse_click', True))
@@ -557,6 +558,13 @@ class StatusPanel(QWidget):
         # held-key/MAKCU-button state)
         self.aim_toggle_row = StatusRow(get_text('status_panel_aim_toggle', 'Aim Toggle'))
 
+        # 3.6 狀態行 - Preset/Config — whichever was most recently loaded or
+        # saved (ConfigManager.load_config()/save_config()); label switches
+        # between "Preset"/"Config" depending on which is active, since
+        # they're genuinely different scopes (aim-only vs. every setting).
+        # See Config.active_preset_name/active_config_name's docstring.
+        self.preset_config_row = StatusRow(get_text('status_panel_preset_config', 'Preset/Config'))
+
         # 4. 狀態行 - 目前模型
         self.model_row = StatusRow(get_text('status_panel_current_model'))
 
@@ -584,6 +592,7 @@ class StatusPanel(QWidget):
         self.container_layout.addSpacing(2) 
         self.container_layout.addWidget(self.aim_row)
         self.container_layout.addWidget(self.aim_toggle_row)
+        self.container_layout.addWidget(self.preset_config_row)
         self.container_layout.addWidget(self.model_row)
         self.container_layout.addWidget(self.mouse_row)
         self.container_layout.addWidget(self.mouse_click_row)
@@ -749,6 +758,22 @@ class StatusPanel(QWidget):
         else:
             self.aim_toggle_row.set_value(
                 get_text("status_panel_off"), FluentColors.to_css_rgba(FluentColors.get_error_color()))
+
+        # 更新 Preset/Config — whichever was most recently loaded/saved
+        # (ConfigManager.load_config()/save_config()); preset takes display
+        # priority since it's the narrower, more frequently-swapped scope,
+        # falling back to the full config's name when no preset is active.
+        _preset_name = getattr(self.config, 'active_preset_name', '') or ''
+        _config_name = getattr(self.config, 'active_config_name', '') or ''
+        if _preset_name:
+            _pc_label, _pc_value = get_text('status_panel_preset', 'Preset'), _preset_name
+        elif _config_name:
+            _pc_label, _pc_value = get_text('status_panel_config', 'Config'), _config_name
+        else:
+            _pc_label, _pc_value = get_text('status_panel_preset_config', 'Preset/Config'), "None"
+        if len(_pc_value) > 25: _pc_value = _pc_value[:22] + "..."
+        self.preset_config_row.label.setText(_pc_label)
+        self.preset_config_row.set_value(_pc_value)
 
         # 更新 Model
         model_name = os.path.basename(current_model) if current_model else "None"
