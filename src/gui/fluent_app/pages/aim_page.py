@@ -158,6 +158,13 @@ class _TargetClassSelector(QWidget):
     entirely model-specific, so this can't be a static, hand-authored list
     of checkboxes the way every other card on this page is.
 
+    One `SettingCard` row per class (class name as title, an empty-text
+    `CheckBox` right-aligned in its control column via `hBoxLayout`) —
+    reuses the exact component/layout every other row on this page already
+    uses, rather than a hand-rolled left-aligned checkbox stack, so spacing
+    and alignment matches the rest of Target Area Settings instead of
+    looking like a different control.
+
     Hidden entirely for a single-class (or nameless) model — there's
     nothing meaningful to multi-select when every detection is already the
     only class there is; the page hides this widget's own header card to
@@ -170,8 +177,9 @@ class _TargetClassSelector(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._vbox = QVBoxLayout(self)
-        self._vbox.setContentsMargins(48, 0, 16, 8)
-        self._vbox.setSpacing(2)
+        self._vbox.setContentsMargins(0, 0, 0, 0)
+        self._vbox.setSpacing(0)
+        self._rows: dict[int, SettingCard] = {}
         self._checks: dict[int, CheckBox] = {}
         self._names_key: tuple | None = None
         self.setVisible(False)
@@ -198,9 +206,10 @@ class _TargetClassSelector(QWidget):
             return len(names) >= 2
 
         self._names_key = key
-        for box in self._checks.values():
-            box.setParent(None)
-            box.deleteLater()
+        for row in self._rows.values():
+            row.setParent(None)
+            row.deleteLater()
+        self._rows.clear()
         self._checks.clear()
 
         if len(names) < 2:
@@ -210,10 +219,14 @@ class _TargetClassSelector(QWidget):
 
         self.setVisible(True)
         for cid in sorted(names.keys()):
-            box = CheckBox(f"{names[cid]}  (#{cid})", self)
+            row = SettingCard(FluentIcon.PEOPLE, f"{names[cid]}  (#{cid})", "", self)
+            box = CheckBox("", row)
             box.setChecked((not selected) or cid in selected)
             box.stateChanged.connect(self._onCheckChanged)
-            self._vbox.addWidget(box)
+            row.hBoxLayout.addWidget(box, 0, Qt.AlignmentFlag.AlignRight)
+            row.hBoxLayout.addSpacing(16)
+            self._vbox.addWidget(row)
+            self._rows[cid] = row
             self._checks[cid] = box
         return True
 
