@@ -222,6 +222,7 @@ class _TargetClassSelector(QWidget):
         if len(names) < 2:
             # A single-class (or nameless) model has nothing to multi-select.
             self.setVisible(False)
+            self._notifyParentGroupResized()  # shrink targetAreaGroup back down
             return False
 
         self.setVisible(True)
@@ -241,7 +242,26 @@ class _TargetClassSelector(QWidget):
             self._vbox.addWidget(row)
             self._rows[cid] = row
             self._checks[cid] = box
+        self._notifyParentGroupResized()
         return True
+
+    def _notifyParentGroupResized(self) -> None:
+        """This widget is added directly to targetAreaGroup's own
+        SettingCardGroup.cardLayout (an ExpandLayout, qfluentwidgets) via
+        addSettingCard(). ExpandLayout doesn't proactively query a managed
+        widget's sizeHint -- it installs an event filter on each one and
+        only grows the group when it actually observes a Resize *event* on
+        that widget (see ExpandLayout.eventFilter/__doLayout, which reads
+        each child's live .height()). Since this widget's own height never
+        changes on its own just because rows were added to its internal
+        layout, the rows render past where the group (and therefore the
+        page's own scroll extent) already ends -- present, but unreachable
+        by scrolling. adjustSize() (plain QWidget, resizes to this widget's
+        own layout-computed sizeHint) is what actually fires that Resize
+        event, which ExpandLayout's filter then propagates upward into
+        targetAreaGroup automatically -- no direct call to the parent
+        group needed at all."""
+        self.adjustSize()
 
     def _onCheckChanged(self, _state) -> None:
         all_ids = sorted(self._checks.keys())
