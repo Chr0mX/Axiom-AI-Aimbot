@@ -199,11 +199,18 @@ class _TargetClassSelector(QWidget):
             # Same class set as last time (the common case — this runs on
             # every ~1s live-config-sync tick) — just resync checked state,
             # e.g. after a preset/config load, without tearing down widgets.
+            # Re-assert visibility every tick too (cheap, idempotent) rather
+            # than trusting a single setVisible() call from the last rebuild
+            # survives indefinitely — removes any chance of this widget
+            # getting stuck hidden across ticks for a reason unrelated to
+            # the class set itself.
+            has_classes = len(names) >= 2
+            self.setVisible(has_classes)
             for cid, box in self._checks.items():
                 box.blockSignals(True)
                 box.setChecked((not selected) or cid in selected)
                 box.blockSignals(False)
-            return len(names) >= 2
+            return has_classes
 
         self._names_key = key
         for row in self._rows.values():
