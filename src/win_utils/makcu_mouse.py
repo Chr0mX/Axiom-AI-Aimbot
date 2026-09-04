@@ -577,6 +577,16 @@ class MakcuMouse:
         """True when right mouse button is physically pressed."""
         return bool(self._btn_mask & 0x02)
 
+    @property
+    def side1_held(self) -> bool:
+        """True when the first side button (S1, e.g. Mouse4) is physically pressed."""
+        return bool(self._btn_mask & 0x08)
+
+    @property
+    def side2_held(self) -> bool:
+        """True when the second side button (S2, e.g. Mouse5) is physically pressed."""
+        return bool(self._btn_mask & 0x10)
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton and convenience functions

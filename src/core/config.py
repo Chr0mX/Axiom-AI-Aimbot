@@ -214,6 +214,8 @@ _FIELD_MAP = {
     'makcu_aim_button':           'hardware.makcu.aim_button',
     'makcu_aim_mode':             'hardware.makcu.aim_mode',
     'makcu_disengage_delay':      'hardware.makcu.disengage_delay',
+    'makcu_always_aim_button':    'hardware.makcu.always_aim_button',
+    'makcu_always_aim_mode':      'hardware.makcu.always_aim_mode',
     'xbox_sensitivity':           'hardware.xbox.sensitivity',
     'xbox_deadzone':              'hardware.xbox.deadzone',
 
@@ -546,6 +548,14 @@ class Config:
         self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_aim_active: bool = False  # runtime state — not serialized
         self.makcu_disengage_delay: float = 0.0  # seconds to keep aiming after releasing aim button (0 = off)
+        # Optional side-button-driven Always Aim — a second, independent
+        # activation path alongside the plain always_aim checkbox: "off"
+        # keeps today's behavior (side button does nothing extra), "side1"/
+        # "side2" bind Always Aim to one of the MAKCU stream's two side
+        # buttons, held or toggled per makcu_always_aim_mode.
+        self.makcu_always_aim_button: str = "off"  # "off", "side1", or "side2"
+        self.makcu_always_aim_mode: str = "hold"   # "hold" = aim while held; "toggle" = click to toggle
+        self.makcu_always_aim_active: bool = False  # runtime state — not serialized
         self.fov_follow_mouse: bool = False # FOV 跟隨鼠標
 
         # 顯示開關

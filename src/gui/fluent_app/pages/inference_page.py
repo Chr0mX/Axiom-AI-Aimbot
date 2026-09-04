@@ -148,13 +148,6 @@ class InferencePage(BasePage):
             parent=self.generalGroup
         )
 
-        self.keepDetectingCard = SwitchSettingCard(
-            FluentIcon.UPDATE,
-            t("keep_detecting"),
-            "",
-            parent=self.generalGroup
-        )
-
         self.idleDetectEnableCard = SwitchSettingCard(
             FluentIcon.SPEED_MEDIUM,
             t("idle_detect_enabled"),
@@ -246,7 +239,6 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.detectIntervalCard)
         self.generalGroup.addSettingCard(self.confidenceCard)
         self.generalGroup.addSettingCard(self.semanticFilterCard)
-        self.generalGroup.addSettingCard(self.keepDetectingCard)
         self.generalGroup.addSettingCard(self.idleDetectEnableCard)
         self.generalGroup.addSettingCard(self.idleDetectIntervalCard)
         self.generalGroup.addSettingCard(self.singleTargetCard)
@@ -278,7 +270,6 @@ class InferencePage(BasePage):
         self.detectIntervalCard.valueChanged.connect(self._onDetectIntervalChanged)
         self.confidenceCard.valueChanged.connect(self._onConfidenceChanged)
         self.semanticFilterCard.checkedChanged.connect(self._onSemanticFilterChanged)
-        self.keepDetectingCard.checkedChanged.connect(self._onKeepDetectingChanged)
         self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
         self.idleDetectIntervalCard.valueChanged.connect(self._onIdleDetectIntervalChanged)
         self.singleTargetCard.checkedChanged.connect(self._onSingleTargetChanged)
@@ -316,7 +307,6 @@ class InferencePage(BasePage):
             self.confidenceCard.setValue(confidence_pct)
             self.semanticFilterCard.setChecked(bool(getattr(self._config, 'detect_semantic_filter_enabled', False)))
 
-            self.keepDetectingCard.setChecked(getattr(self._config, 'keep_detecting', False))
             self.idleDetectEnableCard.setChecked(getattr(self._config, 'idle_detect_enabled', True))
             idle_ms = int(getattr(self._config, 'idle_detect_interval', 0.05) * 1000)
             self.idleDetectIntervalCard.setValue(max(5, min(500, idle_ms)))
@@ -376,15 +366,6 @@ class InferencePage(BasePage):
             self._config.cuda_io_binding_enabled = True
             self.cudaIoBindingCard.setChecked(True)
 
-    def _notifyKeysPageVisibility(self):
-        """Tell the keys page to refresh MAKCU card visibility."""
-        try:
-            win = self.window()
-            if hasattr(win, 'keysInterface') and hasattr(win.keysInterface, '_refreshMakcuVisibility'):
-                win.keysInterface._refreshMakcuVisibility()
-        except Exception:
-            pass
-
     # ──────────────────────────────────────────────
     # Callbacks
     # ──────────────────────────────────────────────
@@ -433,11 +414,6 @@ class InferencePage(BasePage):
     def _onSemanticFilterChanged(self, checked):
         if self._config:
             self._config.detect_semantic_filter_enabled = bool(checked)
-
-    def _onKeepDetectingChanged(self, checked):
-        if self._config:
-            self._config.keep_detecting = checked
-        self._notifyKeysPageVisibility()
 
     def _onIdleDetectEnableChanged(self, checked):
         if self._config:
@@ -506,7 +482,6 @@ class InferencePage(BasePage):
         self.confidenceCard.titleLabel.setText(t("min_confidence"))
         self.semanticFilterCard.titleLabel.setText(t("semantic_filter_enabled", "Semantic FP Filter"))
         self.semanticFilterCard.contentLabel.setText(t("semantic_filter_desc", "Discard trees, vehicles, and HUD elements by class name and geometry"))
-        self.keepDetectingCard.titleLabel.setText(t("keep_detecting"))
         self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
