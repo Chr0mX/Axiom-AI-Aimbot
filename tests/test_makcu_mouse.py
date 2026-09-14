@@ -151,7 +151,7 @@ class TestMakcuTryOpenIdentity:
 class TestMakcuQueryInfoStreamRace:
     """測試 _query_info() 與按鍵事件流讀取執行緒之間的競態條件修復。
 
-    Real bug, confirmed against a hardware capture: other_page.py's
+    Real bug #1, confirmed against a hardware capture: other_page.py's
     periodic Hardware-status refresh calls query_info() every ~3s while
     MAKCU is connected — concurrently with the always-running button-event
     stream reader thread, which polls the same serial port with no lock
@@ -160,12 +160,22 @@ class TestMakcuQueryInfoStreamRace:
     km.info()'s own write + its "...\\r\\n>>> " reply landing mid-stream
     broke that assumption — on a MAKXD device (whose real button frames
     have no verifiable suffix at all) this got misread as a spurious
-    button-mask byte, i.e. "aim activates for no reason". _query_info()
-    now pauses the stream around its own request/reply and restarts it
-    afterward so the two never read concurrently.
+    button-mask byte, i.e. "aim activates for no reason".
+
+    Real bug #2, introduced by that first fix and fixed here: an earlier
+    version stopped and restarted the device-side stream itself
+    (km.buttons(0)/(1)) around the query, which reset _btn_mask to 0 —
+    but MAKCU's button stream is edge-triggered ("streams only emit on
+    new frames" per the protocol docs), so an already-held button never
+    got re-reported after the stream came back up, and holding the aim
+    key appeared to silently "stop working" partway through every hold
+    (timed by this method's own ~3s call cadence). _query_info() now only
+    pauses _stream_reader()'s own reading (via _stream_read_pause) around
+    its request/reply — it never stops/restarts the stream or touches
+    _btn_mask, so an in-progress hold survives the query untouched.
     """
 
-    def test_pauses_and_resumes_stream_when_active(self):
+    def test_pauses_stream_reader_while_querying(self):
         from win_utils.makcu_mouse import MakcuMouse
         m = MakcuMouse()
         m._serial = MagicMock()
@@ -176,15 +186,22 @@ class TestMakcuQueryInfoStreamRace:
         fake_thread.is_alive.return_value = True
         m._stream_thread = fake_thread
 
-        with patch.object(m, "_stop_stream") as mock_stop, \
-             patch.object(m, "_start_stream") as mock_start, \
-             patch.object(m, "is_connected", return_value=True):
+        observed = {}
+
+        def fake_sleep(_seconds):
+            observed["paused_during_sleep"] = m._stream_read_pause.is_set()
+
+        with patch("win_utils.makcu_mouse.time.sleep", side_effect=fake_sleep), \
+             patch.object(m, "_stop_stream") as mock_stop, \
+             patch.object(m, "_start_stream") as mock_start:
             m._query_info()
 
-        mock_stop.assert_called_once()
-        mock_start.assert_called_once()
+        assert observed.get("paused_during_sleep") is True
+        assert m._stream_read_pause.is_set() is False  # cleared afterward
+        mock_stop.assert_not_called()
+        mock_start.assert_not_called()
 
-    def test_does_not_touch_stream_when_not_running(self):
+    def test_does_not_pause_when_stream_not_running(self):
         """例如 connect() 期間第一次呼叫 _query_info() 時，串流尚未啟動。"""
         from win_utils.makcu_mouse import MakcuMouse
         m = MakcuMouse()
@@ -193,15 +210,19 @@ class TestMakcuQueryInfoStreamRace:
         m._serial.in_waiting = 0
         m._stream_thread = None
 
-        with patch.object(m, "_stop_stream") as mock_stop, \
-             patch.object(m, "_start_stream") as mock_start:
+        observed = {}
+
+        def fake_sleep(_seconds):
+            observed["paused_during_sleep"] = m._stream_read_pause.is_set()
+
+        with patch("win_utils.makcu_mouse.time.sleep", side_effect=fake_sleep):
             m._query_info()
 
-        mock_stop.assert_not_called()
-        mock_start.assert_not_called()
+        assert observed.get("paused_during_sleep") is False
+        assert m._stream_read_pause.is_set() is False
 
-    def test_does_not_restart_stream_if_disconnected_meanwhile(self):
-        """查詢期間若已斷線，不應重新啟動串流。"""
+    def test_pause_flag_always_cleared_even_on_disconnect_mid_query(self):
+        """查詢途中若序列埠消失（模擬斷線），暫停旗標仍應被清除。"""
         from win_utils.makcu_mouse import MakcuMouse
         m = MakcuMouse()
         m._serial = MagicMock()
@@ -212,13 +233,32 @@ class TestMakcuQueryInfoStreamRace:
         fake_thread.is_alive.return_value = True
         m._stream_thread = fake_thread
 
-        with patch.object(m, "_stop_stream") as mock_stop, \
-             patch.object(m, "_start_stream") as mock_start, \
-             patch.object(m, "is_connected", return_value=False):
-            m._query_info()
+        def fake_sleep(_seconds):
+            m._serial = None  # simulate the device disappearing mid-query
 
-        mock_stop.assert_called_once()
-        mock_start.assert_not_called()
+        with patch("win_utils.makcu_mouse.time.sleep", side_effect=fake_sleep):
+            result = m._query_info()
+
+        assert result == {}
+        assert m._stream_read_pause.is_set() is False
+
+    def test_stream_reader_skips_reading_and_keeps_mask_while_paused(self):
+        """_stream_reader() 迴圈在暫停旗標設定時應完全跳過讀取，且不動 _btn_mask。"""
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._serial = MagicMock()
+        m._serial.is_open = True
+        m._btn_mask = 0x01  # simulate an already-held left button
+        m._stream_read_pause.set()
+
+        def stop_after_one_pass(*_a, **_k):
+            m._stream_stop.set()
+
+        with patch("win_utils.makcu_mouse.time.sleep", side_effect=stop_after_one_pass):
+            m._stream_reader()
+
+        m._serial.read.assert_not_called()
+        assert m._btn_mask == 0x01
 
 
 class TestMakcuMouseMove:
