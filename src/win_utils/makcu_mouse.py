@@ -62,6 +62,18 @@ class MakcuMouse:
         self._btn_mask: int = 0
         self._stream_stop  = threading.Event()
         self._stream_thread: Optional[threading.Thread] = None
+        # Frame-format detection + startup debug logging — instance-level
+        # (not local to _stream_reader()) so both persist across the
+        # stream's internal pause/resume cycles (see _query_info()), and
+        # only reset on a genuine new connect(). Resetting them on every
+        # _stream_reader() call (the original design) meant every ~3s
+        # hardware-info refresh — which now briefly stops/restarts the
+        # stream to avoid racing with it — silently re-armed both the
+        # "first 20 chunks" debug dump and the one-time format-detection
+        # log line, spamming the console indefinitely for the life of the
+        # connection instead of once at actual connect time.
+        self._stream_frame_len: Optional[int] = None
+        self._stream_logged_chunks: int = 0
 
         # Async write thread — inference thread hands off the latest move;
         # write thread drains it and flushes to serial so inference is never
@@ -175,6 +187,14 @@ class MakcuMouse:
             self._pending_dx = 0
             self._pending_dy = 0
             self._pending_event.clear()
+
+        # Fresh connection: re-arm the stream's one-time format detection
+        # and startup debug logging. _query_info() also stops/restarts the
+        # stream (to avoid racing with it — see its own docstring) but
+        # deliberately does NOT touch these, so they stay armed for exactly
+        # one real connect(), not once per internal pause/resume cycle.
+        self._stream_frame_len = None
+        self._stream_logged_chunks = 0
 
         # Start threads outside the lock
         self._start_stream()
@@ -419,6 +439,17 @@ class MakcuMouse:
         that's an inherent limitation of the documented protocol itself,
         not something this reader can add.
 
+        "Once per connection" is tracked on `self` (`_stream_frame_len`),
+        not as a local variable here, and likewise for the "log the first
+        20 raw chunks" debug budget (`_stream_logged_chunks`) — both are
+        reset only by connect(), not by this method starting. This method
+        itself gets called again on every internal pause/resume cycle
+        (see _query_info()'s own docstring for why that happens periodically
+        while connected), and a local variable would silently re-arm both
+        of these every time, which was a real, reported bug: the console
+        got spammed with a repeating "frame format detected"/20-chunk dump
+        every ~3s for as long as MAKCU stayed connected, instead of once.
+
         km.echo(0) means the device sends nothing in response to move/click writes,
         so all incoming bytes are button stream events — no lock needed on reads.
         """
@@ -428,8 +459,6 @@ class MakcuMouse:
         _LEGACY_FRAME_LEN = len(_KM_PREFIX) + 1 + len(_SUFFIX)  # km. + mask + \r\n>>>(space) = 10
         _SHORT_FRAME_LEN = len(_KM_PREFIX) + 1  # km. + mask = 4 (MAKXD, unframed)
         _DETECT_GRACE_S = 0.05
-        frame_len = None  # unknown until the first frame is seen this connection
-        logged_chunks = 0
         while not self._stream_stop.is_set():
             try:
                 ser = self._serial
@@ -438,9 +467,9 @@ class MakcuMouse:
                 n = ser.in_waiting
                 if n:
                     chunk = ser.read(n)
-                    if logged_chunks < 20:
+                    if self._stream_logged_chunks < 20:
                         logger.info("[MAKCU] stream raw bytes: %s", chunk.hex(' '))
-                        logged_chunks += 1
+                        self._stream_logged_chunks += 1
                     buf.extend(chunk)
                     if len(buf) > 256:
                         buf.clear()
@@ -451,7 +480,7 @@ class MakcuMouse:
                             del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
                             break
 
-                        if frame_len is None:
+                        if self._stream_frame_len is None:
                             # One-time format detection for this connection —
                             # see docstring. Give the device a short grace
                             # window to deliver the one deciding byte before
@@ -466,14 +495,15 @@ class MakcuMouse:
                                     else:
                                         time.sleep(0.001)
                             if len(buf) >= needed and buf[idx + _SHORT_FRAME_LEN] == 0x0D:
-                                frame_len = _LEGACY_FRAME_LEN
+                                self._stream_frame_len = _LEGACY_FRAME_LEN
                             else:
-                                frame_len = _SHORT_FRAME_LEN
+                                self._stream_frame_len = _SHORT_FRAME_LEN
                             logger.info(
                                 "[MAKCU] button stream frame format detected: %s",
-                                "legacy (10-byte)" if frame_len == _LEGACY_FRAME_LEN
+                                "legacy (10-byte)" if self._stream_frame_len == _LEGACY_FRAME_LEN
                                 else "makxd (4-byte)")
 
+                        frame_len = self._stream_frame_len
                         if idx + frame_len > len(buf):
                             # Full frame not yet arrived; drop bytes before the
                             # prefix and wait for the rest.
