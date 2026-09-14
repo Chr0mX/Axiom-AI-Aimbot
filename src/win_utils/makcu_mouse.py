@@ -511,7 +511,30 @@ class MakcuMouse:
 
         Manages its own locking, releasing it across the reply-wait sleep,
         so it never blocks move()/click() for the duration of the query.
+
+        Briefly pauses the button-event stream (if running) around this
+        exchange and restarts it afterward — this was a real, confirmed bug:
+        `_stream_reader()`'s own docstring assumes every byte arriving while
+        the stream is active is a button-stream event, but this method (the
+        Keys & HW / Other page's periodic hardware-info refresh calls it on
+        a live timer while connected) writes km.info() and reads its reply
+        on the *same* serial port with no coordination between the two —
+        confirmed via a real hardware capture where `_stream_reader()`
+        itself logged consuming this method's own "km.info()\\r\\nERR\\r\\n>>> "
+        traffic. On a legacy-framed device the reply's mismatched
+        "\\r\\n>>> " suffix at least gets rejected by the stream reader's own
+        resync check, but on a MAKXD device (unframed 4-byte events, no
+        suffix to verify at all) the 4th byte of "km.info()" (`'i'` =
+        0x69) gets read as a genuine button mask (`0x69 & _BTN_BITS = 0x09`
+        — a spurious LMB+Side1 "press") — i.e. exactly the "aim activates
+        for no reason" symptom this was chasing. Pausing the stream for
+        the ~150ms this query takes removes the race outright, rather than
+        trying to make the parser merely more tolerant of traffic it was
+        never designed to see.
         """
+        was_streaming = self._stream_thread is not None and self._stream_thread.is_alive()
+        if was_streaming:
+            self._stop_stream()
         try:
             with self._lock:
                 if not self._serial:
@@ -534,6 +557,9 @@ class MakcuMouse:
             return info
         except Exception:
             return {}
+        finally:
+            if was_streaming and self.is_connected():
+                self._start_stream()
 
     def query_info(self) -> dict:
         """Return parsed km.info() dict."""
