@@ -589,7 +589,18 @@ def ai_logic_loop(
                     try:
                         from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
                         if is_makcu_connected():
-                            always_btn_now = _mm.side2_held if _makcu_always_btn == 'side2' else _mm.side1_held
+                            # Bindable to any of the four MAKCU stream buttons
+                            # (L/R alongside the original side1/side2) — same
+                            # rising-edge hold/toggle handling regardless of
+                            # which physical button is chosen.
+                            if _makcu_always_btn == 'lmb':
+                                always_btn_now = _mm.lmb_held
+                            elif _makcu_always_btn == 'rmb':
+                                always_btn_now = _mm.rmb_held
+                            elif _makcu_always_btn == 'side2':
+                                always_btn_now = _mm.side2_held
+                            else:
+                                always_btn_now = _mm.side1_held
                             if _makcu_always_mode == 'toggle':
                                 # Rising-edge detection: flip toggle on button press
                                 if always_btn_now and not _always_aim_btn_prev[0]:
