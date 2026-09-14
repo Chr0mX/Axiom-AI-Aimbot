@@ -89,6 +89,65 @@ class TestMakcuMouseConnect:
         assert m.com_port == "COM4"
 
 
+class _FakeVersionProbeSerial:
+    """Minimal serial stand-in for _try_open()'s km.version() probe: feeds a
+    fixed reply once (all available immediately, like a real single UART
+    write), then reports no further data. Unlike a bare MagicMock, this
+    avoids a tight/unbounded spin in _try_open()'s deadline-polling loop
+    when the reply never matches (the "unknown identity" rejection case)."""
+
+    def __init__(self, reply: bytes):
+        self._reply = bytearray(reply)
+        self.is_open = True
+
+    @property
+    def in_waiting(self):
+        return len(self._reply)
+
+    def read(self, n):
+        chunk = bytes(self._reply[:n])
+        del self._reply[:n]
+        return chunk
+
+    def reset_input_buffer(self):
+        pass
+
+    def write(self, data):
+        pass
+
+    def flush(self):
+        pass
+
+
+class TestMakcuTryOpenIdentity:
+    """測試 _try_open() 對裝置身分字串的辨識 (km.MAKCU / km.MAKXD)"""
+
+    @patch("win_utils.makcu_mouse.serial.Serial")
+    def test_accepts_legacy_makcu_identity(self, mock_serial_cls):
+        from win_utils.makcu_mouse import MakcuMouse
+        mock_serial_cls.return_value = _FakeVersionProbeSerial(b"km.MAKCU\r\n>>> ")
+
+        m = MakcuMouse()
+        assert m._try_open("COM3", 4_000_000) is True
+
+    @patch("win_utils.makcu_mouse.serial.Serial")
+    def test_accepts_makxd_identity(self, mock_serial_cls):
+        """新的 MAKXD 裝置身分字串 (per KM_API.md) 也應被接受。"""
+        from win_utils.makcu_mouse import MakcuMouse
+        mock_serial_cls.return_value = _FakeVersionProbeSerial(b"km.MAKXD\r\n>>> ")
+
+        m = MakcuMouse()
+        assert m._try_open("COM3", 4_000_000) is True
+
+    @patch("win_utils.makcu_mouse.serial.Serial")
+    def test_rejects_unknown_identity(self, mock_serial_cls):
+        from win_utils.makcu_mouse import MakcuMouse
+        mock_serial_cls.return_value = _FakeVersionProbeSerial(b"km.SOMETHINGELSE\r\n>>> ")
+
+        m = MakcuMouse()
+        assert m._try_open("COM3", 4_000_000) is False
+
+
 class TestMakcuMouseMove:
     """測試 MAKCU 滑鼠移動指令格式"""
 
@@ -270,10 +329,10 @@ _SUFFIX = b"\r\n>>> "
 
 
 def _frame(mask):
-    """A single button-stream frame in the format confirmed against real
-    MAKCU hardware (raw hex capture, 2026-08-04): "km." + a single mask
-    byte + the same "\\r\\n>>> " suffix the docs describe for one-off ASCII
-    command replies. E.g. a Left-button press is literally
+    """A single legacy-MAKCU button-stream frame, in the format confirmed
+    against real MAKCU hardware (raw hex capture, 2026-08-04): "km." + a
+    single mask byte + the same "\\r\\n>>> " suffix the docs describe for
+    one-off ASCII command replies. E.g. a Left-button press is literally
     `6b 6d 2e 01 0d 0a 3e 3e 3e 20` on the wire.
 
     This is the fourth framing model this reader has used — three earlier
@@ -283,6 +342,15 @@ def _frame(mask):
     See _stream_reader()'s docstring for the confirmed capture.
     """
     return _KM_PREFIX + bytes([mask]) + _SUFFIX
+
+
+def _makxd_frame(mask):
+    """A single MAKXD button-stream frame, per the official
+    terrafirma2021/mak-suite KM_API.md spec: "km." + a single mask byte,
+    unframed — no CR/LF/prompt at all. E.g. a Left-button press is
+    literally `6b 6d 2e 01` on the wire, 4 bytes total.
+    """
+    return _KM_PREFIX + bytes([mask])
 
 
 class TestMakcuStreamReader:
@@ -336,11 +404,44 @@ class TestMakcuStreamReader:
         m = _run_stream(_frame(0x01) + _frame(0x03) + _frame(0x00))
         assert m._btn_mask == 0x00
 
-    def test_partial_frame_not_consumed(self):
-        """不足一個完整封包的資料不應更新狀態"""
-        # "km." + mask byte, but the "\r\n>>> " suffix hasn't arrived yet
+    def test_isolated_km_mask_with_no_suffix_applies_as_makxd_short_frame(self):
+        """"km." + mask 後若在偵測寬限期內始終沒有更多位元組送達，應視為完整的
+        MAKXD 4-byte 無框封包並套用（而非永遠等待一個不會出現的合法後綴）。
+
+        This exact byte sequence is genuinely ambiguous in isolation — it's
+        either a legacy frame whose suffix hasn't arrived yet, or a
+        complete, real MAKXD short frame. Since a real legacy device always
+        writes its full 10 bytes in one shot, "nothing more arrives within
+        the bounded grace window" is the correct signal to treat it as a
+        complete MAKXD event rather than block forever waiting on a suffix
+        that a MAKXD device will never send.
+        """
         m = _run_stream(_KM_PREFIX + bytes([0x01]))
-        assert m._btn_mask == 0x00  # untouched — suffix incomplete
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
+
+    def test_makxd_short_frame_applies_immediately(self):
+        """MAKXD 的 4-byte 無框封包應能單獨被正確解析（無需等待任何後綴）。"""
+        m = _run_stream(_makxd_frame(0x02))
+        assert m._btn_mask == 0x02
+        assert m.rmb_held is True
+
+    def test_makxd_consecutive_short_frames_all_apply_in_order(self):
+        """連續多個 MAKXD 短封包應依序套用，以最後一幀為最終狀態。"""
+        m = _run_stream(_makxd_frame(0x01) + _makxd_frame(0x02) + _makxd_frame(0x00))
+        assert m._btn_mask == 0x00
+
+    def test_makxd_side_buttons_parse(self):
+        """MAKXD 短封包也應正確解析 side1/side2 (bit3/bit4)。"""
+        m = _run_stream(_makxd_frame(0x08))
+        assert m._btn_mask == 0x08
+        assert m.side1_held is True
+        assert m.side2_held is False
+
+        m2 = _run_stream(_makxd_frame(0x10))
+        assert m2._btn_mask == 0x10
+        assert m2.side2_held is True
+        assert m2.side1_held is False
 
     def test_isolated_single_frame_applies(self):
         """孤立的單一封包應直接套用。"""
@@ -392,6 +493,20 @@ class TestMakcuStreamReader:
         m = _run_stream(garbage + _frame(0x01))
         assert m._btn_mask == 0x01
         assert m.lmb_held is True
+
+    def test_side1_press_parses(self):
+        """mask=0x08 → side1 (S1) 按下"""
+        m = _run_stream(_frame(0x08))
+        assert m._btn_mask == 0x08
+        assert m.side1_held is True
+        assert m.side2_held is False
+
+    def test_side2_press_parses(self):
+        """mask=0x10 → side2 (S2) 按下"""
+        m = _run_stream(_frame(0x10))
+        assert m._btn_mask == 0x10
+        assert m.side2_held is True
+        assert m.side1_held is False
 
 
 # ============================================================

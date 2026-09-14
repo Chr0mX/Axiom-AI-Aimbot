@@ -4,6 +4,25 @@ MAKCU is a USB HID interceptor device controlled over UART serial. Two APIs exis
 - **Legacy API (ASCII)** — human-readable text commands
 - **V2 API (Binary)** — compact binary frames for performance
 
+Two device families speak the ASCII API described below: **legacy MAKCU**
+and **MAKXD** (the identity `km.version()` returns differs — `km.MAKCU` vs.
+`km.MAKXD` — and Axiom's own connect probe (`win_utils/makcu_mouse.py`,
+`_try_open()`) accepts either). This doc is cross-checked against the
+official protocol reference for both, terrafirma2021/mak-suite's
+`protocol/KM_API.md` (ASCII) / `protocol/MAK_API.md` (binary) — see that
+repo for the authoritative, exhaustive command list; this file stays a
+quick reference tuned to what Axiom actually uses.
+
+**Button-stream framing differs between the two families** — see
+`win_utils/makcu_mouse.py`'s `_stream_reader()` docstring for the full
+detail, but in short: legacy MAKCU pushes each `km.buttons(1)` change as a
+full 10-byte reply-shaped frame (`km.` + mask + the same `\r\n>>> ` suffix
+one-off command replies use), confirmed against a real hardware capture;
+MAKXD instead pushes a bare, unframed 4-byte event (`km.` + mask, no
+CR/LF/prompt) per KM_API.md. Axiom auto-detects which framing a connected
+device actually uses once per connection rather than assuming one, so both
+work without a config toggle.
+
 ---
 
 ## Protocol Basics
@@ -123,6 +142,14 @@ All streaming requires baud ≥ 1M. Streams only emit on new frames.
 
 **mode:** 1=raw (physical), 2=constructed (after remap/mask)
 **Stop:** send `(0)` or `(0,0)`
+
+> **Note on the Buttons stream's ASCII framing** — the "Output" column above
+> describes the V2 **binary** stream's payload shape; Axiom doesn't use V2
+> binary at all, only the ASCII `km.buttons(1)` stream. On the wire, the
+> ASCII stream's actual framing differs by device family and is *not* the
+> plain 2-byte mask shown above — see the "Two device families" note near
+> the top of this doc and `win_utils/makcu_mouse.py`'s `_stream_reader()`
+> for the confirmed byte-level detail of both.
 
 ---
 

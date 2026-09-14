@@ -183,7 +183,14 @@ class MakcuMouse:
         return True
 
     def _try_open(self, com_port: str, baud: int) -> bool:
-        """Open port at baud, probe with km.version(). Returns True if km.MAKCU found.
+        """Open port at baud, probe with km.version(). Returns True if a
+        known device identity string is found.
+
+        Two device families are accepted: legacy **MAKCU** (`km.MAKCU`)
+        and **MAKXD** (`km.MAKXD`, per the official terrafirma2021/
+        mak-suite KM_API.md spec) — both speak the same km.* ASCII
+        command surface this class relies on, differing only in identity
+        string and (see _stream_reader()) button-stream framing.
 
         Acquires _lock only around the individual serial operations — never
         across a sleep — so it never blocks move()/click() for the duration
@@ -205,11 +212,11 @@ class MakcuMouse:
                     waiting = ser.in_waiting
                     if waiting:
                         raw += ser.read(waiting)
-                if b'km.MAKCU' in raw:
+                if b'km.MAKCU' in raw or b'km.MAKXD' in raw:
                     break
                 if not waiting:
                     time.sleep(0.01)
-            if b'km.MAKCU' not in raw:
+            if b'km.MAKCU' not in raw and b'km.MAKXD' not in raw:
                 with self._lock:
                     self._close_locked()
                 return False
@@ -357,28 +364,60 @@ class MakcuMouse:
                     logger.debug("[MAKCU] Reconnect failed: %s", exc)
 
     def _stream_reader(self):
-        """Daemon thread: parse km.<mask>\\r\\n>>> button frames, update _btn_mask.
+        """Daemon thread: parse km.buttons(1) event frames, update _btn_mask.
 
-        Confirmed against a raw hex capture from real hardware (this
-        codebase's prior three attempts at this format were each tried and
-        reported as not detecting real clicks — see git history on this
-        method for what didn't work and why each guess seemed plausible at
-        the time). The actual frame, captured verbatim:
+        Two device families are supported, sharing the same `km.` + 1-byte
+        mask event but differing in how it's framed on the wire:
 
-            6b 6d 2e 01 0d 0a 3e 3e 3e 20
-            "k  m  .  <mask=0x01>  \\r  \\n  >  >  >  ' '"
+        - **Legacy MAKCU** — confirmed against a raw hex capture from real
+          hardware (this codebase's prior three attempts at this format
+          were each tried and reported as not detecting real clicks — see
+          git history on this method for what didn't work and why each
+          guess seemed plausible at the time). The actual frame, captured
+          verbatim:
 
-        i.e. `km.` + a single mask byte + the exact same `\\r\\n>>> ` suffix
-        the docs describe for one-off ASCII command replies — the buttons
-        stream just pushes this unsolicited on every state change, using
-        the same reply framing as everything else instead of a distinct
-        compact encoding. 10 bytes total, mask is 1 byte (not 2).
+              6b 6d 2e 01 0d 0a 3e 3e 3e 20
+              "k  m  .  <mask=0x01>  \\r  \\n  >  >  >  ' '"
 
-        Verify the trailing suffix too (not just the "km." prefix) when
-        enough bytes are buffered to check — a real mask byte can't corrupt
-        into "km.", but requiring the suffix as well catches a byte
-        misaligning the frame from either direction and forces a resync on
-        the next real "km." instead of misreading a corrupted mask.
+          i.e. `km.` + mask + the exact same `\\r\\n>>> ` suffix the docs
+          describe for one-off ASCII command replies — the buttons stream
+          just pushes this unsolicited on every state change, using the
+          same reply framing as everything else instead of a distinct
+          compact encoding. 10 bytes total.
+
+        - **MAKXD** — per the official terrafirma2021/mak-suite KM_API.md
+          spec: "each change in the physical five-button mask emits
+          exactly four unframed bytes: `km.` + mask ... Events have no
+          CR/LF or prompt." 4 bytes total, nothing to verify.
+
+        Both share the same 5-bit physical mask layout (bit0=L, bit1=R,
+        bit2=M, bit3=S1, bit4=S2), so once framing is known, extracting the
+        mask is identical — only how many trailing bytes belong to "this
+        frame" differs.
+
+        Framing is detected **once per connection**, not re-checked per
+        frame (so a real button press never waits on this): the first time
+        a "km." prefix is seen, the byte immediately following the mask is
+        inspected — `\\r` (0x0D) means the legacy 10-byte suffix is coming,
+        anything else (including a short bounded wait timing out with
+        nothing further arriving) means the unframed 4-byte MAKXD form. A
+        real legacy device can never have a non-CR byte there, and a real
+        MAKXD device can never legitimately produce a stray CR there
+        either (the byte right after its mask is always either the start
+        of the next "km." event or nothing yet), so this one byte is
+        unambiguous once it's available. Even a wrong first guess
+        self-heals: the resync-on-next-"km." logic below discards whatever
+        trailing bytes don't belong to the mistaken frame length before the
+        next real frame is parsed.
+
+        For legacy frames, the trailing suffix is verified (not just the
+        "km." prefix) once enough bytes are buffered — a real mask byte
+        can't corrupt into "km.", but requiring the suffix as well catches
+        a byte misaligning the frame from either direction and forces a
+        resync on the next real "km." instead of misreading a corrupted
+        mask. MAKXD's unframed form has no such trailing check to make —
+        that's an inherent limitation of the documented protocol itself,
+        not something this reader can add.
 
         km.echo(0) means the device sends nothing in response to move/click writes,
         so all incoming bytes are button stream events — no lock needed on reads.
@@ -386,7 +425,10 @@ class MakcuMouse:
         buf = bytearray()
         _KM_PREFIX = b"km."
         _SUFFIX = b"\r\n>>> "
-        FRAME_LEN = len(_KM_PREFIX) + 1 + len(_SUFFIX)  # km. + mask + \r\n>>>(space) = 10
+        _LEGACY_FRAME_LEN = len(_KM_PREFIX) + 1 + len(_SUFFIX)  # km. + mask + \r\n>>>(space) = 10
+        _SHORT_FRAME_LEN = len(_KM_PREFIX) + 1  # km. + mask = 4 (MAKXD, unframed)
+        _DETECT_GRACE_S = 0.05
+        frame_len = None  # unknown until the first frame is seen this connection
         logged_chunks = 0
         while not self._stream_stop.is_set():
             try:
@@ -408,23 +450,48 @@ class MakcuMouse:
                             # No prefix in buffer; keep only a possible partial tail
                             del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
                             break
-                        if idx + FRAME_LEN > len(buf):
+
+                        if frame_len is None:
+                            # One-time format detection for this connection —
+                            # see docstring. Give the device a short grace
+                            # window to deliver the one deciding byte before
+                            # falling back to "no more coming" (= short form).
+                            needed = idx + _SHORT_FRAME_LEN + 1
+                            if len(buf) < needed:
+                                deadline = time.monotonic() + _DETECT_GRACE_S
+                                while len(buf) < needed and time.monotonic() < deadline:
+                                    more = ser.in_waiting
+                                    if more:
+                                        buf.extend(ser.read(more))
+                                    else:
+                                        time.sleep(0.001)
+                            if len(buf) >= needed and buf[idx + _SHORT_FRAME_LEN] == 0x0D:
+                                frame_len = _LEGACY_FRAME_LEN
+                            else:
+                                frame_len = _SHORT_FRAME_LEN
+                            logger.info(
+                                "[MAKCU] button stream frame format detected: %s",
+                                "legacy (10-byte)" if frame_len == _LEGACY_FRAME_LEN
+                                else "makxd (4-byte)")
+
+                        if idx + frame_len > len(buf):
                             # Full frame not yet arrived; drop bytes before the
                             # prefix and wait for the rest.
                             del buf[:idx]
                             break
                         mask = buf[idx + 3]
-                        suffix = bytes(buf[idx + 4:idx + FRAME_LEN])
-                        if suffix != _SUFFIX:
-                            # Not a trustworthy frame — resync on the next "km."
-                            resync_idx = buf.find(_KM_PREFIX, idx + len(_KM_PREFIX))
-                            if resync_idx == -1:
-                                del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
-                            else:
-                                del buf[:resync_idx]
-                            continue
+                        if frame_len == _LEGACY_FRAME_LEN:
+                            suffix = bytes(buf[idx + 4:idx + frame_len])
+                            if suffix != _SUFFIX:
+                                # Not a trustworthy frame — resync on the next "km."
+                                resync_idx = buf.find(_KM_PREFIX, idx + len(_KM_PREFIX))
+                                if resync_idx == -1:
+                                    del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
+                                else:
+                                    del buf[:resync_idx]
+                                continue
                         self._btn_mask = mask & _BTN_BITS
-                        del buf[:idx + FRAME_LEN]
+                        del buf[:idx + frame_len]
                 else:
                     time.sleep(0.001)
             except Exception:
