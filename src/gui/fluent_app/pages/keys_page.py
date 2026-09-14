@@ -46,6 +46,15 @@ _MAKCU_TRIGGER_OPTIONS = [
     ("Off",   "off"),
 ]
 
+# MAKCU Always-Aim side-button combo options (label, config string) — a
+# separate, optional activation path alongside the plain Always Aim
+# checkbox, bindable to either of the MAKCU stream's two side buttons.
+_MAKCU_ALWAYS_AIM_OPTIONS = [
+    ("Off",    "off"),
+    ("Side 1", "side1"),
+    ("Side 2", "side2"),
+]
+
 
 # 虛擬鍵碼對應翻譯 key 表
 VK_CODE_TRANSLATION_MAP = {
@@ -565,6 +574,36 @@ class KeysPage(BasePage):
             parent=self.makcuKeysGroup
         )
 
+        # Always Aim Button (makcu_always_aim_button) — optional side-button
+        # activation of Always Aim, independent of the plain checkbox above.
+        self.makcuAlwaysAimButtonCombo = ComboBox()
+        self.makcuAlwaysAimButtonCombo.setMinimumWidth(110)
+        for label, _ in _MAKCU_ALWAYS_AIM_OPTIONS:
+            self.makcuAlwaysAimButtonCombo.addItem(label)
+        self.makcuAlwaysAimButtonCard = SettingCard(
+            FluentIcon.FINGERPRINT,
+            t("makcu_always_aim_button", "Always Aim Button"),
+            t("makcu_always_aim_button_desc", "Optional side mouse button that activates Always Aim"),
+            self.makcuKeysGroup
+        )
+        self.makcuAlwaysAimButtonCard.hBoxLayout.addWidget(self.makcuAlwaysAimButtonCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuAlwaysAimButtonCard.hBoxLayout.addSpacing(16)
+
+        # Always Aim Mode (makcu_always_aim_mode) — hold or toggle, reuses
+        # the same hold/toggle option list as Aim Mode above.
+        self.makcuAlwaysAimModeCombo = ComboBox()
+        self.makcuAlwaysAimModeCombo.setMinimumWidth(110)
+        for label, _ in _AIM_MODE_OPTIONS:
+            self.makcuAlwaysAimModeCombo.addItem(label)
+        self.makcuAlwaysAimModeCard = SettingCard(
+            FluentIcon.ROTATE,
+            t("makcu_always_aim_mode", "Always Aim Mode"),
+            t("makcu_always_aim_mode_desc", "Hold: always-aim while button held  |  Toggle: click to toggle always-aim on/off"),
+            self.makcuKeysGroup
+        )
+        self.makcuAlwaysAimModeCard.hBoxLayout.addWidget(self.makcuAlwaysAimModeCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuAlwaysAimModeCard.hBoxLayout.addSpacing(16)
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -600,6 +639,8 @@ class KeysPage(BasePage):
         self.makcuKeysGroup.addSettingCard(self.makcuTriggerCard)
         self.makcuKeysGroup.addSettingCard(self.makcuAimModeCard)
         self.makcuKeysGroup.addSettingCard(self.makcuDisengageDelayCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuAlwaysAimButtonCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuAlwaysAimModeCard)
         self.addContent(self.makcuKeysGroup)
         self.makcuKeysGroup.setVisible(False)
 
@@ -628,6 +669,8 @@ class KeysPage(BasePage):
         self.makcuTriggerCombo.currentIndexChanged.connect(self._onMakcuTriggerKeyChanged)
         self.makcuAimModeCombo.currentIndexChanged.connect(self._onMakcuAimModeChanged)
         self.makcuDisengageDelayCard.valueChanged.connect(self._onMakcuDisengageDelayChanged)
+        self.makcuAlwaysAimButtonCombo.currentIndexChanged.connect(self._onMakcuAlwaysAimButtonChanged)
+        self.makcuAlwaysAimModeCombo.currentIndexChanged.connect(self._onMakcuAlwaysAimModeChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -694,6 +737,24 @@ class KeysPage(BasePage):
         delay = float(getattr(self._config, 'makcu_disengage_delay', 0.0) or 0.0)
         self.makcuDisengageDelayCard.setValue(delay)
 
+        # Always Aim Button (makcu_always_aim_button)
+        always_aim_btn = getattr(self._config, 'makcu_always_aim_button', 'off').lower()
+        for i, (_, val) in enumerate(_MAKCU_ALWAYS_AIM_OPTIONS):
+            if val == always_aim_btn:
+                self.makcuAlwaysAimButtonCombo.blockSignals(True)
+                self.makcuAlwaysAimButtonCombo.setCurrentIndex(i)
+                self.makcuAlwaysAimButtonCombo.blockSignals(False)
+                break
+
+        # Always Aim Mode (makcu_always_aim_mode)
+        always_aim_mode = getattr(self._config, 'makcu_always_aim_mode', 'hold').lower()
+        for i, (_, val) in enumerate(self._AIM_MODE_OPTIONS):
+            if val == always_aim_mode:
+                self.makcuAlwaysAimModeCombo.blockSignals(True)
+                self.makcuAlwaysAimModeCombo.setCurrentIndex(i)
+                self.makcuAlwaysAimModeCombo.blockSignals(False)
+                break
+
         self._refreshMakcuVisibility()
 
     def _refreshMakcuVisibility(self):
@@ -708,6 +769,11 @@ class KeysPage(BasePage):
         self.makcuTriggerCard.setVisible(not always_aim)
         self.makcuAimModeCard.setVisible(not always_aim)
         self.makcuDisengageDelayCard.setVisible(not always_aim)
+        # Always Aim Button + Mode: hidden when always_aim is on — the plain
+        # checkbox already keeps aim always active, so the side-button
+        # activation path would have nothing left to add.
+        self.makcuAlwaysAimButtonCard.setVisible(not always_aim)
+        self.makcuAlwaysAimModeCard.setVisible(not always_aim)
         # always_aim/keep_detecting change which MAKCU slots are relevant —
         # re-run the conflict scan against the newly-active set.
         self._checkKeyConflicts()
@@ -755,6 +821,9 @@ class KeysPage(BasePage):
                 trigger_to_vk = {"lmb": 0x01, "rmb": 0x02, "off": None}
                 trigger = getattr(self._config, 'makcu_aim_button', 'lmb').lower()
                 alt_groups.append([(t("makcu_aim_trigger_key", "Aim Trigger Button"), trigger_to_vk.get(trigger))])
+                always_aim_btn_to_vk = {"side1": 0x05, "side2": 0x06, "off": None}
+                always_aim_btn = getattr(self._config, 'makcu_always_aim_button', 'off').lower()
+                alt_groups.append([(t("makcu_always_aim_button", "Always Aim Button"), always_aim_btn_to_vk.get(always_aim_btn))])
         else:
             aim_labels = (t("aim_key_1"), t("aim_key_2"), t("aim_key_3"))
             aim_group = [(label, self._config.AimKeys[i] or None)
@@ -854,6 +923,15 @@ class KeysPage(BasePage):
     def _onMakcuDisengageDelayChanged(self, value: float):
         if self._config:
             self._config.makcu_disengage_delay = float(value)
+
+    def _onMakcuAlwaysAimButtonChanged(self, idx: int):
+        if self._config and 0 <= idx < len(_MAKCU_ALWAYS_AIM_OPTIONS):
+            self._config.makcu_always_aim_button = _MAKCU_ALWAYS_AIM_OPTIONS[idx][1]
+        self._checkKeyConflicts()
+
+    def _onMakcuAlwaysAimModeChanged(self, idx: int):
+        if self._config and 0 <= idx < len(self._AIM_MODE_OPTIONS):
+            self._config.makcu_always_aim_mode = self._AIM_MODE_OPTIONS[idx][1]
 
     def _loadMakcuConnFromConfig(self):
         """Load MAKCU COM port and baud rate from config, then auto-connect if device found."""
@@ -1091,9 +1169,14 @@ class KeysPage(BasePage):
         self.makcuAimModeCard.contentLabel.setText(t("makcu_aim_mode_desc", "Hold: aim while button held  |  Toggle: click to toggle aim on/off"))
         self.makcuDisengageDelayCard.titleLabel.setText(t("makcu_disengage_delay", "Disengage Delay"))
         self.makcuDisengageDelayCard.contentLabel.setText(t("makcu_disengage_delay_desc", "Keep aiming after releasing the aim button (0 = off)"))
+        self.makcuAlwaysAimButtonCard.titleLabel.setText(t("makcu_always_aim_button", "Always Aim Button"))
+        self.makcuAlwaysAimButtonCard.contentLabel.setText(t("makcu_always_aim_button_desc", "Optional side mouse button that activates Always Aim"))
+        self.makcuAlwaysAimModeCard.titleLabel.setText(t("makcu_always_aim_mode", "Always Aim Mode"))
+        self.makcuAlwaysAimModeCard.contentLabel.setText(t("makcu_always_aim_mode_desc", "Hold: always-aim while button held  |  Toggle: click to toggle always-aim on/off"))
 
         # Rebuild Aim Mode combo options with fresh translations, preserving selection
         current_aim_mode_idx = self.makcuAimModeCombo.currentIndex()
+        current_always_aim_mode_idx = self.makcuAlwaysAimModeCombo.currentIndex()
         self._AIM_MODE_OPTIONS = [
             (t("aim_mode_hold", "Hold"), "hold"),
             (t("aim_mode_toggle", "Toggle"), "toggle"),
@@ -1102,6 +1185,11 @@ class KeysPage(BasePage):
         for label, _ in self._AIM_MODE_OPTIONS:
             self.makcuAimModeCombo.addItem(label)
         self.makcuAimModeCombo.setCurrentIndex(current_aim_mode_idx)
+        # Always Aim Mode reuses the same option list/translations
+        self.makcuAlwaysAimModeCombo.clear()
+        for label, _ in self._AIM_MODE_OPTIONS:
+            self.makcuAlwaysAimModeCombo.addItem(label)
+        self.makcuAlwaysAimModeCombo.setCurrentIndex(current_always_aim_mode_idx)
 
         # 刷新按鍵綁定按鈕文字
         self.aimKey1Btn.refreshText()

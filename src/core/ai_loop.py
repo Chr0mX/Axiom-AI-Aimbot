@@ -349,6 +349,11 @@ def ai_logic_loop(
     # MAKCU aim toggle state (used when makcu_aim_mode == "toggle")
     _aim_toggle_active: list = [False]
     _aim_btn_prev: list = [False]
+    # MAKCU Always-Aim side-button toggle state (used when
+    # makcu_always_aim_mode == "toggle") — independent of the aim-trigger
+    # toggle state above, since the two buttons/modes are configured separately.
+    _always_aim_toggle_active: list = [False]
+    _always_aim_btn_prev: list = [False]
     # MAKCU disengage-delay state
     _disengage_time: list = [0.0]   # perf_counter timestamp when aim was released
     _was_aiming: list = [False]     # previous-frame is_aiming for falling-edge detection
@@ -566,13 +571,45 @@ def ai_logic_loop(
                     _makcu_btn != 'off'
                     and getattr(config, 'mouse_move_method', '') == 'makcu'
                 )
+
+                # Optional MAKCU side-button-driven Always Aim — a second,
+                # independent activation path alongside the plain always_aim
+                # checkbox (see config.py's makcu_always_aim_button docstring).
+                # Deliberately not gated on _use_makcu/makcu_aim_button: the
+                # side button is its own optional feature and should work
+                # even if the primary Aim Trigger Button is set to "off".
+                _makcu_always_btn  = getattr(config, 'makcu_always_aim_button', 'off')
+                _makcu_always_mode = getattr(config, 'makcu_always_aim_mode', 'hold')
+                _use_makcu_always  = (
+                    _makcu_always_btn != 'off'
+                    and getattr(config, 'mouse_move_method', '') == 'makcu'
+                )
+                _effective_always_aim = bool(getattr(config, 'always_aim', False))
+                if _use_makcu_always:
+                    try:
+                        from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
+                        if is_makcu_connected():
+                            always_btn_now = _mm.side2_held if _makcu_always_btn == 'side2' else _mm.side1_held
+                            if _makcu_always_mode == 'toggle':
+                                # Rising-edge detection: flip toggle on button press
+                                if always_btn_now and not _always_aim_btn_prev[0]:
+                                    _always_aim_toggle_active[0] = not _always_aim_toggle_active[0]
+                                _always_aim_btn_prev[0] = always_btn_now
+                                _effective_always_aim = _effective_always_aim or _always_aim_toggle_active[0]
+                            else:
+                                # Hold mode: always-aim while button is held
+                                _effective_always_aim = _effective_always_aim or always_btn_now
+                    except Exception:
+                        pass
+                config.makcu_always_aim_active = _effective_always_aim
+
                 if _use_makcu:
                     # MAKCU mode: aim state driven purely by the stream button so
                     # that AimKeys (which may include other mouse buttons) cannot
                     # bleed through and fire aim on the wrong button.
-                    is_aiming = bool(getattr(config, 'always_aim', False))
+                    is_aiming = _effective_always_aim
                 else:
-                    is_aiming = bool(getattr(config, 'always_aim', False)) or any(is_key_pressed(k) for k in config.AimKeys)
+                    is_aiming = _effective_always_aim or any(is_key_pressed(k) for k in config.AimKeys)
                 if _use_makcu:
                     try:
                         from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
@@ -637,7 +674,7 @@ def ai_logic_loop(
                     capture_state['target_region'] = region
 
                 idle_enabled = getattr(config, 'idle_detect_enabled', True)
-                if getattr(config, 'always_aim', False) or getattr(config, 'always_auto_fire', False):
+                if _effective_always_aim or getattr(config, 'always_auto_fire', False):
                     idle_enabled = False
                 if idle_enabled and not is_aiming:
                     desired_interval = getattr(config, 'idle_detect_interval', config.detect_interval)

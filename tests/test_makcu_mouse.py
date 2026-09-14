@@ -308,6 +308,22 @@ class TestMakcuStreamReader:
         assert m.lmb_held is False
         assert m.rmb_held is True
 
+    def test_side1_press_parses(self):
+        """mask=0x08 → 側鍵一按下，不誤報其他按鍵"""
+        m = _run_stream(_frame(0x08))
+        assert m._btn_mask == 0x08
+        assert m.side1_held is True
+        assert m.side2_held is False
+        assert m.lmb_held is False
+        assert m.rmb_held is False
+
+    def test_side2_press_parses(self):
+        """mask=0x10 → 側鍵二按下，不誤報其他按鍵"""
+        m = _run_stream(_frame(0x10))
+        assert m._btn_mask == 0x10
+        assert m.side2_held is True
+        assert m.side1_held is False
+
     def test_high_bits_masked_off(self):
         """遮罩位元組的高位元 (bits 5-7) 應被 _BTN_BITS 遮罩"""
         # 0xE1 = 0b111_00001 -> only bits 0-4 (0x01, Left) should survive
