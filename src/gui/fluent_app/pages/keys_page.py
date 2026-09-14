@@ -46,11 +46,14 @@ _MAKCU_TRIGGER_OPTIONS = [
     ("Off",   "off"),
 ]
 
-# MAKCU Always-Aim side-button combo options (label, config string) — a
+# MAKCU Always-Aim button combo options (label, config string) — a
 # separate, optional activation path alongside the plain Always Aim
-# checkbox, bindable to either of the MAKCU stream's two side buttons.
+# checkbox, bindable to any of the MAKCU stream's four physical buttons
+# (Left/Right alongside the original two side buttons).
 _MAKCU_ALWAYS_AIM_OPTIONS = [
     ("Off",    "off"),
+    ("Left",   "lmb"),
+    ("Right",  "rmb"),
     ("Side 1", "side1"),
     ("Side 2", "side2"),
 ]
@@ -821,7 +824,7 @@ class KeysPage(BasePage):
                 trigger_to_vk = {"lmb": 0x01, "rmb": 0x02, "off": None}
                 trigger = getattr(self._config, 'makcu_aim_button', 'lmb').lower()
                 alt_groups.append([(t("makcu_aim_trigger_key", "Aim Trigger Button"), trigger_to_vk.get(trigger))])
-                always_aim_btn_to_vk = {"side1": 0x05, "side2": 0x06, "off": None}
+                always_aim_btn_to_vk = {"lmb": 0x01, "rmb": 0x02, "side1": 0x05, "side2": 0x06, "off": None}
                 always_aim_btn = getattr(self._config, 'makcu_always_aim_button', 'off').lower()
                 alt_groups.append([(t("makcu_always_aim_button", "Always Aim Button"), always_aim_btn_to_vk.get(always_aim_btn))])
         else:

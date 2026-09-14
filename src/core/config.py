@@ -548,12 +548,15 @@ class Config:
         self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_aim_active: bool = False  # runtime state — not serialized
         self.makcu_disengage_delay: float = 0.0  # seconds to keep aiming after releasing aim button (0 = off)
-        # Optional side-button-driven Always Aim — a second, independent
+        # Optional button-driven Always Aim — a second, independent
         # activation path alongside the plain always_aim checkbox: "off"
-        # keeps today's behavior (side button does nothing extra), "side1"/
-        # "side2" bind Always Aim to one of the MAKCU stream's two side
-        # buttons, held or toggled per makcu_always_aim_mode.
-        self.makcu_always_aim_button: str = "off"  # "off", "side1", or "side2"
+        # keeps today's behavior (no button does anything extra); "lmb"/
+        # "rmb"/"side1"/"side2" bind Always Aim to one of the MAKCU
+        # stream's four physical buttons, held or toggled per
+        # makcu_always_aim_mode. lmb/rmb overlap with makcu_aim_button's
+        # own trigger-button choice is allowed on purpose (same "hold one
+        # button to do both" precedent as AimKeys/auto_fire_key).
+        self.makcu_always_aim_button: str = "off"  # "off", "lmb", "rmb", "side1", or "side2"
         self.makcu_always_aim_mode: str = "hold"   # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_always_aim_active: bool = False  # runtime state — not serialized
         self.fov_follow_mouse: bool = False # FOV 跟隨鼠標
