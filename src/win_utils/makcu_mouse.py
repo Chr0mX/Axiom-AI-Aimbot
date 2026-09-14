@@ -62,6 +62,14 @@ class MakcuMouse:
         self._btn_mask: int = 0
         self._stream_stop  = threading.Event()
         self._stream_thread: Optional[threading.Thread] = None
+        # Set by _query_info() to make _stream_reader() briefly stand down
+        # from calling ser.read() itself, so the two never race for the
+        # same bytes on the wire — see _query_info()'s own docstring for
+        # why this is a *read pause*, not a stop/restart of the device-side
+        # stream (km.buttons(0)/(1)) the way an earlier version of this fix
+        # did. _btn_mask is never touched by this — the whole point is that
+        # pausing must not lose track of an already-held button.
+        self._stream_read_pause = threading.Event()
         # Frame-format detection + startup debug logging — instance-level
         # (not local to _stream_reader()) so both persist across the
         # stream's internal pause/resume cycles (see _query_info()), and
@@ -282,6 +290,7 @@ class MakcuMouse:
         buffer right before enabling the stream so it always starts clean.
         """
         self._stream_stop.clear()
+        self._stream_read_pause.clear()
         self._btn_mask = 0
         try:
             with self._lock:
@@ -461,6 +470,13 @@ class MakcuMouse:
         _DETECT_GRACE_S = 0.05
         while not self._stream_stop.is_set():
             try:
+                if self._stream_read_pause.is_set():
+                    # _query_info() is doing its own exclusive read right
+                    # now — stand down without touching _btn_mask or the
+                    # buffer, so a still-held button stays reported as held
+                    # for the whole pause instead of appearing released.
+                    time.sleep(0.005)
+                    continue
                 ser = self._serial
                 if not ser or not ser.is_open:
                     break
@@ -542,29 +558,45 @@ class MakcuMouse:
         Manages its own locking, releasing it across the reply-wait sleep,
         so it never blocks move()/click() for the duration of the query.
 
-        Briefly pauses the button-event stream (if running) around this
-        exchange and restarts it afterward — this was a real, confirmed bug:
-        `_stream_reader()`'s own docstring assumes every byte arriving while
-        the stream is active is a button-stream event, but this method (the
-        Keys & HW / Other page's periodic hardware-info refresh calls it on
-        a live timer while connected) writes km.info() and reads its reply
-        on the *same* serial port with no coordination between the two —
-        confirmed via a real hardware capture where `_stream_reader()`
-        itself logged consuming this method's own "km.info()\\r\\nERR\\r\\n>>> "
-        traffic. On a legacy-framed device the reply's mismatched
-        "\\r\\n>>> " suffix at least gets rejected by the stream reader's own
-        resync check, but on a MAKXD device (unframed 4-byte events, no
-        suffix to verify at all) the 4th byte of "km.info()" (`'i'` =
-        0x69) gets read as a genuine button mask (`0x69 & _BTN_BITS = 0x09`
-        — a spurious LMB+Side1 "press") — i.e. exactly the "aim activates
-        for no reason" symptom this was chasing. Pausing the stream for
-        the ~150ms this query takes removes the race outright, rather than
-        trying to make the parser merely more tolerant of traffic it was
-        never designed to see.
+        Pauses `_stream_reader()`'s own reading (if a stream is running)
+        for the duration of this exchange, so the two never race for the
+        same bytes on the wire — this was a real, confirmed bug:
+        `_stream_reader()`'s own docstring used to assume every byte
+        arriving while the stream is active is a button-stream event, but
+        this method (the Keys & HW / Other page's periodic hardware-info
+        refresh calls it on a live ~3s timer while connected) writes
+        km.info() and reads its reply on the *same* serial port with no
+        coordination between the two — confirmed via a real hardware
+        capture where `_stream_reader()` itself logged consuming this
+        method's own "km.info()\\r\\nERR\\r\\n>>> " traffic. On a legacy-framed
+        device the reply's mismatched "\\r\\n>>> " suffix at least gets
+        rejected by the stream reader's own resync check, but on a MAKXD
+        device (unframed 4-byte events, no suffix to verify at all) the
+        4th byte of "km.info()" (`'i'` = 0x69) gets read as a genuine
+        button mask (`0x69 & _BTN_BITS = 0x09` — a spurious LMB+Side1
+        "press") — i.e. "aim activates for no reason".
+
+        An earlier version of this fix instead stopped and restarted the
+        device-side stream itself (`km.buttons(0)`/`km.buttons(1)`) around
+        the query, which introduced a second, worse real bug: MAKCU's
+        button stream is edge-triggered — "streams only emit on new
+        frames" per the protocol docs — so if the aim button was already
+        held when the stream got disabled and re-enabled, the device had
+        no *new* state change to report and never re-sent "held" after
+        re-enabling. `_btn_mask` (reset to 0 by `_stop_stream()`) then
+        stayed stuck at "not held" for the rest of that hold, however long
+        it lasted, until the next genuine press/release edge — reported
+        exactly as "holding the aim key stops aiming after ~2-3 seconds"
+        (matching this method's own ~3s call cadence from the Hardware
+        panel timer). This version never stops the device-side stream or
+        touches `_btn_mask` at all — it only tells `_stream_reader()` to
+        skip its own `ser.read()` calls for the ~150ms this query takes,
+        which is enough to remove the race without losing in-progress
+        button-hold state.
         """
         was_streaming = self._stream_thread is not None and self._stream_thread.is_alive()
         if was_streaming:
-            self._stop_stream()
+            self._stream_read_pause.set()
         try:
             with self._lock:
                 if not self._serial:
@@ -588,8 +620,7 @@ class MakcuMouse:
         except Exception:
             return {}
         finally:
-            if was_streaming and self.is_connected():
-                self._start_stream()
+            self._stream_read_pause.clear()
 
     def query_info(self) -> dict:
         """Return parsed km.info() dict."""
