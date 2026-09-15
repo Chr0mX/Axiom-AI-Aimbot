@@ -622,6 +622,97 @@ class TestMakcuStreamReader:
         assert m.side1_held is False
 
 
+def _bin_frame(btn_id, state, tag=0x53, length=3, sub_type=0x01):
+    """A single binary button-event frame, reverse-engineered from a raw
+    capture of a newer MAKCU/MAKXD firmware revision that stopped
+    speaking the ASCII buttons(1) stream entirely: 2-byte 0xDE 0xAD sync
+    + little-endian 2-byte length field + 1-byte report-type tag (0x53
+    for button events) + payload `[sub_type][btn_id][state]`. E.g. a
+    Left-button (bit 0) press is literally `de ad 03 00 53 01 00 01` on
+    the wire; release is the same with the trailing byte 0x00.
+    """
+    return bytes([0xDE, 0xAD, length & 0xFF, (length >> 8) & 0xFF, tag, sub_type, btn_id, state])
+
+
+class TestMakcuBinaryStreamReader:
+    """測試新韌體的二進位按鍵事件流封包解析 (0xDE 0xAD sync)。
+
+    Real, reported bug: a newer MAKCU firmware revision stopped emitting
+    either ASCII "km." button-stream form at all, so clicks silently
+    stopped registering (the format-detection logic never found a "km."
+    prefix anywhere and _btn_mask simply never updated). Confirmed
+    against a raw capture of two button presses+releases (button-index 0
+    and 1, i.e. Left and Right):
+
+        de ad 03 00 53 01 00 01   de ad 03 00 53 01 00 00
+        de ad 03 00 53 01 01 01   de ad 03 00 53 01 01 00
+    """
+
+    def test_left_press_release_parses(self):
+        m = _run_stream(_bin_frame(0x00, 1) + _bin_frame(0x00, 0))
+        assert m._btn_mask == 0x00
+        assert m.lmb_held is False
+
+    def test_left_press_isolated_applies(self):
+        m = _run_stream(_bin_frame(0x00, 1))
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
+
+    def test_right_press_isolated_applies(self):
+        """對應實際擷取到的第二組封包 (btn_id=0x01)。"""
+        m = _run_stream(_bin_frame(0x01, 1))
+        assert m._btn_mask == 0x02
+        assert m.rmb_held is True
+
+    def test_side1_and_side2_bit_indices_apply(self):
+        """side1/side2 的位元索引對應目前沿用既有的 5-bit 慣例 (未經硬體獨立驗證)。"""
+        m1 = _run_stream(_bin_frame(0x03, 1))
+        assert m1._btn_mask == 0x08
+        assert m1.side1_held is True
+
+        m2 = _run_stream(_bin_frame(0x04, 1))
+        assert m2._btn_mask == 0x10
+        assert m2.side2_held is True
+
+    def test_real_captured_sequence_from_hardware(self):
+        """回歸測試：對真實硬體擷取的原始位元組序列逐幀套用。"""
+        raw_hex = (
+            "dead030053010001"
+            "dead030053010000"
+            "dead030053010101"
+            "dead030053010100"
+        )
+        m = _run_stream(bytes.fromhex(raw_hex))
+        assert m._btn_mask == 0x00  # last frame was a release
+
+    def test_resyncs_past_garbage_before_sync(self):
+        garbage = bytes([0x11, 0x22, 0x33])
+        m = _run_stream(garbage + _bin_frame(0x00, 1))
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
+
+    def test_unrecognized_tag_is_skipped_not_misread(self):
+        """未知的 report-type tag 應被跳過，不應誤判為按鍵事件。"""
+        unknown = _bin_frame(0x00, 1, tag=0x99)
+        m = _run_stream(unknown + _bin_frame(0x01, 1))
+        assert m._btn_mask == 0x02  # only the recognized frame applied
+
+    def test_implausible_length_resyncs_instead_of_hanging(self):
+        """異常長度值應視為雜訊並重新同步，而非等待永遠不會到齊的位元組。"""
+        corrupt = bytes([0xDE, 0xAD, 0xFF, 0xFF, 0x00])  # length = 65535
+        m = _run_stream(corrupt + _bin_frame(0x00, 1))
+        assert m._btn_mask == 0x01
+        assert m.lmb_held is True
+
+    def test_binary_marker_wins_detection_over_km_when_earlier(self):
+        """若緩衝區中 0xDE 0xAD 早於任何 "km." 出現，應鎖定為二進位模式。"""
+        # A coincidental "km." substring appearing only *after* the binary
+        # sync marker must not derail detection.
+        m = _run_stream(_bin_frame(0x00, 1) + b"km.stray")
+        assert m._btn_mask == 0x01
+        assert m._stream_binary_mode is True
+
+
 # ============================================================
 # 2. 模組級便利函式測試
 # ============================================================
