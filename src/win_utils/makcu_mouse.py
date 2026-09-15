@@ -82,6 +82,12 @@ class MakcuMouse:
         # connection instead of once at actual connect time.
         self._stream_frame_len: Optional[int] = None
         self._stream_logged_chunks: int = 0
+        # A third device/firmware family streams button events as a
+        # compact binary report (0xDE 0xAD sync + length-prefixed payload)
+        # instead of either ASCII "km." form — see _stream_reader()'s own
+        # docstring. Locked in once per connection alongside the two
+        # ASCII-format fields above, never re-checked mid-connection.
+        self._stream_binary_mode: bool = False
 
         # Async write thread — inference thread hands off the latest move;
         # write thread drains it and flushes to serial so inference is never
@@ -203,6 +209,7 @@ class MakcuMouse:
         # one real connect(), not once per internal pause/resume cycle.
         self._stream_frame_len = None
         self._stream_logged_chunks = 0
+        self._stream_binary_mode = False
 
         # Start threads outside the lock
         self._start_stream()
@@ -395,8 +402,11 @@ class MakcuMouse:
     def _stream_reader(self):
         """Daemon thread: parse km.buttons(1) event frames, update _btn_mask.
 
-        Two device families are supported, sharing the same `km.` + 1-byte
-        mask event but differing in how it's framed on the wire:
+        Three device/firmware families are supported. The first two share
+        the same `km.` + 1-byte mask event but differ in how it's framed
+        on the wire; the third is a genuinely different, binary encoding
+        seen on a newer firmware revision that stopped speaking the ASCII
+        buttons(1) stream at all:
 
         - **Legacy MAKCU** — confirmed against a raw hex capture from real
           hardware (this codebase's prior three attempts at this format
@@ -424,20 +434,59 @@ class MakcuMouse:
         mask is identical — only how many trailing bytes belong to "this
         frame" differs.
 
+        - **Binary** — a newer firmware revision reported to no longer
+          emit either ASCII form at all (clicks stopped registering
+          entirely — the "km." prefix this parser looks for never
+          appears anywhere on the wire). Reverse-engineered from a raw
+          capture of two button presses (mask bit 0 and bit 1), each a
+          press immediately followed by a release:
+
+              de ad 03 00 53 01 00 01   de ad 03 00 53 01 00 00
+              de ad 03 00 53 01 01 01   de ad 03 00 53 01 01 00
+
+          i.e. a 2-byte `0xDE 0xAD` sync marker, a little-endian 2-byte
+          length field (here always `3`, counting only the bytes after
+          the next field), a 1-byte report-type tag (`0x53`, observed
+          only for button events so far), then a 3-byte payload:
+          `[0x01 sub-type][button bit-index][state: 1=press, 0=release]`.
+          The button-index byte matches this codebase's own existing bit
+          numbering (0=L, 1=R, 2=M, 3=S1, 4=S2) exactly — a bit is set/
+          cleared in `_btn_mask` directly from it — which is a reasonable
+          but *not independently confirmed* inference (see the length-
+          driven framing below): the mapping was only ever observed for
+          bits 0 and 1 (Left/Right) on real hardware; Middle/Side1/Side2
+          are extrapolated from the existing convention, not observed.
+          The length field is honored genuinely (not hardcoded to 8
+          bytes) so a differently-sized report of some other kind doesn't
+          desync this parser — an unrecognized tag byte is simply
+          skipped, never misread as a button change. An implausibly large
+          length (more than 64 — no real button report should be anywhere
+          near that) is treated as a corrupted/coincidental sync match and
+          skipped past, resyncing on the next `0xDE 0xAD` occurrence,
+          mirroring the ASCII legacy format's own resync-on-mismatch
+          safety net above.
+
         Framing is detected **once per connection**, not re-checked per
-        frame (so a real button press never waits on this): the first time
-        a "km." prefix is seen, the byte immediately following the mask is
-        inspected — `\\r` (0x0D) means the legacy 10-byte suffix is coming,
-        anything else (including a short bounded wait timing out with
-        nothing further arriving) means the unframed 4-byte MAKXD form. A
-        real legacy device can never have a non-CR byte there, and a real
-        MAKXD device can never legitimately produce a stray CR there
-        either (the byte right after its mask is always either the start
-        of the next "km." event or nothing yet), so this one byte is
-        unambiguous once it's available. Even a wrong first guess
-        self-heals: the resync-on-next-"km." logic below discards whatever
-        trailing bytes don't belong to the mistaken frame length before the
-        next real frame is parsed.
+        frame (so a real button press never waits on this). The very
+        first decision is binary vs. ASCII: whichever marker — `km.` or
+        `0xDE 0xAD` — is found earliest in the buffer wins (a real device
+        only ever speaks one of the two; there's no scenario where both
+        legitimately appear). Once binary mode is locked in, parsing
+        switches entirely to the length-driven binary path described
+        above for the rest of the connection. Otherwise, for the two
+        ASCII sub-formats: the first time a "km." prefix is seen, the byte
+        immediately following the mask is inspected — `\\r` (0x0D) means
+        the legacy 10-byte suffix is coming, anything else (including a
+        short bounded wait timing out with nothing further arriving)
+        means the unframed 4-byte MAKXD form. A real legacy device can
+        never have a non-CR byte there, and a real MAKXD device can never
+        legitimately produce a stray CR there either (the byte right
+        after its mask is always either the start of the next "km." event
+        or nothing yet), so this one byte is unambiguous once it's
+        available. Even a wrong first guess self-heals: the resync-on-
+        next-"km." logic below discards whatever trailing bytes don't
+        belong to the mistaken frame length before the next real frame is
+        parsed.
 
         For legacy frames, the trailing suffix is verified (not just the
         "km." prefix) once enough bytes are buffered — a real mask byte
@@ -468,6 +517,10 @@ class MakcuMouse:
         _LEGACY_FRAME_LEN = len(_KM_PREFIX) + 1 + len(_SUFFIX)  # km. + mask + \r\n>>>(space) = 10
         _SHORT_FRAME_LEN = len(_KM_PREFIX) + 1  # km. + mask = 4 (MAKXD, unframed)
         _DETECT_GRACE_S = 0.05
+        _BIN_SYNC = b"\xde\xad"
+        _BIN_HDR_LEN = len(_BIN_SYNC) + 2  # sync + 2-byte little-endian length field = 4
+        _BIN_BTN_TAG = 0x53  # observed report-type byte for a button-state event
+        _BIN_MAX_PLAUSIBLE_LEN = 64  # guards against a coincidental sync match in noise
         while not self._stream_stop.is_set():
             try:
                 if self._stream_read_pause.is_set():
@@ -489,6 +542,62 @@ class MakcuMouse:
                     buf.extend(chunk)
                     if len(buf) > 256:
                         buf.clear()
+
+                    # One-time protocol decision for this connection —
+                    # binary vs. either ASCII form — made before either
+                    # sub-parser below ever runs. Whichever marker appears
+                    # earliest in the buffer wins; a real device only ever
+                    # speaks one of the two.
+                    if self._stream_frame_len is None and not self._stream_binary_mode:
+                        idx_km = buf.find(_KM_PREFIX)
+                        idx_bin = buf.find(_BIN_SYNC)
+                        if idx_bin != -1 and (idx_km == -1 or idx_bin < idx_km):
+                            self._stream_binary_mode = True
+                            logger.info(
+                                "[MAKCU] button stream frame format detected: binary (0xDE 0xAD sync)")
+
+                    if self._stream_binary_mode:
+                        while True:
+                            idx = buf.find(_BIN_SYNC)
+                            if idx == -1:
+                                del buf[:max(0, len(buf) - (len(_BIN_SYNC) - 1))]
+                                break
+                            if idx + _BIN_HDR_LEN > len(buf):
+                                # Sync found but the length field hasn't
+                                # fully arrived yet.
+                                del buf[:idx]
+                                break
+                            length = buf[idx + 2] | (buf[idx + 3] << 8)
+                            if length > _BIN_MAX_PLAUSIBLE_LEN:
+                                # Not a real frame — a coincidental 0xDE 0xAD
+                                # in unrelated noise. Resync on the next
+                                # occurrence, same principle as the ASCII
+                                # legacy format's mismatched-suffix resync.
+                                resync_idx = buf.find(_BIN_SYNC, idx + len(_BIN_SYNC))
+                                if resync_idx == -1:
+                                    del buf[:max(0, len(buf) - (len(_BIN_SYNC) - 1))]
+                                else:
+                                    del buf[:resync_idx]
+                                continue
+                            frame_len = _BIN_HDR_LEN + 1 + length  # + tag byte + payload
+                            if idx + frame_len > len(buf):
+                                del buf[:idx]
+                                break
+                            tag = buf[idx + _BIN_HDR_LEN]
+                            payload = bytes(buf[idx + _BIN_HDR_LEN + 1:idx + frame_len])
+                            if tag == _BIN_BTN_TAG and len(payload) >= 3 and payload[0] == 0x01:
+                                btn_id, state = payload[1], payload[2]
+                                if 0 <= btn_id <= 4:
+                                    bit = 1 << btn_id
+                                    self._btn_mask = (
+                                        (self._btn_mask | bit) if state else (self._btn_mask & ~bit)
+                                    ) & _BTN_BITS
+                            # An unrecognized tag is a report type this
+                            # reverse-engineered parser doesn't know about
+                            # yet — skip it rather than misread it.
+                            del buf[:idx + frame_len]
+                        continue
+
                     while True:
                         idx = buf.find(_KM_PREFIX)
                         if idx == -1:
