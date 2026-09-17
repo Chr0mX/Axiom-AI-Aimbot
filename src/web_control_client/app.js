@@ -698,6 +698,8 @@
     document.getElementById("keys-makcu-trigger-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-disengage-card").classList.toggle("hidden", hideForAlwaysAim);
+    document.getElementById("keys-makcu-always-aim-button-card").classList.toggle("hidden", hideForAlwaysAim);
+    document.getElementById("keys-makcu-always-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
   }
 
   var vkOptionsLoaded = false;
@@ -1754,6 +1756,8 @@
     document.getElementById("keys-makcu-trigger-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-disengage-card").classList.toggle("hidden", hideForAlwaysAim);
+    document.getElementById("keys-makcu-always-aim-button-card").classList.toggle("hidden", hideForAlwaysAim);
+    document.getElementById("keys-makcu-always-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
 
     // Only reflect server state onto the toggle while it isn't mid-request
     // (disabled) — otherwise a status poll landing between the user's click
