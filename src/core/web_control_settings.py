@@ -199,6 +199,12 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "makcu_aim_button": {"type": "choice", "choices": ["lmb", "rmb", "off"]},
         "makcu_aim_mode": {"type": "choice", "choices": ["hold", "toggle"]},
         "makcu_disengage_delay": {"type": "float", "min": 0.0, "max": 20.0},
+        # Always Aim Button/Mode (makcu_always_aim_button/_mode) — optional
+        # side-button activation of Always Aim, independent of the plain
+        # always_aim checkbox (see the "trigger" tab's own inference schema).
+        # Mirrors keys_page.py's _MAKCU_ALWAYS_AIM_OPTIONS.
+        "makcu_always_aim_button": {"type": "choice", "choices": ["off", "lmb", "rmb", "side1", "side2"]},
+        "makcu_always_aim_mode": {"type": "choice", "choices": ["hold", "toggle"]},
     },
     "visuals": {
         "show_fov": {"type": "bool"},
