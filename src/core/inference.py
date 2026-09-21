@@ -181,6 +181,7 @@ def postprocess_outputs(
     letterbox_scale: float = 1.0,
     letterbox_pad_x: int = 0,
     letterbox_pad_y: int = 0,
+    return_arrays: bool = False,
 ) -> Tuple[List[List[float]], List[float], List[int]]:
     """Post-process ONNX model output into screen-space bounding boxes.
 
@@ -204,6 +205,14 @@ def postprocess_outputs(
         letterbox_scale:  Scale returned by preprocess_image().
         letterbox_pad_x:  Horizontal padding returned by preprocess_image().
         letterbox_pad_y:  Vertical   padding returned by preprocess_image().
+        return_arrays:    When True, return boxes/confidences as numpy arrays
+                          instead of calling .tolist() on them. Callers that
+                          immediately hand the result to non_max_suppression()
+                          (which itself needs numpy arrays internally) can use
+                          this to skip a numpy->list->numpy round trip that
+                          otherwise repeats every detection frame. Default
+                          False preserves the original plain-list return type
+                          for every other caller.
 
     Returns:
         (boxes, confidences) with boxes as [[x1, y1, x2, y2], …] in absolute
@@ -261,8 +270,8 @@ def postprocess_outputs(
     x2 = cx + w / 2 + offset_x
     y2 = cy + h / 2 + offset_y
 
-    boxes = np.stack([x1, y1, x2, y2], axis=1).tolist()
-    confidences = _conf_scores[conf_mask].tolist()
+    boxes_arr = np.stack([x1, y1, x2, y2], axis=1)
+    confidences_arr = _conf_scores[conf_mask]
 
     # Class IDs: argmax over class columns (cols 4+).
     # Using [:, 4:] not [:, 5:] so class 0 (col 4) is correctly included.
@@ -271,9 +280,11 @@ def postprocess_outputs(
         class_ids = filtered_predictions[:, 4:].argmax(axis=1).tolist()
         class_ids = [int(c) for c in class_ids]
     else:
-        class_ids = [0] * len(boxes)
+        class_ids = [0] * len(boxes_arr)
 
-    return boxes, confidences, class_ids
+    if return_arrays:
+        return boxes_arr, confidences_arr, class_ids
+    return boxes_arr.tolist(), confidences_arr.tolist(), class_ids
 
 
 def non_max_suppression(
@@ -314,10 +325,22 @@ def non_max_suppression(
 
     if len(boxes) == 1:
         single_ids = [int(class_ids[0])] if class_ids else [0]
-        return boxes, confidences, single_ids
+        # Normalize to plain lists regardless of whether boxes/confidences
+        # arrived as numpy arrays (postprocess_outputs(return_arrays=True))
+        # or plain lists (every other caller) — the documented return type
+        # is always a plain list either way.
+        out_boxes = boxes.tolist() if isinstance(boxes, np.ndarray) else boxes
+        out_confs = confidences.tolist() if isinstance(confidences, np.ndarray) else confidences
+        return out_boxes, out_confs, single_ids
 
-    boxes_arr = np.array(boxes)
-    confidences_arr = np.array(confidences)
+    # np.asarray (not np.array) is a zero-copy no-op when boxes/confidences
+    # are already ndarrays — e.g. postprocess_outputs(return_arrays=True)
+    # feeding straight in here — avoiding the numpy->list->numpy round trip
+    # that a plain np.array() call would otherwise repeat every frame.
+    # Behavior for a plain-list caller (every other call site) is unchanged:
+    # asarray still has to build a new array from the list either way.
+    boxes_arr = np.asarray(boxes)
+    confidences_arr = np.asarray(confidences)
     areas = (boxes_arr[:, 2] - boxes_arr[:, 0]) * (boxes_arr[:, 3] - boxes_arr[:, 1])
     order = confidences_arr.argsort()[::-1]
     

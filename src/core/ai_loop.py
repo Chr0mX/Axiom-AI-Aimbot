@@ -739,6 +739,13 @@ def ai_logic_loop(
                         letterbox_scale=lb_scale,
                         letterbox_pad_x=lb_pad_x,
                         letterbox_pad_y=lb_pad_y,
+                        # Skip the numpy->list conversion here — non_max_suppression()
+                        # immediately below accepts the arrays directly (np.asarray
+                        # is a zero-copy no-op on them) and normalizes its own
+                        # output back to plain lists, so nothing downstream of NMS
+                        # sees any difference; this just removes a redundant
+                        # array->list->array round trip repeated every frame.
+                        return_arrays=True,
                     )
                     # class_ids must go through NMS with the boxes: NMS drops
                     # detections and reorders the survivors by confidence, so

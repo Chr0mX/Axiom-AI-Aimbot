@@ -44,9 +44,11 @@ class KalmanFilter2D:
         )
 
         # Process noise covariance Q (4×4)
+        self._process_noise = process_noise
         self._Q = np.eye(4, dtype=np.float64) * process_noise
 
         # Measurement noise covariance R (2×2)
+        self._measurement_noise = measurement_noise
         self._R = np.eye(2, dtype=np.float64) * measurement_noise
 
         # Estimate covariance P (4×4) — start with high uncertainty
@@ -62,7 +64,17 @@ class KalmanFilter2D:
         self._x = np.zeros((4, 1), dtype=np.float64)
 
     def reconfigure(self, process_noise: float, measurement_noise: float) -> None:
-        """Hot-swap noise parameters without resetting state."""
+        """Hot-swap noise parameters without resetting state.
+
+        Called every frame kalman_enabled is on (see ai_aiming._get_kalman()),
+        for config values that essentially never change mid-session — skip
+        reallocating Q/R (a fresh numpy array each time) when neither value
+        actually changed since the last call.
+        """
+        if process_noise == self._process_noise and measurement_noise == self._measurement_noise:
+            return
+        self._process_noise = process_noise
+        self._measurement_noise = measurement_noise
         self._Q = np.eye(4, dtype=np.float64) * process_noise
         self._R = np.eye(2, dtype=np.float64) * measurement_noise
 

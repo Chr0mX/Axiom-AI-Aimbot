@@ -49,11 +49,19 @@ def _get_predictor(config: Config) -> VelocityPredictor:
     max_vel = float(getattr(config, 'prediction_max_velocity', 1200.0))
     if _predictor is None:
         _predictor = VelocityPredictor(history_len=history_len, max_velocity_px_per_s=max_vel)
+        _predictor._configured_history_len = history_len
     else:
         _predictor._max_velocity = max_vel
-        _predictor._history = type(_predictor._history)(
-            _predictor._history, maxlen=history_len
-        )
+        # Rebuilding the deque copies its whole history and discards the old
+        # object — real cost paid every single aiming frame if done
+        # unconditionally, for a config value (prediction_history_len) that
+        # essentially never changes mid-session. Only rebuild when it
+        # actually did change.
+        if getattr(_predictor, '_configured_history_len', history_len) != history_len:
+            _predictor._history = type(_predictor._history)(
+                _predictor._history, maxlen=history_len
+            )
+            _predictor._configured_history_len = history_len
     return _predictor
 
 

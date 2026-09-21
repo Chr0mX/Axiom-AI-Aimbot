@@ -255,8 +255,18 @@ class PyQtOverlay(QWidget):
         painter.drawLine(x2, y2, x2 - corner_length, y2)  # 水平線
         painter.drawLine(x2, y2, x2, y2 - corner_length)  # 垂直線
 
-    def draw_tracer_lines(self, painter: QPainter) -> None:
-        """Draw lines from screen center to the aim point of each detected box."""
+    def draw_tracer_lines(self, painter: QPainter, precomputed: list | None = None) -> None:
+        """Draw lines from screen center to the aim point of each detected box.
+
+        `precomputed` — an optional list of (target_x, target_y, in_fov)
+        tuples already computed by paintEvent()'s box-drawing loop (the exact
+        same calculate_aim_target() call and FOV test this method would
+        otherwise redo from scratch). When show_boxes is also on, paintEvent()
+        passes this in so both passes' worth of per-box work isn't computed
+        twice per frame. Falls back to computing it here when boxes aren't
+        being drawn this frame (show_boxes is its own independent toggle from
+        show_tracer_line) or there's nothing to reuse.
+        """
         if not self.boxes:
             return
         cx = int(self.config.crosshairX)
@@ -265,6 +275,13 @@ class PyQtOverlay(QWidget):
         pen = QPen(tracer_color, 2, Qt.PenStyle.SolidLine)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        if precomputed is not None:
+            for tx, ty, in_fov in precomputed:
+                if in_fov:
+                    painter.drawLine(cx, cy, tx, ty)
+            return
+
         # fov_effective_size/_height (not fov_size/fov_height) — reflect any
         # live shrink from "Reduce FOV on Active Target" so the tracer's
         # in/out-FOV test matches what target selection actually used this
@@ -339,6 +356,12 @@ class PyQtOverlay(QWidget):
             else:
                 self.draw_fov_corners(painter, cx, cy, fov_w, fov_h)
 
+        # Reused by the tracer-line pass below (if show_tracer_line is also
+        # on) so its FOV test + calculate_aim_target() call isn't redone from
+        # scratch for every box a second time this frame — see
+        # draw_tracer_lines()'s own docstring.
+        _tracer_points = None
+
         # 繪製檢測框和置信度 - 使用主題顏色
         if show_boxes and self.boxes:
             theme_key = str(getattr(self.config, 'box_color_theme', 'default')).lower()
@@ -378,6 +401,7 @@ class PyQtOverlay(QWidget):
             aim_x_color     = OverlayColors.get_aim_marker_color()
             pen_aim_x       = QPen(aim_x_color, 1)
             calc_target     = _get_calculate_aim_target()
+            _tracer_points = []
 
             for i, box in enumerate(self.boxes):
                 x1, y1, x2, y2 = map(int, box)
@@ -412,6 +436,8 @@ class PyQtOverlay(QWidget):
                 painter.drawLine(tx - r, ty - r, tx + r, ty + r)
                 painter.drawLine(tx + r, ty - r, tx - r, ty + r)
 
+                _tracer_points.append((tx, ty, in_fov))
+
         # Predicted aim-point marker — the locked target's point AFTER
         # cam-drift compensation and prediction_enabled/kalman_enabled
         # smoothing (published by ai_aiming.process_aiming(), since overlay.py
@@ -433,7 +459,7 @@ class PyQtOverlay(QWidget):
 
         # 繪製追蹤線（從螢幕中心到目標）
         if getattr(self.config, 'show_tracer_line', False):
-            self.draw_tracer_lines(painter)
+            self.draw_tracer_lines(painter, _tracer_points)
 
         # 繪製自訂準心
         self._draw_crosshair(painter)
