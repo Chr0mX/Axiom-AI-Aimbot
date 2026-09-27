@@ -205,6 +205,7 @@ Both `model_page.py` and `convert_page.py` pair their model `ComboBox` with a `S
 | `makcu_disengage_delay` | `hardware.makcu.disengage_delay` | Seconds aim stays active after releasing aim button (0–20 s) |
 | `makcu_aim_button` | `hardware.makcu.aim_button` | Which MAKCU button acts as the aim trigger |
 | `always_aim` | `aim.always_aim` | Skip aim-key check; aim every frame |
+| `aim_start_delay_ms` | `aim.start_delay_ms` | Milliseconds (0–1000, default 0) after aim engages before any mouse movement is sent; detection keeps running meanwhile. Gated in `ai_loop.py` via `ai_loop_utils.aim_start_delay_elapsed()` off `state.aiming_start_time`, so every fresh press restarts it |
 | `keep_detecting` | `aim.keep_detecting` | Run detection even when not aiming |
 | `single_target_mode` | `aim.single_target_mode` | Reduce Web ESP/auto-fire/preview box list to the locked target only (applied *after* sticky lock resolves the pick — see Aiming section) |
 | `target_priority_mode` | `tracking.target_priority.mode` | `'distance'` / `'confidence'` / `'composite'` |
