@@ -96,6 +96,7 @@ _FIELD_MAP = {
     'aim_toggle_key':             'aim.aim_toggle_key',
     'AimToggle':                  'aim.aim_toggle',
     'always_aim':                 'aim.always_aim',
+    'aim_start_delay_ms':         'aim.start_delay_ms',
     'keep_detecting':             'aim.keep_detecting',
     'single_target_mode':         'aim.single_target_mode',
     'fov_follow_mouse':           'aim.fov_follow_mouse',
@@ -544,6 +545,9 @@ class Config:
         # 保持檢測功能
         self.keep_detecting: bool = True   # 啟用保持檢測
         self.always_aim: bool = False      # 不按瞄準鍵也執行自動瞄準
+        # Milliseconds after aim engages (aim key pressed / toggle on) before
+        # any mouse movement is sent. 0 = aim immediately.
+        self.aim_start_delay_ms: int = 0
         self.makcu_aim_button: str = "lmb"   # "lmb", "rmb", or "off"
         self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_aim_active: bool = False  # runtime state — not serialized
@@ -927,6 +931,8 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
 
         # 向後兼容：確保 UDP 接收緩衝區大於單一資料包最大值
         _validate_udp_recv_buffer_size(config_instance)
+
+        _validate_queue_and_confidence(config_instance)
         
         logger.info("Config loaded")
         return True
@@ -1007,6 +1013,43 @@ def _validate_udp_recv_buffer_size(config: Config) -> None:
         )
     else:
         config.udp_recv_buffer_size = raw
+
+
+AIM_START_DELAY_MAX_MS = 1000
+
+
+def _validate_queue_and_confidence(config: Config) -> None:
+    """max_queue_size sizes the overlay/auto-fire result queues (main.py):
+    queue.Queue treats <= 0 as *unbounded*, and update_queues() only evicts
+    when full(), so a 0 would let stale results pile up behind the newest.
+    min_confidence outside [0, 1] makes the detector accept everything (< 0)
+    or nothing (> 1). aim_start_delay_ms is clamped to [0, AIM_START_DELAY_MAX_MS]."""
+    try:
+        size = int(getattr(config, 'max_queue_size', 1))
+    except (TypeError, ValueError):
+        size = 1
+    if size < 1:
+        logger.warning("[Config] max_queue_size %d is invalid (must be >= 1) — using 1", size)
+        size = 1
+    config.max_queue_size = size
+
+    try:
+        delay_ms = int(getattr(config, 'aim_start_delay_ms', 0))
+    except (TypeError, ValueError):
+        delay_ms = 0
+    config.aim_start_delay_ms = max(0, min(AIM_START_DELAY_MAX_MS, delay_ms))
+
+    try:
+        conf = float(getattr(config, 'min_confidence', 0.8))
+    except (TypeError, ValueError):
+        conf = 0.8
+    if conf != conf or conf in (float('inf'), float('-inf')):
+        logger.warning("[Config] min_confidence %r is not finite — using 0.8", conf)
+        conf = 0.8
+    clamped = min(1.0, max(0.0, conf))
+    if clamped != conf:
+        logger.warning("[Config] min_confidence %.3f out of range [0, 1] — clamped to %.3f", conf, clamped)
+    config.min_confidence = clamped
 
 
 def _validate_mouse_method(config: Config) -> None:

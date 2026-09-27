@@ -72,6 +72,8 @@
     "import_config": "匯入參數",
     "keep_detecting": "保持偵測（即使未按瞄準鍵）",
     "always_aim": "持續自動瞄準（不需按瞄準鍵）",
+    "aim_start_delay": "瞄準延遲",
+    "aim_start_delay_desc": "開始瞄準後等待此時間才移動滑鼠（0 = 立即）",
     "keys_and_auto_fire": "按鍵與自動射擊",
     "language": "語言",
     "language_settings": "語言",

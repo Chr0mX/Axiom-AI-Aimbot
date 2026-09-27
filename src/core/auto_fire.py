@@ -36,6 +36,8 @@ def auto_fire_loop(config: Config, boxes_queue: queue.Queue) -> None:
     logger = logging.getLogger(__name__)
     
     BOX_UPDATE_INTERVAL = 1 / 60  # 60Hz update frequency
+    # Twice the slowest legitimate refresh (idle_detect_interval is capped at 0.5s).
+    MAX_BOX_AGE_S = 1.0
     
     # Cache key configuration
     auto_fire_key = config.auto_fire_key
@@ -80,6 +82,12 @@ def auto_fire_loop(config: Config, boxes_queue: queue.Queue) -> None:
                                 pass
                             except Exception as e:
                                 logger.warning("AutoFire failed to read detection queue: %s", e)
+
+                        # Nothing new has arrived for a while (inference stalled or
+                        # its source died) — the cached boxes no longer describe
+                        # the screen, so never fire on them.
+                        if cached_boxes and current_time - last_box_update > MAX_BOX_AGE_S:
+                            cached_boxes = []
                         
                         # Determine if shooting should occur
                         if cached_boxes:

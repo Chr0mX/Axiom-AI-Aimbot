@@ -726,12 +726,6 @@ class NDICapture:
         # real frames/sec like the UDP backend does for the status panel.
         self._live_fps_count: int = 0
         self._live_fps_t0: float = time.perf_counter()
-        # Ping-pong pair of BGRA buffers for the crop-path — eliminates per-frame .copy().
-        # Alternating ensures the buffer just returned stays valid while grab() fills the other.
-        self._bgra_bufs: list[np.ndarray | None] = [None, None]
-        self._bgra_shapes: list[tuple] = [(), ()]
-        self._bgra_idx: int = 0
-
         self._ndi_preview_thread: _UVCPreviewThread | None = None
         if self.show_window:
             self._ndi_preview_thread = _UVCPreviewThread(
@@ -979,27 +973,15 @@ class NDICapture:
                     right = min(max_w, (right + 1) & ~1)
                     if right <= left:
                         return None
-                    crop_raw = raw[top:bottom, left:right, :]
-                    expected_shape = (bottom - top, right - left, 4)
-                    idx = self._bgra_idx
-                    if self._bgra_shapes[idx] != expected_shape:
-                        self._bgra_bufs[idx]   = np.empty(expected_shape, dtype=np.uint8)
-                        self._bgra_shapes[idx] = expected_shape
-                    cv2.cvtColor(crop_raw, cv2.COLOR_YUV2BGRA_UYVY, self._bgra_bufs[idx])
-                    frame = self._bgra_bufs[idx]
-                    self._bgra_idx = 1 - idx
+                    # Fresh output array per frame, not a reused buffer: the
+                    # returned frame is handed to the preprocess thread (and
+                    # cached for reuse) without a copy, so any buffer grab()
+                    # writes into again can be overwritten mid-read.
+                    frame = cv2.cvtColor(raw[top:bottom, left:right, :], cv2.COLOR_YUV2BGRA_UYVY)
                 elif recv_fourcc == 'bgra':
                     frame = raw[top:bottom, left:right].copy()
                 else:
-                    crop_raw = raw[top:bottom, left:right]
-                    expected_shape = (bottom - top, right - left, 4)
-                    idx = self._bgra_idx
-                    if self._bgra_shapes[idx] != expected_shape:
-                        self._bgra_bufs[idx]   = np.empty(expected_shape, dtype=np.uint8)
-                        self._bgra_shapes[idx] = expected_shape
-                    cv2.cvtColor(crop_raw, cv2.COLOR_RGBA2BGRA, self._bgra_bufs[idx])
-                    frame = self._bgra_bufs[idx]
-                    self._bgra_idx = 1 - idx
+                    frame = cv2.cvtColor(raw[top:bottom, left:right], cv2.COLOR_RGBA2BGRA)
             else:
                 frame = _to_bgra(raw)
 
@@ -2470,21 +2452,19 @@ class UdpCapture:
         self._preview_thread.start()
 
     def _reader_worker(self) -> None:
-        # Non-blocking poll with time.sleep(0) between frames.
-        # On Windows, Sleep(0) yields to other runnable threads then returns
-        # in < 1 ms — no 15 ms scheduler-quantum penalty that Event.wait() incurs
-        # when used as a blocking wait. This allows the loop to react to a new
-        # frame within microseconds of it being assembled by _recv_loop.
+        # Blocks on the receiver's new-frame event. A set() wakes the waiter
+        # in well under 1 ms (only the *timeout* is subject to the ~15 ms
+        # Windows timer granularity); the time.sleep(0) poll this replaced
+        # kept one core at 100% for as long as UDP capture was active.
         _fps_count = 0
         _fps_t0 = time.perf_counter()
         _seen_id = None
         _logged_stream_dims = None
 
         while not self._stop.is_set():
-            jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id()
+            jpeg_bytes, frame_id = self._receiver.get_latest_frame_with_id(block=True, timeout=0.1)
 
             if jpeg_bytes is None or frame_id == _seen_id:
-                time.sleep(0)  # GIL-releasing yield, no scheduler-quantum penalty
                 continue
 
             _seen_id = frame_id

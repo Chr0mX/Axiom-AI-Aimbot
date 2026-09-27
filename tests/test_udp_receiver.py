@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from core.udp_receiver import HEADER_FORMAT, HEADER_SIZE, UdpJpegReceiver
+from core.udp_receiver import HEADER_FORMAT, HEADER_SIZE, UdpJpegReceiver, _is_newer_frame_id
 
 
 def _make_packet(frame_id, total_size, chunk_index, total_chunks, payload):
@@ -43,6 +43,25 @@ def _send_frame(sock, addr, frame_id, chunks):
 class TestHeaderFormat:
     def test_header_is_14_bytes(self):
         assert HEADER_SIZE == 14
+
+
+class TestIsNewerFrameId:
+    def test_first_frame_and_forward_steps(self):
+        assert _is_newer_frame_id(5, None)
+        assert _is_newer_frame_id(6, 5)
+        assert not _is_newer_frame_id(5, 5)
+
+    def test_recent_straggler_rejected(self):
+        assert not _is_newer_frame_id(99, 100)
+        # ~2.5s late at 120fps — still a straggler, well inside the window.
+        assert not _is_newer_frame_id(1000 - 300, 1000)
+
+    def test_uint32_wrap_is_forward(self):
+        assert _is_newer_frame_id(2, 0xFFFFFFFE)
+
+    def test_counter_reset_is_forward(self):
+        assert _is_newer_frame_id(0, 50_000)
+        assert _is_newer_frame_id(0, 2**31 - 1)
 
 
 class TestFrameReassembly:
@@ -187,6 +206,27 @@ class TestFrameOrdering:
             jpeg, fid = receiver.get_latest_frame_with_id(block=True, timeout=2.0)
             assert fid == 0
             assert jpeg == b"after"
+        finally:
+            client.close()
+
+    def test_sender_restart_from_a_realistic_counter_is_accepted(self, receiver):
+        """The case that actually happens: OBS restarted after minutes/hours
+        of streaming (counter far below 2**31). The signed difference alone
+        reads 0 as ~50k frames *older*, so every post-restart frame used to
+        be dropped until the new counter caught back up."""
+        addr = ("127.0.0.1", receiver.sock.getsockname()[1])
+        client = _client_socket()
+        try:
+            _send_frame(client, addr, frame_id=50_000, chunks=[b"before"])
+            jpeg, fid = receiver.get_latest_frame_with_id(block=True, timeout=2.0)
+            assert fid == 50_000
+
+            for new_id in (0, 1, 2):
+                _send_frame(client, addr, frame_id=new_id, chunks=[b"after%d" % new_id])
+                jpeg, fid = receiver.get_latest_frame_with_id(block=True, timeout=2.0)
+                assert fid == new_id
+                assert jpeg == b"after%d" % new_id
+            assert receiver.stale_frames_dropped == 0
         finally:
             client.close()
 

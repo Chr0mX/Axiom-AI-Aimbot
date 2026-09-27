@@ -71,6 +71,8 @@
     "import_config": "Config importieren",
     "keep_detecting": "Erkennung beibehalten (auch ohne Zieltaste)",
     "always_aim": "Immer automatisch zielen (ohne Zieltaste)",
+    "aim_start_delay": "Zielverzögerung",
+    "aim_start_delay_desc": "Wartezeit nach Aktivierung des Zielens, bevor sich die Maus bewegt (0 = sofort)",
     "keys_and_auto_fire": "Tasten & Auto-Feuer",
     "language": "Sprache",
     "load_config": "Config laden",

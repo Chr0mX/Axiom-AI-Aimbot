@@ -71,6 +71,8 @@
     "import_config": "콘피그 가져오기",
     "keep_detecting": "조준 키 없이도 탐지 유지",
     "always_aim": "항상 자동 조준 (조준 키 필요 없음)",
+    "aim_start_delay": "조준 지연",
+    "aim_start_delay_desc": "조준이 시작된 후 마우스가 움직이기 전까지 대기하는 시간 (0 = 즉시)",
     "keys_and_auto_fire": "키 및 자동 사격",
     "language": "언어",
     "load_config": "콘피그 불러오기",

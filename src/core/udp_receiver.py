@@ -31,6 +31,24 @@ HEADER_SIZE = struct.calcsize(HEADER_FORMAT)  # 14 bytes
 # incoming sockets, which is a direct contributor to dropped/incomplete frames.
 _EVICT_INTERVAL = 0.25
 
+# How far behind the published frame a completed frame may be and still count
+# as a late straggler (discarded). Stragglers are bounded by frame_timeout x
+# fps (~120 at the 1s default / 120fps); anything further back is the sender
+# having restarted its counter, which must be accepted, not discarded — else
+# every new frame reads as "older" until the new counter overtakes the old.
+_REORDER_WINDOW = 512
+
+
+def _is_newer_frame_id(frame_id, latest_id):
+    """Whether *frame_id* should replace the published *latest_id*."""
+    if latest_id is None:
+        return True
+    # Signed 32-bit difference, so a uint32 wrap reads as newer.
+    delta = (frame_id - latest_id) & 0xFFFFFFFF
+    if delta >= 0x80000000:
+        delta -= 0x100000000
+    return delta > 0 or delta < -_REORDER_WINDOW
+
 
 def _boost_thread_priority() -> None:
     """Best-effort: raise this thread's OS priority above normal so a busy
@@ -178,18 +196,9 @@ class UdpJpegReceiver:
                 # unconditionally would hand the consumer an *older* frame
                 # than the one it already has, i.e. visible backwards jitter.
                 #
-                # frame_id is a uint32 that wraps (~414 days at 120fps, but
-                # also immediately whenever the OBS sender restarts and its
-                # counter resets to 0). Compare as a signed 32-bit difference
-                # so wraparound reads as "newer" rather than stranding the
-                # receiver until it catches back up.
-                if self._latest_frame_id is None:
-                    is_newer = True
-                else:
-                    delta = (frame_id - self._latest_frame_id) & 0xFFFFFFFF
-                    if delta >= 0x80000000:
-                        delta -= 0x100000000
-                    is_newer = delta > 0
+                # frame_id is a uint32 that wraps, and resets to 0 whenever
+                # the OBS sender restarts — see _is_newer_frame_id().
+                is_newer = _is_newer_frame_id(frame_id, self._latest_frame_id)
 
                 del self._partial_frames[frame_id]
 

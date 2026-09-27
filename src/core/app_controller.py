@@ -197,6 +197,10 @@ def resolve_model_path(model_path: str) -> tuple[str | None, str | None]:
     if not model_path.endswith('.onnx'):
         return None, "invalid_model_path"
     resolved = model_path if os.path.isabs(model_path) else os.path.join(project_root, model_path)
+    # config.model_path is stored portable ("Model/x.onnx"); without this the
+    # result mixes separators on Windows and never string-compares equal to
+    # the same path built any other way.
+    resolved = os.path.normpath(resolved)
     if not os.path.exists(resolved):
         return None, "not_found"
     return resolved, None

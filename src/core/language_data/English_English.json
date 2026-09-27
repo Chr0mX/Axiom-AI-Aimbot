@@ -91,6 +91,8 @@
   "import_config": "Import Preset",
   "keep_detecting": "Keep Detecting (Even Without Aim Key)",
   "always_aim": "Always Aim (No Aim Key Required)",
+  "aim_start_delay": "Aim Delay",
+  "aim_start_delay_desc": "Wait this long after aiming engages before the mouse starts moving (0 = instant)",
   "keys_and_auto_fire": "Keys & Auto Fire",
   "language": "Language",
   "language_settings": "Language",
