@@ -727,6 +727,11 @@ def ai_logic_loop(
                 # seconds.
                 _was_aiming[0] = _raw_is_aiming
 
+                if _use_makcu and is_aiming != config.makcu_aim_active:
+                    logger.debug(
+                        "[AI Loop] MAKCU aim %s (trigger=%s mode=%s raw=%s always=%s delay_hold=%s)",
+                        "engaged" if is_aiming else "disengaged", _makcu_btn, _makcu_mode,
+                        _raw_is_aiming, _effective_always_aim, is_aiming and not _raw_is_aiming)
                 config.makcu_aim_active = is_aiming
                 if is_aiming:
                     if state.aiming_start_time == 0.0:

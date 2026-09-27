@@ -34,6 +34,11 @@ _BAUD_CHANGE_FRAME = bytes([0xDE, 0xAD, 0x05, 0x00, 0xA5, 0x00, 0x09, 0x3D, 0x00
 # Button stream parsing — see _stream_reader() for the frame format.
 _BTN_BITS = 0x1F  # bits 0-4 = L,R,M,S1,S2 — everything else is noise/high-byte
 
+# Unparsed bytes kept between reads. Only ever a partial frame or marker-less
+# noise is left over after parsing (a binary frame is at most 69 bytes), so
+# this never has to discard a complete, not-yet-applied event.
+_STREAM_MAX_LEFTOVER = 256
+
 
 class MakcuMouse:
     """MAKCU KM Host Mouse Controller
@@ -70,6 +75,12 @@ class MakcuMouse:
         # did. _btn_mask is never touched by this — the whole point is that
         # pausing must not lose track of an already-held button.
         self._stream_read_pause = threading.Event()
+        # Bytes _query_info() read off the wire while the stream reader was
+        # paused. Button events that arrived during the query are in here and
+        # must still be parsed — dropping them is how a Mouse1 release got
+        # lost and left aim engaged.
+        self._stream_carry = bytearray()
+        self._stream_carry_lock = threading.Lock()
         # Frame-format detection + startup debug logging — instance-level
         # (not local to _stream_reader()) so both persist across the
         # stream's internal pause/resume cycles (see _query_info()), and
@@ -299,6 +310,8 @@ class MakcuMouse:
         self._stream_stop.clear()
         self._stream_read_pause.clear()
         self._btn_mask = 0
+        with self._stream_carry_lock:
+            self._stream_carry.clear()
         try:
             with self._lock:
                 if self._serial and self._serial.is_open:
@@ -314,6 +327,24 @@ class MakcuMouse:
         self._stream_thread = threading.Thread(
             target=self._stream_reader, daemon=True, name="makcu-stream")
         self._stream_thread.start()
+
+    def _set_btn_mask(self, mask: int, frame: bytes) -> None:
+        mask &= _BTN_BITS
+        old = self._btn_mask
+        if mask != old:
+            self._btn_mask = mask
+            logger.debug("[MAKCU] button mask 0x%02X -> 0x%02X (L=%d R=%d) from %s",
+                         old, mask, mask & 1, (mask >> 1) & 1, frame.hex(' '))
+
+    def _reenable_button_stream(self) -> None:
+        """Re-subscribe after a device-side overflow (see _stream_reader)."""
+        try:
+            with self._lock:
+                if self._serial and self._serial.is_open:
+                    self._serial.write(b'km.buttons(1)\r\n')
+                    self._serial.flush()
+        except Exception as exc:
+            logger.warning("[MAKCU] could not re-enable button stream after overflow: %s", exc)
 
     def _stop_stream(self):
         """Stop the reader thread and send km.buttons(0)."""
@@ -533,15 +564,22 @@ class MakcuMouse:
                 ser = self._serial
                 if not ser or not ser.is_open:
                     break
+                with self._stream_carry_lock:
+                    carry = bytes(self._stream_carry)
+                    self._stream_carry.clear()
                 n = ser.in_waiting
-                if n:
-                    chunk = ser.read(n)
+                if n or carry:
+                    # Carry first: it was on the wire before anything read now.
+                    chunk = carry + (ser.read(n) if n else b"")
                     if self._stream_logged_chunks < 20:
                         logger.info("[MAKCU] stream raw bytes: %s", chunk.hex(' '))
                         self._stream_logged_chunks += 1
+                    # Never discard before parsing: a single read can hold a
+                    # button release plus a burst of later frames (legacy
+                    # firmware re-emits a frame for every wheel HID report), and
+                    # clearing the buffer here dropped that release — Mouse1
+                    # then read as held until its next physical edge.
                     buf.extend(chunk)
-                    if len(buf) > 256:
-                        buf.clear()
 
                     # One-time protocol decision for this connection —
                     # binary vs. either ASCII form — made before either
@@ -587,15 +625,31 @@ class MakcuMouse:
                             payload = bytes(buf[idx + _BIN_HDR_LEN + 1:idx + frame_len])
                             if tag == _BIN_BTN_TAG and len(payload) >= 3 and payload[0] == 0x01:
                                 btn_id, state = payload[1], payload[2]
-                                if 0 <= btn_id <= 4:
+                                frame = bytes(buf[idx:idx + frame_len])
+                                if btn_id == 0xFF and state == 0xFF:
+                                    # Overflow (mak-suite MAK_API "Input change
+                                    # streams"): the device has disabled the mouse
+                                    # stream and dropped its queued changes, so no
+                                    # release will ever arrive for a held button.
+                                    # Spec: discard cached state and re-enable —
+                                    # each enable starts from released and the
+                                    # next physical report re-sends held buttons.
+                                    logger.warning(
+                                        "[MAKCU] button stream overflow — resetting button "
+                                        "state and re-enabling the stream")
+                                    self._set_btn_mask(0, frame)
+                                    self._reenable_button_stream()
+                                elif 0 <= btn_id <= 4:
                                     bit = 1 << btn_id
-                                    self._btn_mask = (
-                                        (self._btn_mask | bit) if state else (self._btn_mask & ~bit)
-                                    ) & _BTN_BITS
+                                    self._set_btn_mask(
+                                        (self._btn_mask | bit) if state else (self._btn_mask & ~bit),
+                                        frame)
                             # An unrecognized tag is a report type this
                             # reverse-engineered parser doesn't know about
                             # yet — skip it rather than misread it.
                             del buf[:idx + frame_len]
+                        if len(buf) > _STREAM_MAX_LEFTOVER:
+                            del buf[:-_STREAM_MAX_LEFTOVER]
                         continue
 
                     while True:
@@ -636,17 +690,26 @@ class MakcuMouse:
                             break
                         mask = buf[idx + 3]
                         if frame_len == _LEGACY_FRAME_LEN:
-                            suffix = bytes(buf[idx + 4:idx + frame_len])
-                            if suffix != _SUFFIX:
-                                # Not a trustworthy frame — resync on the next "km."
-                                resync_idx = buf.find(_KM_PREFIX, idx + len(_KM_PREFIX))
-                                if resync_idx == -1:
-                                    del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
-                                else:
-                                    del buf[:resync_idx]
-                                continue
-                        self._btn_mask = mask & _BTN_BITS
+                            trustworthy = bytes(buf[idx + 4:idx + frame_len]) == _SUFFIX
+                        else:
+                            # The unframed 4-byte form has no suffix to check,
+                            # but its mask is 5 bits: a byte >= 0x20 after "km."
+                            # is ASCII (a command reply/echo/ERR on the same
+                            # port), never an event — e.g. "km.info()" would
+                            # otherwise read as mask 'i' & 0x1F = LMB+Side1.
+                            trustworthy = mask <= _BTN_BITS
+                        if not trustworthy:
+                            # Not a trustworthy frame — resync on the next "km."
+                            resync_idx = buf.find(_KM_PREFIX, idx + len(_KM_PREFIX))
+                            if resync_idx == -1:
+                                del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
+                            else:
+                                del buf[:resync_idx]
+                            continue
+                        self._set_btn_mask(mask, bytes(buf[idx:idx + frame_len]))
                         del buf[:idx + frame_len]
+                    if len(buf) > _STREAM_MAX_LEFTOVER:
+                        del buf[:-_STREAM_MAX_LEFTOVER]
                 else:
                     time.sleep(0.001)
             except Exception:
@@ -702,6 +765,16 @@ class MakcuMouse:
         skip its own `ser.read()` calls for the ~150ms this query takes,
         which is enough to remove the race without losing in-progress
         button-hold state.
+
+        While streaming, nothing read here is thrown away: button events
+        that arrive during the query window (e.g. a Mouse1 release) share
+        the wire with the reply, so every byte read is handed back to
+        `_stream_reader()` via `_stream_carry`. Purging the input buffer
+        and treating the whole window as reply text used to swallow those
+        events — this runs every 3s for the whole session (other_page.py's
+        hardware panel timer), so a release landing in that ~150ms window
+        left Mouse1 reading as held until its next physical edge. The reply
+        itself is ASCII, which every stream frame format rejects.
         """
         was_streaming = self._stream_thread is not None and self._stream_thread.is_alive()
         if was_streaming:
@@ -710,14 +783,19 @@ class MakcuMouse:
             with self._lock:
                 if not self._serial:
                     return {}
-                self._serial.reset_input_buffer()
+                if not was_streaming:
+                    self._serial.reset_input_buffer()
                 self._serial.write(self.CMD_INFO.encode('ascii'))
                 self._serial.flush()
             time.sleep(0.15)
             with self._lock:
                 if not self._serial:
                     return {}
-                raw = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore')
+                raw_bytes = self._serial.read(self._serial.in_waiting)
+            if was_streaming and raw_bytes:
+                with self._stream_carry_lock:
+                    self._stream_carry.extend(raw_bytes)
+            raw = raw_bytes.decode('ascii', errors='ignore')
             info = {}
             for line in raw.splitlines():
                 line = line.strip().replace('>>>', '').strip()

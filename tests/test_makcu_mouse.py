@@ -714,6 +714,281 @@ class TestMakcuBinaryStreamReader:
 
 
 # ============================================================
+# 1c. Mouse1 release / scroll-wheel regression (stuck aim)
+# ============================================================
+
+class _ChunkedStreamSerial:
+    """Delivers each chunk as one separate read() — models what the reader
+    thread actually sees when it falls behind: several frames in one read."""
+
+    def __init__(self, chunks, stop_event):
+        self._chunks = [bytes(c) for c in chunks]
+        self.is_open = True
+        self._stop = stop_event
+        self.writes = []
+
+    @property
+    def in_waiting(self):
+        if not self._chunks:
+            self._stop.set()
+            return 0
+        return len(self._chunks[0])
+
+    def read(self, n):
+        return self._chunks.pop(0)
+
+    def write(self, data):
+        self.writes.append(bytes(data))
+
+    def flush(self):
+        pass
+
+
+def _run_chunks(chunks, mouse=None):
+    """Drive _stream_reader() over separate reads; records every mask the
+    reader published so a transient phantom press can't hide."""
+    from win_utils.makcu_mouse import MakcuMouse
+    m = mouse or MakcuMouse()
+    m._stream_stop.clear()
+    m._serial = _ChunkedStreamSerial(chunks, m._stream_stop)
+    seen = []
+    real_set = getattr(m, "_set_btn_mask", None)
+    if real_set is not None:
+        def spy(mask, frame):
+            real_set(mask, frame)
+            seen.append(m._btn_mask)
+        m._set_btn_mask = spy
+    m._stream_reader()
+    m.masks_seen = seen
+    return m
+
+
+# Legacy (V3) firmware streams from raw HID frames and "only emits on new
+# frames", so every wheel report re-emits the current mask; the binary
+# (V4/MAKXD) stream never emits wheel at all (mak-suite MAK_API spec).
+def _legacy_scroll(mask, n=40):
+    return b"".join(_frame(mask) for _ in range(n))
+
+
+class TestMakcuMouse1ScrollRegression:
+    """Mouse1 up must disengage aim, and scrolling must never (re-)engage it.
+
+    Real bug: a release frame read together with a burst of later frames
+    (a legacy firmware's scroll re-emits one frame per wheel report) pushed
+    the read past 256 bytes, and the reader cleared the buffer *before*
+    parsing it — the release was discarded and Mouse1 stayed "held"."""
+
+    # 1-3: press -> release [-> scroll]
+    @pytest.mark.parametrize("scroll", [None, "up", "down"])
+    def test_legacy_press_release_then_scroll(self, scroll):
+        chunks = [_frame(0x01), _frame(0x00)]
+        if scroll:
+            chunks.append(_legacy_scroll(0x00))
+        m = _run_chunks(chunks)
+        assert m.lmb_held is False
+
+    def test_binary_press_release_then_scroll(self):
+        # Wheel emits nothing on the binary stream, so a scroll after the
+        # release adds no bytes — the release alone must stick.
+        m = _run_chunks([_bin_frame(0, 1), _bin_frame(0, 0)])
+        assert m.lmb_held is False
+
+    def test_legacy_release_and_scroll_burst_in_one_read(self):
+        """The regression itself: release + 400 bytes of scroll frames in a
+        single read. Previously cleared before parsing -> stuck engaged."""
+        m = _run_chunks([_frame(0x01), _frame(0x00) + _legacy_scroll(0x00)])
+        assert m.lmb_held is False
+
+    def test_binary_burst_over_256_bytes_ending_in_release(self):
+        burst = b"".join(_bin_frame(1, i % 2) for i in range(40)) + _bin_frame(0, 0)
+        assert len(burst) > 256
+        m = _run_chunks([_bin_frame(0, 1), burst])
+        assert m.lmb_held is False
+        assert m.rmb_held is True  # last RMB event in the burst was a press
+
+    # 4-5: press -> scroll -> release [-> scroll]
+    @pytest.mark.parametrize("scroll_after", [False, True])
+    def test_legacy_press_scroll_release(self, scroll_after):
+        chunks = [_frame(0x01), _legacy_scroll(0x01), _frame(0x00)]
+        if scroll_after:
+            chunks.append(_legacy_scroll(0x00))
+        m = _run_chunks(chunks)
+        assert m.lmb_held is False
+
+    def test_legacy_press_scroll_release_all_in_one_read(self):
+        m = _run_chunks([_frame(0x01) + _legacy_scroll(0x01) + _frame(0x00) + _legacy_scroll(0x00)])
+        assert m.lmb_held is False
+
+    # 6: rapid press/release
+    @pytest.mark.parametrize("down,up", [
+        (_frame(0x01), _frame(0x00)),
+        (_bin_frame(0, 1), _bin_frame(0, 0)),
+    ], ids=["legacy", "binary"])
+    def test_rapid_press_release_final_state(self, down, up):
+        clicks = (down + up) * 50
+        assert _run_chunks([clicks]).lmb_held is False
+        assert _run_chunks([clicks + down]).lmb_held is True
+
+    # 7: scrolling without Mouse1 never engages it, not even transiently
+    def test_legacy_rapid_scrolling_without_mouse1_never_engages(self):
+        m = _run_chunks([_legacy_scroll(0x00, 25) for _ in range(8)])
+        assert m.lmb_held is False
+        assert all(not (mask & 0x01) for mask in m.masks_seen)
+
+    # 8: holding Mouse1 while scrolling keeps it engaged
+    @pytest.mark.parametrize("one_read", [False, True])
+    def test_legacy_hold_while_scrolling_stays_engaged(self, one_read):
+        chunks = [_frame(0x01), _legacy_scroll(0x01), _legacy_scroll(0x01)]
+        m = _run_chunks([b"".join(chunks)] if one_read else chunks)
+        assert m.lmb_held is True
+
+    def test_binary_hold_while_scrolling_stays_engaged(self):
+        assert _run_chunks([_bin_frame(0, 1)]).lmb_held is True
+
+    # 9: many scroll bursts after release, each in its own read
+    def test_legacy_multiple_scroll_bursts_after_release(self):
+        m = _run_chunks([_frame(0x01), _frame(0x00)] + [_legacy_scroll(0x00, 30) for _ in range(10)])
+        assert m.lmb_held is False
+
+    def test_large_noise_blob_does_not_hide_the_frame_after_it(self):
+        from win_utils.makcu_mouse import _STREAM_MAX_LEFTOVER
+        m = _run_chunks([_frame(0x00), b"x" * (_STREAM_MAX_LEFTOVER * 4) + _frame(0x01)])
+        assert m.lmb_held is True
+
+    def test_other_buttons_have_the_same_protection(self):
+        """RMB/side buttons go through the same mask — a dropped release
+        would stick them too (RMB can be the aim trigger)."""
+        for bit in (0x02, 0x08, 0x10):
+            m = _run_chunks([_frame(bit), _frame(0x00) + _legacy_scroll(0x00)])
+            assert m._btn_mask == 0x00
+
+
+class TestMakcuBinaryOverflow:
+    """mak-suite MAK_API: `DE AD 03 00 53 kind FF FF` means the device
+    disabled that stream and dropped its queued changes — the client must
+    discard cached state and re-enable. Ignoring it left a held Mouse1
+    engaged forever (the release can never arrive)."""
+
+    def test_overflow_clears_state_and_reenables_stream(self):
+        overflow = _bin_frame(0xFF, 0xFF)
+        m = _run_chunks([_bin_frame(0, 1), overflow])
+        assert m.lmb_held is False
+        assert b"km.buttons(1)\r\n" in m._serial.writes
+
+    def test_press_after_overflow_reenable_applies(self):
+        m = _run_chunks([_bin_frame(0, 1), _bin_frame(0xFF, 0xFF), _bin_frame(0, 1)])
+        assert m.lmb_held is True
+
+
+class TestMakxdShortFrameAsciiRejection:
+    """The unframed 4-byte form has no suffix to verify; its mask is 5 bits,
+    so "km." followed by a byte >= 0x20 is ASCII on the same port."""
+
+    @pytest.mark.parametrize("text", [
+        b"km.info()\r\nERR\r\n>>> ",
+        b"km.move(3,-1)\r\nERR\r\n>>> ",
+        b"km.MAKXD\r\n>>> ",
+    ])
+    def test_ascii_reply_is_not_a_button_event(self, text):
+        m = _run_chunks([_makxd_frame(0x00), text, _makxd_frame(0x00)])
+        assert m._stream_frame_len == 4
+        assert m._btn_mask == 0x00
+        assert all(mask == 0 for mask in m.masks_seen)
+
+    def test_real_events_around_ascii_still_apply(self):
+        m = _run_chunks([_makxd_frame(0x01), b"km.info()\r\nERR\r\n>>> ", _makxd_frame(0x00)])
+        assert m.lmb_held is False
+        m2 = _run_chunks([_makxd_frame(0x00), b"km.info()\r\nERR\r\n>>> " + _makxd_frame(0x01)])
+        assert m2.lmb_held is True
+
+
+class _QuerySerial:
+    """Serial stand-in for _query_info(): bytes already on the wire when the
+    query starts (e.g. a Mouse1 release) plus the device's reply."""
+
+    def __init__(self, pending):
+        self._rx = bytearray(pending)
+        self.is_open = True
+        self.reset_calls = 0
+        self.writes = []
+
+    def reset_input_buffer(self):
+        self.reset_calls += 1
+        self._rx.clear()
+
+    def write(self, data):
+        self.writes.append(bytes(data))
+
+    def flush(self):
+        pass
+
+    @property
+    def in_waiting(self):
+        return len(self._rx)
+
+    def read(self, n):
+        d = bytes(self._rx[:n])
+        del self._rx[:n]
+        return d
+
+
+class TestMakcuQueryInfoKeepsStreamEvents:
+    """Real bug: other_page.py calls query_info() every 3s for the whole
+    session. It purged the input buffer and consumed everything that arrived
+    in its ~150ms window as reply text, so a Mouse1 release landing there
+    was lost and aim stayed engaged."""
+
+    @staticmethod
+    def _query_then_parse(mouse, pending, frame_len=None, binary=False):
+        mouse._serial = _QuerySerial(pending)
+        mouse._stream_thread = MagicMock(is_alive=MagicMock(return_value=True))
+        mouse._stream_frame_len = frame_len
+        mouse._stream_binary_mode = binary
+        mouse._query_info()
+        ser = mouse._serial
+        assert ser.reset_calls == 0, "must not purge stream bytes while streaming"
+        return _run_chunks([], mouse=mouse)
+
+    @pytest.mark.parametrize("fmt", ["legacy", "binary", "makxd"])
+    def test_release_during_query_is_applied(self, fmt):
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._btn_mask = 0x01  # Mouse1 held when the query starts
+        release = {"legacy": _frame(0x00), "binary": _bin_frame(0, 0), "makxd": _makxd_frame(0x00)}[fmt]
+        reply = b"km.info()\r\nVERSION=km.MAKCU v3\r\n>>> "
+        m = self._query_then_parse(
+            m, release + reply,
+            frame_len={"legacy": 10, "binary": None, "makxd": 4}[fmt],
+            binary=(fmt == "binary"))
+        assert m.lmb_held is False
+
+    def test_reply_alone_does_not_create_a_press(self):
+        from win_utils.makcu_mouse import MakcuMouse
+        for frame_len in (10, 4):
+            m = MakcuMouse()
+            m = self._query_then_parse(m, b"km.info()\r\nMAC=aa:bb\r\nFW=km.MAKCU\r\n>>> ", frame_len=frame_len)
+            assert m._btn_mask == 0x00
+
+    def test_not_streaming_still_purges_before_query(self):
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._serial = _QuerySerial(b"stale")
+        m._query_info()
+        assert m._serial.reset_calls == 1
+
+    def test_reconnect_discards_stale_carry(self):
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._stream_carry.extend(_frame(0x01))
+        m._serial = _QuerySerial(b"")
+        m._start_stream()
+        m._stream_stop.set()
+        m._stream_thread.join(1)
+        assert len(m._stream_carry) == 0
+        assert m._btn_mask == 0
+
+
+# ============================================================
 # 2. 模組級便利函式測試
 # ============================================================
 
