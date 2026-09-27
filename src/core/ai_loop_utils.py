@@ -98,6 +98,21 @@ def apply_cam_shift_deadzone(value: float, threshold: float) -> float:
     return value if abs(value) >= threshold else 0.0
 
 
+def aim_start_delay_elapsed(config: Config, aiming_start_time: float, current_time: float) -> bool:
+    """Whether aim_start_delay_ms has passed since aiming engaged.
+
+    aiming_start_time is LoopState.aiming_start_time — set on the frame aim
+    engages and cleared to 0.0 when it disengages, so every fresh press
+    restarts the delay.
+    """
+    delay_s = float(getattr(config, 'aim_start_delay_ms', 0) or 0) / 1000.0
+    if delay_s <= 0.0:
+        return True
+    if aiming_start_time <= 0.0:
+        return False
+    return current_time - aiming_start_time >= delay_s
+
+
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:
     """Update crosshair position"""
 

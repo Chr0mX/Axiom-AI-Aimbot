@@ -24,6 +24,7 @@ from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
 from .detection_semantics import filter_detections_by_target_class, sync_detection_class_names_from_backend
 from .ai_loop_utils import (
+    aim_start_delay_elapsed,
     apply_cam_shift_deadzone,
     calculate_detection_region,
     clear_queues,
@@ -888,7 +889,11 @@ def ai_logic_loop(
                 config.latest_all_boxes = all_boxes
                 config.latest_all_confidences = all_confidences
 
-                aimed_this_frame = bool(is_aiming and boxes)
+                # aim_start_delay_ms: detection keeps running, but no mouse
+                # movement is sent until the delay since aim engaged has passed.
+                aim_engaged = is_aiming and aim_start_delay_elapsed(
+                    config, state.aiming_start_time, current_time)
+                aimed_this_frame = bool(aim_engaged and boxes)
                 if aimed_this_frame:
                     process_aiming(
                         config,
@@ -944,7 +949,7 @@ def ai_logic_loop(
                     # this frame. Runs after the reset above so this call's own
                     # sub-pixel carry isn't wiped by it in the same frame; opt-in
                     # (see apply_idle_micro_jitter's docstring), no-ops otherwise.
-                    if is_aiming:
+                    if aim_engaged:
                         ai_aiming.apply_idle_micro_jitter(config, state, state.cached_mouse_move_method)
 
                 if config.single_target_mode:

@@ -71,6 +71,8 @@
     "import_config": "Importar config",
     "keep_detecting": "Manter detecção (mesmo sem tecla de mira)",
     "always_aim": "Mira automática contínua (sem tecla de mira)",
+    "aim_start_delay": "Atraso da mira",
+    "aim_start_delay_desc": "Tempo de espera após ativar a mira antes de o mouse começar a mover (0 = instantâneo)",
     "keys_and_auto_fire": "Teclas e disparo automático",
     "language": "Idioma",
     "load_config": "Carregar config",

@@ -71,6 +71,8 @@
     "import_config": "Importar config",
     "keep_detecting": "Mantener detección (incluso sin tecla de apuntado)",
     "always_aim": "Apuntado automático continuo (sin tecla de apuntado)",
+    "aim_start_delay": "Retraso de apuntado",
+    "aim_start_delay_desc": "Tiempo de espera tras activar el apuntado antes de que el ratón se mueva (0 = instantáneo)",
     "keys_and_auto_fire": "Teclas y disparo automático",
     "language": "Idioma",
     "load_config": "Cargar config",

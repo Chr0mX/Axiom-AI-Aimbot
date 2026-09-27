@@ -17,6 +17,8 @@ from qfluentwidgets import (
     SegmentedWidget,
     BodyLabel, PushButton, CheckBox,
 )
+from core.config import AIM_START_DELAY_MAX_MS
+
 from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
 
 from ..base_page import BasePage
@@ -336,6 +338,15 @@ class AimPage(BasePage):
         )
         self.mouseMoveCard.hBoxLayout.addWidget(self.mouseMoveCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.mouseMoveCard.hBoxLayout.addSpacing(16)
+
+        self.aimStartDelayCard = SliderSpinCard(
+            FluentIcon.STOP_WATCH,
+            t("aim_start_delay", "Aim Delay"),
+            0, AIM_START_DELAY_MAX_MS,
+            suffix="ms",
+            description=t("aim_start_delay_desc", "Wait this long after aiming engages before the mouse starts moving (0 = instant)"),
+            parent=self.generalGroup
+        )
 
         # === Arduino Settings ===
         self.arduinoGroup = SettingCardGroup("Arduino", self.scrollWidget)
@@ -1023,6 +1034,7 @@ class AimPage(BasePage):
         # General
         self.generalGroup.addSettingCard(self.aimPartCard)
         self.generalGroup.addSettingCard(self.mouseMoveCard)
+        self.generalGroup.addSettingCard(self.aimStartDelayCard)
         self.addContent(self.generalGroup)
 
         # Arduino
@@ -1151,6 +1163,7 @@ class AimPage(BasePage):
         # General
         self.aimPartCombo.currentIndexChanged.connect(self._onAimPartChanged)
         self.mouseMoveCombo.currentTextChanged.connect(self._onMouseMoveChanged)
+        self.aimStartDelayCard.valueChanged.connect(self._onAimStartDelayChanged)
 
         # Arduino
         self.comRefreshBtn.clicked.connect(self._refreshComPorts)
@@ -1253,6 +1266,7 @@ class AimPage(BasePage):
                 self.mouseMoveCombo.setCurrentIndex(mouse_methods.index(self._config.mouse_move_method))
 
             self._updateMethodGroupVisibility(self._config.mouse_move_method)
+            self.aimStartDelayCard.setValue(int(getattr(self._config, 'aim_start_delay_ms', 0)))
 
             # Arduino
             if self._config.arduino_com_port:
@@ -1633,6 +1647,10 @@ class AimPage(BasePage):
             _threading.Thread(target=_draw_heart, daemon=True).start()
 
     # ── Xbox Callbacks ───────────────────────────
+
+    def _onAimStartDelayChanged(self, value):
+        if self._config:
+            self._config.aim_start_delay_ms = int(value)
 
     def _onXboxSensitivityChanged(self, value):
         if self._config:
@@ -2025,6 +2043,8 @@ class AimPage(BasePage):
         self.generalGroup.titleLabel.setText(t("general_params"))
         self.aimPartCard.titleLabel.setText(t("aim_part"))
         self.mouseMoveCard.titleLabel.setText(t("mouse_move_method"))
+        self.aimStartDelayCard.titleLabel.setText(t("aim_start_delay", "Aim Delay"))
+        self.aimStartDelayCard.contentLabel.setText(t("aim_start_delay_desc", "Wait this long after aiming engages before the mouse starts moving (0 = instant)"))
 
         self.comPortCard.titleLabel.setText(t("arduino_com_port"))
         self.comRefreshBtn.setText(t("refresh"))

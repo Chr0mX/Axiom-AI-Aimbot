@@ -860,6 +860,30 @@ class TestValidateQueueAndConfidence:
         _validate_queue_and_confidence(c)
         assert c.min_confidence == pytest.approx(0.8)
 
+    def test_aim_start_delay_default_and_round_trip(self):
+        c = _make_config()
+        assert c.aim_start_delay_ms == 0
+        c.aim_start_delay_ms = 120
+        data = c.to_dict()
+        assert data["aim"]["start_delay_ms"] == 120
+        c2 = _make_config()
+        c2.from_dict(data)
+        assert c2.aim_start_delay_ms == 120
+
+    def test_aim_start_delay_clamped(self):
+        from core.config import _validate_queue_and_confidence, AIM_START_DELAY_MAX_MS
+        c = _make_config()
+        c.aim_start_delay_ms = -50
+        _validate_queue_and_confidence(c)
+        assert c.aim_start_delay_ms == 0
+        c.aim_start_delay_ms = 99999
+        _validate_queue_and_confidence(c)
+        assert c.aim_start_delay_ms == AIM_START_DELAY_MAX_MS
+
+    def test_aim_start_delay_is_an_aim_preset_field(self):
+        from core.config_manager import _AIM_PRESET_FIELDS
+        assert "aim_start_delay_ms" in _AIM_PRESET_FIELDS
+
     def test_applied_by_load_config(self, tmp_path):
         from core.config import load_config
         path = tmp_path / "config.json"

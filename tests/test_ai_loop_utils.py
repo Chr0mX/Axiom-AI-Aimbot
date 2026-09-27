@@ -547,6 +547,32 @@ class TestComputeEffectiveFov:
         assert (size, height) == (50, 25)
 
 
+class TestAimStartDelayElapsed:
+    @staticmethod
+    def _config(ms):
+        from types import SimpleNamespace
+        return SimpleNamespace(aim_start_delay_ms=ms)
+
+    def test_zero_delay_always_elapsed(self, ai_loop_utils):
+        assert ai_loop_utils.aim_start_delay_elapsed(self._config(0), 100.0, 100.0)
+        assert ai_loop_utils.aim_start_delay_elapsed(self._config(0), 0.0, 100.0)
+
+    def test_blocks_until_delay_passes(self, ai_loop_utils):
+        cfg = self._config(150)
+        assert not ai_loop_utils.aim_start_delay_elapsed(cfg, 100.0, 100.0)
+        assert not ai_loop_utils.aim_start_delay_elapsed(cfg, 100.0, 100.149)
+        assert ai_loop_utils.aim_start_delay_elapsed(cfg, 100.0, 100.150)
+        assert ai_loop_utils.aim_start_delay_elapsed(cfg, 100.0, 105.0)
+
+    def test_not_engaged_is_not_elapsed(self, ai_loop_utils):
+        """aiming_start_time == 0.0 means aim isn't engaged — never 'elapsed'."""
+        assert not ai_loop_utils.aim_start_delay_elapsed(self._config(150), 0.0, 100.0)
+
+    def test_missing_field_means_no_delay(self, ai_loop_utils):
+        from types import SimpleNamespace
+        assert ai_loop_utils.aim_start_delay_elapsed(SimpleNamespace(), 100.0, 100.0)
+
+
 class TestPutLatest:
     """ai_loop's 1-slot tensor queue: when the consumer isn't reading, the
     queued item must be the newest one, not the one that happened to be

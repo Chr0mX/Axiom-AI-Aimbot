@@ -96,6 +96,7 @@ _FIELD_MAP = {
     'aim_toggle_key':             'aim.aim_toggle_key',
     'AimToggle':                  'aim.aim_toggle',
     'always_aim':                 'aim.always_aim',
+    'aim_start_delay_ms':         'aim.start_delay_ms',
     'keep_detecting':             'aim.keep_detecting',
     'single_target_mode':         'aim.single_target_mode',
     'fov_follow_mouse':           'aim.fov_follow_mouse',
@@ -544,6 +545,9 @@ class Config:
         # 保持檢測功能
         self.keep_detecting: bool = True   # 啟用保持檢測
         self.always_aim: bool = False      # 不按瞄準鍵也執行自動瞄準
+        # Milliseconds after aim engages (aim key pressed / toggle on) before
+        # any mouse movement is sent. 0 = aim immediately.
+        self.aim_start_delay_ms: int = 0
         self.makcu_aim_button: str = "lmb"   # "lmb", "rmb", or "off"
         self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_aim_active: bool = False  # runtime state — not serialized
@@ -1011,12 +1015,15 @@ def _validate_udp_recv_buffer_size(config: Config) -> None:
         config.udp_recv_buffer_size = raw
 
 
+AIM_START_DELAY_MAX_MS = 1000
+
+
 def _validate_queue_and_confidence(config: Config) -> None:
     """max_queue_size sizes the overlay/auto-fire result queues (main.py):
     queue.Queue treats <= 0 as *unbounded*, and update_queues() only evicts
     when full(), so a 0 would let stale results pile up behind the newest.
     min_confidence outside [0, 1] makes the detector accept everything (< 0)
-    or nothing (> 1)."""
+    or nothing (> 1). aim_start_delay_ms is clamped to [0, AIM_START_DELAY_MAX_MS]."""
     try:
         size = int(getattr(config, 'max_queue_size', 1))
     except (TypeError, ValueError):
@@ -1025,6 +1032,12 @@ def _validate_queue_and_confidence(config: Config) -> None:
         logger.warning("[Config] max_queue_size %d is invalid (must be >= 1) — using 1", size)
         size = 1
     config.max_queue_size = size
+
+    try:
+        delay_ms = int(getattr(config, 'aim_start_delay_ms', 0))
+    except (TypeError, ValueError):
+        delay_ms = 0
+    config.aim_start_delay_ms = max(0, min(AIM_START_DELAY_MAX_MS, delay_ms))
 
     try:
         conf = float(getattr(config, 'min_confidence', 0.8))

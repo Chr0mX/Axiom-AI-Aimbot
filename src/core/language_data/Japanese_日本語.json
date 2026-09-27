@@ -71,6 +71,8 @@
     "import_config": "コンフィグをインポート",
     "keep_detecting": "エイムキーがなくても検出を維持",
     "always_aim": "常時オートエイム（エイムキー不要）",
+    "aim_start_delay": "エイム遅延",
+    "aim_start_delay_desc": "エイム開始後、マウスが動き始めるまでの待機時間（0 = 即時）",
     "keys_and_auto_fire": "キーと自動射撃",
     "language": "言語",
     "load_config": "コンフィグを読み込み",

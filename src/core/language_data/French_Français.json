@@ -71,6 +71,8 @@
     "import_config": "Importer un config",
     "keep_detecting": "Maintenir la détection (même sans touche de visée)",
     "always_aim": "Visée auto continue (sans touche de visée)",
+    "aim_start_delay": "Délai de visée",
+    "aim_start_delay_desc": "Attente après l'activation de la visée avant que la souris ne bouge (0 = instantané)",
     "keys_and_auto_fire": "Touches et tir automatique",
     "language": "Langue",
     "load_config": "Charger le config",
