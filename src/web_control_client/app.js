@@ -389,7 +389,7 @@
   // field-cards. The two Web ESP port fields are the one deliberate
   // exception — they're plain SpinBoxes with no Slider companion in Qt
   // (visuals_page.py never pairs a port number with a slider).
-  var SLIDER_EXCLUDED_KEYS = ["web_esp_http_port", "web_esp_ws_port"];
+  var SLIDER_EXCLUDED_KEYS = ["web_esp_http_port", "web_esp_ws_port", "makcu_udp_port"];
 
   // Fixed dimensions from styles.css's input[type="range"] / ::-webkit-
   // slider-thumb rules — kept in sync with those, not read from the DOM
@@ -567,6 +567,9 @@
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
         }
+        if (tab === "keys" && (key === "makcu_connection" || key === "makcu_device_hotkeys" || key === "makcu_mouse_spread_enabled")) {
+          updateKeysVisibility(lastSettings.keys || {});
+        }
         // One-directional coupling, mirroring trigger_page.py's
         // _onAlwaysAutoFireChanged(): turning Always Auto-Fire ON also
         // disables Keep Detecting While Idle — turning it back off does
@@ -682,13 +685,32 @@
   // MAKCU COM port enumeration.
   // ---------------------------------------------------------------------
   function updateKeysVisibility(data) {
+    data = data || {};
     var isMakcu = data.mouse_move_method === "makcu";
-    ["keys-aim-group", "keys-aim-group-title", "keys-fire-group", "keys-fire-group-title"].forEach(function (id) {
+    // Live DOM wins for fields this panel owns, so a change event updates
+    // visibility before the next settings poll lands.
+    var hotkeysEl = document.getElementById("keys-makcu_device_hotkeys");
+    var deviceHotkeys = hotkeysEl ? hotkeysEl.checked : !!data.makcu_device_hotkeys;
+    var connEl = document.getElementById("keys-makcu_connection");
+    var udp = (connEl ? connEl.value : data.makcu_connection) === "udp";
+    var spreadEl = document.getElementById("keys-makcu_mouse_spread_enabled");
+    var spreadOn = spreadEl ? spreadEl.checked : !!data.makcu_mouse_spread_enabled;
+    // Aim keys 1–3 hide in MAKCU mode; the toggle key stays, matching
+    // keys_page.py. Auto-fire keys come back when hotkeys are read through
+    // the device (any VK is bindable again on a 2-PC setup).
+    ["keys-aim-key-1-card", "keys-aim-key-2-card", "keys-aim-key-3-card"].forEach(function (id) {
       document.getElementById(id).classList.toggle("hidden", isMakcu);
+    });
+    ["keys-fire-group", "keys-fire-group-title"].forEach(function (id) {
+      document.getElementById(id).classList.toggle("hidden", isMakcu && !deviceHotkeys);
     });
     ["keys-makcu-conn-group", "keys-makcu-conn-group-title", "keys-makcu-keys-group", "keys-makcu-keys-group-title"].forEach(function (id) {
       document.getElementById(id).classList.toggle("hidden", !isMakcu);
     });
+    document.getElementById("keys-makcu-udp-card").classList.toggle("hidden", !udp);
+    document.getElementById("keys-makcu-com-card").classList.toggle("hidden", udp);
+    document.getElementById("keys-makcu-baud-card").classList.toggle("hidden", udp);
+    document.getElementById("keys-makcu-spread-card").classList.toggle("hidden", !spreadOn);
     document.getElementById("keys-makcu-inference-card").classList.toggle("hidden", !!data.keep_detecting);
     // always_aim-gated cards are also kept live-synced from every status
     // poll (see applyStatus()) regardless of which tab is active — set

@@ -202,6 +202,42 @@ class TestConnectMakcu:
         app_controller.connect_makcu(config)
         assert calls == [4_000_000]
 
+    def test_udp_empty_host_returns_false(self):
+        config = _FakeConfig()
+        config.makcu_connection = "udp"
+        config.makcu_udp_host = "  "
+        assert app_controller.connect_makcu(config) is False
+
+    def test_udp_delegates_to_connect_makcu_udp(self, monkeypatch):
+        calls = []
+        fake_pkg = types.ModuleType("win_utils")
+        fake_submodule = types.ModuleType("win_utils.makcu_mouse")
+        fake_submodule.connect_makcu_udp = lambda host, port: calls.append((host, port)) or True
+        monkeypatch.setitem(sys.modules, "win_utils", fake_pkg)
+        monkeypatch.setitem(sys.modules, "win_utils.makcu_mouse", fake_submodule)
+
+        config = _FakeConfig()
+        config.makcu_connection = "udp"
+        config.makcu_udp_host = "192.168.1.50"
+        config.makcu_udp_port = 9000
+        assert app_controller.connect_makcu(config) is True
+        assert calls == [("192.168.1.50", 9000)]
+
+    def test_udp_bad_port_falls_back_to_8080(self, monkeypatch):
+        calls = []
+        fake_pkg = types.ModuleType("win_utils")
+        fake_submodule = types.ModuleType("win_utils.makcu_mouse")
+        fake_submodule.connect_makcu_udp = lambda host, port: calls.append(port) or True
+        monkeypatch.setitem(sys.modules, "win_utils", fake_pkg)
+        monkeypatch.setitem(sys.modules, "win_utils.makcu_mouse", fake_submodule)
+
+        config = _FakeConfig()
+        config.makcu_connection = "udp"
+        config.makcu_udp_host = "10.0.0.2"
+        config.makcu_udp_port = "nope"
+        app_controller.connect_makcu(config)
+        assert calls == [8080]
+
 
 class TestDisconnectMakcu:
     def test_missing_win_utils_does_not_raise(self):

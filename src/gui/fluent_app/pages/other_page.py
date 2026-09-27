@@ -571,9 +571,17 @@ class OtherPage(BasePage):
         info = getattr(_makcu_mouse, 'device_info', {})
         if not ver:
             ver = info.get('VERSION', dash)
+        if info.get('FIRMWARE'):
+            ver = f"{ver or 'MAK_API'} · fw {info['FIRMWARE']}"
         self.makcuHwVerCard.contentLabel.setText(ver or dash)
         self.makcuHwModelCard.contentLabel.setText(info.get('MODEL', dash))
-        self.makcuHwVendorCard.contentLabel.setText(info.get('VENDOR', dash))
+        # V4/MAKXD reports no vendor; show its active routes + mouse polling instead.
+        vendor = info.get('VENDOR')
+        if not vendor and info.get('ROUTES'):
+            vendor = f"routes {info['ROUTES']}"
+            if info.get('MOUSE_POLL_HZ'):
+                vendor += f" · mouse {info['MOUSE_POLL_HZ']} Hz"
+        self.makcuHwVendorCard.contentLabel.setText(vendor or dash)
         temp = info.get('TEMP', '')
         self.makcuHwTempCard.contentLabel.setText(f"{temp} °C" if temp else dash)
 

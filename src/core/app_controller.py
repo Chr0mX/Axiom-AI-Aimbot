@@ -375,20 +375,39 @@ def set_always_aim(config: "Config", enabled: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def connect_makcu(config: "Config") -> bool:
-    """Connect to the MAKCU device using the configured port/baud.
+    """Connect to the MAKCU device using the configured transport.
 
-    Reads `config.makcu_com_port`/`config.makcu_baud_rate` rather than
-    taking them as parameters — a web caller has no combo boxes to read
-    them from the way `keys_page.py`'s own `_onMakcuConnectToggle` does
-    (`self.makcuComPortCombo`/`self.makcuBaudCombo`), so this is the one
-    place both callers can share the same already-persisted values.
+    Serial reads `config.makcu_com_port`/`config.makcu_baud_rate`. UDP
+    (`config.makcu_connection == "udp"`) reads `makcu_udp_host` /
+    `makcu_udp_port` and calls `connect_makcu_udp`. A web caller has no
+    combo boxes to read them from the way `keys_page.py`'s own
+    `_onMakcuConnectToggle` does, so this is the one place both callers
+    can share the same already-persisted values.
 
     `win_utils.makcu_mouse.connect_makcu()` is already GUI-free and
     documented as safe to call off the GUI thread (its own lock is never
     held across a sleep) — this wrapper exists only to own the config-read
-    and the empty-port guard, and to serialize concurrent connect attempts
-    via `_makcu_connect_lock`, not to add any new hardware logic.
+    and the empty-port/host guard, and to serialize concurrent connect
+    attempts via `_makcu_connect_lock`, not to add any new hardware logic.
     """
+    connection = str(getattr(config, "makcu_connection", "serial") or "serial")
+    if connection == "udp":
+        host = str(getattr(config, "makcu_udp_host", "") or "").strip()
+        if not host:
+            logger.warning("[MAKCU] UDP connect requested with no host configured")
+            return False
+        try:
+            port = int(getattr(config, "makcu_udp_port", 8080) or 8080)
+        except (TypeError, ValueError):
+            port = 8080
+        with _makcu_connect_lock:
+            try:
+                from win_utils.makcu_mouse import connect_makcu_udp as _connect_udp
+            except ImportError:
+                logger.error("[MAKCU] win_utils.makcu_mouse not importable")
+                return False
+            return bool(_connect_udp(host, port))
+
     com_port = str(getattr(config, "makcu_com_port", "") or "")
     if not com_port:
         logger.warning("[MAKCU] connect requested with no COM port configured")

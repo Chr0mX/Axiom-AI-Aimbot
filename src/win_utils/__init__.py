@@ -60,6 +60,7 @@ from .makcu_mouse import (
     send_mouse_move_makcu,
     send_mouse_click_makcu,
     connect_makcu,
+    connect_makcu_udp,
     disconnect_makcu,
     is_makcu_connected,
 )
@@ -88,7 +89,7 @@ from .mouse_click import (
 from .arduino_mouse import send_mouse_click_arduino
 
 # Key detection
-from .key_utils import is_key_pressed
+from .key_utils import is_key_pressed, set_device_hotkeys
 
 # Gamepad button reading
 from .gamepad_input import (
@@ -208,6 +209,7 @@ __all__ = [
 
     # 按鍵檢測
     'is_key_pressed',
+    'set_device_hotkeys',
     
     # 手柄按鍵
     'is_gamepad_vk',

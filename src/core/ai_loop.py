@@ -85,6 +85,50 @@ _PREPROCESS_ERROR_LOG_INTERVAL_S = 5.0
 _active_loop_token: object | None = None
 
 
+def _makcu_button_held(mm, name: str) -> bool:
+    """MAKCU stream button state for a config button name."""
+    if name == 'rmb':
+        return mm.rmb_held
+    if name == 'mmb':
+        return mm.mmb_held
+    if name == 'side1':
+        return mm.side1_held
+    if name == 'side2':
+        return mm.side2_held
+    return mm.lmb_held
+
+
+def _sync_makcu_features(config: Config) -> None:
+    """Push config-driven MAKCU features to the device — cheap and idempotent,
+    so a change from any UI (Qt, Web Control, a loaded preset) lands within
+    one method-check interval."""
+    try:
+        from win_utils import set_device_hotkeys
+        from win_utils.makcu_mouse import makcu_mouse as _mm
+        use_makcu = getattr(config, 'mouse_move_method', '') == 'makcu'
+        set_device_hotkeys(use_makcu and bool(getattr(config, 'makcu_device_hotkeys', False)))
+        if use_makcu and getattr(config, 'makcu_mouse_spread_enabled', False):
+            _mm.request_mouse_spread(int(getattr(config, 'makcu_mouse_spread', 0)))
+        else:
+            _mm.request_mouse_spread(None)
+    except Exception as exc:
+        logger.debug("[AI Loop] MAKCU feature sync failed: %s", exc)
+
+
+def _set_makcu_move_lock(config: Config, active: bool) -> None:
+    """Assert/release the MAKCU physical-movement lock. Must run every frame
+    while active — the driver auto-releases a lock that stops being
+    re-asserted."""
+    wanted = (active and getattr(config, 'makcu_lock_physical_move', False)
+              and getattr(config, 'mouse_move_method', '') == 'makcu')
+    try:
+        from win_utils.makcu_mouse import makcu_mouse as _mm
+        if wanted or _mm.physical_move_locked:
+            _mm.set_physical_move_lock(wanted)
+    except Exception as exc:
+        logger.debug("[AI Loop] MAKCU move lock failed: %s", exc)
+
+
 def _probe_model_input_size(session, abs_model_path: str) -> int:
     """Return spatial H (=W) from a loaded ORT session, 0 if not determinable.
 
@@ -624,6 +668,7 @@ def ai_logic_loop(
                     if new_method != state.cached_mouse_move_method:
                         state.cached_mouse_move_method = new_method
                     state.last_method_check_time = current_time
+                    _sync_makcu_features(config)
 
                 capture_width, capture_height = get_capture_dimensions(config)
                 update_crosshair_position(config, capture_width // 2, capture_height // 2)
@@ -656,14 +701,7 @@ def ai_logic_loop(
                             # (L/R alongside the original side1/side2) — same
                             # rising-edge hold/toggle handling regardless of
                             # which physical button is chosen.
-                            if _makcu_always_btn == 'lmb':
-                                always_btn_now = _mm.lmb_held
-                            elif _makcu_always_btn == 'rmb':
-                                always_btn_now = _mm.rmb_held
-                            elif _makcu_always_btn == 'side2':
-                                always_btn_now = _mm.side2_held
-                            else:
-                                always_btn_now = _mm.side1_held
+                            always_btn_now = _makcu_button_held(_mm, _makcu_always_btn)
                             if _makcu_always_mode == 'toggle':
                                 # Rising-edge detection: flip toggle on button press
                                 if always_btn_now and not _always_aim_btn_prev[0]:
@@ -688,7 +726,7 @@ def ai_logic_loop(
                     try:
                         from win_utils.makcu_mouse import is_makcu_connected, makcu_mouse as _mm
                         if is_makcu_connected():
-                            btn_now = _mm.rmb_held if _makcu_btn == 'rmb' else _mm.lmb_held
+                            btn_now = _makcu_button_held(_mm, _makcu_btn)
                             if _makcu_mode == 'toggle':
                                 # Rising-edge detection: flip toggle on button press
                                 if btn_now and not _aim_btn_prev[0]:
@@ -752,6 +790,7 @@ def ai_logic_loop(
                     config.display_locked_box = None
                     config.display_locked_box_is_decaying = False
                     config.aim_prediction_active = False
+                    _set_makcu_move_lock(config, False)
                     time.sleep(0.05)
                     continue
 
@@ -899,6 +938,7 @@ def ai_logic_loop(
                 aim_engaged = is_aiming and aim_start_delay_elapsed(
                     config, state.aiming_start_time, current_time)
                 aimed_this_frame = bool(aim_engaged and boxes)
+                _set_makcu_move_lock(config, aimed_this_frame)
                 if aimed_this_frame:
                     process_aiming(
                         config,
@@ -1019,6 +1059,7 @@ def ai_logic_loop(
         # HUD/OCR feeders are module-level singletons shared with whichever loop
         # replaced this one — only the loop that still owns the pipeline stops them.
         if _active_loop_token is loop_token:
+            _set_makcu_move_lock(config, False)
             _hud_stop()
             _ocr_stop()
         _preprocess_stop.set()

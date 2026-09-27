@@ -1266,25 +1266,25 @@
 
           <div class="field-group-title" id="keys-aim-group-title">Aim Activation</div>
           <div class="field-group" id="keys-aim-group">
-            <div class="field-card">
+            <div class="field-card" id="keys-aim-key-1-card">
               <div class="field-info"><div class="field-title">Aim Key 1</div></div>
               <div class="field-control">
                 <select id="keys-aim-key-1" class="vk-select" data-key="AimKeys.0" data-type="number"></select>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="keys-aim-key-2-card">
               <div class="field-info"><div class="field-title">Aim Key 2</div></div>
               <div class="field-control">
                 <select id="keys-aim-key-2" class="vk-select" data-key="AimKeys.1" data-type="number"></select>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="keys-aim-key-3-card">
               <div class="field-info"><div class="field-title">Aim Key 3</div></div>
               <div class="field-control">
                 <select id="keys-aim-key-3" class="vk-select" data-key="AimKeys.2" data-type="number"></select>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="keys-toggle-key-card">
               <div class="field-info">
                 <div class="field-title">Toggle Key</div>
                 <div class="field-desc">Toggle Aim On/Off</div>
@@ -1313,14 +1313,36 @@
 
           <div class="field-group-title" id="keys-makcu-conn-group-title">MAKCU Connection</div>
           <div class="field-group" id="keys-makcu-conn-group">
-            <div class="field-card">
+            <div class="field-card" id="keys-makcu-transport-card">
+              <div class="field-info">
+                <div class="field-title">Connection Type</div>
+                <div class="field-desc">UDP needs a MAKXD on Ethernet/Wi-Fi with plaintext UDP (encrypted UDP is not supported)</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-makcu_connection" data-key="makcu_connection" data-type="choice">
+                  <option value="serial">USB (COM)</option>
+                  <option value="udp">UDP (network)</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-udp-card">
+              <div class="field-info">
+                <div class="field-title">Device Address</div>
+                <div class="field-desc">IP address and UDP port of the MAKXD</div>
+              </div>
+              <div class="field-control">
+                <input type="text" id="keys-makcu_udp_host" data-key="makcu_udp_host" data-type="str" placeholder="192.168.1.50">
+                <input type="number" id="keys-makcu_udp_port" data-key="makcu_udp_port" data-type="number" min="1" max="65535" step="1" placeholder="8080">
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-com-card">
               <div class="field-info"><div class="field-title">COM Port</div></div>
               <div class="field-control">
                 <select id="keys-makcu_com_port" data-key="makcu_com_port" data-type="text"></select>
                 <button id="keys-makcu-port-refresh-btn">Refresh</button>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="keys-makcu-baud-card">
               <div class="field-info"><div class="field-title">Baud Rate</div></div>
               <div class="field-control">
                 <select id="keys-makcu_baud_rate" data-key="makcu_baud_rate" data-type="choice">
@@ -1361,6 +1383,7 @@
                 <select id="keys-makcu_aim_button" data-key="makcu_aim_button" data-type="choice">
                   <option value="lmb">Left</option>
                   <option value="rmb">Right</option>
+                  <option value="mmb">Middle</option>
                   <option value="off">Off</option>
                 </select>
               </div>
@@ -1397,6 +1420,7 @@
                   <option value="off">Off</option>
                   <option value="lmb">Left</option>
                   <option value="rmb">Right</option>
+                  <option value="mmb">Middle</option>
                   <option value="side1">Side 1</option>
                   <option value="side2">Side 2</option>
                 </select>
@@ -1412,6 +1436,42 @@
                   <option value="hold">Hold</option>
                   <option value="toggle">Toggle</option>
                 </select>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-device-hotkeys-card">
+              <div class="field-info">
+                <div class="field-title">Read Hotkeys Through MAKCU</div>
+                <div class="field-desc">Aim, toggle and auto-fire keys also react to the MAKCU's mouse/keyboard (for 2-PC setups; keyboard keys need V4/MAKXD firmware)</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="keys-makcu_device_hotkeys" data-key="makcu_device_hotkeys" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-move-lock-card">
+              <div class="field-info">
+                <div class="field-title">Lock Physical Mouse While Aiming</div>
+                <div class="field-desc">Block your own mouse movement while a target is locked; released automatically if aiming stalls</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="keys-makcu_lock_physical_move" data-key="makcu_lock_physical_move" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-spread-enable-card">
+              <div class="field-info">
+                <div class="field-title">Override Firmware Mouse Spread</div>
+                <div class="field-desc">Apply the firmware's own mouse spread live (V4/MAKXD only; not saved to the device)</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="keys-makcu_mouse_spread_enabled" data-key="makcu_mouse_spread_enabled" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card" id="keys-makcu-spread-card">
+              <div class="field-info">
+                <div class="field-title">Firmware Mouse Spread</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-makcu_mouse_spread" data-key="makcu_mouse_spread" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
           </div>

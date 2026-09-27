@@ -628,6 +628,46 @@ class TestValidateMouseMethod:
         _validate_mouse_method(c)
         assert c.mouse_click_method == method
 
+    def test_makcu_feature_fields_are_clamped(self):
+        from core.config import _validate_mouse_method
+        from core.config_manager import _AIM_PRESET_FIELDS
+        c = _make_config()
+        c.makcu_aim_button = "nope"
+        c.makcu_always_aim_button = "wheel"
+        c.makcu_connection = "ble"
+        c.makcu_udp_port = 0
+        c.makcu_mouse_spread = 250
+        _validate_mouse_method(c)
+        assert c.makcu_aim_button == "lmb"
+        assert c.makcu_always_aim_button == "off"
+        assert c.makcu_connection == "serial"
+        assert c.makcu_udp_port == 8080
+        assert c.makcu_mouse_spread == 100
+        for attr in (
+            "makcu_connection", "makcu_udp_host", "makcu_device_hotkeys",
+            "makcu_lock_physical_move", "makcu_mouse_spread",
+        ):
+            assert attr not in _AIM_PRESET_FIELDS
+
+    def test_makcu_feature_fields_round_trip(self):
+        c = _make_config()
+        c.makcu_connection = "udp"
+        c.makcu_udp_host = "10.0.0.5"
+        c.makcu_udp_port = 9000
+        c.makcu_device_hotkeys = True
+        c.makcu_lock_physical_move = True
+        c.makcu_mouse_spread_enabled = True
+        c.makcu_mouse_spread = 40
+        other = _make_config()
+        other.from_dict(c.to_dict())
+        assert other.makcu_connection == "udp"
+        assert other.makcu_udp_host == "10.0.0.5"
+        assert other.makcu_udp_port == 9000
+        assert other.makcu_device_hotkeys is True
+        assert other.makcu_lock_physical_move is True
+        assert other.makcu_mouse_spread_enabled is True
+        assert other.makcu_mouse_spread == 40
+
 
 # ============================================================
 # 7. _validate_detect_range_size 測試

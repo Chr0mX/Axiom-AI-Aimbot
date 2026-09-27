@@ -197,15 +197,26 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "auto_fire_key2": {"type": "int"},
         "makcu_com_port": {"type": "str"},
         "makcu_baud_rate": {"type": "choice", "choices": [115200, 460800, 1000000, 2000000, 4000000]},
-        "makcu_aim_button": {"type": "choice", "choices": ["lmb", "rmb", "off"]},
+        "makcu_aim_button": {"type": "choice", "choices": ["lmb", "rmb", "mmb", "off"]},
         "makcu_aim_mode": {"type": "choice", "choices": ["hold", "toggle"]},
         "makcu_disengage_delay": {"type": "float", "min": 0.0, "max": 20.0},
         # Always Aim Button/Mode (makcu_always_aim_button/_mode) — optional
         # side-button activation of Always Aim, independent of the plain
         # always_aim checkbox (see the "trigger" tab's own inference schema).
         # Mirrors keys_page.py's _MAKCU_ALWAYS_AIM_OPTIONS.
-        "makcu_always_aim_button": {"type": "choice", "choices": ["off", "lmb", "rmb", "side1", "side2"]},
+        "makcu_always_aim_button": {"type": "choice", "choices": ["off", "lmb", "rmb", "mmb", "side1", "side2"]},
         "makcu_always_aim_mode": {"type": "choice", "choices": ["hold", "toggle"]},
+        # Connection transport. Changing it doesn't reconnect by itself — the
+        # MAKCU Connect toggle does, same as makcu_com_port.
+        "makcu_connection": {"type": "choice", "choices": ["serial", "udp"]},
+        "makcu_udp_host": {"type": "str"},
+        "makcu_udp_port": {"type": "int", "min": 1, "max": 65535},
+        # Applied to the device by ai_loop.py's _sync_makcu_features() within
+        # one method-check interval (and by keys_page.py immediately).
+        "makcu_device_hotkeys": {"type": "bool"},
+        "makcu_lock_physical_move": {"type": "bool"},
+        "makcu_mouse_spread_enabled": {"type": "bool"},
+        "makcu_mouse_spread": {"type": "int", "min": 0, "max": 100},
     },
     "visuals": {
         "show_fov": {"type": "bool"},

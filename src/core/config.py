@@ -217,6 +217,13 @@ _FIELD_MAP = {
     'makcu_disengage_delay':      'hardware.makcu.disengage_delay',
     'makcu_always_aim_button':    'hardware.makcu.always_aim_button',
     'makcu_always_aim_mode':      'hardware.makcu.always_aim_mode',
+    'makcu_connection':           'hardware.devices.makcu.connection',
+    'makcu_udp_host':             'hardware.devices.makcu.udp_host',
+    'makcu_udp_port':             'hardware.devices.makcu.udp_port',
+    'makcu_device_hotkeys':       'hardware.makcu.device_hotkeys',
+    'makcu_lock_physical_move':   'hardware.makcu.lock_physical_move',
+    'makcu_mouse_spread_enabled': 'hardware.makcu.mouse_spread.enabled',
+    'makcu_mouse_spread':         'hardware.makcu.mouse_spread.percent',
     'xbox_sensitivity':           'hardware.xbox.sensitivity',
     'xbox_deadzone':              'hardware.xbox.deadzone',
 
@@ -548,7 +555,7 @@ class Config:
         # Milliseconds after aim engages (aim key pressed / toggle on) before
         # any mouse movement is sent. 0 = aim immediately.
         self.aim_start_delay_ms: int = 0
-        self.makcu_aim_button: str = "lmb"   # "lmb", "rmb", or "off"
+        self.makcu_aim_button: str = "lmb"   # "lmb", "rmb", "mmb", or "off"
         self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_aim_active: bool = False  # runtime state — not serialized
         self.makcu_disengage_delay: float = 0.0  # seconds to keep aiming after releasing aim button (0 = off)
@@ -560,9 +567,23 @@ class Config:
         # makcu_always_aim_mode. lmb/rmb overlap with makcu_aim_button's
         # own trigger-button choice is allowed on purpose (same "hold one
         # button to do both" precedent as AimKeys/auto_fire_key).
-        self.makcu_always_aim_button: str = "off"  # "off", "lmb", "rmb", "side1", or "side2"
+        self.makcu_always_aim_button: str = "off"  # "off", "lmb", "rmb", "mmb", "side1", or "side2"
         self.makcu_always_aim_mode: str = "hold"   # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_always_aim_active: bool = False  # runtime state — not serialized
+        # "serial" (USB COM) or "udp" (plaintext UDP to a MAKXD on Ethernet/Wi-Fi).
+        self.makcu_connection: str = "serial"
+        self.makcu_udp_host: str = ""
+        self.makcu_udp_port: int = 8080
+        # Read every hotkey (aim/toggle/auto-fire keys) through the MAKCU's own
+        # button + keyboard streams in addition to Windows — needed on a 2-PC
+        # setup, where this PC never sees the gaming PC's mouse/keyboard.
+        # Keyboard keys need MAKCU V4 / MAKXD firmware.
+        self.makcu_device_hotkeys: bool = False
+        # Block the user's physical mouse movement while a target is locked.
+        self.makcu_lock_physical_move: bool = False
+        # Firmware-side mouse spread (0-100 %), applied live when enabled.
+        self.makcu_mouse_spread_enabled: bool = False
+        self.makcu_mouse_spread: int = 0
         self.fov_follow_mouse: bool = False # FOV 跟隨鼠標
 
         # 顯示開關
@@ -1063,6 +1084,23 @@ def _validate_mouse_method(config: Config) -> None:
     valid_click_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox')
     if config.mouse_click_method not in valid_click_methods:
         config.mouse_click_method = 'mouse_event'
+
+    if getattr(config, 'makcu_aim_button', 'lmb') not in ('lmb', 'rmb', 'mmb', 'off'):
+        config.makcu_aim_button = 'lmb'
+    if getattr(config, 'makcu_always_aim_button', 'off') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
+        config.makcu_always_aim_button = 'off'
+    if getattr(config, 'makcu_connection', 'serial') not in ('serial', 'udp'):
+        config.makcu_connection = 'serial'
+    try:
+        port = int(getattr(config, 'makcu_udp_port', 8080))
+    except (TypeError, ValueError):
+        port = 8080
+    config.makcu_udp_port = port if 1 <= port <= 65535 else 8080
+    try:
+        spread = int(getattr(config, 'makcu_mouse_spread', 0))
+    except (TypeError, ValueError):
+        spread = 0
+    config.makcu_mouse_spread = max(0, min(100, spread))
 
 
 def _validate_screenshot_method(config: Config) -> None:

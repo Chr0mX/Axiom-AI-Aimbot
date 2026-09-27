@@ -6,10 +6,10 @@ from PyQt6.QtWidgets import QWidget, QHBoxLayout
 from PyQt6.QtGui import QKeySequence
 from qfluentwidgets import (
     SettingCardGroup, SettingCard, SwitchSettingCard, FluentIcon,
-    PushButton, BodyLabel, ComboBox,
+    PushButton, BodyLabel, ComboBox, LineEdit,
 )
 
-from ..components.slider_spin_card import SliderDoubleSpinCard
+from ..components.slider_spin_card import SliderDoubleSpinCard, SliderSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
@@ -41,9 +41,16 @@ _MAKCU_BTN_OPTIONS = [
 
 # MAKCU aim-trigger combo options (label, config string)
 _MAKCU_TRIGGER_OPTIONS = [
-    ("Left",  "lmb"),
-    ("Right", "rmb"),
-    ("Off",   "off"),
+    ("Left",   "lmb"),
+    ("Right",  "rmb"),
+    ("Middle", "mmb"),
+    ("Off",    "off"),
+]
+
+# MAKCU connection transport (label, config string)
+_MAKCU_TRANSPORT_OPTIONS = [
+    ("USB (COM)", "serial"),
+    ("UDP (network)", "udp"),
 ]
 
 # MAKCU Always-Aim button combo options (label, config string) — a
@@ -54,6 +61,7 @@ _MAKCU_ALWAYS_AIM_OPTIONS = [
     ("Off",    "off"),
     ("Left",   "lmb"),
     ("Right",  "rmb"),
+    ("Middle", "mmb"),
     ("Side 1", "side1"),
     ("Side 2", "side2"),
 ]
@@ -285,15 +293,19 @@ class _MakcuConnectWorker(QThread):
 
     finishedResult = pyqtSignal(bool)  # ok
 
-    def __init__(self, port: str, baud: int, parent=None):
+    def __init__(self, port: str, baud: int, parent=None, udp=None):
         super().__init__(parent)
         self._port = port
         self._baud = baud
+        self._udp = udp  # (host, port) for a UDP connection, else None
 
     def run(self) -> None:
         try:
-            from win_utils.makcu_mouse import connect_makcu
-            ok = connect_makcu(self._port, self._baud)
+            from win_utils.makcu_mouse import connect_makcu, connect_makcu_udp
+            if self._udp:
+                ok = connect_makcu_udp(*self._udp)
+            else:
+                ok = connect_makcu(self._port, self._baud)
         except Exception:
             ok = False
         self.finishedResult.emit(ok)
@@ -338,8 +350,10 @@ class KeysPage(BasePage):
         # Aim key cards 1–3 hidden in MAKCU mode; toggle key always visible
         for card in (self.aimKey1Card, self.aimKey2Card, self.aimKey3Card):
             card.setVisible(not is_makcu)
-        # Fire keys group hidden in MAKCU mode
-        self.fireKeysGroup.setVisible(not is_makcu)
+        # Fire keys group hidden in MAKCU mode — unless hotkeys are read
+        # through the MAKCU, which makes any key bindable again.
+        device_hotkeys = bool(getattr(self._config, 'makcu_device_hotkeys', False)) if self._config else False
+        self.fireKeysGroup.setVisible(not is_makcu or device_hotkeys)
         # MAKCU connection + keys groups visible only in MAKCU mode
         self.makcuConnGroup.setVisible(is_makcu)
         self.makcuKeysGroup.setVisible(is_makcu)
@@ -446,6 +460,35 @@ class KeysPage(BasePage):
 
         # === MAKCU Connection (shown only when mouse_move_method == "makcu") ===
         self.makcuConnGroup = SettingCardGroup(t("makcu_connection_group", "MAKCU Connection"), self.scrollWidget)
+
+        self.makcuTransportCombo = ComboBox()
+        self.makcuTransportCombo.setMinimumWidth(150)
+        for label, _ in _MAKCU_TRANSPORT_OPTIONS:
+            self.makcuTransportCombo.addItem(label)
+        self.makcuTransportCard = SettingCard(
+            FluentIcon.CONNECT,
+            t("makcu_transport", "Connection Type"),
+            t("makcu_transport_desc", "UDP needs a MAKXD on Ethernet/Wi-Fi with plaintext UDP (encrypted UDP is not supported)"),
+            self.makcuConnGroup
+        )
+        self.makcuTransportCard.hBoxLayout.addWidget(self.makcuTransportCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuTransportCard.hBoxLayout.addSpacing(16)
+
+        self.makcuUdpHostEdit = LineEdit()
+        self.makcuUdpHostEdit.setPlaceholderText("192.168.1.50")
+        self.makcuUdpHostEdit.setMinimumWidth(150)
+        self.makcuUdpPortEdit = LineEdit()
+        self.makcuUdpPortEdit.setPlaceholderText("8080")
+        self.makcuUdpPortEdit.setFixedWidth(80)
+        self.makcuUdpCard = SettingCard(
+            FluentIcon.GLOBE,
+            t("makcu_udp_address", "Device Address"),
+            t("makcu_udp_address_desc", "IP address and UDP port of the MAKXD"),
+            self.makcuConnGroup
+        )
+        self.makcuUdpCard.hBoxLayout.addWidget(self.makcuUdpHostEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuUdpCard.hBoxLayout.addWidget(self.makcuUdpPortEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.makcuUdpCard.hBoxLayout.addSpacing(16)
 
         # COM port selector + refresh button
         self.makcuComPortCombo = ComboBox()
@@ -607,6 +650,37 @@ class KeysPage(BasePage):
         self.makcuAlwaysAimModeCard.hBoxLayout.addWidget(self.makcuAlwaysAimModeCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.makcuAlwaysAimModeCard.hBoxLayout.addSpacing(16)
 
+        self.makcuDeviceHotkeysCard = SwitchSettingCard(
+            FluentIcon.GAME,
+            t("makcu_device_hotkeys", "Read Hotkeys Through MAKCU"),
+            t("makcu_device_hotkeys_desc", "Aim, toggle and auto-fire keys also react to the MAKCU's mouse/keyboard (for 2-PC setups; keyboard keys need V4/MAKXD firmware)"),
+            parent=self.makcuKeysGroup
+        )
+        self.makcuMoveLockCard = SwitchSettingCard(
+            FluentIcon.PIN,
+            t("makcu_lock_physical_move", "Lock Physical Mouse While Aiming"),
+            t("makcu_lock_physical_move_desc", "Block your own mouse movement while a target is locked; released automatically if aiming stalls"),
+            parent=self.makcuKeysGroup
+        )
+        self.makcuSpreadEnableCard = SwitchSettingCard(
+            FluentIcon.SETTING,
+            t("makcu_mouse_spread_enable", "Override Firmware Mouse Spread"),
+            t("makcu_mouse_spread_enable_desc", "Apply the firmware's own mouse spread live (V4/MAKXD only; not saved to the device)"),
+            parent=self.makcuKeysGroup
+        )
+        self.makcuSpreadCard = SliderSpinCard(
+            FluentIcon.SPEED_OFF,
+            t("makcu_mouse_spread", "Firmware Mouse Spread"),
+            0, 100,
+            suffix="%",
+            description="",
+            parent=self.makcuKeysGroup
+        )
+        self._makcuSpreadTimer = QTimer(self)
+        self._makcuSpreadTimer.setSingleShot(True)
+        self._makcuSpreadTimer.setInterval(300)
+        self._makcuSpreadTimer.timeout.connect(self._applyMakcuFeatures)
+
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -629,6 +703,8 @@ class KeysPage(BasePage):
         self.addContent(self.fireKeysGroup)
 
         # MAKCU Connection group (hidden by default until setConfig runs)
+        self.makcuConnGroup.addSettingCard(self.makcuTransportCard)
+        self.makcuConnGroup.addSettingCard(self.makcuUdpCard)
         self.makcuConnGroup.addSettingCard(self.makcuComPortCard)
         self.makcuConnGroup.addSettingCard(self.makcuBaudCard)
         self.makcuConnGroup.addSettingCard(self.makcuConnectionCard)
@@ -644,6 +720,10 @@ class KeysPage(BasePage):
         self.makcuKeysGroup.addSettingCard(self.makcuDisengageDelayCard)
         self.makcuKeysGroup.addSettingCard(self.makcuAlwaysAimButtonCard)
         self.makcuKeysGroup.addSettingCard(self.makcuAlwaysAimModeCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuDeviceHotkeysCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuMoveLockCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuSpreadEnableCard)
+        self.makcuKeysGroup.addSettingCard(self.makcuSpreadCard)
         self.addContent(self.makcuKeysGroup)
         self.makcuKeysGroup.setVisible(False)
 
@@ -674,6 +754,16 @@ class KeysPage(BasePage):
         self.makcuDisengageDelayCard.valueChanged.connect(self._onMakcuDisengageDelayChanged)
         self.makcuAlwaysAimButtonCombo.currentIndexChanged.connect(self._onMakcuAlwaysAimButtonChanged)
         self.makcuAlwaysAimModeCombo.currentIndexChanged.connect(self._onMakcuAlwaysAimModeChanged)
+        self.makcuTransportCombo.currentIndexChanged.connect(self._onMakcuTransportChanged)
+        self.makcuUdpHostEdit.editingFinished.connect(self._onMakcuUdpAddressChanged)
+        self.makcuUdpPortEdit.editingFinished.connect(self._onMakcuUdpAddressChanged)
+        self.makcuDeviceHotkeysCard.checkedChanged.connect(
+            lambda v: self._onMakcuFeatureToggled('makcu_device_hotkeys', v))
+        self.makcuMoveLockCard.checkedChanged.connect(
+            lambda v: self._onMakcuFeatureToggled('makcu_lock_physical_move', v))
+        self.makcuSpreadEnableCard.checkedChanged.connect(
+            lambda v: self._onMakcuFeatureToggled('makcu_mouse_spread_enabled', v))
+        self.makcuSpreadCard.valueChanged.connect(self._onMakcuSpreadChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -758,7 +848,28 @@ class KeysPage(BasePage):
                 self.makcuAlwaysAimModeCombo.blockSignals(False)
                 break
 
+        transport = getattr(self._config, 'makcu_connection', 'serial')
+        for i, (_, val) in enumerate(_MAKCU_TRANSPORT_OPTIONS):
+            if val == transport:
+                self.makcuTransportCombo.blockSignals(True)
+                self.makcuTransportCombo.setCurrentIndex(i)
+                self.makcuTransportCombo.blockSignals(False)
+                break
+        if not self.makcuUdpHostEdit.hasFocus():
+            self.makcuUdpHostEdit.setText(str(getattr(self._config, 'makcu_udp_host', '') or ''))
+        if not self.makcuUdpPortEdit.hasFocus():
+            self.makcuUdpPortEdit.setText(str(getattr(self._config, 'makcu_udp_port', 8080)))
+
+        for card, attr in ((self.makcuDeviceHotkeysCard, 'makcu_device_hotkeys'),
+                           (self.makcuMoveLockCard, 'makcu_lock_physical_move'),
+                           (self.makcuSpreadEnableCard, 'makcu_mouse_spread_enabled')):
+            card.blockSignals(True)
+            card.setChecked(bool(getattr(self._config, attr, False)))
+            card.blockSignals(False)
+        self.makcuSpreadCard.setValue(int(getattr(self._config, 'makcu_mouse_spread', 0)))
+
         self._refreshMakcuVisibility()
+        self._applyMakcuFeatures()
 
     def _refreshMakcuVisibility(self):
         """Show/hide MAKCU cards based on always_aim and keep_detecting."""
@@ -777,6 +888,11 @@ class KeysPage(BasePage):
         # activation path would have nothing left to add.
         self.makcuAlwaysAimButtonCard.setVisible(not always_aim)
         self.makcuAlwaysAimModeCard.setVisible(not always_aim)
+        is_udp = getattr(self._config, 'makcu_connection', 'serial') == 'udp'
+        self.makcuUdpCard.setVisible(is_udp)
+        self.makcuComPortCard.setVisible(not is_udp)
+        self.makcuBaudCard.setVisible(not is_udp)
+        self.makcuSpreadCard.setVisible(bool(getattr(self._config, 'makcu_mouse_spread_enabled', False)))
         # always_aim/keep_detecting change which MAKCU slots are relevant —
         # re-run the conflict scan against the newly-active set.
         self._checkKeyConflicts()
@@ -821,12 +937,17 @@ class KeysPage(BasePage):
                 aim0 = self._config.AimKeys[0] if len(self._config.AimKeys) >= 1 else 0
                 alt_groups.append([(t("makcu_key_inference", "Inference"), aim0 or None)])
             if not always_aim:
-                trigger_to_vk = {"lmb": 0x01, "rmb": 0x02, "off": None}
+                trigger_to_vk = {"lmb": 0x01, "rmb": 0x02, "mmb": 0x04, "off": None}
                 trigger = getattr(self._config, 'makcu_aim_button', 'lmb').lower()
                 alt_groups.append([(t("makcu_aim_trigger_key", "Aim Trigger Button"), trigger_to_vk.get(trigger))])
-                always_aim_btn_to_vk = {"lmb": 0x01, "rmb": 0x02, "side1": 0x05, "side2": 0x06, "off": None}
+                always_aim_btn_to_vk = {"lmb": 0x01, "rmb": 0x02, "mmb": 0x04, "side1": 0x05, "side2": 0x06, "off": None}
                 always_aim_btn = getattr(self._config, 'makcu_always_aim_button', 'off').lower()
                 alt_groups.append([(t("makcu_always_aim_button", "Always Aim Button"), always_aim_btn_to_vk.get(always_aim_btn))])
+            if getattr(self._config, 'makcu_device_hotkeys', False):
+                alt_groups.append([
+                    (t("auto_fire_key_1"), self._config.auto_fire_key or None),
+                    (t("auto_fire_key_2"), self._config.auto_fire_key2 or None),
+                ])
         else:
             aim_labels = (t("aim_key_1"), t("aim_key_2"), t("aim_key_3"))
             aim_group = [(label, self._config.AimKeys[i] or None)
@@ -971,7 +1092,16 @@ class KeysPage(BasePage):
         self._updateMakcuConnectionStatus()
 
         # Auto-connect if a MAKCU device is detected and not yet connected
-        if effective_port:
+        udp_host = getattr(self._config, 'makcu_udp_host', '')
+        if getattr(self._config, 'makcu_connection', 'serial') == 'udp' and udp_host:
+            try:
+                from win_utils.makcu_mouse import is_makcu_connected
+                if not is_makcu_connected():
+                    self._startMakcuConnect(
+                        "", 0, udp=(udp_host, int(getattr(self._config, 'makcu_udp_port', 8080))))
+            except Exception:
+                pass
+        elif effective_port:
             try:
                 from win_utils.makcu_mouse import is_makcu_connected
                 if not is_makcu_connected():
@@ -1045,6 +1175,11 @@ class KeysPage(BasePage):
             disconnect_makcu()
             self._isMakcuConnected = False
             self._updateMakcuConnectionStatus()
+        elif self._config and getattr(self._config, 'makcu_connection', 'serial') == 'udp':
+            self._onMakcuUdpAddressChanged()
+            host = getattr(self._config, 'makcu_udp_host', '')
+            if host:
+                self._startMakcuConnect("", 0, udp=(host, int(getattr(self._config, 'makcu_udp_port', 8080))))
         else:
             port = self.makcuComPortCombo.currentText()
             if not port or port == t("no_com_port", "No COM Port"):
@@ -1055,7 +1190,7 @@ class KeysPage(BasePage):
                 baud = 4_000_000
             self._startMakcuConnect(port, baud)
 
-    def _startMakcuConnect(self, port: str, baud: int) -> None:
+    def _startMakcuConnect(self, port: str, baud: int, udp=None) -> None:
         """Run connect_makcu() on a background thread instead of blocking
         the GUI/main thread — connect_makcu() is already safe to call off
         the GUI thread (it never holds its own lock across a sleep), the
@@ -1065,7 +1200,7 @@ class KeysPage(BasePage):
             return  # a connect attempt is already in flight
         self.makcuConnectBtn.setEnabled(False)
         self.makcuConnectionLabel.setText(t("connecting", "Connecting..."))
-        self._makcuConnectWorker = _MakcuConnectWorker(port, baud, parent=self)
+        self._makcuConnectWorker = _MakcuConnectWorker(port, baud, parent=self, udp=udp)
         self._makcuConnectWorker.finishedResult.connect(self._onMakcuConnectFinished)
         self._makcuConnectWorker.start()
 
@@ -1073,6 +1208,53 @@ class KeysPage(BasePage):
         self._isMakcuConnected = ok
         self.makcuConnectBtn.setEnabled(True)
         self._updateMakcuConnectionStatus()
+        if ok:
+            self._applyMakcuFeatures()
+
+    def _onMakcuTransportChanged(self, idx: int):
+        if self._config and 0 <= idx < len(_MAKCU_TRANSPORT_OPTIONS):
+            self._config.makcu_connection = _MAKCU_TRANSPORT_OPTIONS[idx][1]
+            self._refreshMakcuVisibility()
+
+    def _onMakcuUdpAddressChanged(self):
+        if not self._config:
+            return
+        self._config.makcu_udp_host = self.makcuUdpHostEdit.text().strip()
+        try:
+            port = int(self.makcuUdpPortEdit.text().strip() or 8080)
+        except ValueError:
+            port = 8080
+        self._config.makcu_udp_port = port if 1 <= port <= 65535 else 8080
+        self.makcuUdpPortEdit.setText(str(self._config.makcu_udp_port))
+
+    def _onMakcuFeatureToggled(self, attr: str, checked: bool):
+        if self._config:
+            setattr(self._config, attr, bool(checked))
+            self._updateMakcuVisibility()
+            self._refreshMakcuVisibility()
+            self._applyMakcuFeatures()
+
+    def _onMakcuSpreadChanged(self, value: int):
+        if self._config:
+            self._config.makcu_mouse_spread = int(value)
+            self._makcuSpreadTimer.start()
+
+    def _applyMakcuFeatures(self):
+        """Push device-side features now rather than waiting for the AI
+        loop's next sync (which only runs while inference is running)."""
+        if not self._config:
+            return
+        try:
+            from win_utils import set_device_hotkeys
+            from win_utils.makcu_mouse import makcu_mouse
+            use_makcu = getattr(self._config, 'mouse_move_method', '') == 'makcu'
+            set_device_hotkeys(use_makcu and bool(getattr(self._config, 'makcu_device_hotkeys', False)))
+            if use_makcu and getattr(self._config, 'makcu_mouse_spread_enabled', False):
+                makcu_mouse.request_mouse_spread(int(getattr(self._config, 'makcu_mouse_spread', 0)))
+            else:
+                makcu_mouse.request_mouse_spread(None)
+        except Exception:
+            pass
 
     def _updateMakcuConnectionStatus(self):
         """Refresh connection label and connect button text."""
@@ -1176,6 +1358,17 @@ class KeysPage(BasePage):
         self.makcuAlwaysAimButtonCard.contentLabel.setText(t("makcu_always_aim_button_desc", "Optional side mouse button that activates Always Aim"))
         self.makcuAlwaysAimModeCard.titleLabel.setText(t("makcu_always_aim_mode", "Always Aim Mode"))
         self.makcuAlwaysAimModeCard.contentLabel.setText(t("makcu_always_aim_mode_desc", "Hold: always-aim while button held  |  Toggle: click to toggle always-aim on/off"))
+        self.makcuTransportCard.titleLabel.setText(t("makcu_transport", "Connection Type"))
+        self.makcuTransportCard.contentLabel.setText(t("makcu_transport_desc", "UDP needs a MAKXD on Ethernet/Wi-Fi with plaintext UDP (encrypted UDP is not supported)"))
+        self.makcuUdpCard.titleLabel.setText(t("makcu_udp_address", "Device Address"))
+        self.makcuUdpCard.contentLabel.setText(t("makcu_udp_address_desc", "IP address and UDP port of the MAKXD"))
+        self.makcuDeviceHotkeysCard.titleLabel.setText(t("makcu_device_hotkeys", "Read Hotkeys Through MAKCU"))
+        self.makcuDeviceHotkeysCard.contentLabel.setText(t("makcu_device_hotkeys_desc", "Aim, toggle and auto-fire keys also react to the MAKCU's mouse/keyboard (for 2-PC setups; keyboard keys need V4/MAKXD firmware)"))
+        self.makcuMoveLockCard.titleLabel.setText(t("makcu_lock_physical_move", "Lock Physical Mouse While Aiming"))
+        self.makcuMoveLockCard.contentLabel.setText(t("makcu_lock_physical_move_desc", "Block your own mouse movement while a target is locked; released automatically if aiming stalls"))
+        self.makcuSpreadEnableCard.titleLabel.setText(t("makcu_mouse_spread_enable", "Override Firmware Mouse Spread"))
+        self.makcuSpreadEnableCard.contentLabel.setText(t("makcu_mouse_spread_enable_desc", "Apply the firmware's own mouse spread live (V4/MAKXD only; not saved to the device)"))
+        self.makcuSpreadCard.titleLabel.setText(t("makcu_mouse_spread", "Firmware Mouse Spread"))
 
         # Rebuild Aim Mode combo options with fresh translations, preserving selection
         current_aim_mode_idx = self.makcuAimModeCombo.currentIndex()

@@ -1132,3 +1132,251 @@ class TestMakcuSerialErrors:
         m.click(1)
 
         assert m._connected is False
+
+
+def _kb_frame(hid, state):
+    """Binary keyboard change: payload [kind=2][hid usage][state]."""
+    return _bin_frame(hid, state, sub_type=0x02)
+
+
+class TestMakcuKeyboardStream:
+    def test_key_down_and_up(self):
+        m = _run_chunks([_kb_frame(0x04, 1), _kb_frame(0x04, 0)])
+        assert 0x04 not in m._keys_down
+
+    def test_held_key_is_visible_to_vk_lookup(self):
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._mak_api = True
+        m._keyboard_stream_wanted = True
+        m = _run_chunks([_kb_frame(0x04, 1)], mouse=m)
+        m._connected = True
+        assert m.is_vk_down(0x41) is True  # VK 'A' -> HID 0x04
+        assert m.is_vk_down(0x42) is False
+
+    def test_overflow_clears_keys_and_reenables(self):
+        from win_utils import makcu_protocol as mp
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._mak_api = True
+        m = _run_chunks([_kb_frame(0x04, 1), _kb_frame(0xFF, 0xFF)], mouse=m)
+        assert m._keys_down == set()
+        assert mp.stream_enable_frame(mp.STREAM_KIND_KEYBOARD, True) in m._serial.writes
+
+    def test_unconnected_vk_is_unknown(self):
+        from win_utils.makcu_mouse import MakcuMouse
+        assert MakcuMouse().is_vk_down(0x41) is None
+
+
+class TestMakcuReplyDemux:
+    def test_non_button_frame_wakes_waiter(self):
+        import threading
+        from win_utils import makcu_protocol as mp
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._mak_api = True
+        waiter = [threading.Event(), None]
+        m._reply_waiters[mp.CMD_BUTTONS] = [waiter]
+        _run_chunks([mp.frame(mp.CMD_BUTTONS, b"\x01")], mouse=m)
+        assert waiter[0].is_set()
+        assert waiter[1] == b"\x01"
+
+    def test_topology_notice_is_not_a_settings_reply(self):
+        import threading
+        from win_utils import makcu_protocol as mp
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._mak_api = True
+        waiter = [threading.Event(), None]
+        m._reply_waiters[mp.CMD_CONNECTION] = [waiter]
+        notice = mp.frame(mp.CMD_CONNECTION, bytes([mp.TOPOLOGY_NOTICE, 0x00]))
+        _run_chunks([notice], mouse=m)
+        assert waiter[0].is_set() is False
+
+
+class TestMakcuMoveLock:
+    def test_reassert_does_not_rewrite_and_stall_releases(self):
+        import time
+        from win_utils import makcu_protocol as mp
+        from win_utils.makcu_mouse import MakcuMouse, _MOVE_LOCK_REFRESH_S
+        m = MakcuMouse()
+        ser = _ChunkedStreamSerial([], m._stream_stop)
+        m._serial = ser
+        m._connected = True
+        m._mak_api = True
+        m.set_physical_move_lock(True)
+        m.set_physical_move_lock(True)
+        assert m.physical_move_locked is True
+        assert ser.writes == [mp.move_mask_frame(True, True, True, True)]
+        m._move_lock_asserted_at = time.monotonic() - _MOVE_LOCK_REFRESH_S - 0.05
+        m._start_write_thread()
+        try:
+            deadline = time.monotonic() + 1.0
+            while m.physical_move_locked and time.monotonic() < deadline:
+                time.sleep(0.02)
+        finally:
+            m.disconnect()
+        assert m.physical_move_locked is False
+        assert mp.move_mask_frame(False, False, False, False) in ser.writes
+
+
+class _ScriptedSerial:
+    """Answers MAK_API frames from write(); the direct-request path reads them back."""
+
+    def __init__(self, responder):
+        self._responder = responder
+        self.writes = []
+        self.is_open = True
+        self._rx = bytearray()
+
+    def reset_input_buffer(self):
+        self._rx.clear()
+
+    def write(self, data):
+        data = bytes(data)
+        self.writes.append(data)
+        reply = self._responder(data)
+        if reply:
+            self._rx.extend(reply)
+
+    def flush(self):
+        pass
+
+    @property
+    def in_waiting(self):
+        return len(self._rx)
+
+    def read(self, n):
+        data = bytes(self._rx[:n])
+        del self._rx[:n]
+        return data
+
+    def close(self):
+        self.is_open = False
+
+
+class TestMakcuMouseSpread:
+    def test_set_and_get_round_trip_without_save(self):
+        import struct
+        from win_utils import makcu_protocol as mp
+        from win_utils.makcu_mouse import MakcuMouse
+
+        image = bytearray(mp.SETTINGS_IMAGE_BYTES)
+        image[mp.SETTINGS_MOUSE_SPREAD_OFFSET] = 10
+
+        def respond(data):
+            if not data.startswith(mp.SYNC) or len(data) < 5:
+                return b""
+            length = data[2] | (data[3] << 8)
+            cmd = data[4]
+            payload = data[5:5 + length]
+            if cmd != mp.CMD_CONNECTION or len(payload) < 2 or payload[0] != mp.SETTINGS_RECORD:
+                return b""
+            op, body = payload[1], payload[2:]
+            if op == mp.SETTINGS_OP_INFO:
+                info = struct.pack("<BBBBBIH", 1, mp.SETTINGS_SECTION_MOUSE, 1, 0, 0, 7, mp.SETTINGS_IMAGE_BYTES)
+                return mp.frame(cmd, bytes([mp.SETTINGS_RECORD, op, 0]) + info)
+            if op == mp.SETTINGS_OP_READ:
+                _rev, offset, n = struct.unpack_from("<IHB", body)
+                chunk = bytes(image[offset:offset + n])
+                return mp.frame(cmd, bytes([mp.SETTINGS_RECORD, op, 0]) + b"\x00" * 6 + chunk)
+            if op == mp.SETTINGS_OP_BEGIN:
+                return mp.frame(cmd, bytes([mp.SETTINGS_RECORD, op, 0]) + (3).to_bytes(4, "little"))
+            if op == mp.SETTINGS_OP_WRITE:
+                token, offset = struct.unpack_from("<IH", body)
+                assert token == 3
+                chunk = body[6:]
+                image[offset:offset + len(chunk)] = chunk
+                return mp.frame(cmd, bytes([mp.SETTINGS_RECORD, op, 0]))
+            if op == mp.SETTINGS_OP_APPLY:
+                return mp.frame(cmd, bytes([mp.SETTINGS_RECORD, op, 0]))
+            if op == mp.SETTINGS_OP_SAVE:
+                raise AssertionError("spread must not be saved unless persist=True")
+            return b""
+
+        m = MakcuMouse()
+        m._serial = _ScriptedSerial(respond)
+        m._connected = True
+        m._mak_api = True
+        assert m.get_mouse_spread() == 10
+        ok, reason = m.set_mouse_spread(55)
+        assert (ok, reason) == (True, "applied")
+        assert image[mp.SETTINGS_MOUSE_SPREAD_OFFSET] == 55
+        assert m.get_mouse_spread() == 55
+        ok, reason = m.set_mouse_spread(55)
+        assert (ok, reason) == (True, "unchanged")
+
+
+class TestMakcuConnectUdp:
+    def test_happy_path_reads_firmware(self):
+        import socket
+        import threading
+        from win_utils import makcu_protocol as mp
+        from win_utils.makcu_mouse import MakcuMouse
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(("127.0.0.1", 0))
+        sock.settimeout(0.2)
+        port = sock.getsockname()[1]
+        stop = threading.Event()
+
+        def serve():
+            while not stop.is_set():
+                try:
+                    data, addr = sock.recvfrom(4096)
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return
+                if len(data) < 5 or data[4] == mp.CMD_INPUT_CHANGE:
+                    continue
+                cmd = data[4]
+                if cmd == mp.CMD_FIRMWARE_VERSION:
+                    sock.sendto(mp.frame(cmd, (42).to_bytes(4, "little")), addr)
+                elif cmd == mp.CMD_DEVICE:
+                    sock.sendto(mp.frame(cmd, bytes([0x03])), addr)
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        m = MakcuMouse()
+        try:
+            assert m.connect_udp("127.0.0.1", port) is True
+            assert m.transport == "udp"
+            assert m.is_mak_api is True
+            assert m.firmware_version == 42
+        finally:
+            m.disconnect()
+            stop.set()
+            sock.close()
+
+    def test_no_reply_is_not_connected(self):
+        import socket
+        from win_utils.makcu_mouse import MakcuMouse
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+        m = MakcuMouse()
+        try:
+            assert m.connect_udp("127.0.0.1", port) is False
+            assert m.is_connected() is False
+        finally:
+            sock.close()
+
+
+class TestMakcuStreamHealth:
+    def test_disabled_streams_are_reenabled(self):
+        from win_utils import makcu_protocol as mp
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._serial = _ChunkedStreamSerial([], m._stream_stop)
+        m._connected = True
+        m._mak_api = True
+        m._keyboard_stream_wanted = True
+        m._keys_down.add(0x04)
+        m._mak_request = lambda cmd, payload=b"", timeout=0.3: b"\x00"
+        result = m.check_stream_health()
+        assert result == {"mouse": False, "keyboard": False}
+        assert m._keys_down == set()
+        assert mp.stream_enable_frame(mp.STREAM_KIND_MOUSE, True) in m._serial.writes
+        assert mp.stream_enable_frame(mp.STREAM_KIND_KEYBOARD, True) in m._serial.writes
