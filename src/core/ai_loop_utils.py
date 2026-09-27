@@ -112,18 +112,57 @@ def update_crosshair_position(config: Config, half_width: int, half_height: int)
         config.crosshairX, config.crosshairY = half_width, half_height
 
 
-def clear_queues(boxes_queue: queue.Queue, confidences_queue: queue.Queue) -> None:
-    """Clear detection queues"""
-
+def _replace_queue_contents(q: queue.Queue, item) -> None:
     try:
-        while not boxes_queue.empty():
-            boxes_queue.get_nowait()
-        while not confidences_queue.empty():
-            confidences_queue.get_nowait()
+        while True:
+            q.get_nowait()
     except queue.Empty:
         pass
-    boxes_queue.put([])
-    confidences_queue.put([])
+    try:
+        q.put_nowait(item)
+    except queue.Full:
+        pass
+
+
+def clear_queues(
+    boxes_queue: queue.Queue,
+    confidences_queue: queue.Queue,
+    auto_fire_queue: queue.Queue | None = None,
+) -> None:
+    """Replace everything queued for the overlay (and auto-fire, if given)
+    with a single empty result, so no consumer can act on a stale one."""
+
+    _replace_queue_contents(boxes_queue, [])
+    _replace_queue_contents(confidences_queue, [])
+    if auto_fire_queue is not None:
+        _replace_queue_contents(auto_fire_queue, [])
+
+
+def put_latest(q: queue.Queue, item, timeout: float = 0.0) -> None:
+    """Put *item*, waiting up to *timeout* for room; if the consumer still
+    hasn't made room, evict whatever is queued instead of dropping *item*.
+
+    The wait keeps the producer paced to the consumer. Evicting the old entry
+    rather than the new one is what keeps a real-time consumer from being
+    handed a frame that sat in the queue while it wasn't reading — e.g. the
+    whole time the aim key was released.
+    """
+    try:
+        if timeout > 0:
+            q.put(item, timeout=timeout)
+        else:
+            q.put_nowait(item)
+        return
+    except queue.Full:
+        pass
+    try:
+        q.get_nowait()
+    except queue.Empty:
+        pass
+    try:
+        q.put_nowait(item)
+    except queue.Full:
+        pass
 
 
 def get_effective_detect_range_size(

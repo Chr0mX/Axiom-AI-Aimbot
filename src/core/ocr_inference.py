@@ -169,9 +169,11 @@ def stop() -> None:
     global _stop_event, _feeder_thread
     if _stop_event is not None:
         _stop_event.set()
-    _kill_proc()
+    # Join the feeder before tearing down: mid-iteration it can still call
+    # _ensure_proc(), respawning the child that was just killed.
     if _feeder_thread is not None and _feeder_thread.is_alive():
         _feeder_thread.join(timeout=2.0)
+    _kill_proc()
     _stop_event = None
     _feeder_thread = None
 

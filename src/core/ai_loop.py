@@ -30,13 +30,21 @@ from .ai_loop_utils import (
     compute_effective_fov,
     filter_boxes_by_fov,
     get_capture_dimensions,
+    put_latest,
     reduce_boxes_for_single_target,
     update_crosshair_position,
     update_queues,
 )
-from .inference import PIDController, non_max_suppression, postprocess_outputs, preprocess_image
+from .inference import (
+    PIDController,
+    detect_end2end_output,
+    non_max_suppression,
+    postprocess_outputs,
+    preprocess_image,
+)
 from .session_utils import inference_controller
 from .screen_capture import (
+    _capture_backend_is_stale,
     _cleanup_capture,
     _detect_active_capture_method,
     capture_frame,
@@ -59,6 +67,21 @@ _LATENCY_STATS_ALPHA = 0.2
 # ai_loop_utils.apply_cam_shift_deadzone()'s docstring for why this only
 # gates the drift integral and not state.cam_shift_x/y itself.
 _CAM_DRIFT_DEADZONE_PX = 0.5
+
+# Threaded backends (uvc/udp/ndi) keep handing back their last decoded frame
+# after the source stops delivering. The backend-reinit watchdog only fires
+# after screen_capture._CAPTURE_STALE_TIMEOUT_SECONDS; until then, re-inferring
+# that frozen frame re-applies the same PID correction every iteration and
+# drags the mouse. Well above any real source's frame period (a 5 fps source
+# is 0.2 s), so it only trips on genuine source loss.
+_SOURCE_FRAME_MAX_AGE_S = 0.5
+
+_PREPROCESS_ERROR_LOG_INTERVAL_S = 5.0
+
+# Identity of the ai_logic_loop() that currently owns the pipeline. config.Running
+# is shared by every loop, so a loop that outlived start_ai_threads()'s join
+# timeout would otherwise resume the moment the new loop sets Running back True.
+_active_loop_token: object | None = None
 
 
 def _probe_model_input_size(session, abs_model_path: str) -> int:
@@ -262,7 +285,16 @@ def ai_logic_loop(
 ) -> None:
     """AI 推理和滑鼠控制的主要循環"""
 
+    global _active_loop_token
+    loop_token = object()
+    _active_loop_token = loop_token
+
+    def _is_active() -> bool:
+        return config.Running and _active_loop_token is loop_token
+
     input_name = model.get_inputs()[0].name
+    is_end2end = detect_end2end_output(model)
+    logger.info("[AI Loop] Model output format: %s", "end-to-end [N, 6]" if is_end2end else "raw grid")
 
     # Auto-detect model input size from the initial session (same probe as hot-swap).
     # Ensures 320/416/448/512/640 models all work without manual config.
@@ -341,6 +373,8 @@ def ai_logic_loop(
         # duplicate (classic ABA). A counter can't collide.
         'frame_seq': 0,
     }
+    # (frame, region it was captured for) — reused when dxcam reports "no change",
+    # so the frame is never republished against a region it wasn't grabbed from.
     _last_valid_frame: list = [None]  # mutable container for closure
     # Mutable containers so the capture worker can hot-swap the backend
     _capture_backend: list = [None]
@@ -374,6 +408,7 @@ def ai_logic_loop(
         high_res_timer_enabled = False
         last_capture_perf = 0.0
         last_method_check = 0.0
+        source_stale_logged = False
 
         try:
             while config.Running and not capture_stop_event.is_set():
@@ -422,19 +457,36 @@ def ai_logic_loop(
 
                 last_capture_perf = time.perf_counter()
                 captured_frame = capture_frame(_capture_backend[0], target_region)
+                captured_region = target_region
+
+                if captured_frame is not None and _capture_backend_is_stale(
+                    _capture_backend[0], _SOURCE_FRAME_MAX_AGE_S
+                ):
+                    if not source_stale_logged:
+                        logger.warning(
+                            "[Capture] Source (%s) delivered no new frame for >%.1fs — "
+                            "pausing detection instead of re-inferring the frozen frame.",
+                            _active_method[0], _SOURCE_FRAME_MAX_AGE_S,
+                        )
+                        source_stale_logged = True
+                    _last_valid_frame[0] = None
+                    continue
+                if source_stale_logged and captured_frame is not None:
+                    logger.info("[Capture] Source (%s) is delivering frames again.", _active_method[0])
+                    source_stale_logged = False
 
                 if captured_frame is not None:
-                    _last_valid_frame[0] = captured_frame
+                    _last_valid_frame[0] = (captured_frame, target_region)
                 elif _last_valid_frame[0] is not None:
                     # dxcam returns None when screen content hasn't changed;
                     # reuse the last valid frame so FPS isn't throttled by VSync
-                    captured_frame = _last_valid_frame[0]
+                    captured_frame, captured_region = _last_valid_frame[0]
                 else:
                     continue
 
                 with frame_lock:
                     capture_state['latest_frame'] = captured_frame
-                    capture_state['latest_region'] = target_region
+                    capture_state['latest_region'] = captured_region
                     capture_state['frame_seq'] = int(capture_state['frame_seq']) + 1
 
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
@@ -448,7 +500,9 @@ def ai_logic_loop(
         _set_thread_priority(getattr(config, 'thread_priority', 'high'))
         last_frame_seq: int = -1
         _cmc_prev: list = [None]  # previous 128×128 float32 gray frame for phase correlation
+        _last_error_log: list = [float('-inf')]
         while not _preprocess_stop.is_set() and config.Running:
+            frame = None
             try:
                 with frame_lock:
                     frame = capture_state.get('latest_frame')
@@ -489,11 +543,16 @@ def ai_logic_loop(
                 tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
                     frame, config.model_input_size, fast_resize=_frame_is_square
                 )
-                try:
-                    _tensor_queue.put((tensor, lb_scale, lb_pad_x, lb_pad_y, region), timeout=0.05)
-                except queue.Full:
-                    pass
+                put_latest(_tensor_queue, (tensor, lb_scale, lb_pad_x, lb_pad_y, region), timeout=0.05)
             except Exception:
+                now_err = time.perf_counter()
+                if now_err - _last_error_log[0] >= _PREPROCESS_ERROR_LOG_INTERVAL_S:
+                    _last_error_log[0] = now_err
+                    logger.exception(
+                        "[Preprocess] Failed on frame shape=%s dtype=%s model_input_size=%s",
+                        getattr(frame, 'shape', None), getattr(frame, 'dtype', None),
+                        getattr(config, 'model_input_size', None),
+                    )
                 time.sleep(0.001)
 
     _preprocess_thread = threading.Thread(target=_preprocess_worker, name='PreprocessWorker', daemon=True)
@@ -508,7 +567,7 @@ def ai_logic_loop(
     _hud_start(config)
 
     try:
-        while config.Running:
+        while _is_active():
             try:
                 # ── Cooperative pause / stop check ───────────────────────────
                 # config.inference_paused is a simple flag that UI code can set
@@ -538,6 +597,9 @@ def ai_logic_loop(
                 )
                 if model is not prev_model:
                     _io_binding[0] = _setup_io_binding(model)
+                    is_end2end = detect_end2end_output(model)
+                    logger.info("[Model HotSwap] Output format: %s",
+                                "end-to-end [N, 6]" if is_end2end else "raw grid")
                     # Drain tensors sized for the old model so the next inference
                     # always receives a tensor matching the new model_input_size.
                     while True:
@@ -672,13 +734,27 @@ def ai_logic_loop(
                     state.aiming_start_time = 0.0
 
                 if not config.AimToggle or (not config.keep_detecting and not is_aiming):
-                    clear_queues(overlay_boxes_queue, overlay_confidences_queue)
+                    # Detection stops here, so every published result is about to
+                    # go stale — including auto-fire's, which would otherwise keep
+                    # firing on its last box list for as long as its key is held.
+                    clear_queues(overlay_boxes_queue, overlay_confidences_queue,
+                                 auto_fire_queue=auto_fire_boxes_queue)
+                    config.latest_boxes = []
+                    config.latest_confidences = []
+                    config.latest_all_boxes = []
+                    config.latest_all_confidences = []
+                    config.display_locked_box = None
+                    config.display_locked_box_is_decaying = False
+                    config.aim_prediction_active = False
                     time.sleep(0.05)
                     continue
 
                 crosshair_x, crosshair_y = config.crosshairX, config.crosshairY
                 region = calculate_detection_region(config, crosshair_x, crosshair_y)
                 if region['width'] <= 0 or region['height'] <= 0:
+                    # e.g. fov_follow_mouse with the cursor on another monitor —
+                    # without a sleep this retries at 100% of a core.
+                    time.sleep(0.005)
                     continue
 
                 with region_lock:
@@ -739,6 +815,7 @@ def ai_logic_loop(
                         letterbox_scale=lb_scale,
                         letterbox_pad_x=lb_pad_x,
                         letterbox_pad_y=lb_pad_y,
+                        is_end2end=is_end2end,
                     )
                     # class_ids must go through NMS with the boxes: NMS drops
                     # detections and reorders the survivors by confidence, so
@@ -929,8 +1006,11 @@ def ai_logic_loop(
                 traceback.print_exc()
                 time.sleep(1.0)
     finally:
-        _hud_stop()
-        _ocr_stop()
+        # HUD/OCR feeders are module-level singletons shared with whichever loop
+        # replaced this one — only the loop that still owns the pipeline stops them.
+        if _active_loop_token is loop_token:
+            _hud_stop()
+            _ocr_stop()
         _preprocess_stop.set()
         if _preprocess_thread.is_alive():
             _preprocess_thread.join(timeout=1.0)

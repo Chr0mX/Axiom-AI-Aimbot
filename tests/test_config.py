@@ -817,3 +817,54 @@ class TestValidateUdpRecvBufferSize:
         c.udp_recv_buffer_size = "not-a-number"
         _validate_udp_recv_buffer_size(c)
         assert c.udp_recv_buffer_size == 65536
+
+
+# ============================================================
+# 11. _validate_queue_and_confidence 測試
+# ============================================================
+
+class TestValidateQueueAndConfidence:
+    """queue.Queue(maxsize<=0) is unbounded, and update_queues() only evicts
+    when full() — so a 0 max_queue_size lets stale results pile up."""
+
+    def test_zero_or_negative_queue_size_becomes_one(self):
+        from core.config import _validate_queue_and_confidence
+        for bad in (0, -3):
+            c = _make_config()
+            c.max_queue_size = bad
+            _validate_queue_and_confidence(c)
+            assert c.max_queue_size == 1
+
+    def test_valid_queue_size_kept(self):
+        from core.config import _validate_queue_and_confidence
+        c = _make_config()
+        c.max_queue_size = 3
+        _validate_queue_and_confidence(c)
+        assert c.max_queue_size == 3
+
+    def test_min_confidence_clamped(self):
+        from core.config import _validate_queue_and_confidence
+        c = _make_config()
+        c.min_confidence = 1.7
+        _validate_queue_and_confidence(c)
+        assert c.min_confidence == 1.0
+        c.min_confidence = -0.2
+        _validate_queue_and_confidence(c)
+        assert c.min_confidence == 0.0
+
+    def test_nan_min_confidence_is_not_zero(self):
+        """NaN must not clamp to 0.0 — that would accept every detection."""
+        from core.config import _validate_queue_and_confidence
+        c = _make_config()
+        c.min_confidence = float('nan')
+        _validate_queue_and_confidence(c)
+        assert c.min_confidence == pytest.approx(0.8)
+
+    def test_applied_by_load_config(self, tmp_path):
+        from core.config import load_config
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"performance": {"max_queue_size": 0}, "aim": {"min_confidence": 5}}))
+        c = _make_config()
+        assert load_config(c, str(path)) is True
+        assert c.max_queue_size == 1
+        assert c.min_confidence == 1.0

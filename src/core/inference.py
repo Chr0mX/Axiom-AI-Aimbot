@@ -170,6 +170,68 @@ def preprocess_image(
     return np.ascontiguousarray(blob, dtype=np.float32), scale, pad_x, pad_y
 
 
+# Ultralytics' default max_det. Used only as the shape-heuristic fallback in
+# detect_end2end_output() when a model carries no "end2end" metadata key.
+_END2END_MAX_ROWS = 300
+
+
+def detect_end2end_output(session: Any) -> bool:
+    """Whether *session*'s first output is an Ultralytics end-to-end export.
+
+    End-to-end exports (YOLO26, or any model with NMS baked into the graph)
+    emit ``[1, max_det, 6]`` rows of ``[x1, y1, x2, y2, confidence,
+    class_id]`` — already decoded, already NMS'd, absolute input-pixel
+    corners. That is a different format from a raw ``[1, 4+C, anchors]``
+    grid even when C == 2 gives the same ``6`` feature count, so it can't be
+    told apart from the tensor alone and has to be decided per model.
+
+    Prefers the ``end2end`` metadata key Ultralytics embeds; falls back to a
+    shape check (6 columns, at most max_det rows) only when the key is absent.
+    """
+    try:
+        meta = session.get_modelmeta().custom_metadata_map or {}
+    except Exception:
+        meta = {}
+    flag = str(meta.get("end2end", "")).strip().lower()
+    if flag in ("true", "1", "yes"):
+        return True
+    if flag in ("false", "0", "no"):
+        return False
+    try:
+        shape = session.get_outputs()[0].shape
+        rows, cols = int(shape[-2]), int(shape[-1])
+    except Exception:
+        return False
+    return cols == 6 and 0 < rows <= _END2END_MAX_ROWS
+
+
+def _postprocess_end2end(
+    raw: npt.NDArray[np.float32],
+    min_confidence: float,
+    offset_x: int,
+    offset_y: int,
+    letterbox_scale: float,
+    letterbox_pad_x: int,
+    letterbox_pad_y: int,
+) -> Tuple[List[List[float]], List[float], List[int]]:
+    preds = raw.reshape(-1, raw.shape[-1]) if raw.ndim != 2 else raw
+    if preds.shape[0] == 0 or preds.shape[1] < 6:
+        return [], [], []
+    conf = preds[:, 4]
+    mask = conf >= min_confidence
+    if not np.any(mask):
+        return [], [], []
+    p = preds[mask]
+    inv_scale = 1.0 / letterbox_scale if letterbox_scale > 0 else 1.0
+    x1 = (p[:, 0] - letterbox_pad_x) * inv_scale + offset_x
+    y1 = (p[:, 1] - letterbox_pad_y) * inv_scale + offset_y
+    x2 = (p[:, 2] - letterbox_pad_x) * inv_scale + offset_x
+    y2 = (p[:, 3] - letterbox_pad_y) * inv_scale + offset_y
+    boxes = np.stack([x1, y1, x2, y2], axis=1).tolist()
+    class_ids = [int(c) for c in np.rint(p[:, 5])]
+    return boxes, conf[mask].tolist(), class_ids
+
+
 def postprocess_outputs(
     outputs: List[Any],
     original_width: int,
@@ -181,6 +243,7 @@ def postprocess_outputs(
     letterbox_scale: float = 1.0,
     letterbox_pad_x: int = 0,
     letterbox_pad_y: int = 0,
+    is_end2end: bool = False,
 ) -> Tuple[List[List[float]], List[float], List[int]]:
     """Post-process ONNX model output into screen-space bounding boxes.
 
@@ -204,15 +267,29 @@ def postprocess_outputs(
         letterbox_scale:  Scale returned by preprocess_image().
         letterbox_pad_x:  Horizontal padding returned by preprocess_image().
         letterbox_pad_y:  Vertical   padding returned by preprocess_image().
+        is_end2end:       Output is an end-to-end ``[N, 6]`` export (see
+                          detect_end2end_output()). Must be decided per model:
+                          reading one through the generic path takes
+                          max(confidence, class_id) as the score, so every
+                          class-1 row reports 1.0 and passes any threshold.
 
     Returns:
-        (boxes, confidences) with boxes as [[x1, y1, x2, y2], …] in absolute
-        screen coordinates.
+        (boxes, confidences, class_ids) with boxes as [[x1, y1, x2, y2], …]
+        in absolute screen coordinates.
     """
     raw = outputs[0][0]
+    if is_end2end:
+        return _postprocess_end2end(
+            raw, min_confidence, offset_x, offset_y,
+            letterbox_scale, letterbox_pad_x, letterbox_pad_y,
+        )
     # Layout B (features × anchors): shape[0] < shape[1], needs .T to become (anchors, features)
     # Layout A (anchors × features): shape[0] > shape[1], already correct
-    _is_layout_b = raw.ndim == 2 and raw.shape[0] < raw.shape[1]
+    # A second dim below 5 can't be Layout A (4 box coords + >=1 score), so
+    # it's Layout B with fewer anchors than features.
+    _is_layout_b = raw.ndim == 2 and (
+        raw.shape[0] < raw.shape[1] or raw.shape[1] < 5 <= raw.shape[0]
+    )
     predictions = raw.T if _is_layout_b else raw
 
     # Use max class score (cols 4+) so any model layout reports a real 0-1 confidence.

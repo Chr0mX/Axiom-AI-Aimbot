@@ -545,3 +545,56 @@ class TestComputeEffectiveFov:
         state = LoopState(locked_box=[0, 0, 10, 10])
         size, height = ai_loop_utils.compute_effective_fov(config, state, current_time=1.0)
         assert (size, height) == (50, 25)
+
+
+class TestPutLatest:
+    """ai_loop's 1-slot tensor queue: when the consumer isn't reading, the
+    queued item must be the newest one, not the one that happened to be
+    there when it stopped (formerly held for as long as aim was released)."""
+
+    def test_full_queue_keeps_newest(self, ai_loop_utils):
+        import queue
+        q = queue.Queue(maxsize=1)
+        ai_loop_utils.put_latest(q, "stale")
+        ai_loop_utils.put_latest(q, "fresh", timeout=0.01)
+        assert q.get_nowait() == "fresh"
+        assert q.empty()
+
+    def test_waits_for_consumer_before_evicting(self, ai_loop_utils):
+        import queue
+        import threading
+        q = queue.Queue(maxsize=1)
+        q.put("first")
+        taken = []
+        t = threading.Timer(0.05, lambda: taken.append(q.get()))
+        t.start()
+        ai_loop_utils.put_latest(q, "second", timeout=1.0)
+        t.join()
+        assert taken == ["first"]  # consumer got its item — nothing evicted
+        assert q.get_nowait() == "second"
+
+
+class TestClearQueues:
+    def test_auto_fire_queue_is_cleared_too(self, ai_loop_utils):
+        """Stopping detection must not leave auto-fire holding the last box
+        list — it fires on whatever it last received for as long as its key
+        (or always_auto_fire) is held."""
+        import queue
+        boxes_q, confs_q, af_q = (queue.Queue(maxsize=1) for _ in range(3))
+        boxes_q.put([[0, 0, 10, 10]])
+        confs_q.put([0.9])
+        af_q.put([[0, 0, 10, 10]])
+        ai_loop_utils.clear_queues(boxes_q, confs_q, auto_fire_queue=af_q)
+        assert boxes_q.get_nowait() == []
+        assert confs_q.get_nowait() == []
+        assert af_q.get_nowait() == []
+
+    def test_multi_slot_queue_is_fully_drained(self, ai_loop_utils):
+        import queue
+        boxes_q, confs_q = queue.Queue(maxsize=3), queue.Queue(maxsize=3)
+        for i in range(3):
+            boxes_q.put([[i]])
+            confs_q.put([i])
+        ai_loop_utils.clear_queues(boxes_q, confs_q)
+        assert boxes_q.get_nowait() == [] and boxes_q.empty()
+        assert confs_q.get_nowait() == [] and confs_q.empty()

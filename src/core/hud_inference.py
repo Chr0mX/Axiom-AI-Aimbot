@@ -257,26 +257,36 @@ def stop() -> None:
     global _stop_event, _feeder_thread
     if _stop_event is not None:
         _stop_event.set()
-    _kill_proc()
-    _kill_hud_udp_receiver()
+    # Join the feeder before tearing down: mid-iteration it can still call
+    # _ensure_proc()/_ensure_hud_udp_receiver(), respawning what was just killed.
     if _feeder_thread is not None and _feeder_thread.is_alive():
         _feeder_thread.join(timeout=2.0)
+    _kill_proc()
+    _kill_hud_udp_receiver()
     _stop_event = None
     _feeder_thread = None
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _crop_roi(frame: np.ndarray, roi: dict[str, int], log_once: list) -> np.ndarray:
-    """Crop frame to the given roi dict, clamping to frame bounds."""
+def _crop_roi(frame: np.ndarray, roi: dict[str, int], log_once: list) -> np.ndarray | None:
+    """Crop frame to the given roi dict, clamping to frame bounds.
+
+    Returns None when the ROI doesn't overlap the frame at all (e.g. 1080p
+    HUD coordinates against a smaller cropped stream) — an empty crop only
+    fails later, in the child, on every scan.
+    """
     h, w = frame.shape[:2]
     l, t = roi["left"], roi["top"]
     rw, rh = roi["width"], roi["height"]
-    x1, y1 = min(l, w), min(t, h)
-    x2, y2 = min(l + rw, w), min(t + rh, h)
+    # Clamp at 0 too: a negative bound is a from-the-end index in numpy.
+    x1, y1 = max(0, min(l, w)), max(0, min(t, h))
+    x2, y2 = max(0, min(l + rw, w)), max(0, min(t + rh, h))
     if not log_once:
         logger.info("[HUD] Frame %dx%d → ROI [x:%d-%d, y:%d-%d]", w, h, x1, x2, y1, y2)
         log_once.append(True)
+    if x2 <= x1 or y2 <= y1:
+        return None
     return frame[y1:y2, x1:x2]
 
 

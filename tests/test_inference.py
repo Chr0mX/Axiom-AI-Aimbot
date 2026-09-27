@@ -9,6 +9,8 @@ AI 推理模組單元測試
 4. non_max_suppression - NMS 非極大值抑制
 """
 
+import os
+
 import numpy as np
 import pytest
 
@@ -128,7 +130,7 @@ class TestPreprocessImage:
     def test_output_shape_bgr(self):
         from core.inference import preprocess_image
         img = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-        result = preprocess_image(img, 640)
+        result, _, _, _ = preprocess_image(img, 640)
         assert result.shape == (1, 3, 640, 640)
         assert result.dtype == np.float32
 
@@ -136,14 +138,14 @@ class TestPreprocessImage:
         """BGRA 圖像應自動轉換"""
         from core.inference import preprocess_image
         img = np.random.randint(0, 255, (480, 640, 4), dtype=np.uint8)
-        result = preprocess_image(img, 640)
+        result, _, _, _ = preprocess_image(img, 640)
         assert result.shape == (1, 3, 640, 640)
 
     def test_output_normalized(self):
         """像素值應歸一化到 [0, 1]"""
         from core.inference import preprocess_image
         img = np.full((640, 640, 3), 255, dtype=np.uint8)
-        result = preprocess_image(img, 640)
+        result, _, _, _ = preprocess_image(img, 640)
         assert result.max() <= 1.0 + 1e-6
         assert result.min() >= 0.0 - 1e-6
 
@@ -151,14 +153,39 @@ class TestPreprocessImage:
         from core.inference import preprocess_image
         img = np.random.randint(0, 255, (320, 320, 3), dtype=np.uint8)
         for size in [320, 416, 640]:
-            result = preprocess_image(img, size)
+            result, _, _, _ = preprocess_image(img, size)
             assert result.shape == (1, 3, size, size)
 
     def test_contiguous_memory(self):
         from core.inference import preprocess_image
         img = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
-        result = preprocess_image(img, 640)
+        result, _, _, _ = preprocess_image(img, 640)
         assert result.flags['C_CONTIGUOUS']
+
+    def test_bgr_to_rgb_channel_order(self):
+        """The blob is RGB (swapRB) — a pure-blue BGR pixel lands in channel 2."""
+        from core.inference import preprocess_image
+        img = np.zeros((640, 640, 4), dtype=np.uint8)
+        img[..., 0] = 255  # B in BGRA
+        blob, _, _, _ = preprocess_image(img, 640)
+        assert blob[0, 2].min() == pytest.approx(1.0)
+        assert blob[0, 0].max() == pytest.approx(0.0)
+
+    def test_letterbox_params_for_non_square_frame(self):
+        """A 640x320 frame scales by 1.0 and is padded 160px top/bottom."""
+        from core.inference import preprocess_image
+        img = np.zeros((320, 640, 3), dtype=np.uint8)
+        _, scale, pad_x, pad_y = preprocess_image(img, 640)
+        assert scale == pytest.approx(1.0)
+        assert (pad_x, pad_y) == (0, 160)
+
+    def test_fast_resize_square_scale(self):
+        from core.inference import preprocess_image
+        img = np.zeros((320, 320, 3), dtype=np.uint8)
+        blob, scale, pad_x, pad_y = preprocess_image(img, 640, fast_resize=True)
+        assert blob.shape == (1, 3, 640, 640)
+        assert scale == pytest.approx(2.0)
+        assert (pad_x, pad_y) == (0, 0)
 
 
 # ============================================================
@@ -183,19 +210,22 @@ class TestPostprocessOutputs:
     def test_no_detections(self):
         from core.inference import postprocess_outputs
         outputs = self._make_output([])
-        boxes, confs = postprocess_outputs(outputs, 640, 640, 640, 0.5)
+        boxes, confs, cids = postprocess_outputs(outputs, 640, 640, 640, 0.5)
         assert boxes == []
         assert confs == []
+        assert cids == []
 
     def test_single_detection(self):
+        """One anchor gives a (5, 1) grid — fewer anchors than features, which
+        the layout check used to misread as anchors-first and crash on."""
         from core.inference import postprocess_outputs
         # cx=320, cy=320, w=100, h=100, conf=0.9
         outputs = self._make_output([[320, 320, 100, 100, 0.9]])
-        boxes, confs = postprocess_outputs(outputs, 640, 640, 640, 0.5)
+        boxes, confs, cids = postprocess_outputs(outputs, 640, 640, 640, 0.5)
         assert len(boxes) == 1
         assert len(confs) == 1
         assert abs(confs[0] - 0.9) < 0.01
-
+        assert cids == [0]
 
     def test_filter_low_confidence(self):
         from core.inference import postprocess_outputs
@@ -203,29 +233,156 @@ class TestPostprocessOutputs:
             [320, 320, 100, 100, 0.9],
             [100, 100, 50, 50, 0.1],  # 低於閾值
         ])
-        boxes, confs = postprocess_outputs(outputs, 640, 640, 640, 0.5)
+        boxes, confs, _ = postprocess_outputs(outputs, 640, 640, 640, 0.5)
         assert len(boxes) == 1
         assert confs[0] >= 0.5
 
     def test_offset_applied(self):
         from core.inference import postprocess_outputs
         outputs = self._make_output([[320, 320, 100, 100, 0.9]])
-        boxes, _ = postprocess_outputs(outputs, 640, 640, 640, 0.5, offset_x=100, offset_y=200)
+        boxes, _, _ = postprocess_outputs(outputs, 640, 640, 640, 0.5, offset_x=100, offset_y=200)
         # 所有 x 座標 +100, 所有 y 座標 +200
         x1, y1, x2, y2 = boxes[0]
         assert abs(x1 - (270 + 100)) < 1
         assert abs(y1 - (270 + 200)) < 1
 
-    def test_scale_factor(self):
-        """當 original_size != model_input_size 時應正確縮放"""
+    def test_letterbox_reversed(self):
+        """Model-space coords are un-padded then divided by the letterbox scale
+        (uniform — aspect ratio is preserved, never stretched per axis)."""
         from core.inference import postprocess_outputs
-        # model_input=640, original=1280x720
+        # A 640x320 capture letterboxed into 640: scale 1.0, pad_y 160.
         outputs = self._make_output([[320, 320, 100, 100, 0.9]])
-        boxes, _ = postprocess_outputs(outputs, 1280, 720, 640, 0.5)
+        boxes, _, _ = postprocess_outputs(
+            outputs, 640, 320, 640, 0.5,
+            letterbox_scale=1.0, letterbox_pad_x=0, letterbox_pad_y=160,
+        )
         x1, y1, x2, y2 = boxes[0]
-        # scale_x = 1280/640 = 2.0, scale_y = 720/640 = 1.125
-        assert abs(x2 - x1 - 100 * 2.0) < 1
-        assert abs(y2 - y1 - 100 * 1.125) < 1
+        assert (x1, y1, x2, y2) == pytest.approx((270, 110, 370, 210))
+
+    def test_scale_factor(self):
+        """A 320px capture upscaled 2x to a 640 model maps back at 1/2."""
+        from core.inference import postprocess_outputs
+        outputs = self._make_output([[320, 320, 100, 100, 0.9]])
+        boxes, _, _ = postprocess_outputs(outputs, 320, 320, 640, 0.5, letterbox_scale=2.0)
+        x1, y1, x2, y2 = boxes[0]
+        assert x2 - x1 == pytest.approx(50)
+        assert y2 - y1 == pytest.approx(50)
+        assert ((x1 + x2) / 2, (y1 + y2) / 2) == pytest.approx((160, 160))
+
+
+class TestEnd2EndOutputs:
+    """Ultralytics end-to-end exports: [1, max_det, 6] rows of
+    [x1, y1, x2, y2, confidence, class_id]."""
+
+    @staticmethod
+    def _rows(*rows, max_det=300):
+        arr = np.zeros((1, max_det, 6), dtype=np.float32)
+        for i, r in enumerate(rows):
+            arr[0, i] = r
+        return [arr]
+
+    def test_class_id_is_not_read_as_confidence(self):
+        """Regression: through the generic path max(conf, class_id) became the
+        score, so a class-1 row with conf 0.001 reported 1.0 and passed any
+        threshold — a phantom target on every frame."""
+        from core.inference import postprocess_outputs
+        outputs = self._rows([10, 10, 50, 90, 0.001, 1], [100, 100, 140, 180, 0.95, 0])
+        boxes, confs, cids = postprocess_outputs(outputs, 640, 640, 640, 0.8, is_end2end=True)
+        assert confs == [pytest.approx(0.95)]
+        assert cids == [0]
+        assert boxes == [pytest.approx([100, 100, 140, 180])]
+
+    def test_class_ids_and_letterbox_mapping(self):
+        from core.inference import postprocess_outputs
+        outputs = self._rows([100, 260, 200, 460, 0.9, 1])
+        boxes, confs, cids = postprocess_outputs(
+            outputs, 640, 320, 640, 0.5, offset_x=10, offset_y=20,
+            letterbox_scale=2.0, letterbox_pad_x=0, letterbox_pad_y=160,
+            is_end2end=True,
+        )
+        assert cids == [1]
+        assert boxes[0] == pytest.approx([60, 70, 110, 170])
+
+    def test_empty_and_all_below_threshold(self):
+        from core.inference import postprocess_outputs
+        assert postprocess_outputs(self._rows(), 640, 640, 640, 0.5, is_end2end=True) == ([], [], [])
+        outputs = self._rows([0, 0, 10, 10, 0.2, 0])
+        assert postprocess_outputs(outputs, 640, 640, 640, 0.5, is_end2end=True) == ([], [], [])
+
+
+class _FakeSession:
+    def __init__(self, meta, out_shape):
+        self._meta = meta
+        self._out_shape = out_shape
+
+    def get_modelmeta(self):
+        class _M:
+            pass
+        m = _M()
+        m.custom_metadata_map = self._meta
+        return m
+
+    def get_outputs(self):
+        class _O:
+            pass
+        o = _O()
+        o.shape = self._out_shape
+        return [o]
+
+
+class TestDetectEnd2EndOutput:
+    def test_metadata_true(self):
+        from core.inference import detect_end2end_output
+        assert detect_end2end_output(_FakeSession({"end2end": "True"}, [1, 300, 6])) is True
+
+    def test_metadata_false_wins_over_shape(self):
+        from core.inference import detect_end2end_output
+        assert detect_end2end_output(_FakeSession({"end2end": "False"}, [1, 300, 6])) is False
+
+    def test_shape_fallback(self):
+        from core.inference import detect_end2end_output
+        assert detect_end2end_output(_FakeSession({}, [1, 300, 6])) is True
+        # A raw 2-class grid also has 6 features, but as [1, 6, anchors].
+        assert detect_end2end_output(_FakeSession({}, [1, 6, 8400])) is False
+        assert detect_end2end_output(_FakeSession({}, [1, 5, 8400])) is False
+
+    def test_dynamic_shape_is_not_end2end(self):
+        from core.inference import detect_end2end_output
+        assert detect_end2end_output(_FakeSession({}, [1, "N", 6])) is False
+
+
+_MULTICLASS_E2E_MODEL = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "Model", "Apex_8k_9t2v2_Y26s.onnx",
+)
+
+
+@pytest.mark.skipif(not os.path.isfile(_MULTICLASS_E2E_MODEL), reason="shipped 2-class end2end model not present")
+def test_real_multiclass_end2end_model_has_no_phantom_detections():
+    """Frames with no real target (max true confidence << 0.8) must produce
+    zero detections at the default 0.8 threshold. Before the fix this model
+    returned ~30 class-1 phantoms per frame, all reported at confidence 1.0."""
+    ort = pytest.importorskip("onnxruntime")
+    cv2 = pytest.importorskip("cv2")
+    from core.inference import detect_end2end_output, postprocess_outputs, preprocess_image
+
+    sess = ort.InferenceSession(_MULTICLASS_E2E_MODEL, providers=["CPUExecutionProvider"])
+    size = int(sess.get_inputs()[0].shape[2])
+    assert detect_end2end_output(sess) is True
+    rng = np.random.default_rng(1)
+    for _ in range(5):
+        img = np.full((size, size, 3), rng.integers(0, 255, 3), np.uint8)
+        for _ in range(12):
+            x, y = (int(v) for v in rng.integers(0, size - 40, 2))
+            w, h = (int(v) for v in rng.integers(20, 200, 2))
+            cv2.rectangle(img, (x, y), (x + w, y + h), tuple(int(v) for v in rng.integers(0, 255, 3)), -1)
+        blob, sc, px, py = preprocess_image(img, size, fast_resize=True)
+        out = sess.run(None, {sess.get_inputs()[0].name: blob})
+        true_max = float(out[0][0][:, 4].max())
+        boxes, confs, _ = postprocess_outputs(out, size, size, size, 0.8, is_end2end=True)
+        assert all(c <= true_max + 1e-6 for c in confs)
+        if true_max < 0.8:
+            assert boxes == []
 
 
 # ============================================================
