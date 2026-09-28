@@ -2,10 +2,8 @@
 """快捷鍵監聽模組 - 處理全域快捷鍵事件"""
 
 import time
-import win32api
 
-from win_utils import get_vk_name
-from win_utils.gamepad_input import is_gamepad_vk, is_gamepad_button_pressed
+from win_utils import get_vk_name, is_key_pressed
 
 
 def aim_toggle_key_listener(config, update_gui_callback=None):
@@ -43,11 +41,8 @@ def aim_toggle_key_listener(config, update_gui_callback=None):
                 key_code = current_key_code
                 key_name = get_vk_name(key_code)
             
-            # 檢測按鍵狀態（支援鍵盤/滑鼠/手柄）
-            if is_gamepad_vk(key_code):
-                state = is_gamepad_button_pressed(key_code)
-            else:
-                state = bool(win32api.GetAsyncKeyState(key_code) & 0x8000)
+            # 檢測按鍵狀態（支援鍵盤/滑鼠/手柄，及經由 MAKCU 的按鍵）
+            state = is_key_pressed(key_code)
             
             # 檢測按鍵按下事件
             if state and not last_state:

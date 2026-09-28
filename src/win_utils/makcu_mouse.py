@@ -25,7 +25,16 @@ if _deps_dir not in sys.path:
 import serial
 import serial.tools.list_ports
 
+from . import makcu_protocol as mp
+
 logger = logging.getLogger(__name__)
+
+# The physical-movement lock (set_physical_move_lock) auto-releases unless the
+# caller re-asserts it within this window, so a stalled/crashed aim loop can
+# never leave the user's own mouse blocked.
+_MOVE_LOCK_REFRESH_S = 0.3
+_HEALTH_CHECK_INTERVAL_S = 4.0
+_MAK_REQUEST_TIMEOUT_S = 0.3
 
 # Official 4 Mbaud connection constants
 _OPERATING_BAUD    = 4_000_000
@@ -33,6 +42,11 @@ _BAUD_CHANGE_FRAME = bytes([0xDE, 0xAD, 0x05, 0x00, 0xA5, 0x00, 0x09, 0x3D, 0x00
 
 # Button stream parsing — see _stream_reader() for the frame format.
 _BTN_BITS = 0x1F  # bits 0-4 = L,R,M,S1,S2 — everything else is noise/high-byte
+
+# Unparsed bytes kept between reads. Only ever a partial frame or marker-less
+# noise is left over after parsing (a binary frame is at most 69 bytes), so
+# this never has to discard a complete, not-yet-applied event.
+_STREAM_MAX_LEFTOVER = 256
 
 
 class MakcuMouse:
@@ -70,6 +84,12 @@ class MakcuMouse:
         # did. _btn_mask is never touched by this — the whole point is that
         # pausing must not lose track of an already-held button.
         self._stream_read_pause = threading.Event()
+        # Bytes _query_info() read off the wire while the stream reader was
+        # paused. Button events that arrived during the query are in here and
+        # must still be parsed — dropping them is how a Mouse1 release got
+        # lost and left aim engaged.
+        self._stream_carry = bytearray()
+        self._stream_carry_lock = threading.Lock()
         # Frame-format detection + startup debug logging — instance-level
         # (not local to _stream_reader()) so both persist across the
         # stream's internal pause/resume cycles (see _query_info()), and
@@ -117,6 +137,35 @@ class MakcuMouse:
         # Reconnect watchdog — re-establishes connection after USB glitches.
         self._reconnect_thread: Optional[threading.Thread] = None
 
+        # MAK_API (MAKCU V4 / MAKXD) — detected per connection via km.device()
+        # (V4 answers "R:..;M:..uf;..", V3 "mouse"/"keyboard"/"none"), or
+        # implied by a UDP connection. When set: binary command frames, the
+        # binary event stream, replies demultiplexed by _stream_reader().
+        self._mak_api: bool = False
+        self._transport: str = "serial"
+        self._udp_target: Optional[tuple] = None
+        self._firmware_version: Optional[int] = None
+        self._device_kinds: Optional[int] = None
+        self._km_device: dict = {}
+        self._reply_lock = threading.Lock()
+        self._reply_waiters: dict = {}   # cmd -> list[[Event, payload|None]]
+        self._settings_lock = threading.Lock()
+        self._last_health_check = 0.0
+
+        # Keyboard input stream (HID usages currently held), V4/MAKXD only.
+        self._keys_down: set = set()
+        self._keyboard_stream_wanted = False
+
+        # Physical-movement lock state (see set_physical_move_lock).
+        self._move_lock_active = False
+        self._move_lock_asserted_at = 0.0
+
+        # Firmware mouse spread the caller wants applied (None = leave the
+        # device's own setting alone); see request_mouse_spread().
+        self._spread_desired: Optional[int] = None
+        self._spread_applied: Optional[int] = None
+        self._spread_thread: Optional[threading.Thread] = None
+
         # Legacy attribute kept so ai_loop.py can set it without errors
         self.lmb_cache_seconds: float = 0.008
 
@@ -153,7 +202,8 @@ class MakcuMouse:
             with self._lock:
                 self._connected = True
                 self._com_port = com_port
-            self._query_info()
+                self._transport = "serial"
+            self._identify_device()
             logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
         else:
             if self._write_stop.is_set():
@@ -184,9 +234,45 @@ class MakcuMouse:
             with self._lock:
                 self._connected = True
                 self._com_port = com_port
-            self._query_info()
+                self._transport = "serial"
+            self._identify_device()
             logger.info("[MAKCU] Connected to %s @ %d baud", com_port, _OPERATING_BAUD)
 
+        return self._finish_connect()
+
+    def connect_udp(self, host: str, port: int = 8080) -> bool:
+        """Connect over plaintext UDP (MAKXD Ethernet/Wi-Fi). MAK_API only —
+        the device must answer FIRMWARE_VERSION to count as connected.
+        Encrypted UDP and the raw-UDP transaction header are not supported."""
+        self._write_stop.clear()
+        with self._lock:
+            self._close_locked()
+        try:
+            adapter = mp.UdpSerialAdapter(host, int(port))
+        except OSError as exc:
+            logger.error("[MAKCU] UDP socket to %s:%s failed: %s", host, port, exc)
+            return False
+        with self._lock:
+            self._serial = adapter
+        self._mak_api = True
+        version = self._mak_request(mp.CMD_FIRMWARE_VERSION, timeout=1.0)
+        if version is None or mp.is_rejection(version) or len(version) < 4:
+            logger.error("[MAKCU] No MAK_API reply from %s:%s over UDP", host, port)
+            with self._lock:
+                self._close_locked()
+            self._mak_api = False
+            return False
+        with self._lock:
+            self._connected = True
+            self._transport = "udp"
+            self._udp_target = (host, int(port))
+            self._com_port = f"udp://{host}:{port}"
+        self._version_string = "MAK_API (UDP)"
+        self._load_mak_api_info(version)
+        logger.info("[MAKCU] Connected over UDP to %s:%s", host, port)
+        return self._finish_connect()
+
+    def _finish_connect(self) -> bool:
         if self._write_stop.is_set():
             # disconnect() requested mid-flight — tear back down instead of
             # leaving a live connection behind after disconnect() already ran.
@@ -209,13 +295,168 @@ class MakcuMouse:
         # one real connect(), not once per internal pause/resume cycle.
         self._stream_frame_len = None
         self._stream_logged_chunks = 0
-        self._stream_binary_mode = False
+        # A MAK_API device is known to speak the binary event stream, so skip
+        # the first-marker guess (its own km.* text replies could win it).
+        self._stream_binary_mode = self._mak_api
+        self._keys_down.clear()
+        self._move_lock_active = False
 
         # Start threads outside the lock
         self._start_stream()
         self._start_write_thread()
         self._start_reconnect_thread()
+        self._spread_applied = None
+        if self._spread_desired is not None:
+            self._kick_spread_worker()
         return True
+
+    def _identify_device(self) -> None:
+        """Tell MAKCU V4/MAKXD (MAK_API) from V3 using `km.device()`, which
+        both accept: V4 replies `R:<routes>;M:<n>uf;...`, V3 `mouse` /
+        `keyboard` / `none`. Runs before the stream starts. V3 then gets the
+        classic km.info() query; V4 has no km.info() and is read via
+        FIRMWARE_VERSION/DEVICE instead."""
+        self._mak_api = False
+        self._firmware_version = None
+        self._device_kinds = None
+        self._km_device = {}
+        text = self._ascii_query("km.device()\r\n")
+        parsed = mp.parse_km_device(text)
+        if parsed is None:
+            self._query_info()
+            return
+        self._km_device = parsed
+        self._mak_api = True
+        version = self._mak_request(mp.CMD_FIRMWARE_VERSION)
+        self._load_mak_api_info(version)
+        logger.info("[MAKCU] MAK_API device detected (routes=%s, firmware=%s)",
+                    parsed.get("R"), self._firmware_version)
+
+    def _load_mak_api_info(self, version_payload: Optional[bytes]) -> None:
+        if version_payload and not mp.is_rejection(version_payload) and len(version_payload) >= 4:
+            self._firmware_version = int.from_bytes(version_payload[:4], "little")
+        kinds = self._mak_request(mp.CMD_DEVICE)
+        if kinds and not mp.is_rejection(kinds):
+            self._device_kinds = kinds[0]
+        info = {}
+        if self._firmware_version is not None:
+            info["FIRMWARE"] = str(self._firmware_version)
+        if self._device_kinds is not None:
+            info["MODEL"] = mp.describe_device_kinds(self._device_kinds)
+        routes = self._km_device.get("R")
+        if routes:
+            info["ROUTES"] = routes
+        hz = mp.usb_period_to_hz(self._km_device.get("M", ""))
+        if hz:
+            info["MOUSE_POLL_HZ"] = f"{hz:.0f}"
+        self._device_info = info
+
+    def _ascii_query(self, command: str, wait_s: float = 0.15) -> str:
+        """Pre-stream ASCII query; returns whatever text came back."""
+        try:
+            with self._lock:
+                if not self._serial:
+                    return ""
+                self._serial.reset_input_buffer()
+                self._serial.write(command.encode("ascii"))
+                self._serial.flush()
+            time.sleep(wait_s)
+            with self._lock:
+                if not self._serial:
+                    return ""
+                return self._serial.read(self._serial.in_waiting).decode("ascii", errors="ignore")
+        except Exception:
+            return ""
+
+    # ------------------------------------------------------------------
+    # MAK_API requests (V4 / MAKXD)
+    # ------------------------------------------------------------------
+
+    def _mak_request(self, cmd: int, payload: bytes = b"",
+                     timeout: float = _MAK_REQUEST_TIMEOUT_S) -> Optional[bytes]:
+        """Send a MAK_API GET (or a management transaction that replies) and
+        return the reply payload, or None on timeout/not connected.
+
+        With the stream reader running, the reply is demultiplexed by it and
+        handed over through a waiter — the reader stays the only thing that
+        reads the port, so no button event is ever consumed here. Before the
+        stream starts (connect-time), the reply is read directly."""
+        stream_running = self._stream_thread is not None and self._stream_thread.is_alive()
+        if not stream_running:
+            return self._mak_request_direct(cmd, payload, timeout)
+        waiter = [threading.Event(), None]
+        with self._reply_lock:
+            self._reply_waiters.setdefault(cmd, []).append(waiter)
+        if not self._write_frame(mp.frame(cmd, payload)):
+            with self._reply_lock:
+                if waiter in self._reply_waiters.get(cmd, []):
+                    self._reply_waiters[cmd].remove(waiter)
+            return None
+        if waiter[0].wait(timeout):
+            return waiter[1]
+        with self._reply_lock:
+            if waiter in self._reply_waiters.get(cmd, []):
+                self._reply_waiters[cmd].remove(waiter)
+        return None
+
+    def _mak_request_direct(self, cmd: int, payload: bytes, timeout: float) -> Optional[bytes]:
+        try:
+            with self._lock:
+                ser = self._serial
+                if not ser or not ser.is_open:
+                    return None
+                ser.reset_input_buffer()
+                ser.write(mp.frame(cmd, payload))
+                ser.flush()
+            buf = bytearray()
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                with self._lock:
+                    n = ser.in_waiting
+                    if n:
+                        buf.extend(ser.read(n))
+                while True:
+                    idx = buf.find(mp.SYNC)
+                    if idx == -1 or idx + 5 > len(buf):
+                        break
+                    length = buf[idx + 2] | (buf[idx + 3] << 8)
+                    end = idx + 5 + length
+                    if length > 1024:
+                        del buf[:idx + 2]
+                        continue
+                    if end > len(buf):
+                        break
+                    if buf[idx + 4] == cmd:
+                        return bytes(buf[idx + 5:end])
+                    del buf[:end]
+                if not n:
+                    time.sleep(0.002)
+        except Exception as exc:
+            logger.debug("[MAKCU] MAK_API request 0x%02X failed: %s", cmd, exc)
+        return None
+
+    def _dispatch_reply(self, cmd: int, payload: bytes) -> None:
+        if cmd == mp.CMD_CONNECTION and payload[:1] == bytes([mp.TOPOLOGY_NOTICE]):
+            return  # asynchronous topology notice, not a reply
+        with self._reply_lock:
+            waiters = self._reply_waiters.get(cmd)
+            waiter = waiters.pop(0) if waiters else None
+        if waiter is not None:
+            waiter[1] = payload
+            waiter[0].set()
+
+    def _write_frame(self, data: bytes) -> bool:
+        try:
+            with self._lock:
+                if self._serial and self._serial.is_open:
+                    self._serial.write(data)
+                    self._serial.flush()
+                    return True
+        except serial.SerialException:
+            self._connected = False
+        except Exception as exc:
+            logger.debug("[MAKCU] write failed: %s", exc)
+        return False
 
     def _try_open(self, com_port: str, baud: int) -> bool:
         """Open port at baud, probe with km.version(). Returns True if a
@@ -299,11 +540,18 @@ class MakcuMouse:
         self._stream_stop.clear()
         self._stream_read_pause.clear()
         self._btn_mask = 0
+        with self._stream_carry_lock:
+            self._stream_carry.clear()
         try:
             with self._lock:
                 if self._serial and self._serial.is_open:
                     self._serial.reset_input_buffer()
-                    self._serial.write(b'km.buttons(1)\r\n')
+                    if self._mak_api:
+                        self._serial.write(mp.stream_enable_frame(mp.STREAM_KIND_MOUSE, True))
+                        if self._keyboard_stream_wanted:
+                            self._serial.write(mp.stream_enable_frame(mp.STREAM_KIND_KEYBOARD, True))
+                    else:
+                        self._serial.write(b'km.buttons(1)\r\n')
                     self._serial.flush()
                 else:
                     logger.warning("[MAKCU] _start_stream: serial not open, button stream not started")
@@ -315,6 +563,23 @@ class MakcuMouse:
             target=self._stream_reader, daemon=True, name="makcu-stream")
         self._stream_thread.start()
 
+    def _set_btn_mask(self, mask: int, frame: bytes) -> None:
+        mask &= _BTN_BITS
+        old = self._btn_mask
+        if mask != old:
+            self._btn_mask = mask
+            logger.debug("[MAKCU] button mask 0x%02X -> 0x%02X (L=%d R=%d) from %s",
+                         old, mask, mask & 1, (mask >> 1) & 1, frame.hex(' '))
+
+    def _reenable_button_stream(self) -> None:
+        """Re-subscribe after a device-side overflow (see _stream_reader)."""
+        data = mp.stream_enable_frame(mp.STREAM_KIND_MOUSE, True) if self._mak_api else b'km.buttons(1)\r\n'
+        if not self._write_frame(data):
+            logger.warning("[MAKCU] could not re-enable button stream after overflow")
+
+    def _reenable_keyboard_stream(self) -> None:
+        self._write_frame(mp.stream_enable_frame(mp.STREAM_KIND_KEYBOARD, True))
+
     def _stop_stream(self):
         """Stop the reader thread and send km.buttons(0)."""
         self._stream_stop.set()
@@ -324,11 +589,17 @@ class MakcuMouse:
         try:
             with self._lock:
                 if self._serial and self._serial.is_open:
-                    self._serial.write(b'km.buttons(0)\r\n')
+                    if self._mak_api:
+                        self._serial.write(mp.stream_enable_frame(mp.STREAM_KIND_MOUSE, False))
+                        if self._keyboard_stream_wanted:
+                            self._serial.write(mp.stream_enable_frame(mp.STREAM_KIND_KEYBOARD, False))
+                    else:
+                        self._serial.write(b'km.buttons(0)\r\n')
                     self._serial.flush()
         except Exception:
             pass
         self._btn_mask = 0
+        self._keys_down.clear()
 
     # ------------------------------------------------------------------
     # Async write thread
@@ -366,7 +637,11 @@ class MakcuMouse:
         here, not a regression.
         """
         while not self._write_stop.is_set():
-            if not self._pending_event.wait(0.01):
+            got = self._pending_event.wait(0.01)
+            if (self._move_lock_active
+                    and time.monotonic() - self._move_lock_asserted_at > _MOVE_LOCK_REFRESH_S):
+                self._send_move_lock(False)
+            if not got:
                 continue
             with self._pending_lock:
                 dx, dy = self._pending_dx, self._pending_dy
@@ -375,11 +650,14 @@ class MakcuMouse:
                 self._pending_event.clear()
             if dx == 0 and dy == 0:
                 continue
-            cmd = self.CMD_MOVE.format(dx=dx, dy=dy)
+            if self._mak_api:
+                data = mp.move_frame(dx, dy)
+            else:
+                data = self.CMD_MOVE.format(dx=dx, dy=dy).encode('ascii')
             try:
                 with self._lock:
                     if self._serial and self._serial.is_open:
-                        self._serial.write(cmd.encode('ascii'))
+                        self._serial.write(data)
                         self._serial.flush()
             except serial.SerialException:
                 self._connected = False
@@ -387,7 +665,8 @@ class MakcuMouse:
                 pass
 
     def _reconnect_worker(self):
-        """Watchdog: re-establish connection automatically after USB glitches."""
+        """Watchdog: re-establish connection automatically after USB glitches,
+        and (MAK_API) keep the input subscriptions alive."""
         while not self._write_stop.is_set():
             self._write_stop.wait(2.0)
             if self._write_stop.is_set():
@@ -395,9 +674,43 @@ class MakcuMouse:
             if not self.is_connected() and self._com_port:
                 logger.info("[MAKCU] Connection lost — reconnecting on %s", self._com_port)
                 try:
-                    self.connect(self._com_port)
+                    if self._transport == "udp" and self._udp_target:
+                        self.connect_udp(*self._udp_target)
+                    else:
+                        self.connect(self._com_port)
                 except Exception as exc:
                     logger.debug("[MAKCU] Reconnect failed: %s", exc)
+                continue
+            now = time.monotonic()
+            if self._mak_api and now - self._last_health_check >= _HEALTH_CHECK_INTERVAL_S:
+                self._last_health_check = now
+                self.check_stream_health()
+
+    def check_stream_health(self) -> dict:
+        """Query each subscription (MAK_API BUTTONS / KEY_KEYS GET) and
+        re-enable any the device reports as off — e.g. after an overflow
+        whose event was lost, or firmware disabling it. Queries don't move
+        subscription ownership. Returns {kind: enabled_before_check}."""
+        result = {}
+        if not self._mak_api or not self.is_connected():
+            return result
+        checks = [("mouse", mp.CMD_BUTTONS, mp.STREAM_KIND_MOUSE)]
+        if self._keyboard_stream_wanted:
+            checks.append(("keyboard", mp.CMD_KEY_KEYS, mp.STREAM_KIND_KEYBOARD))
+        for name, cmd, kind in checks:
+            reply = self._mak_request(cmd)
+            if reply is None or mp.is_rejection(reply) or not reply:
+                continue
+            enabled = bool(reply[0])
+            result[name] = enabled
+            if not enabled:
+                logger.warning("[MAKCU] %s input stream was disabled on the device — re-enabling", name)
+                if kind == mp.STREAM_KIND_MOUSE:
+                    self._set_btn_mask(0, b"health-check")
+                else:
+                    self._keys_down.clear()
+                self._write_frame(mp.stream_enable_frame(kind, True))
+        return result
 
     def _stream_reader(self):
         """Daemon thread: parse km.buttons(1) event frames, update _btn_mask.
@@ -460,8 +773,8 @@ class MakcuMouse:
           bytes) so a differently-sized report of some other kind doesn't
           desync this parser — an unrecognized tag byte is simply
           skipped, never misread as a button change. An implausibly large
-          length (more than 64 — no real button report should be anywhere
-          near that) is treated as a corrupted/coincidental sync match and
+          length (more than 128 — the largest real frame, a live-settings
+          READ reply, is 105) is treated as a corrupted/coincidental sync match and
           skipped past, resyncing on the next `0xDE 0xAD` occurrence,
           mirroring the ASCII legacy format's own resync-on-mismatch
           safety net above.
@@ -520,7 +833,10 @@ class MakcuMouse:
         _BIN_SYNC = b"\xde\xad"
         _BIN_HDR_LEN = len(_BIN_SYNC) + 2  # sync + 2-byte little-endian length field = 4
         _BIN_BTN_TAG = 0x53  # observed report-type byte for a button-state event
-        _BIN_MAX_PLAUSIBLE_LEN = 64  # guards against a coincidental sync match in noise
+        # Guards against a coincidental sync match in noise. The largest real
+        # frame is a live-settings READ reply: [1D op status] + revision:u32 +
+        # offset:u16 + 96 data bytes = 105.
+        _BIN_MAX_PLAUSIBLE_LEN = 128
         while not self._stream_stop.is_set():
             try:
                 if self._stream_read_pause.is_set():
@@ -533,15 +849,22 @@ class MakcuMouse:
                 ser = self._serial
                 if not ser or not ser.is_open:
                     break
+                with self._stream_carry_lock:
+                    carry = bytes(self._stream_carry)
+                    self._stream_carry.clear()
                 n = ser.in_waiting
-                if n:
-                    chunk = ser.read(n)
+                if n or carry:
+                    # Carry first: it was on the wire before anything read now.
+                    chunk = carry + (ser.read(n) if n else b"")
                     if self._stream_logged_chunks < 20:
                         logger.info("[MAKCU] stream raw bytes: %s", chunk.hex(' '))
                         self._stream_logged_chunks += 1
+                    # Never discard before parsing: a single read can hold a
+                    # button release plus a burst of later frames (legacy
+                    # firmware re-emits a frame for every wheel HID report), and
+                    # clearing the buffer here dropped that release — Mouse1
+                    # then read as held until its next physical edge.
                     buf.extend(chunk)
-                    if len(buf) > 256:
-                        buf.clear()
 
                     # One-time protocol decision for this connection —
                     # binary vs. either ASCII form — made before either
@@ -587,15 +910,46 @@ class MakcuMouse:
                             payload = bytes(buf[idx + _BIN_HDR_LEN + 1:idx + frame_len])
                             if tag == _BIN_BTN_TAG and len(payload) >= 3 and payload[0] == 0x01:
                                 btn_id, state = payload[1], payload[2]
-                                if 0 <= btn_id <= 4:
+                                frame = bytes(buf[idx:idx + frame_len])
+                                if btn_id == 0xFF and state == 0xFF:
+                                    # Overflow (mak-suite MAK_API "Input change
+                                    # streams"): the device has disabled the mouse
+                                    # stream and dropped its queued changes, so no
+                                    # release will ever arrive for a held button.
+                                    # Spec: discard cached state and re-enable —
+                                    # each enable starts from released and the
+                                    # next physical report re-sends held buttons.
+                                    logger.warning(
+                                        "[MAKCU] button stream overflow — resetting button "
+                                        "state and re-enabling the stream")
+                                    self._set_btn_mask(0, frame)
+                                    self._reenable_button_stream()
+                                elif 0 <= btn_id <= 4:
                                     bit = 1 << btn_id
-                                    self._btn_mask = (
-                                        (self._btn_mask | bit) if state else (self._btn_mask & ~bit)
-                                    ) & _BTN_BITS
-                            # An unrecognized tag is a report type this
-                            # reverse-engineered parser doesn't know about
-                            # yet — skip it rather than misread it.
+                                    self._set_btn_mask(
+                                        (self._btn_mask | bit) if state else (self._btn_mask & ~bit),
+                                        frame)
+                            elif (tag == _BIN_BTN_TAG and len(payload) >= 3
+                                    and payload[0] == mp.STREAM_KIND_KEYBOARD):
+                                key, state = payload[1], payload[2]
+                                if key == 0xFF and state == 0xFF:
+                                    logger.warning(
+                                        "[MAKCU] keyboard stream overflow — resetting key "
+                                        "state and re-enabling the stream")
+                                    self._keys_down.clear()
+                                    self._reenable_keyboard_stream()
+                                elif state:
+                                    self._keys_down.add(key)
+                                else:
+                                    self._keys_down.discard(key)
+                            elif tag != _BIN_BTN_TAG and self._mak_api:
+                                # A reply to one of our own MAK_API requests.
+                                self._dispatch_reply(tag, payload)
+                            # Anything else is a report type this parser
+                            # doesn't know — skip it rather than misread it.
                             del buf[:idx + frame_len]
+                        if len(buf) > _STREAM_MAX_LEFTOVER:
+                            del buf[:-_STREAM_MAX_LEFTOVER]
                         continue
 
                     while True:
@@ -636,17 +990,26 @@ class MakcuMouse:
                             break
                         mask = buf[idx + 3]
                         if frame_len == _LEGACY_FRAME_LEN:
-                            suffix = bytes(buf[idx + 4:idx + frame_len])
-                            if suffix != _SUFFIX:
-                                # Not a trustworthy frame — resync on the next "km."
-                                resync_idx = buf.find(_KM_PREFIX, idx + len(_KM_PREFIX))
-                                if resync_idx == -1:
-                                    del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
-                                else:
-                                    del buf[:resync_idx]
-                                continue
-                        self._btn_mask = mask & _BTN_BITS
+                            trustworthy = bytes(buf[idx + 4:idx + frame_len]) == _SUFFIX
+                        else:
+                            # The unframed 4-byte form has no suffix to check,
+                            # but its mask is 5 bits: a byte >= 0x20 after "km."
+                            # is ASCII (a command reply/echo/ERR on the same
+                            # port), never an event — e.g. "km.info()" would
+                            # otherwise read as mask 'i' & 0x1F = LMB+Side1.
+                            trustworthy = mask <= _BTN_BITS
+                        if not trustworthy:
+                            # Not a trustworthy frame — resync on the next "km."
+                            resync_idx = buf.find(_KM_PREFIX, idx + len(_KM_PREFIX))
+                            if resync_idx == -1:
+                                del buf[:max(0, len(buf) - (len(_KM_PREFIX) - 1))]
+                            else:
+                                del buf[:resync_idx]
+                            continue
+                        self._set_btn_mask(mask, bytes(buf[idx:idx + frame_len]))
                         del buf[:idx + frame_len]
+                    if len(buf) > _STREAM_MAX_LEFTOVER:
+                        del buf[:-_STREAM_MAX_LEFTOVER]
                 else:
                     time.sleep(0.001)
             except Exception:
@@ -702,7 +1065,20 @@ class MakcuMouse:
         skip its own `ser.read()` calls for the ~150ms this query takes,
         which is enough to remove the race without losing in-progress
         button-hold state.
+
+        While streaming, nothing read here is thrown away: button events
+        that arrive during the query window (e.g. a Mouse1 release) share
+        the wire with the reply, so every byte read is handed back to
+        `_stream_reader()` via `_stream_carry`. Purging the input buffer
+        and treating the whole window as reply text used to swallow those
+        events — this runs every 3s for the whole session (other_page.py's
+        hardware panel timer), so a release landing in that ~150ms window
+        left Mouse1 reading as held until its next physical edge. The reply
+        itself is ASCII, which every stream frame format rejects.
         """
+        if self._mak_api:
+            # V4/MAKXD has no km.info(); its info was read at connect.
+            return dict(self._device_info)
         was_streaming = self._stream_thread is not None and self._stream_thread.is_alive()
         if was_streaming:
             self._stream_read_pause.set()
@@ -710,14 +1086,19 @@ class MakcuMouse:
             with self._lock:
                 if not self._serial:
                     return {}
-                self._serial.reset_input_buffer()
+                if not was_streaming:
+                    self._serial.reset_input_buffer()
                 self._serial.write(self.CMD_INFO.encode('ascii'))
                 self._serial.flush()
             time.sleep(0.15)
             with self._lock:
                 if not self._serial:
                     return {}
-                raw = self._serial.read(self._serial.in_waiting).decode('ascii', errors='ignore')
+                raw_bytes = self._serial.read(self._serial.in_waiting)
+            if was_streaming and raw_bytes:
+                with self._stream_carry_lock:
+                    self._stream_carry.extend(raw_bytes)
+            raw = raw_bytes.decode('ascii', errors='ignore')
             info = {}
             for line in raw.splitlines():
                 line = line.strip().replace('>>>', '').strip()
@@ -749,6 +1130,8 @@ class MakcuMouse:
 
     def disconnect(self):
         """Stop all threads then close serial port."""
+        if self._move_lock_active:
+            self._send_move_lock(False)
         self._write_stop.set()
         if self._write_thread:
             self._write_thread.join(timeout=1.0)
@@ -806,21 +1189,25 @@ class MakcuMouse:
         """Left mouse click. action: 1=click, 2=press, 3=release."""
         if not self.is_connected():
             return
+        if self._mak_api:
+            down, up = mp.button_frame(0, True), mp.button_frame(0, False)
+        else:
+            down, up = self.CMD_LEFT_DOWN.encode('ascii'), self.CMD_LEFT_UP.encode('ascii')
         try:
             if action == 1:
                 with self._lock:
                     if self._serial and self._serial.is_open:
-                        self._serial.write(self.CMD_LEFT_DOWN.encode('ascii'))
+                        self._serial.write(down)
                 time.sleep(0.03)
                 with self._lock:
                     if self._serial and self._serial.is_open:
-                        self._serial.write(self.CMD_LEFT_UP.encode('ascii'))
+                        self._serial.write(up)
                 return
-            cmd = self.CMD_LEFT_DOWN if action == 2 else self.CMD_LEFT_UP if action == 3 else None
-            if cmd:
+            data = down if action == 2 else up if action == 3 else None
+            if data:
                 with self._lock:
                     if self._serial and self._serial.is_open:
-                        self._serial.write(cmd.encode('ascii'))
+                        self._serial.write(data)
         except serial.SerialException:
             self._connected = False
         except Exception:
@@ -850,6 +1237,266 @@ class MakcuMouse:
         """True when the second side button (S2, e.g. Mouse5) is physically pressed."""
         return bool(self._btn_mask & 0x10)
 
+    @property
+    def mmb_held(self) -> bool:
+        """True when the middle mouse button is physically pressed."""
+        return bool(self._btn_mask & 0x04)
+
+    # ------------------------------------------------------------------
+    # Device info
+    # ------------------------------------------------------------------
+
+    @property
+    def is_mak_api(self) -> bool:
+        """MAKCU V4 / MAKXD (binary MAK_API) rather than V3 ASCII-only."""
+        return self._mak_api
+
+    @property
+    def transport(self) -> str:
+        return self._transport
+
+    @property
+    def firmware_version(self) -> Optional[int]:
+        return self._firmware_version
+
+    # ------------------------------------------------------------------
+    # Hotkeys through the device (keyboard + mouse-button streams)
+    # ------------------------------------------------------------------
+
+    def set_keyboard_stream_enabled(self, enabled: bool) -> None:
+        """Subscribe to (or drop) the device's keyboard change stream.
+        Remembered across reconnects. MAK_API devices only."""
+        enabled = bool(enabled)
+        if enabled == self._keyboard_stream_wanted:
+            return
+        self._keyboard_stream_wanted = enabled
+        if not enabled:
+            self._keys_down.clear()
+        if self._mak_api and self.is_connected():
+            self._write_frame(mp.stream_enable_frame(mp.STREAM_KIND_KEYBOARD, enabled))
+
+    @property
+    def keyboard_stream_active(self) -> bool:
+        return self._keyboard_stream_wanted and self._mak_api and self.is_connected()
+
+    def is_vk_down(self, vk: int) -> Optional[bool]:
+        """Whether Windows virtual-key `vk` is held, as seen by the device.
+
+        Mouse-button VKs come from the button stream; keyboard VKs from the
+        keyboard stream (MAK_API with set_keyboard_stream_enabled(True)).
+        None means the device can't answer for this VK — the caller should
+        fall back to the local OS state."""
+        if not self.is_connected():
+            return None
+        bit = mp.MOUSE_VK_TO_BIT.get(vk)
+        if bit is not None:
+            return bool(self._btn_mask & bit)
+        usages = mp.VK_TO_HID.get(vk)
+        if usages is None or not self.keyboard_stream_active:
+            return None
+        return any(u in self._keys_down for u in usages)
+
+    # ------------------------------------------------------------------
+    # Physical-movement lock (masks physical input only; injection bypasses it)
+    # ------------------------------------------------------------------
+
+    def set_physical_move_lock(self, active: bool) -> None:
+        """Block (or restore) the user's own mouse movement.
+
+        Must be re-asserted at least every _MOVE_LOCK_REFRESH_S while active;
+        the write thread releases it otherwise, so a stalled caller can't
+        leave the mouse dead. Idempotent — only state changes hit the wire."""
+        if active:
+            self._move_lock_asserted_at = time.monotonic()
+        if bool(active) != self._move_lock_active and self.is_connected():
+            self._send_move_lock(bool(active))
+
+    def _send_move_lock(self, active: bool) -> None:
+        if self._mak_api:
+            ok = self._write_frame(mp.move_mask_frame(active, active, active, active))
+        else:
+            n = 1 if active else 0
+            ok = self._write_frame(f"km.lock_mx({n})\r\nkm.lock_my({n})\r\n".encode("ascii"))
+        if ok or not active:
+            self._move_lock_active = active and ok
+        logger.debug("[MAKCU] physical movement lock %s", "on" if self._move_lock_active else "off")
+
+    @property
+    def physical_move_locked(self) -> bool:
+        return self._move_lock_active
+
+    # ------------------------------------------------------------------
+    # Firmware mouse spread (live device settings, MAK_API only)
+    # ------------------------------------------------------------------
+
+    def _settings_call(self, op_frame: bytes, op: int, timeout: float = 0.5):
+        """Send one settings transaction; returns (status, body) or None."""
+        stream_running = self._stream_thread is not None and self._stream_thread.is_alive()
+        if stream_running:
+            waiter = [threading.Event(), None]
+            with self._reply_lock:
+                self._reply_waiters.setdefault(mp.CMD_CONNECTION, []).append(waiter)
+            if not self._write_frame(op_frame) or not waiter[0].wait(timeout):
+                with self._reply_lock:
+                    if waiter in self._reply_waiters.get(mp.CMD_CONNECTION, []):
+                        self._reply_waiters[mp.CMD_CONNECTION].remove(waiter)
+                return None
+            payload = waiter[1]
+        else:
+            payload = self._mak_request_direct(mp.CMD_CONNECTION, op_frame[5:], timeout)
+        parsed = mp.parse_settings_reply(payload or b"")
+        if parsed is None or parsed[0] != op:
+            return None
+        return parsed[1], parsed[2]
+
+    def _settings_info(self) -> Optional[dict]:
+        reply = self._settings_call(mp.settings_frame(mp.SETTINGS_OP_INFO), mp.SETTINGS_OP_INFO)
+        if not reply or reply[0] != 0:
+            return None
+        return mp.parse_settings_info(reply[1])
+
+    def _settings_read_image(self, revision: int) -> Optional[bytearray]:
+        image = bytearray()
+        while len(image) < mp.SETTINGS_IMAGE_BYTES:
+            length = min(mp.SETTINGS_CHUNK, mp.SETTINGS_IMAGE_BYTES - len(image))
+            reply = self._settings_call(
+                mp.settings_read_frame(revision, len(image), length), mp.SETTINGS_OP_READ)
+            if not reply or reply[0] != 0 or len(reply[1]) < 6 + length:
+                return None
+            image.extend(reply[1][6:6 + length])
+        return image
+
+    def get_mouse_spread(self) -> Optional[int]:
+        """Current firmware mouse spread (0-100 %), or None if unsupported."""
+        if not (self._mak_api and self.is_connected()):
+            return None
+        with self._settings_lock:
+            info = self._settings_info()
+            if not info or not info["sections"] & mp.SETTINGS_SECTION_MOUSE:
+                return None
+            image = self._settings_read_image(info["revision"])
+            return image[mp.SETTINGS_MOUSE_SPREAD_OFFSET] if image else None
+
+    def set_mouse_spread(self, percent: int, persist: bool = False) -> tuple:
+        """Apply firmware mouse spread live (DEVICE_SETTINGS.md: INFO, READ the
+        400-byte image, BEGIN, WRITE it back with byte 396 changed, APPLY;
+        SAVE only when `persist`). Returns (ok, reason)."""
+        if not (self._mak_api and self.is_connected()):
+            return False, "unsupported"
+        percent = max(0, min(100, int(percent)))
+        with self._settings_lock:
+            info = self._settings_info()
+            if not info:
+                return False, "no_reply"
+            if not info["sections"] & mp.SETTINGS_SECTION_MOUSE:
+                return False, "unsupported"
+            revision = info["revision"]
+            image = self._settings_read_image(revision)
+            if image is None:
+                return False, "read_failed"
+            if image[mp.SETTINGS_MOUSE_SPREAD_OFFSET] == percent and not persist:
+                return True, "unchanged"
+            image[mp.SETTINGS_MOUSE_SPREAD_OFFSET] = percent
+            reply = self._settings_call(
+                mp.settings_begin_frame(revision, mp.SETTINGS_SECTION_MOUSE), mp.SETTINGS_OP_BEGIN)
+            if not reply or reply[0] != 0 or len(reply[1]) < 4:
+                return False, mp.SETTINGS_STATUS.get(reply[0], "begin_failed") if reply else "no_reply"
+            token = int.from_bytes(reply[1][:4], "little")
+            for offset in range(0, mp.SETTINGS_IMAGE_BYTES, mp.SETTINGS_CHUNK):
+                chunk = bytes(image[offset:offset + mp.SETTINGS_CHUNK])
+                reply = self._settings_call(
+                    mp.settings_write_frame(token, offset, chunk), mp.SETTINGS_OP_WRITE)
+                if not reply or reply[0] != 0:
+                    return False, "write_failed"
+            reply = self._settings_call(mp.settings_apply_frame(token), mp.SETTINGS_OP_APPLY)
+            if not reply or reply[0] != 0:
+                return False, mp.SETTINGS_STATUS.get(reply[0], "apply_failed") if reply else "no_reply"
+            if persist:
+                info = self._settings_info()
+                if not info:
+                    return False, "no_reply"
+                reply = self._settings_call(
+                    mp.settings_save_frame(info["revision"], mp.SETTINGS_SECTION_MOUSE),
+                    mp.SETTINGS_OP_SAVE)
+                if not reply or reply[0] not in (0, 1):
+                    return False, "save_failed"
+        logger.info("[MAKCU] firmware mouse spread set to %d%%%s", percent, " (saved)" if persist else "")
+        return True, "applied"
+
+    def request_mouse_spread(self, percent: Optional[int]) -> None:
+        """Apply `percent` in the background (None = stop managing it).
+        Cheap to call repeatedly; only a changed value reaches the device,
+        and it is re-applied after every reconnect."""
+        self._spread_desired = None if percent is None else max(0, min(100, int(percent)))
+        if self._spread_desired is not None and self._spread_desired != self._spread_applied:
+            self._kick_spread_worker()
+
+    def _kick_spread_worker(self) -> None:
+        if self._spread_thread is not None and self._spread_thread.is_alive():
+            return
+        self._spread_thread = threading.Thread(
+            target=self._spread_worker, daemon=True, name="makcu-spread")
+        self._spread_thread.start()
+
+    def _spread_worker(self) -> None:
+        # Newest value wins: one transaction in flight, then re-check.
+        while True:
+            want = self._spread_desired
+            if want is None or want == self._spread_applied:
+                return
+            if not (self._mak_api and self.is_connected()):
+                return
+            ok, reason = self.set_mouse_spread(want)
+            if not ok:
+                logger.warning("[MAKCU] firmware mouse spread not applied: %s", reason)
+                return
+            self._spread_applied = want
+
+    # ------------------------------------------------------------------
+    # Injection / masks / remaps (MAK_API; wheel also works on V3)
+    # ------------------------------------------------------------------
+
+    def wheel(self, delta: int) -> bool:
+        if not self.is_connected():
+            return False
+        if self._mak_api:
+            return self._write_frame(mp.wheel_frame(delta))
+        return self._write_frame(f"km.wheel({int(delta)})\r\n".encode("ascii"))
+
+    def key_down(self, hid_usage: int) -> bool:
+        return self._mak_api and self.is_connected() and self._write_frame(
+            mp.frame(mp.CMD_KEY_DOWN, bytes([hid_usage & 0xFF])))
+
+    def key_up(self, hid_usage: int) -> bool:
+        return self._mak_api and self.is_connected() and self._write_frame(
+            mp.frame(mp.CMD_KEY_UP, bytes([hid_usage & 0xFF])))
+
+    def key_press(self, hid_usage: int, hold_ms: Optional[int] = None,
+                  random_range: Optional[int] = None) -> bool:
+        return self._mak_api and self.is_connected() and self._write_frame(
+            mp.key_press_frame(hid_usage, hold_ms, random_range))
+
+    def keys_release_all(self) -> bool:
+        """KEY_INIT: releases injected keys and clears keyboard masks/remaps."""
+        return self._mak_api and self.is_connected() and self._write_frame(mp.frame(mp.CMD_KEY_INIT))
+
+    def set_key_mask(self, hid_usage: int, mode: int) -> bool:
+        return self._mak_api and self.is_connected() and self._write_frame(
+            mp.frame(mp.CMD_KEY_MASK, bytes([hid_usage & 0xFF, mode & 0xFF])))
+
+    def set_key_remap(self, source: int, target: int) -> bool:
+        return self._mak_api and self.is_connected() and self._write_frame(
+            mp.frame(mp.CMD_KEY_REMAP, bytes([source & 0xFF, target & 0xFF])))
+
+    def set_button_mask(self, button: int, enabled: bool) -> bool:
+        """button: 0=left 1=right 2=middle 3=side1 4=side2."""
+        return (0 <= button <= 4 and self._mak_api and self.is_connected()
+                and self._write_frame(mp.button_mask_frame(button, enabled)))
+
+    def set_wheel_mask(self, down: bool, up: bool) -> bool:
+        return self._mak_api and self.is_connected() and self._write_frame(
+            mp.wheel_mask_frame(down, up))
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton and convenience functions
@@ -869,6 +1516,10 @@ def send_mouse_click_makcu(action: int = 1):
 
 def connect_makcu(com_port: str, baud_rate: int = _OPERATING_BAUD) -> bool:
     return makcu_mouse.connect(com_port, baud_rate)
+
+
+def connect_makcu_udp(host: str, port: int = 8080) -> bool:
+    return makcu_mouse.connect_udp(host, port)
 
 
 def disconnect_makcu():
