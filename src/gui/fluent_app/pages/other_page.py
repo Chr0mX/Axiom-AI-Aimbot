@@ -82,7 +82,7 @@ class OtherPage(BasePage):
         self.showConsoleCard = SwitchSettingCard(
             FluentIcon.COMMAND_PROMPT,
             t("show_console"),
-            "",
+            t("show_console_desc", "Log window. The app keeps running while text in this window is selected."),
             parent=self.programGroup
         )
 
@@ -800,6 +800,8 @@ class OtherPage(BasePage):
 
         # 程式控制
         self.showConsoleCard.titleLabel.setText(t("show_console"))
+        self.showConsoleCard.contentLabel.setText(
+            t("show_console_desc", "Log window. The app keeps running while text in this window is selected."))
         self.exitSaveCard.titleLabel.setText(t("exit_and_save"))
         self.exitSaveBtn.setText(t("exit_and_save"))
 
