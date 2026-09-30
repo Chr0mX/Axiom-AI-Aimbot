@@ -82,3 +82,13 @@ class LoopState:
     # crosshair converges exactly onto the aim point. Applies to all mouse backends.
     aim_carry_x: float = 0.0
     aim_carry_y: float = 0.0
+    aim_ema_x: float = 0.0
+    aim_ema_y: float = 0.0
+    path_phase: float = 0.0
+    last_mouse_speed_px_s: float = 0.0
+    last_aim_dt: float = 0.0
+    sticky_last_x: float = 0.0
+    sticky_last_y: float = 0.0
+    sticky_last_t: float = 0.0
+    sticky_vx: float = 0.0
+    sticky_vy: float = 0.0

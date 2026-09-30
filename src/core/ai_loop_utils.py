@@ -251,6 +251,17 @@ def compute_effective_fov(config: Config, state: LoopState, current_time: float)
     effective_size = int(getattr(config, 'fov_size', 0) or 0)
     effective_height = int(getattr(config, 'fov_height', effective_size) or effective_size)
 
+    if getattr(config, 'fov_dynamic_enabled', False):
+        key = int(getattr(config, 'fov_dynamic_key', 0) or 0)
+        if key:
+            try:
+                from win_utils import is_key_pressed
+                if is_key_pressed(key):
+                    effective_size = int(getattr(config, 'fov_dynamic_size', effective_size) or effective_size)
+                    effective_height = int(getattr(config, 'fov_dynamic_height', effective_size) or effective_size)
+            except Exception:
+                pass
+
     if not getattr(config, 'fov_reduce_on_target_enabled', False):
         state.fov_reduce_since = 0.0
         return effective_size, effective_height
