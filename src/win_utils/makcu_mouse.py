@@ -628,13 +628,10 @@ class MakcuMouse:
         Runs on its own thread so the inference thread (which calls move())
         is never blocked waiting on the serial port.
 
-        Takes the latest pending delta and zeroes it in one locked step, so
-        a move() landing while this write is in flight goes into a freshly-
-        zeroed slot rather than being lost or merged into what's about to be
-        sent. If two or more move() calls land before this loop gets back
-        around to draining, only the newest survives — see move()'s
-        docstring for why replacing (not summing) the stale one is correct
-        here, not a regression.
+        Takes the pending delta and zeroes it in one locked step, so a move()
+        landing while this write is in flight goes into a freshly-zeroed slot
+        rather than being merged into what's about to be sent. PID calls
+        replace that slot; movement-path calls add into it. See move().
         """
         while not self._write_stop.is_set():
             got = self._pending_event.wait(0.01)
@@ -1155,34 +1152,25 @@ class MakcuMouse:
     # Mouse control
     # ------------------------------------------------------------------
 
-    def move(self, dx: int, dy: int):
+    def move(self, dx: int, dy: int, accumulate: bool = False):
         """Relative mouse move. Handed to the async write thread.
 
-        Latest-only: if a previous move hasn't been written yet, this one
-        *replaces* it rather than adding to it.
+        ``accumulate`` is false for PID. The value is the full correction for
+        the current error, so a step still sitting in the pending slot is
+        replaced. Summing those re-measured corrections is what made the aim
+        snap past the target.
 
-        dx/dy arrive here as the single, complete correction ai_aiming.py
-        computed for the CURRENT frame — PID output, humanization, sub-pixel
-        carry and jitter are all already folded in before send_mouse_move()
-        is ever called. A pending value that hasn't reached the wire yet
-        doesn't describe "movement still owed on top of the next frame's" —
-        it describes an error the next frame's fresh PID output already
-        re-measures and re-corrects for, because the aim loop is a closed
-        feedback loop, not a source of independent deltas. Summing them
-        (an earlier version of this code did, to avoid losing displacement)
-        double-counts that same not-yet-visually-applied error every time
-        the real USB-injection + game-frame + capture round trip is slower
-        than detect_interval — which is routinely true — so N queued-up
-        PID cycles land as one N-times-too-large jump. That's the systemic
-        Y-axis overshoot ("aim snaps past the target") this fixes: replacing
-        the stale pending value with the fresh one is what keeps each
-        physical move sized to exactly one frame's correction.
+        Movement paths pass ``accumulate=True``. Each call is only the next
+        slice of the curve (linear, exponential, bezier, adaptive, perlin).
+        Replacing that slice leaves MAKCU with whichever sample happened to
+        be pending when the writer woke, so the path never plays. Adding the
+        slices preserves the curve until the writer drains it.
         """
         if not self.is_connected():
             return
         with self._pending_lock:
-            self._pending_dx = max(-32768, min(32767, int(dx)))
-            self._pending_dy = max(-32768, min(32767, int(dy)))
+            self._pending_dx, self._pending_dy = mp.merge_relative_move(
+                self._pending_dx, self._pending_dy, dx, dy, accumulate)
         self._pending_event.set()
 
     def click(self, action: int = 1):
@@ -1505,8 +1493,11 @@ class MakcuMouse:
 makcu_mouse = MakcuMouse()
 
 
-def send_mouse_move_makcu(dx: int, dy: int):
-    makcu_mouse.move(dx, dy)
+def send_mouse_move_makcu(dx: int, dy: int, accumulate: bool = False):
+    if accumulate:
+        makcu_mouse.move(dx, dy, accumulate=True)
+    else:
+        makcu_mouse.move(dx, dy)
 
 
 def send_mouse_click_makcu(action: int = 1):

@@ -51,6 +51,23 @@ def send_mouse_click_ddxoft():
         return True
 
 
+def send_mouse_button(method: str = "mouse_event", down: bool = True) -> bool:
+    """Hold or release the left button. Used by auto-fire spray mode."""
+    try:
+        if method == "makcu":
+            from .makcu_mouse import send_mouse_click_makcu
+            return bool(send_mouse_click_makcu(2 if down else 3))
+        if method == "arduino":
+            from .arduino_mouse import send_mouse_click_arduino
+            return bool(send_mouse_click_arduino(2 if down else 3))
+        flag = win32con.MOUSEEVENTF_LEFTDOWN if down else win32con.MOUSEEVENTF_LEFTUP
+        win32api.mouse_event(flag, 0, 0, 0, 0)
+        return True
+    except Exception:
+        logger.debug("mouse button %s failed", "down" if down else "up", exc_info=True)
+        return False
+
+
 def send_mouse_click(method="ddxoft"):
     """
     Unified mouse click function, supports multiple methods

@@ -85,6 +85,7 @@ from .mouse_click import (
     send_mouse_click_mouse_event,
     send_mouse_click_ddxoft,
     send_mouse_click,
+    send_mouse_button,
 )
 from .arduino_mouse import send_mouse_click_arduino
 
@@ -202,6 +203,7 @@ __all__ = [
 
     # 滑鼠點擊
     'send_mouse_click',
+    'send_mouse_button',
     'send_mouse_click_sendinput',
     'send_mouse_click_mouse_event',
     'send_mouse_click_ddxoft',

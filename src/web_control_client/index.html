@@ -999,6 +999,122 @@
             </div>
             <div class="field-card">
               <div class="field-info">
+                <div class="field-title">Prediction Method</div>
+                <div class="field-desc">Velocity, EMA, or a rolling average of recent steps</div>
+              </div>
+              <div class="field-control">
+                <select id="aim-prediction_method" data-key="prediction_method" data-type="choice">
+                  <option value="velocity">Velocity</option>
+                  <option value="ema">EMA</option>
+                  <option value="rolling">Rolling</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Rolling Lead</div><div class="field-desc">Frames ahead for the rolling predictor</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-prediction_lead_frames" data-key="prediction_lead_frames" data-type="number" min="1" max="10" step="0.5">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Adaptive Lead</div><div class="field-desc">Stretch the time lead when the mouse is moving slowly</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="aim-prediction_adaptive_lead" data-key="prediction_adaptive_lead" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Movement Path</div><div class="field-desc">PID is the default. Other paths travel a fraction of the remaining error</div></div>
+              <div class="field-control">
+                <select id="aim-aim_movement_path" data-key="aim_movement_path" data-type="choice">
+                  <option value="pid">PID</option>
+                  <option value="linear">Linear</option>
+                  <option value="exponential">Exponential</option>
+                  <option value="bezier">Bezier</option>
+                  <option value="adaptive">Adaptive</option>
+                  <option value="perlin">Perlin</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Path Sensitivity</div><div class="field-desc">Higher is slower. Fraction traveled is 1 minus this</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_path_sensitivity" data-key="aim_path_sensitivity" data-type="number" min="0.01" max="0.99" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Path Curve</div><div class="field-desc">Perpendicular bow for Bezier and Adaptive</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_path_curve" data-key="aim_path_curve" data-type="number" min="0" max="0.5" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Output EMA</div><div class="field-desc">Smooth the move step after PID or the path</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="aim-aim_ema_smoothing_enabled" data-key="aim_ema_smoothing_enabled" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">EMA Amount</div><div class="field-desc">1 follows the new step, lower holds the previous step</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_ema_smoothing" data-key="aim_ema_smoothing" data-type="number" min="0.01" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim X Offset</div><div class="field-desc">Fraction of box width. Negative moves the point left</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_x_offset_frac" data-key="aim_x_offset_frac" data-type="number" min="-1" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Aim Y Offset</div><div class="field-desc">Fraction of box height. Positive moves the point down</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-aim_y_offset_frac" data-key="aim_y_offset_frac" data-type="number" min="-1" max="1" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Gap Extrapolation</div><div class="field-desc">Keep aiming along the last velocity for a few missed frames</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="aim-sticky_gap_extrapolate" data-key="sticky_gap_extrapolate" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Gap Frames</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-sticky_gap_frames" data-key="sticky_gap_frames" data-type="number" min="1" max="8" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Dynamic FOV</div><div class="field-desc">While the key is held, use the dynamic FOV size (scope)</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="aim-fov_dynamic_enabled" data-key="fov_dynamic_enabled" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Dynamic FOV Key</div><div class="field-desc">Windows VK code. 0 disables the key</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-fov_dynamic_key" data-key="fov_dynamic_key" data-type="number" min="0" max="255" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Dynamic FOV Size</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-fov_dynamic_size" data-key="fov_dynamic_size" data-type="number" min="10" max="640" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Dynamic FOV Height</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-fov_dynamic_height" data-key="fov_dynamic_height" data-type="number" min="10" max="640" step="1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Third Person Mask</div><div class="field-desc">Black out the bottom-left quarter of the capture so your own body is not a target</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="aim-third_person_mask" data-key="third_person_mask" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
                 <div class="field-title">Max Velocity Cap</div>
                 <div class="field-desc">Velocity spikes above this are treated as detection jumps and reset prediction</div>
               </div>
@@ -1240,6 +1356,15 @@
               <div class="field-control">
                 <input type="number" id="trig-auto_fire_interval" data-key="auto_fire_interval" data-type="number" min="0.01" max="1.0" step="0.01">
                 <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Spray</div>
+                <div class="field-desc">Hold fire while the crosshair is on target, and release when it leaves</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="trig-auto_fire_spray" data-key="auto_fire_spray" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
           </div>

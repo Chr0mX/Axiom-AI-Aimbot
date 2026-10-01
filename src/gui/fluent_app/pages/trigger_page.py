@@ -99,6 +99,13 @@ class TriggerPage(BasePage):
         self.fireGroup.addSettingCard(self.mouseClickCard)
         self.fireGroup.addSettingCard(self.scopeDelayCard)
         self.fireGroup.addSettingCard(self.fireIntervalCard)
+        self.sprayCard = SwitchSettingCard(
+            FluentIcon.RINGER,
+            t("auto_fire_spray", "Spray"),
+            t("auto_fire_spray_desc", "Hold fire while the crosshair is on target, and release when it leaves"),
+            parent=self.fireGroup,
+        )
+        self.fireGroup.addSettingCard(self.sprayCard)
         self.addContent(self.fireGroup)
 
         self.scrollLayout.addStretch(1)
@@ -111,6 +118,7 @@ class TriggerPage(BasePage):
         self.mouseClickCombo.currentTextChanged.connect(self._onMouseClickChanged)
         self.scopeDelayCard.valueChanged.connect(self._onScopeDelayChanged)
         self.fireIntervalCard.valueChanged.connect(self._onFireIntervalChanged)
+        self.sprayCard.checkedChanged.connect(self._onSprayChanged)
 
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -122,6 +130,7 @@ class TriggerPage(BasePage):
         if self._config.auto_fire_target_part in targets:
             self.fireTargetCombo.setCurrentIndex(targets.index(self._config.auto_fire_target_part))
         self.alwaysAutoFireCard.setChecked(getattr(self._config, 'always_auto_fire', False))
+        self.sprayCard.setChecked(bool(getattr(self._config, 'auto_fire_spray', False)))
 
         # 滑鼠點擊方式
         click_methods = ["mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox"]
@@ -168,6 +177,10 @@ class TriggerPage(BasePage):
         if self._config:
             self._config.auto_fire_interval = value
 
+    def _onSprayChanged(self, checked):
+        if self._config:
+            self._config.auto_fire_spray = bool(checked)
+
     def retranslateUi(self):
         """刷新翻譯"""
         super().retranslateUi()
@@ -181,6 +194,8 @@ class TriggerPage(BasePage):
         self.mouseClickCard.titleLabel.setText(t("mouse_click_method"))
         self.scopeDelayCard.titleLabel.setText(t("scope_delay"))
         self.fireIntervalCard.titleLabel.setText(t("fire_interval"))
+        self.sprayCard.titleLabel.setText(t("auto_fire_spray", "Spray"))
+        self.sprayCard.contentLabel.setText(t("auto_fire_spray_desc", "Hold fire while the crosshair is on target, and release when it leaves"))
 
         # 更新 ComboBox 內容
         current_target = self.fireTargetCombo.currentIndex()

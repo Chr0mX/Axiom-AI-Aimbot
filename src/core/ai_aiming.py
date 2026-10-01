@@ -10,7 +10,14 @@ from .ai_loop_state import LoopState
 from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
-from .target_predictor import VelocityPredictor
+from .aim_paths import (
+    adaptive_lead_s,
+    clamp_path_step,
+    ema_step,
+    scale_path_step,
+    shape_movement,
+)
+from .target_predictor import EmaPredictor, RollingVelocityPredictor, VelocityPredictor
 
 if TYPE_CHECKING:
     from .config import Config
@@ -27,6 +34,8 @@ def _box_iou(a: List[float], b: List[float]) -> float:
 
 # Module-level singleton — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
+_ema_predictor: Optional[EmaPredictor] = None
+_rolling_predictor: Optional[RollingVelocityPredictor] = None
 _kalman: Optional[KalmanFilter2D] = None
 
 
@@ -55,6 +64,29 @@ def _get_predictor(config: Config) -> VelocityPredictor:
             _predictor._history, maxlen=history_len
         )
     return _predictor
+
+
+def _get_ema_predictor() -> EmaPredictor:
+    global _ema_predictor
+    if _ema_predictor is None:
+        _ema_predictor = EmaPredictor()
+    return _ema_predictor
+
+
+def _get_rolling_predictor() -> RollingVelocityPredictor:
+    global _rolling_predictor
+    if _rolling_predictor is None:
+        _rolling_predictor = RollingVelocityPredictor()
+    return _rolling_predictor
+
+
+def _reset_unused_predictors(method: str) -> None:
+    if method != "velocity" and _predictor is not None:
+        _predictor.reset()
+    if method != "ema" and _ema_predictor is not None:
+        _ema_predictor.reset()
+    if method != "rolling" and _rolling_predictor is not None:
+        _rolling_predictor.reset()
 
 
 def calculate_aim_target(
@@ -104,12 +136,11 @@ def calculate_aim_target(
         head_h = box_h * ratio
         target_y = (abs_y1 + head_h + abs_y2) * 0.5
 
-    # TODO: X-axis offset (aim_x_offset_frac) — nudge target_x by ± fraction of box_w
-    #       to correct for systematic model bounding-box bias. Config: aim_x_offset_frac.
-
-    # TODO: Fine Y nudge (aim_y_offset_frac) — additive fraction of box_h applied after
-    #       the ratio formula for per-game calibration without re-deriving head_height_ratio.
-    #       Config: aim_y_offset_frac (positive = lower in box).
+    if config is not None:
+        x_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
+        y_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))
+        target_x += box_w * x_frac
+        target_y += box_h * y_frac
 
     # TODO: Per-class routing — when model outputs separate head/body class IDs, bypass
     #       the ratio formula: aim at box center for head class, body formula for body class.
@@ -327,14 +358,31 @@ def process_aiming(
         # nothing anticipating a moving target, which read as the aimbot
         # feeling permanently a step behind.
         if getattr(config, 'prediction_enabled', False):
-            predictor = _get_predictor(config)
+            method = str(getattr(config, 'prediction_method', 'velocity') or 'velocity')
+            if method not in ('velocity', 'ema', 'rolling'):
+                method = 'velocity'
             if _in_acquisition:
-                predictor.reset()
+                _reset_unused_predictors('')
+                if method == 'velocity':
+                    _get_predictor(config).reset()
+                elif method == 'ema':
+                    _get_ema_predictor().reset()
+                else:
+                    _get_rolling_predictor().reset()
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
-            pred_x, pred_y = predictor.update(pred_x, pred_y, time.perf_counter(), horizon_s)
+            if getattr(config, 'prediction_adaptive_lead', False) and method != 'rolling':
+                horizon_s = adaptive_lead_s(horizon_s, float(getattr(state, 'last_mouse_speed_px_s', 0.0)))
+            now_t = time.perf_counter()
+            if method == 'ema':
+                pred_x, pred_y = _get_ema_predictor().update(pred_x, pred_y, now_t, horizon_s)
+            elif method == 'rolling':
+                lead_frames = float(getattr(config, 'prediction_lead_frames', 3.0) or 3.0)
+                pred_x, pred_y = _get_rolling_predictor().update(pred_x, pred_y, now_t, lead_frames)
+            else:
+                pred_x, pred_y = _get_predictor(config).update(pred_x, pred_y, now_t, horizon_s)
+            _reset_unused_predictors(method)
         else:
-            if _predictor is not None:
-                _predictor.reset()
+            _reset_unused_predictors('')
 
         # --- Kalman filter aim-point smoothing (optional) ---
         if getattr(config, 'kalman_enabled', False):
@@ -387,76 +435,138 @@ def process_aiming(
                 pid_y.update(0.0)
                 return
 
+        if state.sticky_last_t > 0:
+            _sdt = current_time - state.sticky_last_t
+            if _sdt > 0:
+                state.sticky_vx = (target_x - state.sticky_last_x) / _sdt
+                state.sticky_vy = (target_y - state.sticky_last_y) / _sdt
+                state.last_aim_dt = _sdt
+        state.sticky_last_x = target_x
+        state.sticky_last_y = target_y
+        state.sticky_last_t = current_time
+
+        _finish_aim_move(
+            config, state, pid_x, pid_y, mouse_method, current_time,
+            errorX, errorY, target_y, selected_box[3] - selected_box[1],
+        )
+
+        return
+
+
+def _finish_aim_move(
+    config, state, pid_x, pid_y, mouse_method, current_time,
+    errorX, errorY, target_y, box_height,
+) -> None:
+    del box_height
+    path = str(getattr(config, 'aim_movement_path', 'pid') or 'pid')
+    if path == 'pid':
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
+    else:
+        dt = float(getattr(state, 'last_aim_dt', 0.0) or 0.0)
+        dx, dy = shape_movement(
+            errorX, errorY, path,
+            float(getattr(config, 'aim_path_sensitivity', 0.80) or 0.80),
+            float(getattr(config, 'aim_path_curve', 0.15) or 0.0),
+            float(getattr(state, 'path_phase', 0.0)),
+        )
+        dx, dy = clamp_path_step(*scale_path_step(dx, dy, dt))
+        step = min(1.0, dt / (1.0 / 60.0)) if 0.0 < dt < 1.0 / 60.0 else 1.0
+        state.path_phase = float(getattr(state, 'path_phase', 0.0)) + 0.17 * step
 
-        # Track target Y velocity for the velocity-restore gate
-        if state.aim_y_last_target_t > 0:
-            _y_dt = current_time - state.aim_y_last_target_t
-            _vy = (target_y - state.aim_y_last_target_y) / _y_dt if _y_dt > 0 else 0.0
-        else:
-            _vy = 0.0
-        state.aim_y_last_target_y = target_y
-        state.aim_y_last_target_t = current_time
+    if getattr(config, 'aim_ema_smoothing_enabled', False):
+        factor = float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)
+        dx = ema_step(state.aim_ema_x, dx, factor)
+        dy = ema_step(state.aim_ema_y, dy, factor)
+        state.aim_ema_x, state.aim_ema_y = dx, dy
 
-        if getattr(config, 'aim_y_reduce_enabled', False) and state.aiming_start_time > 0:
-            aim_duration = current_time - state.aiming_start_time
-            delay = getattr(config, 'aim_y_reduce_delay', 0.6)
-            if aim_duration > delay:
-                suppress = True
-                # Error-based gate: skip suppression until crosshair has settled vertically
-                settle_px = float(getattr(config, 'aim_y_reduce_settle_px', 0.0))
-                if settle_px > 0 and abs(errorY) > settle_px:
+    # Track target Y velocity for the velocity-restore gate
+    if state.aim_y_last_target_t > 0:
+        _y_dt = current_time - state.aim_y_last_target_t
+        _vy = (target_y - state.aim_y_last_target_y) / _y_dt if _y_dt > 0 else 0.0
+    else:
+        _vy = 0.0
+    state.aim_y_last_target_y = target_y
+    state.aim_y_last_target_t = current_time
+
+    if getattr(config, 'aim_y_reduce_enabled', False) and state.aiming_start_time > 0:
+        aim_duration = current_time - state.aiming_start_time
+        delay = getattr(config, 'aim_y_reduce_delay', 0.6)
+        if aim_duration > delay:
+            suppress = True
+            settle_px = float(getattr(config, 'aim_y_reduce_settle_px', 0.0))
+            if settle_px > 0 and abs(errorY) > settle_px:
+                suppress = False
+            if suppress:
+                vel_restore = float(getattr(config, 'aim_y_vel_restore_px_s', 0.0))
+                if vel_restore > 0 and abs(_vy) > vel_restore:
                     suppress = False
-                # Velocity-aware gate: restore full Y if target is moving vertically fast enough
-                if suppress:
-                    vel_restore = float(getattr(config, 'aim_y_vel_restore_px_s', 0.0))
-                    if vel_restore > 0 and abs(_vy) > vel_restore:
-                        suppress = False
-                if suppress:
-                    floor = float(getattr(config, 'aim_y_reduce_floor', 0.0))
-                    ramp = float(getattr(config, 'aim_y_reduce_ramp', 0.0))
-                    if ramp > 0:
-                        t_past = aim_duration - delay
-                        factor = 1.0 - min(1.0, t_past / ramp) * (1.0 - floor)
-                    else:
-                        factor = floor
-                    dy *= factor
+            if suppress:
+                floor = float(getattr(config, 'aim_y_reduce_floor', 0.0))
+                ramp = float(getattr(config, 'aim_y_reduce_ramp', 0.0))
+                if ramp > 0:
+                    t_past = aim_duration - delay
+                    factor = 1.0 - min(1.0, t_past / ramp) * (1.0 - floor)
+                else:
+                    factor = floor
+                dy *= factor
 
-        # Apply humanization layer (post-PID, pre-rounding, pre-injection).
-        # Operates only on dx/dy; never touches PID state or coordinate space.
-        _hcfg = getattr(config, 'humanization', None)
-        if _hcfg is not None and _hcfg.enabled:
-            _result = apply_humanization(dx, dy, _hcfg)
-            if _result is None:
-                # Reaction variability: suppress this frame's injection.
-                # PID error persists and is corrected on the next frame.
-                return
-            dx, dy = _result
+    _hcfg = getattr(config, 'humanization', None)
+    if _hcfg is not None and _hcfg.enabled:
+        _result = apply_humanization(dx, dy, _hcfg)
+        if _result is None:
+            return
+        dx, dy = _result
 
-        # Sub-pixel carry (all backends): accumulate the fractional remainder that
-        # integer truncation would otherwise discard, so micro-corrections (e.g. a
-        # PID output of 0.4 px) are carried forward and applied on a later frame.
-        # This lets the crosshair converge exactly onto the aim point instead of
-        # dithering ±0.5 px from per-frame rounding.
-        raw_x = dx + state.aim_carry_x
-        raw_y = dy + state.aim_carry_y
-        move_x = int(raw_x)
-        move_y = int(raw_y)
-        state.aim_carry_x = raw_x - move_x
-        state.aim_carry_y = raw_y - move_y
+    raw_x = dx + state.aim_carry_x
+    raw_y = dy + state.aim_carry_y
+    move_x = int(raw_x)
+    move_y = int(raw_y)
+    state.aim_carry_x = raw_x - move_x
+    state.aim_carry_y = raw_y - move_y
 
-        # --- Per-frame pixel cap (new feature from Someone_idea) ---
-        if getattr(config, 'max_move_per_frame_px', 0) > 0:
-            _mx, _my = _apply_per_frame_cap(float(move_x), float(move_y), config)
-            move_x, move_y = int(round(_mx)), int(round(_my))
+    if getattr(config, 'max_move_per_frame_px', 0) > 0:
+        _mx, _my = _apply_per_frame_cap(float(move_x), float(move_y), config)
+        move_x, move_y = int(round(_mx)), int(round(_my))
 
-        if move_x != 0 or move_y != 0:
+    dt = float(getattr(state, 'last_aim_dt', 0.0) or 0.0)
+    if dt > 0:
+        state.last_mouse_speed_px_s = math.hypot(move_x, move_y) / dt
+
+    if move_x != 0 or move_y != 0:
+        # Path slices have to be added into MAKCU's pending slot. PID keeps
+        # the replace behavior inside send_mouse_move_makcu / move().
+        if path != 'pid' and mouse_method == 'makcu':
+            from win_utils.makcu_mouse import send_mouse_move_makcu
+            send_mouse_move_makcu(move_x, move_y, accumulate=True)
+        else:
             send_mouse_move(move_x, move_y, method=mouse_method)
-    # NOTE: process_aiming() is only ever called from ai_loop.py under
-    # `if is_aiming and boxes:`, so `boxes` is never empty here and
-    # `valid_targets` is therefore always non-empty. The no-detection /
-    # sticky-lock-decay handling lives in ai_loop.py's `else` branch
-    # (the zero-boxes case) instead.
+
+
+def process_sticky_gap(
+    config: Config,
+    crosshair_x: int,
+    crosshair_y: int,
+    pid_x: PIDController,
+    pid_y: PIDController,
+    mouse_method: str,
+    state: LoopState,
+    current_time: float,
+) -> None:
+    """Keep steering along the last target velocity for a few missed frames."""
+    frames = int(getattr(state, 'no_detection_frames', 0) or 0)
+    limit = int(getattr(config, 'sticky_gap_frames', 3) or 3)
+    if frames <= 0 or frames > limit:
+        return
+    step = float(getattr(state, 'last_aim_dt', 0.0) or 0.016)
+    target_x = state.sticky_last_x + state.sticky_vx * frames * step
+    target_y = state.sticky_last_y + state.sticky_vy * frames * step
+    config.aim_predicted_x = target_x
+    config.aim_predicted_y = target_y
+    config.aim_prediction_active = True
+    _finish_aim_move(
+        config, state, pid_x, pid_y, mouse_method, current_time,
+        target_x - crosshair_x, target_y - crosshair_y, target_y, 0.0,
+    )
 
 
 def apply_idle_micro_jitter(config: "Config", state: LoopState, mouse_method: str) -> None:

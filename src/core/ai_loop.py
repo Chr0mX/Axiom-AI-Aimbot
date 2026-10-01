@@ -584,6 +584,11 @@ def ai_logic_loop(
                     state.cam_drift_x = 0.0
                     state.cam_drift_y = 0.0
 
+                if getattr(config, 'third_person_mask', False):
+                    frame = frame.copy()
+                    from .aim_paths import apply_third_person_mask
+                    apply_third_person_mask(frame)
+
                 _frame_is_square = frame.shape[0] == frame.shape[1]
                 tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
                     frame, config.model_input_size, fast_resize=_frame_is_square
@@ -971,6 +976,13 @@ def ai_logic_loop(
                         config.display_locked_box_is_decaying = True
                         holding_lock = state.no_detection_frames < decay
 
+                    if (aim_engaged and not boxes and holding_lock
+                            and getattr(config, 'sticky_gap_extrapolate', False)):
+                        ai_aiming.process_sticky_gap(
+                            config, crosshair_x, crosshair_y, pid_x, pid_y,
+                            state.cached_mouse_move_method, state, current_time,
+                        )
+
                     if not holding_lock:
                         pid_x.reset()
                         pid_y.reset()
@@ -980,6 +992,11 @@ def ai_logic_loop(
                         state.no_detection_frames = 0
                         state.aim_carry_x = 0.0
                         state.aim_carry_y = 0.0
+                        state.aim_ema_x = 0.0
+                        state.aim_ema_y = 0.0
+                        state.sticky_last_t = 0.0
+                        state.sticky_vx = 0.0
+                        state.sticky_vy = 0.0
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
                         config.aim_prediction_active = False
@@ -987,6 +1004,10 @@ def ai_logic_loop(
                         # newly-acquired target isn't corrupted by the old one's history.
                         if ai_aiming._predictor is not None:
                             ai_aiming._predictor.reset()
+                        if ai_aiming._ema_predictor is not None:
+                            ai_aiming._ema_predictor.reset()
+                        if ai_aiming._rolling_predictor is not None:
+                            ai_aiming._rolling_predictor.reset()
                         if ai_aiming._kalman is not None:
                             ai_aiming._kalman.reset()
 

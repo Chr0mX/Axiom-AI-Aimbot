@@ -9,7 +9,7 @@ import traceback
 import logging
 from typing import TYPE_CHECKING
 
-from win_utils import is_key_pressed, send_mouse_click
+from win_utils import is_key_pressed, send_mouse_button, send_mouse_click
 
 if TYPE_CHECKING:
     from .config import Config
@@ -31,6 +31,7 @@ def auto_fire_loop(config: Config, boxes_queue: queue.Queue) -> None:
     last_key_state = False
     delay_start_time = None
     last_fire_time = 0
+    spraying = False
     cached_boxes = []
     last_box_update = 0
     logger = logging.getLogger(__name__)
@@ -138,13 +139,28 @@ def auto_fire_loop(config: Config, boxes_queue: queue.Queue) -> None:
                                         should_fire = True
 
                                 if should_fire:
-                                    # 執行射擊
                                     mouse_click_method = getattr(config, 'mouse_click_method', 'mouse_event')
-                                    send_mouse_click(mouse_click_method)
-                                    last_fire_time = current_time
+                                    if getattr(config, 'auto_fire_spray', False):
+                                        if not spraying:
+                                            spraying = bool(send_mouse_button(mouse_click_method, True))
+                                    else:
+                                        if spraying:
+                                            send_mouse_button(mouse_click_method, False)
+                                            spraying = False
+                                        send_mouse_click(mouse_click_method)
+                                        last_fire_time = current_time
                                     break
+                            if getattr(config, 'auto_fire_spray', False) and not should_fire and spraying:
+                                send_mouse_button(getattr(config, 'mouse_click_method', 'mouse_event'), False)
+                                spraying = False
+                        elif spraying and getattr(config, 'auto_fire_spray', False):
+                            send_mouse_button(getattr(config, 'mouse_click_method', 'mouse_event'), False)
+                            spraying = False
             else:
                 delay_start_time = None
+                if spraying:
+                    send_mouse_button(getattr(config, 'mouse_click_method', 'mouse_event'), False)
+                    spraying = False
                 if cached_boxes:
                     cached_boxes = []
 

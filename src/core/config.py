@@ -138,6 +138,18 @@ _FIELD_MAP = {
     'aim_posture_aware_enabled':  'aim.target_area.posture_aware.enabled',
     'aim_crouch_aspect_threshold':'aim.target_area.posture_aware.crouch_aspect',
     'aim_custom_y_pct':           'aim.target_area.custom_y_pct',
+    'aim_x_offset_frac':          'aim.target_area.x_offset_frac',
+    'aim_y_offset_frac':          'aim.target_area.y_offset_frac',
+    'aim_movement_path':          'aim.movement.path',
+    'aim_path_sensitivity':       'aim.movement.sensitivity',
+    'aim_path_curve':             'aim.movement.curve',
+    'aim_ema_smoothing_enabled':  'aim.movement.ema_enabled',
+    'aim_ema_smoothing':          'aim.movement.ema',
+    'fov_dynamic_enabled':        'aim.fov_dynamic.enabled',
+    'fov_dynamic_key':            'aim.fov_dynamic.key',
+    'fov_dynamic_size':           'aim.fov_dynamic.size',
+    'fov_dynamic_height':         'aim.fov_dynamic.height',
+    'third_person_mask':          'aim.third_person_mask',
     'aim_target_class_ids':       'aim.target_class_ids',
 
     # --- autofire ---
@@ -147,12 +159,18 @@ _FIELD_MAP = {
     'auto_fire_delay':            'autofire.delay',
     'auto_fire_interval':         'autofire.interval',
     'auto_fire_target_part':      'autofire.target_part',
+    'auto_fire_spray':            'autofire.spray',
 
     # --- tracking ---
     'prediction_enabled':         'tracking.prediction.enabled',
     'prediction_horizon_ms':      'tracking.prediction.horizon_ms',
     'prediction_max_velocity':    'tracking.prediction.max_velocity',
     'prediction_history_len':     'tracking.prediction.history_len',
+    'prediction_method':          'tracking.prediction.method',
+    'prediction_lead_frames':     'tracking.prediction.lead_frames',
+    'prediction_adaptive_lead':   'tracking.prediction.adaptive_lead',
+    'sticky_gap_extrapolate':     'tracking.sticky_lock.gap_extrapolate',
+    'sticky_gap_frames':          'tracking.sticky_lock.gap_frames',
     'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
     'lock_decay_frames':          'tracking.sticky_lock.decay_frames',
     'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
@@ -454,6 +472,23 @@ class Config:
         self.aim_posture_aware_enabled: bool = False
         self.aim_crouch_aspect_threshold: float = 1.2  # box_w/box_h above which = crouching
         self.aim_custom_y_pct: float = 30.0  # Custom aim Y as % of box height (0=top, 100=bottom)
+        # Additive aim-point nudge as a fraction of the box. 0 leaves the
+        # point where the head/body/custom formula put it. X: negative = left.
+        # Y: positive = lower in the box.
+        self.aim_x_offset_frac: float = 0.0
+        self.aim_y_offset_frac: float = 0.0
+        # pid keeps the PID. Other values replace the PID step with a fraction
+        # of the remaining error (linear, exponential, bezier, adaptive, perlin).
+        self.aim_movement_path: str = "pid"
+        self.aim_path_sensitivity: float = 0.80  # higher = slower (fraction traveled is 1 - this)
+        self.aim_path_curve: float = 0.15        # perpendicular bow for bezier / adaptive
+        self.aim_ema_smoothing_enabled: bool = False
+        self.aim_ema_smoothing: float = 0.5      # 1 = follow the new step, 0 = hold the previous
+        self.fov_dynamic_enabled: bool = False
+        self.fov_dynamic_key: int = 0            # VK code; 0 = never
+        self.fov_dynamic_size: int = 120
+        self.fov_dynamic_height: int = 120
+        self.third_person_mask: bool = False     # black out the bottom-left quarter of the capture
 
         # Target class multi-select — which of the currently loaded model's
         # own class IDs are valid aim targets (e.g. keep class 0 "enemy" but
@@ -548,6 +583,7 @@ class Config:
         self.auto_fire_delay: float = 0.0        # 無延遲
         self.auto_fire_interval: float = 0.01    # 射擊間隔
         self.auto_fire_target_part: str = "both" # 可選: "head", "body", "both"
+        self.auto_fire_spray: bool = False       # hold fire while the crosshair is on target
 
         # 保持檢測功能
         self.keep_detecting: bool = True   # 啟用保持檢測
@@ -656,12 +692,17 @@ class Config:
         self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
         self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
         self.prediction_history_len: int = 3         # 歷史點數量
+        self.prediction_method: str = "velocity"     # velocity | ema | rolling
+        self.prediction_lead_frames: float = 3.0     # rolling predictor, in frames
+        self.prediction_adaptive_lead: bool = False
 
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
         self.lock_decay_frames: int = 15
         self.lock_iou_threshold: float = 0.3
         self.sticky_adaptive_iou: bool = True
+        self.sticky_gap_extrapolate: bool = False
+        self.sticky_gap_frames: int = 3
 
         # FOV filter mode
         self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square
@@ -942,6 +983,7 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
         
         # 向後兼容：修正滑鼠移動方式
         _validate_mouse_method(config_instance)
+        _validate_aim_math(config_instance)
 
         # 向後兼容：修正推理後端選擇
         _validate_inference_backend(config_instance)
@@ -1071,6 +1113,25 @@ def _validate_queue_and_confidence(config: Config) -> None:
     if clamped != conf:
         logger.warning("[Config] min_confidence %.3f out of range [0, 1] — clamped to %.3f", conf, clamped)
     config.min_confidence = clamped
+
+
+def _validate_aim_math(config: Config) -> None:
+    """Clamp the optional aim-math fields added on better-math."""
+    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'ema', 'rolling'):
+        config.prediction_method = 'velocity'
+    if getattr(config, 'aim_movement_path', 'pid') not in (
+        'pid', 'linear', 'exponential', 'bezier', 'adaptive', 'perlin'
+    ):
+        config.aim_movement_path = 'pid'
+    config.aim_x_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
+    config.aim_y_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))
+    config.aim_path_sensitivity = max(0.01, min(0.99, float(getattr(config, 'aim_path_sensitivity', 0.8) or 0.8)))
+    config.aim_path_curve = max(0.0, min(0.5, float(getattr(config, 'aim_path_curve', 0.15) or 0.0)))
+    config.aim_ema_smoothing = max(0.01, min(1.0, float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)))
+    config.prediction_lead_frames = max(1.0, min(10.0, float(getattr(config, 'prediction_lead_frames', 3.0) or 3.0)))
+    config.sticky_gap_frames = max(1, min(8, int(getattr(config, 'sticky_gap_frames', 3) or 3)))
+    config.fov_dynamic_size = max(10, min(640, int(getattr(config, 'fov_dynamic_size', 120) or 120)))
+    config.fov_dynamic_height = max(10, min(640, int(getattr(config, 'fov_dynamic_height', 120) or 120)))
 
 
 def _validate_mouse_method(config: Config) -> None:

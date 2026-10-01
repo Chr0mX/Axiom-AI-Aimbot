@@ -70,3 +70,89 @@ class VelocityPredictor:
         predicted_x = x1 + vx * prediction_horizon_s
         predicted_y = y1 + vy * prediction_horizon_s
         return predicted_x, predicted_y
+
+
+class EmaPredictor:
+    """EMA position and velocity, then a time lead.
+
+    Same shape as a smoothed constant-velocity estimate: the position is
+    an exponential moving average, velocity is an EMA of that position's
+    frame-to-frame rate, and the returned point is ema + velocity * horizon.
+    """
+
+    def __init__(self, alpha: float = 0.5) -> None:
+        self.alpha = alpha
+        self.reset()
+
+    def reset(self) -> None:
+        self._initialized = False
+        self._ema_x = self._ema_y = 0.0
+        self._vx = self._vy = 0.0
+        self._prev_x = self._prev_y = 0.0
+
+    def update(
+        self,
+        x: float,
+        y: float,
+        t: float,
+        prediction_horizon_s: float,
+    ) -> Tuple[float, float]:
+        if not self._initialized:
+            self._ema_x = self._prev_x = x
+            self._ema_y = self._prev_y = y
+            self._last_t = t
+            self._initialized = True
+            return x, y
+
+        dt = t - self._last_t
+        dt = 0.001 if dt <= 0 else min(0.1, dt)
+        a = self.alpha
+        self._ema_x = a * x + (1.0 - a) * self._ema_x
+        self._ema_y = a * y + (1.0 - a) * self._ema_y
+        nvx = (self._ema_x - self._prev_x) / dt
+        nvy = (self._ema_y - self._prev_y) / dt
+        self._vx = a * nvx + (1.0 - a) * self._vx
+        self._vy = a * nvy + (1.0 - a) * self._vy
+        self._prev_x, self._prev_y = self._ema_x, self._ema_y
+        self._last_t = t
+        return (
+            self._ema_x + self._vx * prediction_horizon_s,
+            self._ema_y + self._vy * prediction_horizon_s,
+        )
+
+
+class RollingVelocityPredictor:
+    """Average of the last few per-frame position deltas, times a frame lead.
+
+    Lead is a frame count, not seconds: a lead of 3 means "three frames of
+    the recent average step ahead of the current point."
+    """
+
+    def __init__(self, history_len: int = 5) -> None:
+        self._vx: deque[float] = deque(maxlen=history_len)
+        self._vy: deque[float] = deque(maxlen=history_len)
+        self._prev: Tuple[float, float] | None = None
+
+    def reset(self) -> None:
+        self._vx.clear()
+        self._vy.clear()
+        self._prev = None
+
+    def update(
+        self,
+        x: float,
+        y: float,
+        t: float,
+        lead_frames: float,
+    ) -> Tuple[float, float]:
+        del t  # frame-count lead does not use the timestamp
+        if self._prev is None:
+            self._prev = (x, y)
+            return x, y
+        px, py = self._prev
+        self._vx.append(x - px)
+        self._vy.append(y - py)
+        self._prev = (x, y)
+        ax = sum(self._vx) / len(self._vx)
+        ay = sum(self._vy) / len(self._vy)
+        return x + ax * lead_frames, y + ay * lead_frames
