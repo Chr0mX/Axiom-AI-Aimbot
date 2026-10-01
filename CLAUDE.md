@@ -238,8 +238,6 @@ Both `model_page.py` and `convert_page.py` pair their model `ComboBox` with a `S
 | `prediction_method` | `tracking.prediction.method` | `'velocity'` / `'ema'` / `'rolling'` while prediction is on. Rolling uses `prediction_lead_frames` |
 | `aim_movement_path` | `aim.movement.path` | `'pid'` (default) or `linear` / `exponential` / `bezier` / `adaptive` / `perlin` |
 | `aim_x_offset_frac` / `aim_y_offset_frac` | `aim.target_area.x_offset_frac` / `.y_offset_frac` | Extra aim-point nudge as a fraction of the box (−1..1). Y positive is down |
-| `fov_dynamic_enabled` | `aim.fov_dynamic.enabled` | While `fov_dynamic_key` is held, FOV uses `fov_dynamic_size` / `fov_dynamic_height` |
-| `third_person_mask` | `aim.third_person_mask` | Black out the bottom-left quarter of the capture before inference |
 | `auto_fire_spray` | `autofire.spray` | Hold the click while the crosshair is on target |
 | `uvc_crop_mode` | `capture.uvc.crop_mode` | `'dynamic'` (recompute crop from live Detection Range every frame) / `'fixed'` (freeze a centered `detect_range_size` square — native DLL crop on v2/NV12, software crop otherwise) |
 | `uvc_show_window` | `capture.preview.enabled` | Show live capture preview panel |

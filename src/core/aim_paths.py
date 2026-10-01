@@ -84,14 +84,6 @@ def adaptive_lead_s(horizon_s: float, mouse_speed_px_s: float) -> float:
     return max(0.02, min(0.30, scaled))
 
 
-def apply_third_person_mask(frame) -> None:
-    """Black out the bottom-left quarter so the player's own body is not a target."""
-    height, width = frame.shape[:2]
-    if height < 2 or width < 2:
-        return
-    frame[height // 2:, : width // 2] = 0
-
-
 def _bezier(ex: float, ey: float, t: float, curve: float) -> tuple[float, float]:
     length = math.hypot(ex, ey)
     if length < 1e-6:

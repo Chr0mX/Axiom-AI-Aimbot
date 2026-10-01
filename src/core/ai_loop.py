@@ -614,11 +614,6 @@ def ai_logic_loop(
                     state.cam_drift_x = 0.0
                     state.cam_drift_y = 0.0
 
-                if getattr(config, 'third_person_mask', False):
-                    frame = frame.copy()
-                    from .aim_paths import apply_third_person_mask
-                    apply_third_person_mask(frame)
-
                 _frame_is_square = frame.shape[0] == frame.shape[1]
                 tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
                     frame, config.model_input_size, fast_resize=_frame_is_square
