@@ -200,12 +200,17 @@ class ModelPage(BasePage):
 
         self.modelCombo = ComboBox()
         self.modelCombo.setMinimumWidth(200)
+        self.precisionCombo = ComboBox()
+        self.precisionCombo.addItems(["FP32", "FP16"])
+        self.precisionCombo.setMinimumWidth(100)
         self.modelCard = SettingCard(
             FluentIcon.ROBOT,
             t("model"),
             "",
             self.modelGroup
         )
+        self.modelCard.hBoxLayout.addWidget(self.precisionCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.modelCard.hBoxLayout.addSpacing(8)
         self.modelCard.hBoxLayout.addWidget(self.modelCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.modelCard.hBoxLayout.addSpacing(16)
 
@@ -293,6 +298,7 @@ class ModelPage(BasePage):
     def _connectSignals(self):
         self.modelSearchEdit.textChanged.connect(self._onModelSearchChanged)
         self.modelCombo.currentTextChanged.connect(self._onModelChanged)
+        self.precisionCombo.currentTextChanged.connect(self._onPrecisionChanged)
         self.inferenceBackendCombo.currentTextChanged.connect(self._onInferenceBackendChanged)
         self.openModelFolderBtn.clicked.connect(self._openModelFolder)
         self.hudGameCombo.currentTextChanged.connect(self._onHudGameChanged)
@@ -329,6 +335,11 @@ class ModelPage(BasePage):
                 if self._config:
                     self._config.model_path = "Model/" + self.modelCombo.itemText(pick)
             self.modelCombo.blockSignals(False)
+
+            self.precisionCombo.blockSignals(True)
+            self.precisionCombo.setCurrentText(
+                "FP16" if bool(getattr(self._config, "trt_fp16_enabled", False)) else "FP32")
+            self.precisionCombo.blockSignals(False)
 
             backend_map = {
                 "auto": "Auto",
@@ -498,7 +509,8 @@ class ModelPage(BasePage):
             from core.session_utils import find_trt_engine_cache
         except Exception:
             return {}
-        return {name: find_trt_engine_cache(name) is not None for name in names}
+        fp16 = bool(getattr(self._config, "trt_fp16_enabled", False)) if self._config else None
+        return {name: find_trt_engine_cache(name, fp16=fp16) is not None for name in names}
 
     def _isTensorRtActive(self) -> bool:
         """True if TensorRT is what build_provider_list(config) would
@@ -533,10 +545,11 @@ class ModelPage(BasePage):
         the way SettingCard's own constructor would for content="" vs. a
         real string."""
         if self._isTensorRtActive():
+            precision = "FP16" if bool(getattr(self._config, "trt_fp16_enabled", False)) else "FP32"
             self.modelCard.contentLabel.setText(t(
                 "model_trt_badge_legend",
-                "✓ = TensorRT engine already cached  ·  ⬇ = needs a one-time build (1-5 min)"
-            ))
+                "✓ = TensorRT engine already cached  ·  ⬇ = needs a one-time build (1-5 min)",
+            ) + f"  ({precision})")
             self.modelCard.contentLabel.show()
             self.modelCard.setFixedHeight(70)
         else:
@@ -705,6 +718,22 @@ class ModelPage(BasePage):
     # ──────────────────────────────────────────────
     # Callbacks
     # ──────────────────────────────────────────────
+
+    def _onPrecisionChanged(self, text):
+        """FP32 or FP16 for the model that is already selected.
+
+        Either precision can be cached on its own. Picking one that has no
+        engine yet goes to the Convert tab for that precision instead of
+        loading it inline.
+        """
+        if not self._config or self._isLoadingConfig or not text:
+            return
+        self._config.trt_fp16_enabled = text == "FP16"
+        self._model_engine_cached = self._computeEngineCacheStatus(self._all_model_files)
+        self._applyModelBadges()
+        self._updateModelCardLegend()
+        if self._config.model_path:
+            self._redirectToConvertIfNeeded(self._config.model_path)
 
     def _onModelChanged(self, text):
         if not self._config or not text:

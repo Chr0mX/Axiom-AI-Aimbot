@@ -235,12 +235,20 @@ def get_model_cache_status(config: "Config") -> dict:
     from .session_utils import find_trt_engine_cache, effective_first_provider
 
     names = list_models()
-    cached = {name: find_trt_engine_cache(name) is not None for name in names}
+    fp16 = bool(getattr(config, "trt_fp16_enabled", False))
+    cached = {name: find_trt_engine_cache(name, fp16=fp16) is not None for name in names}
+    cached_fp16 = {name: find_trt_engine_cache(name, fp16=True) is not None for name in names}
+    cached_fp32 = {name: find_trt_engine_cache(name, fp16=False) is not None for name in names}
     try:
         trt_active = effective_first_provider(config) == "TensorrtExecutionProvider"
     except Exception:
         trt_active = False
-    return {"cached": cached, "trt_active": trt_active}
+    return {
+        "cached": cached,
+        "cached_fp16": cached_fp16,
+        "cached_fp32": cached_fp32,
+        "trt_active": trt_active,
+    }
 
 
 def start_ai_threads(
@@ -459,6 +467,7 @@ def request_model_change(
     config: "Config",
     model_path: str,
     inference_backend: str | None = None,
+    fp16: bool | None = None,
 ) -> dict:
     """Decide whether a model/backend switch can be applied right now.
 
@@ -520,11 +529,15 @@ def request_model_change(
         # Config itself).
         preview = copy.deepcopy(config)
         preview.inference_backend = requested_backend
+        if fp16 is not None:
+            preview.trt_fp16_enabled = bool(fp16)
         if needs_trt_build(preview, resolved_path):
             return {"ok": False, "reason": "needs_conversion"}
 
         config.model_path = model_path
         config.inference_backend = requested_backend
+        if fp16 is not None:
+            config.trt_fp16_enabled = bool(fp16)
 
     return {
         "ok": True,
@@ -586,6 +599,7 @@ def confirm_model_change_with_restart(
     config: "Config",
     model_path: str,
     inference_backend: str | None = None,
+    fp16: bool | None = None,
 ) -> dict:
     """The confirmed-restart counterpart to request_model_change(): call
     this only after that function has already refused the identical
@@ -616,6 +630,8 @@ def confirm_model_change_with_restart(
         config.model_path = model_path
         if inference_backend is not None:
             config.inference_backend = inference_backend
+        if fp16 is not None:
+            config.trt_fp16_enabled = bool(fp16)
 
     return restart_axiom(config)
 

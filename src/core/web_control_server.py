@@ -164,6 +164,7 @@ def _build_status(config) -> dict:
         # which never matches any of the select's four option values and
         # was leaving the dropdown stuck on its default "Auto".
         "selected_backend": str(getattr(config, "inference_backend", "auto")),
+        "trt_fp16_enabled": bool(getattr(config, "trt_fp16_enabled", False)),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
         "capture_fps": round(cap_fps, 1),
@@ -257,6 +258,7 @@ def start(
     class ModelChangeBody(BaseModel):
         model_path: str
         inference_backend: Optional[str] = None
+        fp16: Optional[bool] = None
 
     class ModelNotesBody(BaseModel):
         model: str
@@ -374,7 +376,7 @@ def start(
     @app.post("/api/control/model", dependencies=[Depends(_check_token)])
     def post_model_change(body: ModelChangeBody):
         from .app_controller import request_model_change
-        return request_model_change(config, body.model_path, body.inference_backend)
+        return request_model_change(config, body.model_path, body.inference_backend, body.fp16)
 
     @app.post("/api/control/model_restart", dependencies=[Depends(_check_token)])
     def post_model_restart_route(body: ModelChangeBody):
@@ -387,7 +389,8 @@ def start(
         # is safe to expose as a route at all (still refuses outright for
         # a genuinely bad model_path/backend).
         from .app_controller import confirm_model_change_with_restart
-        return confirm_model_change_with_restart(config, body.model_path, body.inference_backend)
+        return confirm_model_change_with_restart(
+            config, body.model_path, body.inference_backend, body.fp16)
 
     # -----------------------------------------------------------------
     # Tab settings — generic get/apply covering the Model/Capture/
