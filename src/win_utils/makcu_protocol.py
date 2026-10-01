@@ -73,6 +73,21 @@ def is_rejection(payload: bytes) -> bool:
     return payload == b"\xff"
 
 
+def merge_relative_move(pending_dx: int, pending_dy: int, dx: int, dy: int, accumulate: bool) -> tuple:
+    """Combine a new relative step with whatever has not been written yet.
+
+    PID corrections replace the pending step: the new value is already the
+    full correction for the current error, so adding the stale one double-counts
+    it. Movement-path steps (linear, exponential, bezier, adaptive, perlin) are
+    partial samples. Replacing those drops every sample except the last, and on
+    a 4 Mbaud link the writer usually keeps up, so the curve never reaches the
+    device. Those steps add instead.
+    """
+    x = int(dx) + (int(pending_dx) if accumulate else 0)
+    y = int(dy) + (int(pending_dy) if accumulate else 0)
+    return max(-32768, min(32767, x)), max(-32768, min(32767, y))
+
+
 def move_frame(dx: int, dy: int) -> bytes:
     dx = max(-32768, min(32767, int(dx)))
     dy = max(-32768, min(32767, int(dy)))

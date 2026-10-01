@@ -10,7 +10,13 @@ from .ai_loop_state import LoopState
 from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
-from .aim_paths import adaptive_lead_s, ema_step, shape_movement
+from .aim_paths import (
+    adaptive_lead_s,
+    clamp_path_step,
+    ema_step,
+    scale_path_step,
+    shape_movement,
+)
 from .target_predictor import EmaPredictor, RollingVelocityPredictor, VelocityPredictor
 
 if TYPE_CHECKING:
@@ -456,13 +462,16 @@ def _finish_aim_move(
     if path == 'pid':
         dx, dy = pid_x.update(errorX), pid_y.update(errorY)
     else:
+        dt = float(getattr(state, 'last_aim_dt', 0.0) or 0.0)
         dx, dy = shape_movement(
             errorX, errorY, path,
             float(getattr(config, 'aim_path_sensitivity', 0.80) or 0.80),
             float(getattr(config, 'aim_path_curve', 0.15) or 0.0),
             float(getattr(state, 'path_phase', 0.0)),
         )
-        state.path_phase = float(getattr(state, 'path_phase', 0.0)) + 0.17
+        dx, dy = clamp_path_step(*scale_path_step(dx, dy, dt))
+        step = min(1.0, dt / (1.0 / 60.0)) if 0.0 < dt < 1.0 / 60.0 else 1.0
+        state.path_phase = float(getattr(state, 'path_phase', 0.0)) + 0.17 * step
 
     if getattr(config, 'aim_ema_smoothing_enabled', False):
         factor = float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)
@@ -524,7 +533,13 @@ def _finish_aim_move(
         state.last_mouse_speed_px_s = math.hypot(move_x, move_y) / dt
 
     if move_x != 0 or move_y != 0:
-        send_mouse_move(move_x, move_y, method=mouse_method)
+        # Path slices have to be added into MAKCU's pending slot. PID keeps
+        # the replace behavior inside send_mouse_move_makcu / move().
+        if path != 'pid' and mouse_method == 'makcu':
+            from win_utils.makcu_mouse import send_mouse_move_makcu
+            send_mouse_move_makcu(move_x, move_y, accumulate=True)
+        else:
+            send_mouse_move(move_x, move_y, method=mouse_method)
 
 
 def process_sticky_gap(

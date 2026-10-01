@@ -7,7 +7,14 @@ sys.modules.setdefault("win32api", MagicMock())
 sys.modules.setdefault("win32con", MagicMock())
 sys.modules.setdefault("cv2", MagicMock())
 
-from core.aim_paths import adaptive_lead_s, apply_third_person_mask, ema_step, shape_movement
+from core.aim_paths import (
+    adaptive_lead_s,
+    apply_third_person_mask,
+    ema_step,
+    scale_path_step,
+    shape_movement,
+)
+from win_utils.makcu_protocol import merge_relative_move
 from core.ai_aiming import calculate_aim_target
 from core.target_predictor import EmaPredictor, RollingVelocityPredictor
 
@@ -55,6 +62,22 @@ def test_linear_path_travels_a_fraction_of_the_error():
     x, y = shape_movement(100, 0, "linear", 0.80, 0.0, 0.0)
     assert abs(x - 20) < 1e-6
     assert y == 0
+
+
+def test_exponential_path_is_large_enough_to_move():
+    x, _y = shape_movement(100, 0, "exponential", 0.80, 0.0, 0.0)
+    assert abs(x - 6.4) < 1e-6
+
+
+def test_fast_ticks_sum_to_one_60hz_step():
+    full, _ = shape_movement(100, 0, "linear", 0.80, 0.0, 0.0)
+    quarter, _ = scale_path_step(full, 0.0, 1.0 / 240.0)
+    assert abs(quarter * 4 - full) < 1e-6
+
+
+def test_makcu_path_steps_accumulate_and_pid_steps_replace():
+    assert merge_relative_move(10, 4, 10, -3, accumulate=True) == (20, 1)
+    assert merge_relative_move(10, 4, 10, -3, accumulate=False) == (10, -3)
 
 
 def test_bezier_with_curve_is_not_the_straight_fraction():

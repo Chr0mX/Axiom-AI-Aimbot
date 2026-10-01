@@ -12,6 +12,26 @@ import math
 
 PATHS = ("pid", "linear", "exponential", "bezier", "adaptive", "perlin")
 
+# One step of shape_movement() is a 60 Hz step. The aim loop often runs
+# several times faster; scale_path_step() shrinks the step with the real
+# tick so a 240 Hz loop does not travel four times too far.
+REFERENCE_DT = 1.0 / 60.0
+
+# Same per-command ceiling Aimmy applies before handing the step to a device.
+PATH_STEP_LIMIT = 150.0
+
+
+def scale_path_step(dx: float, dy: float, dt: float) -> tuple[float, float]:
+    """Shrink a 60 Hz path step to this aim tick. A stall does not enlarge it."""
+    if dt <= 0.0 or dt >= REFERENCE_DT:
+        return dx, dy
+    scale = dt / REFERENCE_DT
+    return dx * scale, dy * scale
+
+
+def clamp_path_step(dx: float, dy: float, limit: float = PATH_STEP_LIMIT) -> tuple[float, float]:
+    return max(-limit, min(limit, dx)), max(-limit, min(limit, dy))
+
 
 def shape_movement(
     error_x: float,
@@ -24,7 +44,11 @@ def shape_movement(
     t = max(0.01, min(0.99, 1.0 - float(sensitivity)))
     kind = path if path in PATHS and path != "pid" else "linear"
     if kind == "exponential":
-        scale = t ** 3
+        # 1 - (sensitivity - 0.2), then cubed. Using (1 - sensitivity)^3
+        # alone left the default 0.80 sensitivity at 0.8% of the error per
+        # step, which never accumulated into a MAKCU report.
+        exp_t = max(0.05, min(0.95, 1.0 - (float(sensitivity) - 0.2)))
+        scale = exp_t ** 3
         return error_x * scale, error_y * scale
     if kind == "bezier":
         return _bezier(error_x, error_y, t, curve)
