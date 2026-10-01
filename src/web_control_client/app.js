@@ -551,7 +551,10 @@
         });
         if (tab === "capture") updateCaptureVisibility(data.screenshot_method);
         if (tab === "inference") updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
-        if (tab === "aim") updateHumanizationVisibility();
+        if (tab === "aim") {
+          updateHumanizationVisibility();
+          updateAimMathVisibility();
+        }
         if (tab === "keys") updateKeysVisibility(data);
         if (tab === "visuals") applyVisualsExtras(data);
         if (tab === "convert" && typeof convertPrecisionSelect !== "undefined" && convertPrecisionSelect
@@ -595,6 +598,11 @@
         }
         if (tab === "inference" && key === "fov_reduce_on_target_enabled") updateFovReduceVisibility(el.checked);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
+        if (tab === "aim" && (
+          key === "prediction_enabled" || key === "prediction_method" ||
+          key === "aim_movement_path" || key === "aim_ema_smoothing_enabled" ||
+          key === "sticky_gap_extrapolate"
+        )) updateAimMathVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
         }
@@ -647,6 +655,27 @@
     gate("aim-humanization-speed-shaping-enabled", "aim-humanization-speed-shaping-subgroup");
     gate("aim-humanization-micro-stutter-enabled", "aim-humanization-stutter-subgroup");
     gate("aim-humanization-reaction-variability-enabled", "aim-humanization-reaction-subgroup");
+  }
+
+  function updateAimMathVisibility() {
+    function hide(id, hidden) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle("hidden", hidden);
+    }
+    var predicting = !!(document.getElementById("aim-prediction_enabled") || {}).checked;
+    var methodEl = document.getElementById("aim-prediction_method");
+    var method = methodEl ? methodEl.value : "velocity";
+    var pathEl = document.getElementById("aim-aim_movement_path");
+    var path = pathEl ? pathEl.value : "pid";
+    var emaEl = document.getElementById("aim-aim_ema_smoothing_enabled");
+    var gapEl = document.getElementById("aim-sticky_gap_extrapolate");
+    hide("aim-prediction-method-card", !predicting);
+    hide("aim-prediction-lead-card", !(predicting && method === "rolling"));
+    hide("aim-prediction-adaptive-card", !(predicting && method !== "rolling"));
+    hide("aim-path-sensitivity-card", path === "pid");
+    hide("aim-path-curve-card", path !== "bezier" && path !== "adaptive");
+    hide("aim-ema-amount-card", !(emaEl && emaEl.checked));
+    hide("aim-gap-frames-card", !(gapEl && gapEl.checked));
   }
 
   document.getElementById("aim-humanization-reset-btn").addEventListener("click", function () {

@@ -1,4 +1,4 @@
-"""Opt-in aim math: offsets, predictors, paths, mask, adaptive lead."""
+"""Opt-in aim math: offsets, predictors, paths, adaptive lead."""
 
 import sys
 from unittest.mock import MagicMock
@@ -7,13 +7,7 @@ sys.modules.setdefault("win32api", MagicMock())
 sys.modules.setdefault("win32con", MagicMock())
 sys.modules.setdefault("cv2", MagicMock())
 
-from core.aim_paths import (
-    adaptive_lead_s,
-    apply_third_person_mask,
-    ema_step,
-    scale_path_step,
-    shape_movement,
-)
+from core.aim_paths import adaptive_lead_s, ema_step, scale_path_step, shape_movement
 from win_utils.makcu_protocol import merge_relative_move
 from core.ai_aiming import calculate_aim_target
 from core.target_predictor import EmaPredictor, RollingVelocityPredictor
@@ -96,12 +90,3 @@ def test_adaptive_lead_grows_when_the_mouse_is_slow_and_clamps():
 
 def test_ema_step_blends():
     assert ema_step(0.0, 10.0, 0.5) == 5.0
-
-
-def test_third_person_mask_blacks_only_the_bottom_left_quarter():
-    import numpy as np
-    frame = np.ones((4, 4, 3), dtype=np.uint8) * 9
-    apply_third_person_mask(frame)
-    assert frame[2, 0, 0] == 0
-    assert frame[0, 0, 0] == 9
-    assert frame[2, 2, 0] == 9

@@ -1149,19 +1149,21 @@ class AimPage(BasePage):
         self.predictionMethodCard = SettingCard(
             FluentIcon.HISTORY,
             t("prediction_method", "Prediction Method"),
-            t("prediction_method_desc", "Velocity, EMA, or a rolling average of recent steps"),
+            t("prediction_method_desc", "How the lead is estimated. Only used while Velocity Prediction is on."),
             self.mathGroup,
         )
         self.predictionMethodCard.hBoxLayout.addWidget(self.predictionMethodCombo, 0)
         self.predictionMethodCard.hBoxLayout.addSpacing(16)
         self.predictionLeadFramesCard = SliderLabelCard(
             FluentIcon.HISTORY, t("prediction_lead_frames", "Rolling Lead"),
-            1, 10, format_func=lambda v: f"{v} fr", parent=self.mathGroup,
+            1, 10, format_func=lambda v: f"{v} fr",
+            description=t("prediction_lead_frames_desc", "How many frames ahead the rolling predictor aims. Shown only for Rolling."),
+            parent=self.mathGroup,
         )
         self.predictionAdaptiveLeadCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("prediction_adaptive_lead", "Adaptive Lead"),
-            t("prediction_adaptive_lead_desc", "Stretch the time lead when the mouse is moving slowly"),
+            t("prediction_adaptive_lead_desc", "Lengthen the lead when the mouse is moving slowly. Not used with Rolling."),
             parent=self.mathGroup,
         )
         self.movementPathCombo = ComboBox()
@@ -1170,18 +1172,22 @@ class AimPage(BasePage):
         self.movementPathCard = SettingCard(
             FluentIcon.MOVE,
             t("aim_movement_path", "Movement Path"),
-            t("aim_movement_path_desc", "PID is the default. Other paths travel a fraction of the remaining error"),
+            t("aim_movement_path_desc", "How the crosshair moves onto the target. PID uses the sliders above. The other paths step a fraction of the remaining distance each frame."),
             self.mathGroup,
         )
         self.movementPathCard.hBoxLayout.addWidget(self.movementPathCombo, 0)
         self.movementPathCard.hBoxLayout.addSpacing(16)
         self.pathSensitivityCard = SliderLabelCard(
             FluentIcon.SPEED_HIGH, t("aim_path_sensitivity", "Path Sensitivity"),
-            1, 99, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+            1, 99, format_func=lambda v: f"{v}%",
+            description=t("aim_path_sensitivity_desc", "Higher is slower. Shown only when Movement Path is not PID."),
+            parent=self.mathGroup,
         )
         self.pathCurveCard = SliderLabelCard(
             FluentIcon.FIT_PAGE, t("aim_path_curve", "Path Curve"),
-            0, 50, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+            0, 50, format_func=lambda v: f"{v}%",
+            description=t("aim_path_curve_desc", "How far Bezier and Adaptive bow sideways. Hidden for the other paths."),
+            parent=self.mathGroup,
         )
         self.emaSmoothingCard = SwitchSettingCard(
             FluentIcon.SYNC,
@@ -1191,56 +1197,39 @@ class AimPage(BasePage):
         )
         self.emaAmountCard = SliderLabelCard(
             FluentIcon.SYNC, t("aim_ema_smoothing", "EMA Amount"),
-            1, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+            1, 100, format_func=lambda v: f"{v}%",
+            description=t("aim_ema_smoothing_amount_desc", "100% follows the new step. Lower holds more of the previous step."),
+            parent=self.mathGroup,
         )
         self.aimXOffsetCard = SliderLabelCard(
             FluentIcon.MOVE, t("aim_x_offset_frac", "Aim X Offset"),
-            -100, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+            -100, 100, format_func=lambda v: f"{v}%",
+            description=t("aim_x_offset_frac_desc", "Nudge the aim point sideways. Negative is left, as a percent of the box width."),
+            parent=self.mathGroup,
         )
         self.aimYOffsetCard = SliderLabelCard(
             FluentIcon.MOVE, t("aim_y_offset_frac", "Aim Y Offset"),
-            -100, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+            -100, 100, format_func=lambda v: f"{v}%",
+            description=t("aim_y_offset_frac_desc", "Nudge the aim point up or down. Positive is down, as a percent of the box height."),
+            parent=self.mathGroup,
         )
         self.stickyGapCard = SwitchSettingCard(
             FluentIcon.RINGER,
             t("sticky_gap_extrapolate", "Gap Extrapolation"),
-            t("sticky_gap_extrapolate_desc", "Keep aiming along the last velocity for a few missed frames"),
+            t("sticky_gap_extrapolate_desc", "If detection drops for a moment, keep moving along the target's last velocity instead of stopping."),
             parent=self.mathGroup,
         )
         self.stickyGapFramesCard = SliderLabelCard(
             FluentIcon.HISTORY, t("sticky_gap_frames", "Gap Frames"),
-            1, 8, parent=self.mathGroup,
-        )
-        self.dynamicFovCard = SwitchSettingCard(
-            FluentIcon.FIT_PAGE,
-            t("fov_dynamic_enabled", "Dynamic FOV"),
-            t("fov_dynamic_enabled_desc", "While the key is held, use the dynamic FOV size"),
-            parent=self.mathGroup,
-        )
-        self.dynamicFovKeyCard = SliderLabelCard(
-            FluentIcon.VPN, t("fov_dynamic_key", "Dynamic FOV Key"),
-            0, 255, format_func=lambda v: str(int(v)), parent=self.mathGroup,
-        )
-        self.dynamicFovSizeCard = SliderLabelCard(
-            FluentIcon.FIT_PAGE, t("fov_dynamic_size", "Dynamic FOV Size"),
-            10, 640, parent=self.mathGroup,
-        )
-        self.dynamicFovHeightCard = SliderLabelCard(
-            FluentIcon.FIT_PAGE, t("fov_dynamic_height", "Dynamic FOV Height"),
-            10, 640, parent=self.mathGroup,
-        )
-        self.thirdPersonCard = SwitchSettingCard(
-            FluentIcon.PEOPLE,
-            t("third_person_mask", "Third Person Mask"),
-            t("third_person_mask_desc", "Black out the bottom-left quarter of the capture"),
+            1, 8,
+            description=t("sticky_gap_frames_desc", "How many missed frames to keep steering before giving up."),
             parent=self.mathGroup,
         )
         for card in (
             self.predictionMethodCard, self.predictionLeadFramesCard, self.predictionAdaptiveLeadCard,
             self.movementPathCard, self.pathSensitivityCard, self.pathCurveCard,
             self.emaSmoothingCard, self.emaAmountCard, self.aimXOffsetCard, self.aimYOffsetCard,
-            self.stickyGapCard, self.stickyGapFramesCard, self.dynamicFovCard, self.dynamicFovKeyCard,
-            self.dynamicFovSizeCard, self.dynamicFovHeightCard, self.thirdPersonCard,
+            self.stickyGapCard, self.stickyGapFramesCard,
         ):
             self.mathGroup.addSettingCard(card)
         self.addContent(self.mathGroup)
@@ -1341,11 +1330,6 @@ class AimPage(BasePage):
         self.aimYOffsetCard.valueChanged.connect(self._onAimMathChanged)
         self.stickyGapCard.checkedChanged.connect(self._onAimMathChanged)
         self.stickyGapFramesCard.valueChanged.connect(self._onAimMathChanged)
-        self.dynamicFovCard.checkedChanged.connect(self._onAimMathChanged)
-        self.dynamicFovKeyCard.valueChanged.connect(self._onAimMathChanged)
-        self.dynamicFovSizeCard.valueChanged.connect(self._onAimMathChanged)
-        self.dynamicFovHeightCard.valueChanged.connect(self._onAimMathChanged)
-        self.thirdPersonCard.checkedChanged.connect(self._onAimMathChanged)
         self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
         self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
         self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
@@ -1481,11 +1465,7 @@ class AimPage(BasePage):
             self.aimYOffsetCard.setValue(int(float(getattr(self._config, 'aim_y_offset_frac', 0.0)) * 100))
             self.stickyGapCard.setChecked(bool(getattr(self._config, 'sticky_gap_extrapolate', False)))
             self.stickyGapFramesCard.setValue(int(getattr(self._config, 'sticky_gap_frames', 3)))
-            self.dynamicFovCard.setChecked(bool(getattr(self._config, 'fov_dynamic_enabled', False)))
-            self.dynamicFovKeyCard.setValue(int(getattr(self._config, 'fov_dynamic_key', 0)))
-            self.dynamicFovSizeCard.setValue(int(getattr(self._config, 'fov_dynamic_size', 120)))
-            self.dynamicFovHeightCard.setValue(int(getattr(self._config, 'fov_dynamic_height', 120)))
-            self.thirdPersonCard.setChecked(bool(getattr(self._config, 'third_person_mask', False)))
+            self._updateAimMathVisibility()
 
             # Target Area
             self.customYCard.setValue(int(getattr(self._config, 'aim_custom_y_pct', 30.0)))
@@ -2097,15 +2077,31 @@ class AimPage(BasePage):
         self._config.aim_y_offset_frac = self.aimYOffsetCard.value() / 100.0
         self._config.sticky_gap_extrapolate = bool(self.stickyGapCard.isChecked())
         self._config.sticky_gap_frames = int(self.stickyGapFramesCard.value())
-        self._config.fov_dynamic_enabled = bool(self.dynamicFovCard.isChecked())
-        self._config.fov_dynamic_key = int(self.dynamicFovKeyCard.value())
-        self._config.fov_dynamic_size = int(self.dynamicFovSizeCard.value())
-        self._config.fov_dynamic_height = int(self.dynamicFovHeightCard.value())
-        self._config.third_person_mask = bool(self.thirdPersonCard.isChecked())
+        self._updateAimMathVisibility()
+
+    def _updateAimMathVisibility(self):
+        """Hide Aim Math controls that do not apply to the current choices.
+
+        Path Sensitivity does nothing while Movement Path is PID. Path Curve
+        only bows Bezier and Adaptive. Rolling Lead and Adaptive Lead depend
+        on the prediction method, and both are idle while prediction is off.
+        """
+        predicting = self.predictionEnableCard.isChecked()
+        method = self.predictionMethodCombo.currentText()
+        path = self.movementPathCombo.currentText()
+        self.predictionMethodCard.setVisible(predicting)
+        self.predictionLeadFramesCard.setVisible(predicting and method == "Rolling")
+        self.predictionAdaptiveLeadCard.setVisible(predicting and method != "Rolling")
+        curved = path in ("Bezier", "Adaptive")
+        self.pathSensitivityCard.setVisible(path != "PID")
+        self.pathCurveCard.setVisible(curved)
+        self.emaAmountCard.setVisible(self.emaSmoothingCard.isChecked())
+        self.stickyGapFramesCard.setVisible(self.stickyGapCard.isChecked())
 
     def _onPredictionEnableChanged(self, checked):
         if self._config:
             self._config.prediction_enabled = bool(checked)
+        self._updateAimMathVisibility()
 
     def _onPredictionHorizonChanged(self, value):
         if self._config:
@@ -2313,7 +2309,50 @@ class AimPage(BasePage):
         self.mathGroup.titleLabel.setText(t("aim_math_group", "Aim Math"))
         self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Prediction Method"))
         self.movementPathCard.titleLabel.setText(t("aim_movement_path", "Movement Path"))
-        self.thirdPersonCard.titleLabel.setText(t("third_person_mask", "Third Person Mask"))
+        self.movementPathCard.contentLabel.setText(t(
+            "aim_movement_path_desc",
+            "How the crosshair moves onto the target. PID uses the sliders above. The other paths step a fraction of the remaining distance each frame.",
+        ))
+        self.predictionMethodCard.contentLabel.setText(t(
+            "prediction_method_desc",
+            "How the lead is estimated. Only used while Velocity Prediction is on.",
+        ))
+        self.predictionLeadFramesCard.contentLabel.setText(t(
+            "prediction_lead_frames_desc",
+            "How many frames ahead the rolling predictor aims. Shown only for Rolling.",
+        ))
+        self.predictionAdaptiveLeadCard.contentLabel.setText(t(
+            "prediction_adaptive_lead_desc",
+            "Lengthen the lead when the mouse is moving slowly. Not used with Rolling.",
+        ))
+        self.pathSensitivityCard.contentLabel.setText(t(
+            "aim_path_sensitivity_desc",
+            "Higher is slower. Shown only when Movement Path is not PID.",
+        ))
+        self.pathCurveCard.contentLabel.setText(t(
+            "aim_path_curve_desc",
+            "How far Bezier and Adaptive bow sideways. Hidden for the other paths.",
+        ))
+        self.emaAmountCard.contentLabel.setText(t(
+            "aim_ema_smoothing_amount_desc",
+            "100% follows the new step. Lower holds more of the previous step.",
+        ))
+        self.aimXOffsetCard.contentLabel.setText(t(
+            "aim_x_offset_frac_desc",
+            "Nudge the aim point sideways. Negative is left, as a percent of the box width.",
+        ))
+        self.aimYOffsetCard.contentLabel.setText(t(
+            "aim_y_offset_frac_desc",
+            "Nudge the aim point up or down. Positive is down, as a percent of the box height.",
+        ))
+        self.stickyGapCard.contentLabel.setText(t(
+            "sticky_gap_extrapolate_desc",
+            "If detection drops for a moment, keep moving along the target's last velocity instead of stopping.",
+        ))
+        self.stickyGapFramesCard.contentLabel.setText(t(
+            "sticky_gap_frames_desc",
+            "How many missed frames to keep steering before giving up.",
+        ))
         self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
         self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
         self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))
