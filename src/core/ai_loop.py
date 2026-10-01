@@ -154,25 +154,34 @@ def _probe_model_input_size(session, abs_model_path: str) -> int:
     return 0
 
 
+_hot_swap_skip_logged: tuple | None = None
+
+
 def _try_hot_swap_model(
     config: Config,
     model: ort.InferenceSession,
     current_model_path: str,
     current_backend: str,
     current_dml_fallback: bool,
+    current_fp16: bool,
 ):
     """Try hot-swapping ONNX model when model/provider related settings change."""
 
     config_backend = str(getattr(config, "inference_backend", "auto")).lower()
     config_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
+    config_fp16 = bool(getattr(config, "trt_fp16_enabled", False))
 
     should_reload = (
         config.model_path != current_model_path
         or config_backend != current_backend
         or config_dml_fallback != current_dml_fallback
+        or config_fp16 != current_fp16
     )
     if not should_reload:
-        return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
+        return (
+            model, current_model_path, model.get_inputs()[0].name,
+            current_backend, current_dml_fallback, current_fp16,
+        )
 
     new_model_path = config.model_path
     if not os.path.isabs(new_model_path):
@@ -184,7 +193,11 @@ def _try_hot_swap_model(
     if not (os.path.exists(abs_model_path) and abs_model_path.endswith('.onnx')):
         logger.warning("[Model HotSwap] Invalid path or file not found: %s", abs_model_path)
         config.model_path = current_model_path
-        return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
+        config.trt_fp16_enabled = current_fp16
+        return (
+            model, current_model_path, model.get_inputs()[0].name,
+            current_backend, current_dml_fallback, current_fp16,
+        )
 
     # A TensorRT session with no cached .engine yet compiles one synchronously
     # inside InferenceSession(...) — a 1-5 minute call. This function runs
@@ -197,14 +210,26 @@ def _try_hot_swap_model(
     # worker) rather than the primary UX.
     from .session_utils import needs_trt_build
     if needs_trt_build(config, abs_model_path):
-        logger.warning(
-            "[Model HotSwap] Skipping swap to %s — no cached TensorRT engine yet "
-            "(building one inline would block the inference loop for 1-5 min). "
-            "Convert it first via the Convert tab.",
-            os.path.basename(abs_model_path),
-        )
+        global _hot_swap_skip_logged
+        skip_key = (abs_model_path, config_fp16, config_backend)
+        if _hot_swap_skip_logged != skip_key:
+            _hot_swap_skip_logged = skip_key
+            logger.warning(
+                "[Model HotSwap] Skipping swap to %s (%s) — no cached TensorRT engine yet "
+                "(building one inline would block the inference loop for 1-5 min). "
+                "Convert it first via the Convert tab.",
+                os.path.basename(abs_model_path),
+                "FP16" if config_fp16 else "FP32",
+            )
         config.model_path = current_model_path
-        return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
+        # Leave trt_fp16_enabled on the user's choice. Reverting it would
+        # snap the precision combo back while the Convert tab is building
+        # that precision. The loaded session stays on current_fp16 until
+        # the matching engine exists and this function swaps it in.
+        return (
+            model, current_model_path, model.get_inputs()[0].name,
+            current_backend, current_dml_fallback, current_fp16,
+        )
 
     try:
         import onnxruntime as _ort
@@ -227,11 +252,15 @@ def _try_hot_swap_model(
         if actual_providers:
             config.current_provider = actual_providers[0]
         logger.info("[Model HotSwap] Switched to: %s / %s", os.path.basename(abs_model_path), config_backend)
-        return new_model, new_model_path, input_name, config_backend, config_dml_fallback
+        return new_model, new_model_path, input_name, config_backend, config_dml_fallback, config_fp16
     except Exception as e:
         logger.error("[Model HotSwap] Load failed: %s — continuing with current model", e)
         config.model_path = current_model_path
-        return model, current_model_path, model.get_inputs()[0].name, current_backend, current_dml_fallback
+        config.trt_fp16_enabled = current_fp16
+        return (
+            model, current_model_path, model.get_inputs()[0].name,
+            current_backend, current_dml_fallback, current_fp16,
+        )
 
 
 def _sleep_precise(seconds: float) -> None:
@@ -389,6 +418,7 @@ def ai_logic_loop(
     current_model_path = config.model_path
     current_backend = str(getattr(config, "inference_backend", "auto")).lower()
     current_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
+    current_fp16 = bool(getattr(config, "trt_fp16_enabled", False))
 
     ema_total = 0.0
     ema_overhead = 0.0   # this loop's per-iteration work before the tensor wait
@@ -638,12 +668,16 @@ def ai_logic_loop(
                 current_time = time.time()
 
                 prev_model = model
-                model, current_model_path, input_name, current_backend, current_dml_fallback = _try_hot_swap_model(
+                (
+                    model, current_model_path, input_name,
+                    current_backend, current_dml_fallback, current_fp16,
+                ) = _try_hot_swap_model(
                     config,
                     model,
                     current_model_path,
                     current_backend,
                     current_dml_fallback,
+                    current_fp16,
                 )
                 if model is not prev_model:
                     _io_binding[0] = _setup_io_binding(model)

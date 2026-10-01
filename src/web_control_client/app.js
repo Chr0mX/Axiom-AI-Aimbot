@@ -193,9 +193,33 @@
   // visible label instead. The <option>'s own value stays the bare filename
   // either way, so nothing downstream (selection matching, POST bodies) needs
   // to know about this cosmetic prefix.
+  var modelCacheFp16 = {};
+  var modelCacheFp32 = {};
+
+  function selectedModelFp16() {
+    var el = document.getElementById("model-precision-select");
+    return !el || el.value === "fp16";
+  }
+
+  function modelIsCached(name) {
+    if (selectedModelFp16()) {
+      if (name in modelCacheFp16) return !!modelCacheFp16[name];
+    } else if (name in modelCacheFp32) {
+      return !!modelCacheFp32[name];
+    }
+    return !!modelCacheStatus[name];
+  }
+
   function formatModelOptionLabel(name) {
     if (!modelTrtActive) return name;
-    return (modelCacheStatus[name] ? "✓ " : "⬇ ") + name;
+    return (modelIsCached(name) ? "✓ " : "⬇ ") + name;
+  }
+
+  function refreshModelOptionLabels() {
+    Array.prototype.forEach.call(modelSelect.options, function (opt) {
+      opt.textContent = formatModelOptionLabel(opt.value);
+    });
+    updateModelCacheLegend();
   }
 
   function applyModelSelection(name) {
@@ -231,6 +255,8 @@
         var currentSelection = modelListLoaded ? modelSelect.value : "";
         allModelNames = data.models;
         modelCacheStatus = data.cached || {};
+        modelCacheFp16 = data.cached_fp16 || {};
+        modelCacheFp32 = data.cached_fp32 || {};
         modelTrtActive = !!data.trt_active;
         modelSelect.innerHTML = "";
         data.models.forEach(function (name) {
@@ -258,7 +284,8 @@
     var el = document.getElementById("model-cache-legend");
     if (!el) return;
     if (modelTrtActive) {
-      el.textContent = "✓ = TensorRT engine already cached  ·  ⬇ = needs a one-time build (1-5 min)";
+      var precision = selectedModelFp16() ? "FP16" : "FP32";
+      el.textContent = "✓ = TensorRT engine already cached  ·  ⬇ = needs a one-time build (1-5 min)  (" + precision + ")";
       el.hidden = false;
     } else {
       el.hidden = true;
@@ -527,6 +554,10 @@
         if (tab === "aim") updateHumanizationVisibility();
         if (tab === "keys") updateKeysVisibility(data);
         if (tab === "visuals") applyVisualsExtras(data);
+        if (tab === "convert" && typeof convertPrecisionSelect !== "undefined" && convertPrecisionSelect
+            && document.activeElement !== convertPrecisionSelect && typeof data.trt_fp16_enabled === "boolean") {
+          convertPrecisionSelect.value = data.trt_fp16_enabled ? "fp16" : "fp32";
+        }
       })
       .catch(function () {});
   }
@@ -1556,15 +1587,14 @@
   // the server here — see app_controller.start_conversion()). The model
   // to build and the workspace budget are one-shot POST parameters, never
   // persisted Config fields, matching convert_page.py's own workspaceCombo
-  // (also never written back to Config). trt_fp16_enabled is the one
-  // field that DOES round-trip through the generic settings mechanism —
-  // marked data-custom="1" so it's read generically (pre-populates the
-  // toggle from the last-used value, mirroring ConvertPage.setConfig())
-  // but never auto-pushed on a bare flip; the real write happens only
-  // after a successful build, exactly when _onConvertFinished() does it.
+  // (also never written back to Config). Precision is an FP32/FP16 combo.
+  // The last-used value still comes from trt_fp16_enabled (mirroring
+  // ConvertPage.setConfig()) but is not written on a bare change; the real
+  // write happens only after a successful build, exactly when
+  // _onConvertFinished() does it.
   // ---------------------------------------------------------------------
   var convertModelSelect = document.getElementById("convert-model-select");
-  var convertFp16Toggle = document.getElementById("convert-trt_fp16_enabled");
+  var convertPrecisionSelect = document.getElementById("convert-precision-select");
   var convertWorkspaceSelect = document.getElementById("convert-workspace-select");
   var convertBtn = document.getElementById("convert-btn");
   var convertProgress = document.getElementById("convert-progress");
@@ -1679,7 +1709,7 @@
   // would have used.
   function startConversionFlow(name, fp16, workspaceMb) {
     if (!name) { convertReason.textContent = "select a model first"; return; }
-    if (fp16 === undefined) fp16 = convertFp16Toggle.checked;
+    if (fp16 === undefined) fp16 = !convertPrecisionSelect || convertPrecisionSelect.value !== "fp32";
     if (workspaceMb === undefined) workspaceMb = parseInt(convertWorkspaceSelect.value, 10) || 2048;
     convertLog.value = "";
     convertLogSince = 0;
@@ -1812,6 +1842,15 @@
     // dropdown to the old backend right as the operator is confirming the
     // restart. See modelSwitchPending's own comment for exactly where it's
     // set/cleared.
+    var modelPrecisionSelect = document.getElementById("model-precision-select");
+    if (modelPrecisionSelect && typeof s.trt_fp16_enabled === "boolean"
+        && document.activeElement !== modelPrecisionSelect && !modelSwitchPending) {
+      var precisionValue = s.trt_fp16_enabled ? "fp16" : "fp32";
+      if (modelPrecisionSelect.value !== precisionValue) {
+        modelPrecisionSelect.value = precisionValue;
+        refreshModelOptionLabels();
+      }
+    }
     if (s.selected_backend && document.activeElement !== backendSelect && !modelSwitchPending) {
       var backendDisplay = displayBackend(s.selected_backend);
       var hasOption = Array.prototype.some.call(backendSelect.options, function (opt) {
@@ -2011,7 +2050,11 @@
     fetch("/api/control/model_restart", {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ model_path: modelPath, inference_backend: inferenceBackend }),
+      body: JSON.stringify({
+        model_path: modelPath,
+        inference_backend: inferenceBackend,
+        fp16: selectedModelFp16(),
+      }),
     })
       .then(function (res) { return res.ok ? res.json() : null; })
       .then(function (data) {
@@ -2041,6 +2084,14 @@
       });
   }
 
+  var modelPrecisionSelect = document.getElementById("model-precision-select");
+  if (modelPrecisionSelect) {
+    modelPrecisionSelect.addEventListener("change", function () {
+      if (convertPrecisionSelect) convertPrecisionSelect.value = modelPrecisionSelect.value;
+      refreshModelOptionLabels();
+    });
+  }
+
   modelSwitchBtn.addEventListener("click", function () {
     // modelSelect's options are bare basenames (see loadModelList()) —
     // resolve_model_path() joins a relative path directly against
@@ -2053,7 +2104,11 @@
     fetch("/api/control/model", {
       method: "POST",
       headers: authHeaders(),
-      body: JSON.stringify({ model_path: modelPath, inference_backend: backendSelect.value }),
+      body: JSON.stringify({
+        model_path: modelPath,
+        inference_backend: backendSelect.value,
+        fp16: selectedModelFp16(),
+      }),
     })
       .then(function (res) {
         if (!res.ok) {
@@ -2105,7 +2160,8 @@
             var bareName = modelSelect.value;
             activateTab("convert");
             convertModelSelect.value = bareName;
-            startConversionFlow(bareName);
+            if (convertPrecisionSelect) convertPrecisionSelect.value = selectedModelFp16() ? "fp16" : "fp32";
+            startConversionFlow(bareName, selectedModelFp16());
           } else {
             modelSwitchReason.textContent = describeModelSwitchReason(data.reason);
           }

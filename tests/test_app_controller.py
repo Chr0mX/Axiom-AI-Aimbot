@@ -345,7 +345,7 @@ class TestGetModelCacheStatus:
     def _fake_session_utils(self, monkeypatch, cached_names=(), trt_active=True, raise_on_provider=False):
         fake_module = types.ModuleType("core.session_utils")
 
-        def _fake_find_trt_engine_cache(name):
+        def _fake_find_trt_engine_cache(name, cache_dir=None, fp16=None):
             return f"trt_cache/{name}.engine" if name in cached_names else None
 
         def _fake_effective_first_provider(cfg):
@@ -370,8 +370,11 @@ class TestGetModelCacheStatus:
 
         result = app_controller.get_model_cache_status(_FakeConfig())
 
+        cached = {"cached.onnx": True, "uncached.onnx": False}
         assert result == {
-            "cached": {"cached.onnx": True, "uncached.onnx": False},
+            "cached": cached,
+            "cached_fp16": cached,
+            "cached_fp32": cached,
             "trt_active": True,
         }
 
@@ -389,7 +392,12 @@ class TestGetModelCacheStatus:
 
         result = app_controller.get_model_cache_status(_FakeConfig())
 
-        assert result == {"cached": {}, "trt_active": True}
+        assert result == {
+            "cached": {},
+            "cached_fp16": {},
+            "cached_fp32": {},
+            "trt_active": True,
+        }
 
     def test_provider_lookup_failure_falls_back_to_false(self, tmp_path, monkeypatch):
         """effective_first_provider() raising (e.g. a malformed config) must

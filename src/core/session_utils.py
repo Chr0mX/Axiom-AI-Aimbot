@@ -270,7 +270,21 @@ def build_provider_list(config) -> list:
     return result or ["CPUExecutionProvider"]
 
 
-def find_trt_engine_cache(model_path: str, cache_dir: str | None = None) -> str | None:
+def _engine_precision(path: str) -> str | None:
+    """``fp16`` / ``fp32`` from an ORT cache filename, or None if it has neither tag."""
+    name = os.path.basename(path).lower()
+    if "_fp16" in name:
+        return "fp16"
+    if "_fp32" in name:
+        return "fp32"
+    return None
+
+
+def find_trt_engine_cache(
+    model_path: str,
+    cache_dir: str | None = None,
+    fp16: bool | None = None,
+) -> str | None:
     """Return the newest cached .engine file for `model_path`, or None if one
     hasn't been built yet.
 
@@ -279,6 +293,11 @@ def find_trt_engine_cache(model_path: str, cache_dir: str | None = None) -> str 
     question ORT's TensorrtExecutionProvider asks internally when a session
     is created: "is there already a usable engine, or will loading this
     model trigger a fresh (1-5 minute) build?"
+
+    ``fp16=True`` keeps only ``_fp16`` engines, ``fp16=False`` only ``_fp32``.
+    ``None`` accepts either, which is how a caller asks "is any engine cached?"
+    Choosing a model at a specific precision must pass the flag: an FP16
+    engine does not satisfy an FP32 session, and the other way around.
     """
     if not model_path:
         return None
@@ -287,6 +306,10 @@ def find_trt_engine_cache(model_path: str, cache_dir: str | None = None) -> str 
         return None
     model_stem = os.path.splitext(os.path.basename(model_path))[0]
     matches = glob.glob(os.path.join(cache_dir, f"{model_stem}*.engine"))
+    if fp16 is True:
+        matches = [m for m in matches if _engine_precision(m) == "fp16"]
+    elif fp16 is False:
+        matches = [m for m in matches if _engine_precision(m) == "fp32"]
     return sorted(matches)[-1] if matches else None
 
 
@@ -319,7 +342,8 @@ def needs_trt_build(config, model_path: str) -> bool:
     if not os.path.isabs(model_path):
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         model_path = os.path.join(project_root, model_path)
-    return find_trt_engine_cache(model_path) is None
+    fp16 = bool(getattr(config, "trt_fp16_enabled", False))
+    return find_trt_engine_cache(model_path, fp16=fp16) is None
 
 
 def optimize_onnx_session(config):

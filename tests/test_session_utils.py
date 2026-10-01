@@ -84,6 +84,35 @@ def test_needs_trt_build_true_when_engine_missing(tmp_path):
         assert session_utils.needs_trt_build(cfg, str(onnx_path)) is True
 
 
+def test_find_trt_engine_cache_filters_by_precision(tmp_path):
+    from core import session_utils
+
+    onnx_path = tmp_path / "Roblox_8n.onnx"
+    fp16_engine = tmp_path / "Roblox_8n_sm75_fp16.engine"
+    fp32_engine = tmp_path / "Roblox_8n_sm75_fp32.engine"
+    fp16_engine.write_bytes(b"fp16")
+    fp32_engine.write_bytes(b"fp32")
+
+    assert session_utils.find_trt_engine_cache(str(onnx_path), str(tmp_path), fp16=True) == str(fp16_engine)
+    assert session_utils.find_trt_engine_cache(str(onnx_path), str(tmp_path), fp16=False) == str(fp32_engine)
+    assert session_utils.find_trt_engine_cache(str(onnx_path), str(tmp_path)) in (
+        str(fp16_engine), str(fp32_engine))
+
+
+def test_needs_trt_build_depends_on_selected_precision(tmp_path):
+    from core import session_utils
+
+    onnx_path = tmp_path / "Roblox_8n.onnx"
+    (tmp_path / "Roblox_8n_sm75_fp32.engine").write_bytes(b"fp32")
+    cfg = _FakeConfig(backend="tensorrt", model_path=str(onnx_path))
+    with _with_providers(["TensorrtExecutionProvider", "CPUExecutionProvider"]), \
+         patch.object(session_utils, "_TRT_CACHE_DIR", str(tmp_path)):
+        cfg.trt_fp16_enabled = True
+        assert session_utils.needs_trt_build(cfg, str(onnx_path)) is True
+        cfg.trt_fp16_enabled = False
+        assert session_utils.needs_trt_build(cfg, str(onnx_path)) is False
+
+
 def test_needs_trt_build_false_when_engine_cached(tmp_path):
     from core import session_utils
 

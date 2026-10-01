@@ -8,7 +8,7 @@ import sys
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFileDialog
 from qfluentwidgets import (
-    SettingCardGroup, SettingCard, SwitchSettingCard, ComboBox,
+    SettingCardGroup, SettingCard, ComboBox,
     FluentIcon, PrimaryPushButton, PushButton, BodyLabel, CaptionLabel,
     TextEdit, IndeterminateProgressBar, InfoBar, InfoBarPosition, SearchLineEdit,
 )
@@ -97,7 +97,7 @@ class ConvertPage(BasePage):
         self._config = config
         if config is None:
             return
-        self.fp16Card.setChecked(bool(getattr(config, 'trt_fp16_enabled', True)))
+        self._setPrecision(bool(getattr(config, 'trt_fp16_enabled', True)))
         model_path = getattr(config, 'model_path', '')
         model_name = os.path.basename(model_path or "")
         idx = self.modelCombo.findText(model_name)
@@ -143,14 +143,19 @@ class ConvertPage(BasePage):
         self.modelCard.hBoxLayout.addWidget(self.browseBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.modelCard.hBoxLayout.addSpacing(16)
 
-        # FP16 toggle
-        self.fp16Card = SwitchSettingCard(
+        # Precision — FP32 or FP16. Both can be built and then chosen on the Model page.
+        self.precisionCombo = ComboBox()
+        self.precisionCombo.addItems(["FP32", "FP16"])
+        self.precisionCombo.setCurrentText("FP16")
+        self.precisionCombo.setMinimumWidth(120)
+        self.precisionCard = SettingCard(
             FluentIcon.SPEED_HIGH,
-            t("trt_fp16", "FP16 Precision"),
-            t("trt_fp16_desc", "Half precision — ~2× faster on RTX GPUs, negligible accuracy loss."),
-            parent=self.convertGroup,
+            t("trt_precision", "Precision"),
+            t("trt_precision_desc", "FP16 is ~2× faster on RTX GPUs. FP32 is full precision. Either engine can be selected later with the model."),
+            self.convertGroup,
         )
-        self.fp16Card.setChecked(True)
+        self.precisionCard.hBoxLayout.addWidget(self.precisionCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.precisionCard.hBoxLayout.addSpacing(16)
 
         # Workspace budget
         self.workspaceCombo = ComboBox()
@@ -202,7 +207,7 @@ class ConvertPage(BasePage):
     def _initLayout(self):
         self.convertGroup.addSettingCard(self.modelSearchCard)
         self.convertGroup.addSettingCard(self.modelCard)
-        self.convertGroup.addSettingCard(self.fp16Card)
+        self.convertGroup.addSettingCard(self.precisionCard)
         self.convertGroup.addSettingCard(self.workspaceCard)
         self.convertGroup.addSettingCard(self.outputCard)
         self.addContent(self.convertGroup)
@@ -292,11 +297,22 @@ class ConvertPage(BasePage):
             self.modelCombo.addItem(name, userData=abs_path)
             self.modelCombo.setCurrentIndex(self.modelCombo.count() - 1)
 
+    def _fp16Selected(self) -> bool:
+        return self.precisionCombo.currentText() == "FP16"
+
+    def _setPrecision(self, fp16: bool) -> None:
+        self.precisionCombo.setCurrentText("FP16" if fp16 else "FP32")
+
     def startConversionFor(self, model_path: str | None = None) -> None:
         """Public entry point for other pages: select `model_path` (if given)
         then start conversion, as if the user clicked Convert. Used by
         ModelPage's model/backend selectors to redirect here automatically
-        when the selected model has no cached TensorRT engine yet."""
+        when the selected model has no cached TensorRT engine yet.
+
+        Precision follows config.trt_fp16_enabled, which the Model page sets
+        from its own FP32/FP16 combo before calling this."""
+        if self._config is not None:
+            self._setPrecision(bool(getattr(self._config, 'trt_fp16_enabled', True)))
         if model_path:
             self.selectModelForConversion(model_path)
         self._onConvert()
@@ -356,6 +372,7 @@ class ConvertPage(BasePage):
         self.convertBtn.setText(
             t("trt_converting", "Converting…") if is_running else t("trt_convert", "Convert"))
         self.modelCombo.setEnabled(not is_running)
+        self.precisionCombo.setEnabled(not is_running)
         self.browseBtn.setEnabled(not is_running)
 
         for line in status.get("log_lines") or []:
@@ -407,7 +424,7 @@ class ConvertPage(BasePage):
             return
 
         os.makedirs(self._cache_dir, exist_ok=True)
-        fp16 = self.fp16Card.isChecked()
+        fp16 = self._fp16Selected()
         try:
             workspace_mb = int(self.workspaceCombo.currentText())
         except ValueError:
@@ -422,6 +439,7 @@ class ConvertPage(BasePage):
         # self._converting_onnx_path on success, so it must stay in sync with
         # whatever the worker is actually building.
         self.modelCombo.setEnabled(False)
+        self.precisionCombo.setEnabled(False)
         self.browseBtn.setEnabled(False)
         self._converting_onnx_path = onnx_path
 
@@ -447,13 +465,14 @@ class ConvertPage(BasePage):
         self.convertBtn.setEnabled(True)
         self.convertBtn.setText(t("trt_convert", "Convert"))
         self.modelCombo.setEnabled(True)
+        self.precisionCombo.setEnabled(True)
         self.browseBtn.setEnabled(True)
         if self._config:
             self._config.inference_paused = False
         if success:
             self.logView.append(f"✓ Done. Engine cache written to: {message}")
             if self._config is not None:
-                self._config.trt_fp16_enabled = self.fp16Card.isChecked()
+                self._config.trt_fp16_enabled = self._fp16Selected()
                 # Point the running app at the model we just built an engine
                 # for, so the (now cache-hit, near-instant) hot-swap in
                 # ai_loop.py picks it up on the next frame instead of the
@@ -507,8 +526,11 @@ class ConvertPage(BasePage):
         self.modelCard.titleLabel.setText(t("trt_source_model", "Source ONNX Model"))
         self.modelCard.contentLabel.setText(t("trt_source_model_desc", "Select the .onnx model to compile into a TensorRT engine."))
         self.browseBtn.setText(t("trt_browse", "Browse"))
-        self.fp16Card.titleLabel.setText(t("trt_fp16", "FP16 Precision"))
-        self.fp16Card.contentLabel.setText(t("trt_fp16_desc", "Half precision — ~2× faster on RTX GPUs, negligible accuracy loss."))
+        self.precisionCard.titleLabel.setText(t("trt_precision", "Precision"))
+        self.precisionCard.contentLabel.setText(t(
+            "trt_precision_desc",
+            "FP16 is ~2× faster on RTX GPUs. FP32 is full precision. Either engine can be selected later with the model.",
+        ))
         self.workspaceCard.titleLabel.setText(t("trt_workspace", "Builder Workspace (MiB)"))
         self.workspaceCard.contentLabel.setText(t("trt_workspace_desc", "GPU memory budget for the build. Increase for larger models."))
         self.outputCard.titleLabel.setText(t("trt_output", "Output Cache Directory"))

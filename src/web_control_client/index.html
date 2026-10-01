@@ -94,6 +94,10 @@
             <input type="text" id="model-search-input" placeholder="Search models…">
             <div class="row">
               <select id="model-select"></select>
+              <select id="model-precision-select" title="TensorRT precision for this model">
+                <option value="fp32">FP32</option>
+                <option value="fp16">FP16</option>
+              </select>
               <select id="backend-select">
                 <option value="auto">Auto</option>
                 <option value="tensorrt">TensorRT</option>
@@ -1897,14 +1901,14 @@
             </div>
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">FP16 Precision</div>
-                <div class="field-desc">Half precision — ~2&times; faster on RTX GPUs, negligible accuracy loss.</div>
+                <div class="field-title">Precision</div>
+                <div class="field-desc">FP16 is ~2&times; faster on RTX GPUs. FP32 is full precision. Either engine can be selected with the model.</div>
               </div>
               <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="convert-trt_fp16_enabled" data-key="trt_fp16_enabled" data-type="bool" data-custom="1" checked>
-                  <span class="slider"></span>
-                </label>
+                <select id="convert-precision-select">
+                  <option value="fp32">FP32</option>
+                  <option value="fp16" selected>FP16</option>
+                </select>
               </div>
             </div>
             <div class="field-card">
