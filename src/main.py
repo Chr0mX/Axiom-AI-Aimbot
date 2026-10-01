@@ -47,6 +47,22 @@ src_dir = os.path.dirname(os.path.abspath(__file__))
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
+# Before any print/log. Clicking the console (Quick Edit selection) blocks
+# WriteConsole, and a blocked log line holds the logging lock the UI thread
+# needs. Load console.py directly so this does not import win_utils/__init__.py
+# (that pulls win32api in before the dependency path and DLL preload below).
+try:
+    import importlib.util
+    _console_path = os.path.join(src_dir, "win_utils", "console.py")
+    _console_spec = importlib.util.spec_from_file_location(
+        "_axiom_console_early", _console_path)
+    if _console_spec is not None and _console_spec.loader is not None:
+        _console_mod = importlib.util.module_from_spec(_console_spec)
+        _console_spec.loader.exec_module(_console_mod)
+        _console_mod.prepare_console()
+except Exception as _console_exc:
+    print(f"Warning: console freeze guard failed: {_console_exc}")
+
 # Add dependencies directory to Python path (located in src/python/dependencies)
 python_dir = os.path.join(src_dir, "python")
 dependencies_dir = os.path.join(python_dir, "dependencies")

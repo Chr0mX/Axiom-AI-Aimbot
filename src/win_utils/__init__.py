@@ -115,6 +115,7 @@ from .console import (
     show_console,
     hide_console,
     is_console_visible,
+    prepare_console,
 )
 
 
@@ -230,5 +231,6 @@ __all__ = [
     'show_console',
     'hide_console',
     'is_console_visible',
+    'prepare_console',
 ]
 

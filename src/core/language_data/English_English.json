@@ -138,6 +138,7 @@
   "show_boxes": "Show Player Boxes",
   "show_confidence": "Show Detection Confidence",
   "show_console": "Show Console Window",
+  "show_console_desc": "Log window. The app keeps running while text in this window is selected.",
   "show_fov": "Show FOV",
   "show_detect_range": "Show AI Inference Range",
   "show_status_panel": "Show Status Panel",
