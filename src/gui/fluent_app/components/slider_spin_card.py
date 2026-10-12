@@ -65,6 +65,9 @@ class SliderSpinCard(SettingCard):
         self.slider.blockSignals(True)
         self.slider.setValue(value)
         self.slider.blockSignals(False)
+        # qfluentwidgets' Slider only moves its handle on valueChanged —
+        # blockSignals suppresses that, so force a handle/groove refresh.
+        self._syncSliderHandle()
         self.valueChanged.emit(value)
 
     def setValue(self, value: int):
@@ -81,6 +84,20 @@ class SliderSpinCard(SettingCard):
         self.spinBox.setValue(clamped)
         self.slider.blockSignals(False)
         self.spinBox.blockSignals(False)
+        self._syncSliderHandle()
+
+    def _syncSliderHandle(self) -> None:
+        """Move qfluentwidgets' SliderHandle after a blocked setValue().
+
+        That Slider positions its handle only via valueChanged →
+        _adjustHandlePos. Config/preset loads call setValue() with signals
+        blocked (to avoid feedback loops), so without this the numeric
+        SpinBox updates while the thumb stays at the previous position.
+        """
+        adjust = getattr(self.slider, "_adjustHandlePos", None)
+        if callable(adjust):
+            adjust()
+        self.slider.update()
 
     def value(self) -> int:
         """取得當前值"""
@@ -151,6 +168,7 @@ class SliderDoubleSpinCard(SettingCard):
         self.slider.blockSignals(True)
         self.slider.setValue(int_val)
         self.slider.blockSignals(False)
+        self._syncSliderHandle()
         self.valueChanged.emit(value)
 
     def setValue(self, value: float):
@@ -164,6 +182,14 @@ class SliderDoubleSpinCard(SettingCard):
         self.spinBox.setValue(self.slider.value() / self._multiplier)
         self.slider.blockSignals(False)
         self.spinBox.blockSignals(False)
+        self._syncSliderHandle()
+
+    def _syncSliderHandle(self) -> None:
+        """See SliderSpinCard._syncSliderHandle — same qfluentwidgets handle bug."""
+        adjust = getattr(self.slider, "_adjustHandlePos", None)
+        if callable(adjust):
+            adjust()
+        self.slider.update()
 
     def value(self) -> float:
         """取得當前值"""
@@ -228,6 +254,12 @@ class SliderLabelCard(SettingCard):
         # disagrees with.
         self.label.setText(self._format_func(self.slider.value()))
         self.slider.blockSignals(False)
+        # qfluentwidgets only moves SliderHandle on valueChanged — blocked
+        # signals leave the thumb stuck after config/preset loads.
+        adjust = getattr(self.slider, "_adjustHandlePos", None)
+        if callable(adjust):
+            adjust()
+        self.slider.update()
 
     def value(self) -> int:
         """取得當前值"""

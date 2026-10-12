@@ -74,6 +74,15 @@
 
   tokenSaveBtn.addEventListener("click", function () {
     setToken(tokenInput.value.trim());
+    // A wrong/empty token on first load leaves the model <select> empty with
+    // no retry — re-fetch models (and related one-shot lists) now that auth
+    // may actually succeed, instead of requiring a full page reload.
+    modelListLoaded = false;
+    hudModelsLoaded = false;
+    gameProfilesLoaded = false;
+    loadModelList();
+    if (typeof ensureModelPanelExtras === "function") ensureModelPanelExtras();
+    if (typeof ensureVkOptionsLoaded === "function") ensureVkOptionsLoaded();
     poll();
   });
 
@@ -240,13 +249,38 @@
     // a phantom option for a file that may no longer exist.
   }
 
+  function setModelListHint(msg, isError) {
+    if (modelSwitchReason) {
+      modelSwitchReason.textContent = msg || "";
+      modelSwitchReason.className = isError ? "hint error" : "hint";
+    }
+    var emptyHint = document.getElementById("model-empty-hint");
+    if (emptyHint) {
+      emptyHint.hidden = !!(msg || (allModelNames && allModelNames.length));
+    }
+  }
+
   function loadModelList() {
     fetch("/api/models", { headers: authHeaders() })
       .then(function (res) {
-        return res.ok ? res.json() : null;
+        if (res.status === 401) {
+          setModelListHint("Unauthorized — check the Access Token, then Save.", true);
+          return null;
+        }
+        if (!res.ok) {
+          setModelListHint("Could not load models (HTTP " + res.status + ").", true);
+          return null;
+        }
+        return res.json();
       })
       .then(function (data) {
-        if (!data || !data.models) return;
+        if (!data || !data.models) {
+          if (!modelSwitchReason || !modelSwitchReason.textContent) {
+            setModelListHint("Could not load model list. Check the token and try Refresh.", true);
+          }
+          modelSwitchBtn.disabled = true;
+          return;
+        }
         // Preserve whatever's currently selected across the rebuild below —
         // this function is also called after a successful switch (to
         // refresh the ✓/⬇ badges for the newly-active backend), where
@@ -268,13 +302,31 @@
         if (currentSelection) modelSelect.value = currentSelection;
         updateModelCacheLegend();
         modelListLoaded = true;
-        modelSwitchBtn.disabled = false;
+        modelSwitchBtn.disabled = data.models.length === 0;
+        var emptyHint = document.getElementById("model-empty-hint");
+        if (emptyHint) emptyHint.hidden = data.models.length > 0;
+        if (data.models.length === 0) {
+          setModelListHint("No .onnx files in Model/ on the host.", true);
+        } else if (modelSwitchReason && /Unauthorized|Could not load/i.test(modelSwitchReason.textContent)) {
+          setModelListHint("", false);
+        }
         if (pendingModelSelection) {
           applyModelSelection(pendingModelSelection);
           pendingModelSelection = null;
         }
       })
-      .catch(function () {});
+      .catch(function () {
+        setModelListHint("Network error loading models. Retry with Refresh.", true);
+        modelSwitchBtn.disabled = true;
+      });
+  }
+
+  var modelRefreshBtn = document.getElementById("model-refresh-btn");
+  if (modelRefreshBtn) {
+    modelRefreshBtn.addEventListener("click", function () {
+      modelListLoaded = false;
+      loadModelList();
+    });
   }
 
   // Explains the ✓/⬇ prefix — only shown while it's actually meaningful,
@@ -550,8 +602,14 @@
           applyGenericValue(el, type, data[key]);
         });
         if (tab === "capture") updateCaptureVisibility(data.screenshot_method);
-        if (tab === "inference") updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
-        if (tab === "aim") updateHumanizationVisibility();
+        if (tab === "inference") {
+          updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
+          updateWeaponDetectVisibility(data.second_inference_mode);
+        }
+        if (tab === "aim") {
+          updateHumanizationVisibility();
+          if (typeof data.pid_unsafe_mode === "boolean") applyPidUnsafeSliderLimits(!!data.pid_unsafe_mode);
+        }
         if (tab === "keys") updateKeysVisibility(data);
         if (tab === "visuals") applyVisualsExtras(data);
         if (tab === "convert" && typeof convertPrecisionSelect !== "undefined" && convertPrecisionSelect
@@ -594,6 +652,7 @@
           updateUvcSubVisibility();
         }
         if (tab === "inference" && key === "fov_reduce_on_target_enabled") updateFovReduceVisibility(el.checked);
+        if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
@@ -619,6 +678,11 @@
   function updateFovReduceVisibility(enabled) {
     document.getElementById("inf-fov-min-size-card").classList.toggle("hidden", !enabled);
     document.getElementById("inf-fov-min-duration-card").classList.toggle("hidden", !enabled);
+  }
+
+  function updateWeaponDetectVisibility(mode) {
+    var card = document.getElementById("inf-hud-confidence-card");
+    if (card) card.classList.toggle("hidden", mode !== "v2_onnx");
   }
 
   // ---------------------------------------------------------------------
@@ -665,8 +729,23 @@
   // Done as one coupled POST (all three keys the client already has in
   // hand from the currently-loaded number inputs), same precedent as
   // ndi_source_name/ndi_force_reconnect.
+  function applyPidUnsafeSliderLimits(enabled) {
+    // Mirror aim_page.py: safe mode caps P travel at 0.5; Unsafe Mode opens to 1.0.
+    var max = enabled ? "1" : "0.5";
+    ["aim-pid_kp_x", "aim-pid_kp_y"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.max = max;
+      if (el._pairedRange) {
+        el._pairedRange.max = max;
+        if (typeof updateRangeFill === "function") updateRangeFill(el._pairedRange);
+      }
+    });
+  }
+
   document.getElementById("aim-pid_unsafe_mode").addEventListener("change", function (e) {
     var enabled = e.target.checked;
+    applyPidUnsafeSliderLimits(enabled);
     var body = { pid_unsafe_mode: enabled };
     if (!enabled) {
       var kpX = document.getElementById("aim-pid_kp_x");
@@ -675,6 +754,8 @@
       var yVal = parseFloat(kpY.value);
       if (!isNaN(xVal) && xVal > 0.5) { body.pid_kp_x = 0.5; kpX.value = "0.5"; }
       if (!isNaN(yVal) && yVal > 0.5) { body.pid_kp_y = 0.5; kpY.value = "0.5"; }
+      if (kpX._pairedRange) kpX._pairedRange.value = kpX.value;
+      if (kpY._pairedRange) kpY._pairedRange.value = kpY.value;
     }
     fetch("/api/settings/aim", {
       method: "POST",
@@ -1120,11 +1201,18 @@
           select.innerHTML = "";
           data.models.forEach(function (name) {
             var opt = document.createElement("option");
-            opt.value = name;
+            // Desktop always persists Model_Hud/<basename> — option values
+            // must match that form or select.value = config path fails and a
+            // generic POST can write a bare basename back into Config.
+            opt.value = "Model_Hud/" + name;
             opt.textContent = name;
             select.appendChild(opt);
           });
-          if (lastSettings.model.hud_model_path) select.value = lastSettings.model.hud_model_path;
+          if (lastSettings.model && lastSettings.model.hud_model_path) {
+            var want = lastSettings.model.hud_model_path.replace(/\\/g, "/");
+            if (want.indexOf("/") < 0) want = "Model_Hud/" + want;
+            select.value = want;
+          }
         })
         .catch(function () {});
     }

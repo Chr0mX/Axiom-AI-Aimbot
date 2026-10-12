@@ -767,7 +767,8 @@ class TestRunConversionWorker:
         assert config.trt_fp16_enabled is True
         # Re-derived as "Model/real.onnx" (portable relative form), not the
         # absolute tmp_path — mirrors convert_page.py's own storage format.
-        assert config.model_path == os.path.join("Model", "real.onnx")
+        # Always forward-slash portable form (spaces/Windows paths safe).
+        assert config.model_path.replace("\\", "/") == "Model/real.onnx"
         assert saved == [config]
         assert app_controller._convert_state["running"] is False
         assert app_controller._convert_state["done"] is True

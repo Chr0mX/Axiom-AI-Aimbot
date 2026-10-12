@@ -4,6 +4,7 @@
 import glob
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -280,6 +281,33 @@ def _engine_precision(path: str) -> str | None:
     return None
 
 
+# ORT names engines ``{prefix}_{hash|smXX|fp16|fp32}_...``. The first segment
+# after the model stem must look like that metadata — not another model-name
+# fragment — otherwise a shorter stem (``Foo``) falsely claims a longer
+# model's engine (``Foo_v2_sm75_fp16.engine``).
+_ORT_ENGINE_AFTER_STEM = re.compile(
+    r"^(?:fp16|fp32|sm\d+|[0-9a-f]{8,})(?:_|$)",
+    re.IGNORECASE,
+)
+
+
+def _engine_belongs_to_stem(engine_path: str, model_stem: str) -> bool:
+    """True if `engine_path` was built with trt_engine_cache_prefix == model_stem.
+
+    Rejects prefix collisions where a shorter stem matches a longer model's
+    engine filename (e.g. stem ``Foo`` must not match ``Foo_v2_*.engine``).
+    """
+    name = os.path.basename(engine_path)
+    if name.lower().endswith(".engine"):
+        name = name[:-7]
+    if name == model_stem:
+        return True
+    prefix = model_stem + "_"
+    if not name.startswith(prefix):
+        return False
+    return bool(_ORT_ENGINE_AFTER_STEM.match(name[len(prefix):]))
+
+
 def find_trt_engine_cache(
     model_path: str,
     cache_dir: str | None = None,
@@ -298,6 +326,11 @@ def find_trt_engine_cache(
     ``None`` accepts either, which is how a caller asks "is any engine cached?"
     Choosing a model at a specific precision must pass the flag: an FP16
     engine does not satisfy an FP32 session, and the other way around.
+
+    Untagged engines (no ``_fp16``/``_fp32`` in the filename) are accepted as
+    a fallback for the requested precision — some ORT builds omit the tag,
+    and treating them as missing forever left hot-swap stuck skipping the
+    just-converted model.
     """
     if not model_path:
         return None
@@ -305,11 +338,19 @@ def find_trt_engine_cache(
     if not os.path.isdir(cache_dir):
         return None
     model_stem = os.path.splitext(os.path.basename(model_path))[0]
-    matches = glob.glob(os.path.join(cache_dir, f"{model_stem}*.engine"))
+    # Delimiter-aware glob (stem + "_" or exact stem.engine), then filter out
+    # longer-stem collisions the glob alone can't reject.
+    candidates = glob.glob(os.path.join(cache_dir, f"{model_stem}_*.engine"))
+    exact = os.path.join(cache_dir, f"{model_stem}.engine")
+    if os.path.isfile(exact):
+        candidates.append(exact)
+    matches = [m for m in candidates if _engine_belongs_to_stem(m, model_stem)]
     if fp16 is True:
-        matches = [m for m in matches if _engine_precision(m) == "fp16"]
+        tagged = [m for m in matches if _engine_precision(m) == "fp16"]
+        matches = tagged or [m for m in matches if _engine_precision(m) is None]
     elif fp16 is False:
-        matches = [m for m in matches if _engine_precision(m) == "fp32"]
+        tagged = [m for m in matches if _engine_precision(m) == "fp32"]
+        matches = tagged or [m for m in matches if _engine_precision(m) is None]
     return sorted(matches)[-1] if matches else None
 
 

@@ -1,7 +1,6 @@
 # convert_page.py
 """TensorRT engine conversion page — convert ONNX models to .engine caches."""
 
-import glob
 import os
 import sys
 
@@ -236,10 +235,16 @@ class ConvertPage(BasePage):
         thing that narrows it to a subset afterward."""
         self._all_model_files = []
         if os.path.isdir(self._model_dir):
-            self._all_model_files = sorted(
-                ((os.path.basename(m), m) for m in glob.glob(os.path.join(self._model_dir, "*.onnx"))),
-                key=lambda pair: pair[0],
-            )
+            # Case-insensitive .onnx/.ONNX (glob("*.onnx") misses uppercase
+            # on case-sensitive filesystems).
+            pairs = []
+            for name in os.listdir(self._model_dir):
+                if not name.lower().endswith(".onnx"):
+                    continue
+                full = os.path.join(self._model_dir, name)
+                if os.path.isfile(full):
+                    pairs.append((name, full))
+            self._all_model_files = sorted(pairs, key=lambda pair: pair[0])
         self.modelCombo.clear()
         for name, path in self._all_model_files:
             self.modelCombo.addItem(name, userData=path)
@@ -303,19 +308,28 @@ class ConvertPage(BasePage):
     def _setPrecision(self, fp16: bool) -> None:
         self.precisionCombo.setCurrentText("FP16" if fp16 else "FP32")
 
-    def startConversionFor(self, model_path: str | None = None) -> None:
+    def startConversionFor(self, model_path: str | None = None) -> bool:
         """Public entry point for other pages: select `model_path` (if given)
         then start conversion, as if the user clicked Convert. Used by
         ModelPage's model/backend selectors to redirect here automatically
         when the selected model has no cached TensorRT engine yet.
 
         Precision follows config.trt_fp16_enabled, which the Model page sets
-        from its own FP32/FP16 combo before calling this."""
+        from its own FP32/FP16 combo before calling this.
+
+        Returns True if a conversion worker was actually started, False if
+        one was already running / the path couldn't be resolved (so callers
+        can surface a real error instead of claiming a build began).
+        """
+        if self._worker is not None and self._worker.isRunning():
+            return False
         if self._config is not None:
             self._setPrecision(bool(getattr(self._config, 'trt_fp16_enabled', True)))
         if model_path:
             self.selectModelForConversion(model_path)
+        before = self._worker
         self._onConvert()
+        return self._worker is not None and self._worker is not before
 
     def showRemoteConversionState(self, status: dict) -> None:
         """Mirrors a TensorRT build that was triggered remotely — via the
@@ -482,8 +496,15 @@ class ConvertPage(BasePage):
                 # so config.json/presets stay portable across machines.
                 if self._converting_onnx_path:
                     converted = self._converting_onnx_path
-                    if os.path.isabs(converted) and os.path.dirname(converted) == self._model_dir:
-                        converted = os.path.join("Model", os.path.basename(converted))
+                    # normpath/normcase so Windows path separators and drive
+                    # letter casing don't leave an absolute path in config
+                    # when the file really lives under Model/.
+                    conv_dir = os.path.normcase(os.path.normpath(os.path.dirname(converted)))
+                    model_dir = os.path.normcase(os.path.normpath(self._model_dir))
+                    if os.path.isabs(converted) and conv_dir == model_dir:
+                        converted = "Model/" + os.path.basename(converted)
+                    elif not os.path.isabs(converted):
+                        converted = converted.replace("\\", "/")
                     self._config.model_path = converted
                 try:
                     from core.config import save_config
