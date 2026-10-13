@@ -82,6 +82,12 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "udp_bind_ip": {"type": "str"},
         "udp_bind_port": {"type": "int", "min": 1, "max": 65535},
         "udp_force_restart": {"type": "bool"},
+        # Dedicated HUD UDP stream (capture_page.py's UDP group) — used when
+        # the main UDP crop excludes the HUD strip. Defaults match Config.
+        "hud_udp_enabled": {"type": "bool"},
+        "hud_udp_bind_ip": {"type": "str"},
+        "hud_udp_bind_port": {"type": "int", "min": 1, "max": 65535},
+        "second_inference_fps": {"type": "int", "min": 1, "max": 10},
     },
     "inference": {
         "fov_size": {"type": "int", "min": 50, "max": 500},
@@ -107,6 +113,12 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # raw-int convention, since a plain number input has no separate
         # label to carry the /10 translation the GUI's format_func provides.
         "frame_skip_threshold": {"type": "float", "min": 0.5, "max": 10.0},
+        # Weapon Detection Method (inference_page.py) — off / OCR / ONNX HUD.
+        "second_inference_mode": {
+            "type": "choice",
+            "choices": ["off", "v1_ocr", "v2_onnx"],
+        },
+        "hud_confidence": {"type": "float", "min": 0.01, "max": 1.0},
     },
     "aim": {
         "aim_part": {"type": "choice", "choices": ["head", "body", "center", "custom"]},
@@ -141,7 +153,8 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # HumanizationConfig dataclass), reached via the dotted-path
         # mechanism in _get_nested()/_set_nested() above.
         "humanization.enabled": {"type": "bool"},
-        "humanization.intensity": {"type": "float", "min": 0.0, "max": 1.0},
+        # Desktop Aim page shows Intensity as 0–100%; Config stores 0.0–1.0.
+        "humanization.intensity": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
         "humanization.micro_jitter_enabled": {"type": "bool"},
         "humanization.micro_jitter_base": {"type": "float", "min": 0.0, "max": 2.0},
         "humanization.micro_jitter_scale": {"type": "float", "min": 0.0, "max": 0.2},
@@ -246,12 +259,15 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "chroma_box_speed": {"type": "int", "min": 0, "max": 20},
         "show_status_panel": {"type": "bool"},
         "status_panel_show_auto_aim": {"type": "bool"},
+        "status_panel_show_aim_toggle": {"type": "bool"},
+        "status_panel_show_preset_config": {"type": "bool"},
         "status_panel_show_model": {"type": "bool"},
         "status_panel_show_mouse_move": {"type": "bool"},
         "status_panel_show_mouse_click": {"type": "bool"},
         "status_panel_show_screenshot_method": {"type": "bool"},
         "status_panel_show_screenshot_fps": {"type": "bool"},
         "status_panel_show_detection_fps": {"type": "bool"},
+        "show_aim_prediction_marker": {"type": "bool"},
         "show_crosshair": {"type": "bool"},
         "crosshair_style": {"type": "choice", "choices": ["dot", "cross"]},
         "crosshair_size": {"type": "int", "min": 1, "max": 20},
@@ -643,11 +659,19 @@ def get_game_profiles() -> dict:
 
 def get_hud_models() -> list[str]:
     """Sorted .onnx basenames under Model_Hud/ — same pattern as
-    app_controller.list_models(), different directory."""
+    app_controller.list_models(), different directory.
+
+    Case-insensitive on the extension so ``.ONNX`` files appear on
+    case-sensitive filesystems.
+    """
     model_dir = os.path.join(project_root, "Model_Hud")
     if not os.path.exists(model_dir):
         return []
-    return sorted(os.path.basename(m) for m in glob.glob(os.path.join(model_dir, "*.onnx")))
+    return sorted(
+        name for name in os.listdir(model_dir)
+        if name.lower().endswith(".onnx")
+        and os.path.isfile(os.path.join(model_dir, name))
+    )
 
 
 # ---------------------------------------------------------------------------

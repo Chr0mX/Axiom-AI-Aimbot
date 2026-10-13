@@ -490,8 +490,13 @@ class ModelPage(BasePage):
         model_dir = os.path.join(project_root, "Model")
         self._all_model_files = []
         if os.path.exists(model_dir):
+            # Case-insensitive .onnx/.ONNX — glob("*.onnx") misses uppercase
+            # extensions on case-sensitive filesystems (Linux CI / some NAS).
             self._all_model_files = sorted(
-                os.path.basename(m) for m in glob.glob(os.path.join(model_dir, "*.onnx")))
+                name for name in os.listdir(model_dir)
+                if name.lower().endswith(".onnx")
+                and os.path.isfile(os.path.join(model_dir, name))
+            )
         self._model_engine_cached = self._computeEngineCacheStatus(self._all_model_files)
         self.modelCombo.clear()
         for name in self._all_model_files:
@@ -591,9 +596,13 @@ class ModelPage(BasePage):
         project_root = os.path.dirname(src_dir)
         model_dir = os.path.join(project_root, "Model_Hud")
         if os.path.exists(model_dir):
-            models = glob.glob(os.path.join(model_dir, "*.onnx"))
-            for m in sorted(models):
-                self.hudModelCombo.addItem(os.path.basename(m))
+            models = sorted(
+                name for name in os.listdir(model_dir)
+                if name.lower().endswith(".onnx")
+                and os.path.isfile(os.path.join(model_dir, name))
+            )
+            for name in models:
+                self.hudModelCombo.addItem(name)
 
     def _loadGameJson(self) -> dict:
         """Read game.json from project root. Returns {} on missing/invalid file."""
@@ -738,17 +747,18 @@ class ModelPage(BasePage):
     def _onModelChanged(self, text):
         if not self._config or not text:
             return
-        new_path = os.path.join("Model", text)
-        if self._redirectToConvertIfNeeded(new_path):
-            # Engine missing under the active TensorRT backend — conversion
-            # was just kicked off on the Convert tab instead of applying this
-            # model_path here, which would otherwise hang the running aim
-            # loop's hot-swap doing a blocking 1-5 min build. The Convert
-            # tab sets model_path itself once the build finishes.
-            return
+        # Always record the user's selection as the authoritative model path
+        # immediately — even when a TensorRT build is still needed. Hot-swap
+        # skips loading until the engine exists without reverting this path,
+        # and Convert (re)applies the same path on success. Leaving it unset
+        # until Convert finished was the old failure mode: a skipped/raced
+        # build left config.json pointing at the previous model forever.
+        new_path = os.path.join("Model", text).replace("\\", "/")
         self._config.model_path = new_path
         self._updateModelInfo(self._config.model_path)
         self.modelNotesCard.setModel(os.path.basename(text))
+        if self._redirectToConvertIfNeeded(new_path):
+            return
 
     def _needsTrtConversion(self, model_path: str) -> bool:
         if not self._config or not model_path:
@@ -763,17 +773,15 @@ class ModelPage(BasePage):
         """If `model_path` would need a fresh (1-5 min) TensorRT build under
         the currently active backend, send the user to the Convert tab and
         start that build there (background thread, progress bar) instead of
-        ever letting config.model_path reach a combination that would hang
-        the running aim loop's hot-swap. Returns True if it redirected."""
+        letting hot-swap try an inline build. Returns True if conversion is
+        needed (redirect attempted); False if the model can load as-is.
+
+        `config.model_path` is expected to already hold `model_path` — this
+        only owns the Convert-tab handoff, not the selection write.
+        """
         if not self._needsTrtConversion(model_path):
             return False
-        InfoBar.warning(
-            t("model_trt_engine_missing", "TensorRT engine not built yet"),
-            t("model_trt_engine_missing_desc",
-              "Redirecting to the Convert tab to build it — this can take 1-5 minutes. "
-              "The model will switch over automatically once it's done."),
-            duration=6000, isClosable=True, position=InfoBarPosition.TOP, parent=self,
-        )
+        started = False
         try:
             win = self.window()
             convert_page = getattr(win, 'convertInterface', None)
@@ -781,9 +789,30 @@ class ModelPage(BasePage):
                 if hasattr(win, 'switchTo'):
                     win.switchTo(convert_page)
                 if hasattr(convert_page, 'startConversionFor'):
-                    convert_page.startConversionFor(model_path)
-        except Exception:
-            pass
+                    started = bool(convert_page.startConversionFor(model_path))
+        except Exception as exc:
+            InfoBar.error(
+                t("model_trt_redirect_fail", "Could not start TensorRT conversion"),
+                str(exc),
+                duration=6000, isClosable=True, position=InfoBarPosition.TOP, parent=self,
+            )
+            return True
+        if started:
+            InfoBar.warning(
+                t("model_trt_engine_missing", "TensorRT engine not built yet"),
+                t("model_trt_engine_missing_desc",
+                  "Redirecting to the Convert tab to build it — this can take 1-5 minutes. "
+                  "The model will switch over automatically once it's done."),
+                duration=6000, isClosable=True, position=InfoBarPosition.TOP, parent=self,
+            )
+        else:
+            InfoBar.warning(
+                t("model_trt_engine_missing", "TensorRT engine not built yet"),
+                t("model_trt_convert_busy",
+                  "A conversion is already running (or Convert could not start). "
+                  "Selected model is saved — finish/retry conversion on the Convert tab."),
+                duration=8000, isClosable=True, position=InfoBarPosition.TOP, parent=self,
+            )
         return True
 
     def _onHudGameChanged(self, text):

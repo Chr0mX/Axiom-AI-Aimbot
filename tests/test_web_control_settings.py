@@ -366,13 +366,14 @@ class TestNestedFieldPaths:
         return types.SimpleNamespace(**base)
 
     def test_get_reads_dotted_humanization_field(self):
+        # Schema exposes Intensity in desktop % units (scale 100); Config stores 0–1.
         config = _config(humanization=self._humanization_config(intensity=0.7))
         result = wcs.get_tab_settings(config, "aim")
-        assert result["humanization.intensity"] == 0.7
+        assert result["humanization.intensity"] == 70.0
 
     def test_apply_writes_dotted_humanization_field_without_touching_siblings(self):
         config = _config(humanization=self._humanization_config())
-        result = wcs.apply_tab_settings(config, "aim", {"humanization.intensity": 0.9})
+        result = wcs.apply_tab_settings(config, "aim", {"humanization.intensity": 90})
         assert result["ok"] is True
         assert config.humanization.intensity == 0.9
         assert config.humanization.enabled is True  # untouched
@@ -401,7 +402,7 @@ class TestNestedFieldPaths:
         # the write loop discards that return value (there's nothing to
         # meaningfully report per-field once validation has already
         # passed), so the overall apply still reports ok.
-        result = wcs.apply_tab_settings(config, "aim", {"humanization.intensity": 0.9})
+        result = wcs.apply_tab_settings(config, "aim", {"humanization.intensity": 90})
         assert result["ok"] is True
 
     def test_plain_field_unaffected_by_nested_path_generalization(self):

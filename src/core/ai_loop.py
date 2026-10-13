@@ -190,7 +190,7 @@ def _try_hot_swap_model(
     else:
         abs_model_path = new_model_path
 
-    if not (os.path.exists(abs_model_path) and abs_model_path.endswith('.onnx')):
+    if not (os.path.exists(abs_model_path) and abs_model_path.lower().endswith('.onnx')):
         logger.warning("[Model HotSwap] Invalid path or file not found: %s", abs_model_path)
         config.model_path = current_model_path
         config.trt_fp16_enabled = current_fp16
@@ -208,6 +208,13 @@ def _try_hot_swap_model(
     # tab instead — this is a safety net for paths that bypass the GUI (a
     # loaded preset, a hand-edited config.json, a race with the Convert
     # worker) rather than the primary UX.
+    #
+    # Critically: do NOT write config.model_path back to current_model_path
+    # here. The user's selection (and Convert's post-build write) must remain
+    # the authoritative desired model; reverting it was the root cause of
+    # "conversion finished but config.json still points at the old model"
+    # whenever needs_trt_build() stayed true for a frame (cache race, untagged
+    # engine filename, etc.) and a later save_config persisted the revert.
     from .session_utils import needs_trt_build
     if needs_trt_build(config, abs_model_path):
         global _hot_swap_skip_logged
@@ -217,15 +224,14 @@ def _try_hot_swap_model(
             logger.warning(
                 "[Model HotSwap] Skipping swap to %s (%s) — no cached TensorRT engine yet "
                 "(building one inline would block the inference loop for 1-5 min). "
-                "Convert it first via the Convert tab.",
+                "Convert it first via the Convert tab. Keeping selected model_path=%s.",
                 os.path.basename(abs_model_path),
                 "FP16" if config_fp16 else "FP32",
+                config.model_path,
             )
-        config.model_path = current_model_path
-        # Leave trt_fp16_enabled on the user's choice. Reverting it would
-        # snap the precision combo back while the Convert tab is building
-        # that precision. The loaded session stays on current_fp16 until
-        # the matching engine exists and this function swaps it in.
+        # Leave trt_fp16_enabled and model_path on the user's choice. The
+        # loaded session stays on current_* until the matching engine exists
+        # and this function swaps it in on a later frame.
         return (
             model, current_model_path, model.get_inputs()[0].name,
             current_backend, current_dml_fallback, current_fp16,

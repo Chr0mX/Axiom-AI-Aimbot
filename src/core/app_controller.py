@@ -50,7 +50,6 @@ without that landmine.
 from __future__ import annotations
 
 import copy
-import glob
 import logging
 import os
 import queue
@@ -194,7 +193,9 @@ def resolve_model_path(model_path: str) -> tuple[str | None, str | None]:
     """
     if not model_path:
         return None, "no_model_path"
-    if not model_path.endswith('.onnx'):
+    # Accept .onnx / .ONNX / mixed case — endswith('.onnx') alone rejects
+    # uppercase extensions that still load fine under ORT.
+    if not str(model_path).lower().endswith('.onnx'):
         return None, "invalid_model_path"
     resolved = model_path if os.path.isabs(model_path) else os.path.join(project_root, model_path)
     # config.model_path is stored portable ("Model/x.onnx"); without this the
@@ -209,16 +210,24 @@ def resolve_model_path(model_path: str) -> tuple[str | None, str | None]:
 def list_models() -> list[str]:
     """Sorted list of .onnx basenames in Model/.
 
-    Mirrors model_page.py's _refreshModelList() glob+sort logic
+    Mirrors model_page.py's _refreshModelList() listing logic
     conceptually — reimplemented here rather than imported, since
     model_page.py is a GUI file this module must not depend on, and
     per CLAUDE.md's Web Control section model_page.py itself stays
     untouched (same precedent as MAKCU/request_model_change).
+
+    Case-insensitive on the extension so ``.ONNX`` files appear on
+    case-sensitive filesystems (Linux), matching what the desktop Model
+    page lists after the same fix.
     """
     model_dir = os.path.join(project_root, "Model")
     if not os.path.exists(model_dir):
         return []
-    return sorted(os.path.basename(m) for m in glob.glob(os.path.join(model_dir, "*.onnx")))
+    return sorted(
+        name for name in os.listdir(model_dir)
+        if name.lower().endswith(".onnx")
+        and os.path.isfile(os.path.join(model_dir, name))
+    )
 
 
 def get_model_cache_status(config: "Config") -> dict:
@@ -782,10 +791,13 @@ def _run_conversion_worker(config: "Config", onnx_path: str, cache_dir: str, fp1
             # the same "Model/x.onnx" relative form model_page.py uses so
             # config.json/presets stay portable across machines.
             config.trt_fp16_enabled = fp16
-            model_dir = os.path.join(project_root, "Model")
+            model_dir = os.path.normcase(os.path.normpath(os.path.join(project_root, "Model")))
             converted = onnx_path
-            if os.path.isabs(converted) and os.path.dirname(converted) == model_dir:
-                converted = os.path.join("Model", os.path.basename(converted))
+            conv_dir = os.path.normcase(os.path.normpath(os.path.dirname(converted)))
+            if os.path.isabs(converted) and conv_dir == model_dir:
+                converted = "Model/" + os.path.basename(converted)
+            elif not os.path.isabs(converted):
+                converted = converted.replace("\\", "/")
             config.model_path = converted
             try:
                 from core.config import save_config

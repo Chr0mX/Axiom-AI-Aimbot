@@ -219,6 +219,14 @@ button {
   cursor: pointer;
 }
 button:hover { border-color: var(--accent); color: var(--accent); }
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:disabled:hover {
+  border-color: var(--line);
+  color: var(--ink);
+}
 
 .hint {
   margin-top: 10px;
@@ -226,6 +234,37 @@ button:hover { border-color: var(--accent); color: var(--accent); }
   color: var(--ink-faint);
 }
 .hint b { color: var(--ink-soft); }
+.hint.error { color: var(--bad); }
+
+.row.model-select-row {
+  flex-wrap: wrap;
+}
+.row.model-select-row select {
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+#model-select {
+  flex: 2 1 180px;
+}
+#model-precision-select,
+#backend-select {
+  flex: 0 1 110px;
+}
+#model-empty-hint {
+  margin-top: 6px;
+}
+
+.config-listbox {
+  width: 100%;
+  min-height: 10.5em;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px;
+  color: var(--ink);
+  font: inherit;
+}
 
 .grid {
   display: grid;
