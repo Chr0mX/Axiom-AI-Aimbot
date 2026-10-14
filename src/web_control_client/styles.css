@@ -183,7 +183,7 @@ html, body {
   gap: 8px;
   align-items: center;
 }
-input[type="password"], input[type="text"], select {
+input[type="password"], input[type="text"], input[type="search"], select {
   flex: 1;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -586,7 +586,8 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 
 /* Settings search — while a query is active every panel is shown and only
    matching cards stay visible. */
-.search-box { width: 100%; }
+.search-box { width: 100%; box-sizing: border-box; }
+input[type="search"]::placeholder { color: var(--ink-faint); }
 .search-count { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
 body.searching .panel { display: flex; flex-direction: column; gap: 16px; }
 body.searching .panel-title { font-size: 14px; color: var(--ink-faint); }
