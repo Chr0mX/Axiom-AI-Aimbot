@@ -64,3 +64,7 @@ src/python/Lib/site-packages/comtypes/gen/_78530B68_61F9_11D2_8CAD_00A024580902_
 src/python/Lib/site-packages/comtypes/gen/DexterLib.py
 src/python/Lib/site-packages/comtypes/gen/QuartzTypeLib.py
 src/python/Lib/site-packages/comtypes/gen/stdole.py
+
+# Config recovery / atomic-write leftovers
+*.corrupt-*
+*.json.tmp

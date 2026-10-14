@@ -256,3 +256,10 @@ Both `model_page.py` and `convert_page.py` pair their model `ComboBox` with a `S
 | `web_control_port` | `web_control.port` | Port the FastAPI/uvicorn control server listens on |
 | `web_control_token` | `web_control.token` | Shared access token required on every request (`X-Axiom-Token` header); auto-generated on first enable |
 | `preset_slots` | `web_control.preset_slots` | 5-slot list of preset names for the web client's Quick Presets sidebar shortcuts; empty string = unassigned |
+
+## Versioning, CI and Repo Hygiene
+
+- **`src/version.py` is the release source.** `release.yml` tags `<prefix>-<__version__>` (prefix `main`/`gpu`/`gpu-feat`) and skips with a notice if that tag already exists — bump `__version__` to publish. `core/version_utils.py::parse_version` (pure; re-exported by `updater.py`) drops any non-numeric prefix, so `main-6.4` and `v6.4` both parse as (6, 4, 0). `updater.py`'s `REPO_OWNER = "iishong0w0"` is intentional.
+- **CI** (`.github/workflows/ci.yml`): blocking ruff (`E9,F63,F7,F82`), informational full ruff, tests and mypy (both non-blocking until the known Linux failures are triaged). Config in `pyproject.toml`.
+- **`tests/conftest.py`** reports missing Windows-only modules (`win32*`, `PyQt6`, `onnxruntime`, `cv2`, ...) and `ctypes.windll` AttributeErrors as skips on non-Windows only; other failures stay failures.
+- `requirements-vendored.txt` is an informational inventory of `src/python`; `THIRD_PARTY_NOTICES.md` lists bundled binaries/licence questions. `pip` inside `src/python` is needed at runtime (`install_tensorrt_local.py`) — do not remove it.
