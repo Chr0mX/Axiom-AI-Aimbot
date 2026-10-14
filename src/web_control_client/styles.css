@@ -4,7 +4,7 @@
   /* Sentinel: app.js only builds custom dropdowns when this stylesheet
      version is actually loaded (a stale cached CSS would otherwise leave
      the native <select> visible beside the trigger text). */
-  --axiom-css: 3;
+  --axiom-css: 4;
   --bg: #0d0d13;
   --surface: #14141c;
   --surface-2: #1b1b26;
@@ -740,4 +740,25 @@ input[type="range"] { max-width: 100%; }
 .dd-empty { padding: 10px 12px; color: var(--ink-faint); font-size: 13px; }
 @media (prefers-reduced-motion: reduce) {
   .dd-menu, .dd-trigger, .dd-chevron { transition: none; }
+}
+
+
+/* ---------------------------------------------------------------------
+   Slider rows: consistent track alignment + readable phone layout
+   --------------------------------------------------------------------- */
+/* Every slider row gets the same control width, and the unit label a fixed
+   slot (rows without a unit reserve it), so tracks and number boxes line up
+   down the whole panel instead of drifting with description/unit length. */
+.field-control:has(input[type="range"]) { width: 340px; min-width: 340px; max-width: 100%; }
+.field-control:has(input[type="range"]) input[type="range"] { flex: 1 1 auto; width: auto; min-width: 0; }
+.field-control:has(input[type="range"]) input[type="number"] { flex: none; width: 86px; min-width: 70px; }
+.field-control:has(input[type="range"]) .field-slider-value { flex: none; width: 28px; min-width: 28px; }
+.field-control:has(input[type="range"]):not(:has(.field-slider-value)) { padding-right: 36px; box-sizing: border-box; }
+
+@media (max-width: 760px) {
+  /* Info text was being squeezed to a sliver beside the slider; stack the
+     slider underneath the title/description instead. */
+  .field-card:has(.field-control input[type="range"]) { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
+  .field-card:has(.field-control input[type="range"]) .field-info { flex: none; width: 100%; }
+  .field-control:has(input[type="range"]) { width: 100%; min-width: 0; }
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Axiom Web Control</title>
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <div class="app">
@@ -214,7 +214,8 @@
               <div class="field-control">
                 <button id="cap-preview-toggle-btn">Hide Preview</button>
               </div>
-              <img id="cap-preview-img" class="preview-img" alt="Capture preview">
+              <img id="cap-preview-img" class="preview-img" alt="">
+              <div class="hint" id="cap-preview-state" role="status"></div>
             </div>
           </div>
 
@@ -2064,6 +2065,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

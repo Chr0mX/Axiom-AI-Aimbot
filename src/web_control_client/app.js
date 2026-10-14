@@ -1087,15 +1087,35 @@
     previewToggleBtn.textContent = previewHidden ? "Show Preview" : "Hide Preview";
     img.classList.toggle("hidden", previewHidden);
 
+    var stateEl = document.getElementById("cap-preview-state");
     var shouldRun = isStream && currentTab === "capture" && !previewHidden;
+    if (!img.dataset.wired) {
+      img.dataset.wired = "1";
+      // An MJPEG <img> fires load on its first frame and error if the
+      // stream dies — say so instead of showing a blank/broken-image box.
+      img.addEventListener("load", function () { stateEl.textContent = ""; });
+      img.addEventListener("error", function () {
+        if (!img.dataset.streaming) return;
+        stateEl.textContent = "Preview interrupted — retrying…";
+        clearTimeout(img._retryTimer);
+        img._retryTimer = setTimeout(function () {
+          if (img.dataset.streaming) {
+            img.src = "/api/preview_stream?preview_token=" + encodeURIComponent(getToken()) + "&t=" + Date.now();
+          }
+        }, 3000);
+      });
+    }
     if (shouldRun) {
       if (!img.dataset.streaming) {
-        img.src = "/api/preview_stream?preview_token=" + encodeURIComponent(getToken());
         img.dataset.streaming = "1";
+        stateEl.textContent = "Waiting for the first frame from the capture source…";
+        img.src = "/api/preview_stream?preview_token=" + encodeURIComponent(getToken());
       }
     } else if (img.dataset.streaming) {
+      clearTimeout(img._retryTimer);
       img.removeAttribute("src");
       delete img.dataset.streaming;
+      stateEl.textContent = previewHidden ? "Preview hidden." : "";
     }
   }
 
@@ -1461,7 +1481,7 @@
                 // The just-loaded preset/config can touch fields on any
                 // tab — resync every generic-schema tab so the whole
                 // client reflects the new live config, not just Configs.
-                ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(loadTabSettings);
+                ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(function (t) { loadTabSettings(t); });
               } else {
                 reasonEl.textContent = (loadData && loadData.reason) || "failed to load";
               }
@@ -1650,14 +1670,22 @@
     presetSlotLoadBtns.push(document.getElementById("preset-slot-load-" + _psi));
   }
 
+  // The server's (or cache's) assigned name per slot. The options list and
+  // the assignments arrive from two independent requests in either order; if
+  // the assignment lands first, `sel.value = name` has no matching <option>
+  // yet and is a silent no-op, and the later option rebuild would then reset
+  // the slot to "unassigned" while its Load button stayed enabled. Keeping
+  // the assignment here lets populatePresetSlotSelects() re-apply it.
+  var presetSlotAssigned = ["", "", "", "", ""];
+
   function populatePresetSlotSelects(names) {
     // Cached so the next page load can rebuild these <option> lists
     // immediately, before GET /api/configs has even round-tripped — see
     // the restore call near the bottom of this file's startup block.
     setLocalJSON(PRESET_NAMES_CACHE_KEY, names || []);
-    presetSlotSelects.forEach(function (sel) {
+    presetSlotSelects.forEach(function (sel, i) {
       if (document.activeElement === sel) return; // don't clobber a mid-pick
-      var current = sel.value;
+      var current = presetSlotAssigned[i] || sel.value;
       sel.innerHTML = '<option value="">— unassigned —</option>';
       (names || []).forEach(function (name) {
         var opt = document.createElement("option");
@@ -1685,7 +1713,9 @@
         if (!data || !data.slots) return;
         data.slots.forEach(function (name, i) {
           var sel = presetSlotSelects[i];
-          if (!sel || document.activeElement === sel) return;
+          if (!sel) return;
+          presetSlotAssigned[i] = name || "";
+          if (document.activeElement === sel) return;
           sel.value = name || "";
           presetSlotLoadBtns[i].disabled = !name;
         });
@@ -1705,16 +1735,19 @@
         .then(function (res) { return res.ok ? res.json() : null; })
         .then(function (data) {
           if (data && data.ok) {
+            presetSlotAssigned[i] = name || "";
             presetSlotLoadBtns[i].disabled = !name;
             setLocalJSON(PRESET_SLOTS_CACHE_KEY, currentPresetSlotValues());
+            notify(name ? "Slot " + (i + 1) + " → " + name : "Slot " + (i + 1) + " cleared");
           } else {
+            notify("Could not assign slot " + (i + 1), true);
             // Refused (e.g. the picked name no longer exists) — resync
             // this row from the server's actual current assignment rather
             // than trusting the now-stale local selection.
             fetchPresetSlotAssignments();
           }
         })
-        .catch(function () {});
+        .catch(function () { notify("Could not assign slot " + (i + 1) + ": cannot reach the Axiom host", true); });
     });
   });
 
@@ -1733,10 +1766,13 @@
           if (data && data.ok) {
             // Same resync every other successful preset load already does
             // — a preset can touch fields on any generic-schema tab.
-            ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(loadTabSettings);
+            ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(function (t) { loadTabSettings(t); });
+            notify("Loaded preset: " + name);
+          } else {
+            notify("Could not load preset " + name + (data && data.reason ? " (" + String(data.reason).replace(/_/g, " ") + ")" : ""), true);
           }
         })
-        .catch(function () {})
+        .catch(function () { notify("Could not load preset " + name + ": cannot reach the Axiom host", true); })
         .then(function () { btn.disabled = !presetSlotSelects[i].value; });
     });
   });
@@ -2459,6 +2495,7 @@
     cachedPresetSlots.forEach(function (name, i) {
       var sel = presetSlotSelects[i];
       if (!sel) return;
+      presetSlotAssigned[i] = name || "";
       sel.value = name || "";
       if (presetSlotLoadBtns[i]) presetSlotLoadBtns[i].disabled = !name;
     });
@@ -2500,7 +2537,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "3") return;
+    if (cssVer !== "4") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
