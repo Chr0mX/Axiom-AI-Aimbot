@@ -155,6 +155,11 @@ def _probe_model_input_size(session, abs_model_path: str) -> int:
 
 
 _hot_swap_skip_logged: tuple | None = None
+# While a selected model has no TensorRT engine yet, config.model_path stays
+# != current_model_path (it must — see _try_hot_swap_model), so every frame
+# would re-run needs_trt_build()'s glob. Re-check the disk at most this often.
+_HOT_SWAP_RECHECK_S = 1.0
+_hot_swap_skip_state: tuple | None = None  # (skip_key, monotonic time of last check)
 
 
 def _try_hot_swap_model(
@@ -216,9 +221,20 @@ def _try_hot_swap_model(
     # whenever needs_trt_build() stayed true for a frame (cache race, untagged
     # engine filename, etc.) and a later save_config persisted the revert.
     from .session_utils import needs_trt_build
+    global _hot_swap_skip_logged, _hot_swap_skip_state
+    skip_key = (abs_model_path, config_fp16, config_backend)
+    _now = time.monotonic()
+    if (
+        _hot_swap_skip_state is not None
+        and _hot_swap_skip_state[0] == skip_key
+        and _now - _hot_swap_skip_state[1] < _HOT_SWAP_RECHECK_S
+    ):
+        return (
+            model, current_model_path, model.get_inputs()[0].name,
+            current_backend, current_dml_fallback, current_fp16,
+        )
     if needs_trt_build(config, abs_model_path):
-        global _hot_swap_skip_logged
-        skip_key = (abs_model_path, config_fp16, config_backend)
+        _hot_swap_skip_state = (skip_key, _now)
         if _hot_swap_skip_logged != skip_key:
             _hot_swap_skip_logged = skip_key
             logger.warning(
