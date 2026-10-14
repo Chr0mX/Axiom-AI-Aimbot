@@ -428,8 +428,18 @@ class TestConfigFileIO:
         try:
             result = load_config(c, filepath)
             assert result is False
+            # The unparseable file is preserved as <name>.corrupt-<time>
+            # instead of being left to be overwritten with defaults.
+            import glob
+            backups = glob.glob(filepath + ".corrupt-*")
+            assert len(backups) == 1
+            with open(backups[0], encoding='utf-8') as bf:
+                assert bf.read() == "NOT VALID JSON {{{"
         finally:
-            os.unlink(filepath)
+            import glob
+            for leftover in [filepath] + glob.glob(filepath + ".corrupt-*"):
+                if os.path.exists(leftover):
+                    os.unlink(leftover)
 
     def test_save_config_drops_extra_fields(self):
         """save_config 應只寫入 to_dict() 的欄位，不保留舊版殘留的未知欄位。
