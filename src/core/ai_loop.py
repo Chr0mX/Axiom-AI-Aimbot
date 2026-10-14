@@ -197,6 +197,10 @@ def _try_hot_swap_model(
 
     if not (os.path.exists(abs_model_path) and abs_model_path.lower().endswith('.onnx')):
         logger.warning("[Model HotSwap] Invalid path or file not found: %s", abs_model_path)
+        config.model_load_error = (
+            f"Model file not found or not .onnx: {os.path.basename(abs_model_path)} "
+            f"— keeping {os.path.basename(current_model_path)}"
+        )
         config.model_path = current_model_path
         config.trt_fp16_enabled = current_fp16
         return (
@@ -274,9 +278,16 @@ def _try_hot_swap_model(
         if actual_providers:
             config.current_provider = actual_providers[0]
         logger.info("[Model HotSwap] Switched to: %s / %s", os.path.basename(abs_model_path), config_backend)
+        config.loaded_model_path = new_model_path
+        config.loaded_model_fp16 = config_fp16
+        config.model_load_error = ""
         return new_model, new_model_path, input_name, config_backend, config_dml_fallback, config_fp16
     except Exception as e:
         logger.error("[Model HotSwap] Load failed: %s — continuing with current model", e)
+        config.model_load_error = (
+            f"Failed to load {os.path.basename(abs_model_path)}: {e} "
+            f"— keeping {os.path.basename(current_model_path)}"
+        )
         config.model_path = current_model_path
         config.trt_fp16_enabled = current_fp16
         return (
@@ -441,6 +452,10 @@ def ai_logic_loop(
     current_backend = str(getattr(config, "inference_backend", "auto")).lower()
     current_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
     current_fp16 = bool(getattr(config, "trt_fp16_enabled", False))
+    # Publish what the live session is really running (see Config.loaded_model_path).
+    config.loaded_model_path = current_model_path
+    config.loaded_model_fp16 = current_fp16
+    config.model_load_error = ""
 
     ema_total = 0.0
     ema_overhead = 0.0   # this loop's per-iteration work before the tensor wait

@@ -165,6 +165,8 @@ def _build_status(config) -> dict:
         # was leaving the dropdown stuck on its default "Auto".
         "selected_backend": str(getattr(config, "inference_backend", "auto")),
         "trt_fp16_enabled": bool(getattr(config, "trt_fp16_enabled", False)),
+        # Last hot-swap load failure ("" when none) — the Model panel shows it.
+        "model_load_error": str(getattr(config, "model_load_error", "") or ""),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
         "capture_fps": round(cap_fps, 1),

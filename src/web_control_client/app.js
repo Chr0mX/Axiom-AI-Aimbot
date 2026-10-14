@@ -1856,7 +1856,20 @@
   // client's own scoping request.
   var STREAM_FPS_LABELS = { uvc: "UVC Source FPS", ndi: "NDI Source FPS", udp: "UDP Stream FPS" };
 
+  var lastModelLoadError = "";
+  function applyModelLoadError(err) {
+    // Hot-swap load failures (ai_loop keeps the old model) — show them in the
+    // Model panel's hint line; clear only our own message once it resolves.
+    err = err || "";
+    if (err === lastModelLoadError) return;
+    var wasShowing = modelSwitchReason && modelSwitchReason.textContent === "Model failed to load: " + lastModelLoadError;
+    lastModelLoadError = err;
+    if (err) setModelListHint("Model failed to load: " + err, true);
+    else if (wasShowing) setModelListHint("", false);
+  }
+
   function applyStatus(s) {
+    applyModelLoadError(s.model_load_error);
     document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
     document.getElementById("s-firing").textContent = s.aim_firing ? "Aiming" : "Idle";
