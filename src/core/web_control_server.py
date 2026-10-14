@@ -727,8 +727,18 @@ def start(
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
 
+    class _NoCacheStaticFiles(StaticFiles):
+        """Always revalidate (ETag/Last-Modified still make that cheap): the
+        client's index.html/app.js/styles.css must stay in lockstep, and a
+        browser reusing a stale styles.css with a newer app.js broke the UI."""
+
+        async def get_response(self, path, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
+
     if os.path.isdir(_WEB_DIR):
-        app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")
+        app.mount("/", _NoCacheStaticFiles(directory=_WEB_DIR, html=True), name="client")
     else:
         logger.warning("[WebControl] client directory not found: %s", _WEB_DIR)
 
