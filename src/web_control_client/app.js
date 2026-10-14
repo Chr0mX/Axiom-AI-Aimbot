@@ -2487,6 +2487,227 @@
   // search, phone sidebar toggle, and the client-only Other tab. All of it
   // is progressive: it only decorates markup that already works without it.
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // Custom dropdowns. A native <select>'s popup can't be styled at all, so
+  // every single-choice <select> is progressively enhanced with a styled
+  // trigger + listbox menu. The real <select> stays the source of truth
+  // AND the focus target (visually hidden, over the trigger): programmatic
+  // .value writes, change events, disabled state and every existing
+  // `document.activeElement === select` "don't clobber an edit" guard keep
+  // working untouched, and screen readers still get the native control.
+  // ---------------------------------------------------------------------
+  function enhanceSelects() {
+    var proto = HTMLSelectElement.prototype;
+    var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
+    var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
+    var openDD = null;
+
+    function closeOpen(refocus) {
+      if (openDD) openDD.close(refocus);
+    }
+    document.addEventListener("pointerdown", function (e) {
+      if (openDD && !openDD.root.contains(e.target) && !openDD.menu.contains(e.target)) closeOpen(false);
+    });
+    window.addEventListener("resize", function () { closeOpen(false); });
+    window.addEventListener("scroll", function (e) {
+      if (openDD && !openDD.menu.contains(e.target)) closeOpen(false);
+    }, true);
+
+    Array.prototype.forEach.call(document.querySelectorAll("select"), function (sel) {
+      if (sel.multiple || sel.size > 1 || sel._dd) return;
+
+      var root = document.createElement("div");
+      root.className = "dd";
+      var trigger = document.createElement("div");
+      trigger.className = "dd-trigger";
+      trigger.setAttribute("aria-hidden", "true");
+      var label = document.createElement("span");
+      label.className = "dd-label";
+      var chev = document.createElement("span");
+      chev.className = "dd-chevron";
+      trigger.appendChild(label);
+      trigger.appendChild(chev);
+
+      var menu = document.createElement("div");
+      menu.className = "dd-menu";
+      menu.setAttribute("aria-hidden", "true");
+
+      sel.parentNode.insertBefore(root, sel);
+      root.appendChild(sel);
+      root.appendChild(trigger);
+      sel.classList.add("dd-native");
+
+      var items = [];     // [{value, el}] selectable rows currently in the menu
+      var active = -1;
+
+      function refresh() {
+        var opt = sel.options[sel.selectedIndex];
+        label.textContent = opt ? opt.text : "—";
+        label.classList.toggle("placeholder", !opt || opt.value === "");
+        root.classList.toggle("disabled", sel.disabled);
+      }
+
+      function setActive(i, scroll) {
+        if (!items.length) return;
+        active = Math.max(0, Math.min(items.length - 1, i));
+        items.forEach(function (it, k) { it.el.classList.toggle("active", k === active); });
+        if (scroll) items[active].el.scrollIntoView({ block: "nearest" });
+      }
+
+      function build() {
+        menu.innerHTML = "";
+        items = [];
+        var current = sel.selectedIndex;
+        function addOption(o, idx) {
+          var row = document.createElement("div");
+          row.className = "dd-option" + (o.disabled ? " disabled" : "") + (idx === current ? " selected" : "");
+          var txt = document.createElement("span");
+          txt.textContent = o.text;
+          row.appendChild(txt);
+          menu.appendChild(row);
+          if (o.disabled) return;
+          var entry = { index: idx, el: row };
+          items.push(entry);
+          row.addEventListener("mousemove", function () { setActive(items.indexOf(entry), false); });
+          row.addEventListener("click", function () { choose(idx); });
+        }
+        var idx = 0;
+        Array.prototype.forEach.call(sel.children, function (child) {
+          if (child.tagName === "OPTGROUP") {
+            var g = document.createElement("div");
+            g.className = "dd-group";
+            g.textContent = child.label;
+            menu.appendChild(g);
+            Array.prototype.forEach.call(child.children, function (o) { addOption(o, idx++); });
+          } else {
+            addOption(child, idx++);
+          }
+        });
+        if (!menu.children.length) {
+          var empty = document.createElement("div");
+          empty.className = "dd-empty";
+          empty.textContent = "No options";
+          menu.appendChild(empty);
+        }
+        var sIdx = items.findIndex(function (it) { return it.index === current; });
+        setActive(sIdx >= 0 ? sIdx : 0, false);
+      }
+
+      function place() {
+        var r = trigger.getBoundingClientRect();
+        var room = window.innerHeight - r.bottom - 12;
+        var above = r.top - 12;
+        var maxH = 300;
+        var flip = room < Math.min(maxH, menu.scrollHeight) && above > room;
+        menu.style.minWidth = r.width + "px";
+        menu.style.maxHeight = Math.max(120, Math.min(maxH, flip ? above : room)) + "px";
+        menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + "px";
+        if (flip) {
+          menu.style.top = "auto";
+          menu.style.bottom = (window.innerHeight - r.top + 6) + "px";
+          menu.classList.add("flip");
+        } else {
+          menu.style.bottom = "auto";
+          menu.style.top = (r.bottom + 6) + "px";
+          menu.classList.remove("flip");
+        }
+      }
+
+      var dd = {
+        root: root,
+        menu: menu,
+        open: function () {
+          if (sel.disabled) return;
+          if (openDD && openDD !== dd) openDD.close(false);
+          build();
+          document.body.appendChild(menu);
+          menu.classList.remove("show");
+          place();
+          requestAnimationFrame(function () { menu.classList.add("show"); });
+          root.classList.add("open");
+          sel._ddOpen = true;
+          openDD = dd;
+          if (items[active]) items[active].el.scrollIntoView({ block: "nearest" });
+        },
+        close: function (refocus) {
+          if (openDD !== dd) return;
+          root.classList.remove("open");
+          sel._ddOpen = false;
+          menu.classList.remove("show");
+          if (menu.parentNode) menu.parentNode.removeChild(menu);
+          openDD = null;
+          if (refocus) sel.focus();
+        },
+      };
+      sel._dd = dd;
+
+      function choose(idx) {
+        var changed = sel.selectedIndex !== idx;
+        indexDesc.set.call(sel, idx);
+        refresh();
+        dd.close(true);
+        if (changed) sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      // The menu must never steal focus from the (hidden) native select.
+      menu.addEventListener("mousedown", function (e) { e.preventDefault(); });
+
+      trigger.addEventListener("click", function () {
+        if (sel.disabled) return;
+        sel.focus();
+        if (openDD === dd) dd.close(true); else dd.open();
+      });
+
+      sel.addEventListener("keydown", function (e) {
+        if (sel.disabled) return;
+        if (openDD === dd) {
+          if (e.key === "ArrowDown") { e.preventDefault(); setActive(active + 1, true); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active - 1, true); }
+          else if (e.key === "Home") { e.preventDefault(); setActive(0, true); }
+          else if (e.key === "End") { e.preventDefault(); setActive(items.length - 1, true); }
+          else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (items[active]) choose(items[active].index); }
+          else if (e.key === "Escape") { e.preventDefault(); dd.close(true); }
+          else if (e.key === "Tab") { dd.close(false); }
+          else if (e.key.length === 1) {
+            // type-ahead within the open menu
+            var ch = e.key.toLowerCase();
+            for (var k = 1; k <= items.length; k++) {
+              var cand = (active + k) % items.length;
+              if (items[cand].el.textContent.replace(/^[✓⬇]\s*/, "").toLowerCase().indexOf(ch) === 0) { setActive(cand, true); break; }
+            }
+          }
+          return;
+        }
+        // Closed: native arrow/type-ahead behaviour stays (works with
+        // assistive tech); only the "open the popup" keys are redirected.
+        if (e.key === "Enter" || e.key === " " || (e.altKey && e.key === "ArrowDown")) {
+          e.preventDefault();
+          dd.open();
+        }
+      });
+      sel.addEventListener("blur", function () { if (openDD === dd) dd.close(false); });
+      sel.addEventListener("change", refresh);
+
+      // Programmatic writes (applyGenericValue, model list sync, ...) go
+      // through these setters without firing any event — keep the label in step.
+      Object.defineProperty(sel, "value", {
+        configurable: true,
+        get: function () { return valueDesc.get.call(this); },
+        set: function (v) { valueDesc.set.call(this, v); refresh(); },
+      });
+      Object.defineProperty(sel, "selectedIndex", {
+        configurable: true,
+        get: function () { return indexDesc.get.call(this); },
+        set: function (v) { indexDesc.set.call(this, v); refresh(); },
+      });
+      new MutationObserver(refresh).observe(sel, {
+        childList: true, subtree: true, characterData: true,
+        attributes: true, attributeFilter: ["disabled", "label"],
+      });
+      refresh();
+    });
+  }
+
   var COLLAPSED_KEY = "axiom_collapsed_groups";
 
   function initUiEnhancements() {
@@ -2628,6 +2849,8 @@
         setSidebar(sidebar.classList.contains("collapsed"));
       });
     }
+
+    enhanceSelects();
 
     // Other tab — client-only tools (nothing here changes server state).
     var testBtn = document.getElementById("other-test-btn");
