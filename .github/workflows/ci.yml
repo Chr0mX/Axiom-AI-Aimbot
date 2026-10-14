@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, GPU, GPU-feat, Axiom-EXE]
+    branches: [main, GPU, GPU-feat, refactored-code]
   pull_request:
 
 permissions:
