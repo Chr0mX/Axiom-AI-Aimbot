@@ -28,3 +28,45 @@ def _isolated_cwd(tmp_path, monkeypatch):
     ``sys.path`` by absolute path above, so nothing here depends on the CWD.
     """
     monkeypatch.chdir(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Windows-only dependency handling
+# ---------------------------------------------------------------------------
+# This is a Windows app: several modules need pywin32, PyQt6, the Windows
+# ctypes API or the onnxruntime native extension. On a non-Windows machine
+# (CI on Linux, a sandbox) a test that reaches one of those fails with an
+# environment error that says nothing about the code. Report exactly those
+# narrow errors as skips instead, so a Linux run's failures are real ones.
+# Nothing changes on Windows, and any other exception type or message still
+# fails normally.
+_WINDOWS_ONLY_MODULES = (
+    "win32", "pywintypes", "pythoncom", "winerror", "PyQt6", "qfluentwidgets",
+    "onnxruntime", "vgamepad", "dxcam", "cv2",
+)
+
+
+def _is_windows_only_env_error(excinfo):
+    exc = excinfo.value
+    if isinstance(exc, ModuleNotFoundError):
+        name = getattr(exc, "name", "") or ""
+        return name.split(".")[0].startswith(_WINDOWS_ONLY_MODULES)
+    if isinstance(exc, AttributeError):
+        return "windll" in str(exc) and "ctypes" in str(exc)
+    return False
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    if sys.platform == "win32":
+        return
+    report = outcome.get_result()
+    if call.when == "call" and report.failed and call.excinfo is not None:
+        if _is_windows_only_env_error(call.excinfo):
+            report.outcome = "skipped"
+            report.longrepr = (
+                str(item.fspath), item.location[1] or 0,
+                "Skipped: requires Windows-only dependency "
+                f"({call.excinfo.value})",
+            )

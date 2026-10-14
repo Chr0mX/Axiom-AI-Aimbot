@@ -1,0 +1,21 @@
+# Tooling configuration only. The app is not installed as a package.
+[tool.ruff]
+target-version = "py311"
+extend-exclude = ["src/python", "Model", "Model_Hud", "trt_cache"]
+
+[tool.ruff.lint]
+# Deliberately narrow: syntax errors and undefined/unused names only.
+select = ["F", "E9"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+exclude = ["src/python/", "tests/"]
+
+[tool.ruff.lint.per-file-ignores]
+# String-literal type annotations ("frame" / "np.ndarray"): not runtime lookups.
+"src/gui/fluent_app/components/capture_preview.py" = ["F821"]
+"src/gui/fluent_app/pages/capture_page.py" = ["F821"]
