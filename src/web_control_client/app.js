@@ -74,6 +74,10 @@
 
   tokenSaveBtn.addEventListener("click", function () {
     setToken(tokenInput.value.trim());
+    authState = "unknown";
+    pollFailures = 0;
+    tokenInput.classList.remove("attn");
+    notify(tokenInput.value.trim() ? "Token saved — checking…" : "Token cleared", !tokenInput.value.trim());
     // A wrong/empty token on first load leaves the model <select> empty with
     // no retry — re-fetch models (and related one-shot lists) now that auth
     // may actually succeed, instead of requiring a full page reload.
@@ -88,11 +92,68 @@
 
   tokenShowBtn.addEventListener("click", function () {
     tokenInput.type = tokenInput.type === "password" ? "text" : "password";
+    tokenShowBtn.setAttribute("aria-pressed", tokenInput.type === "text" ? "true" : "false");
   });
 
-  function setStatusBadge(connected, label) {
+  // "connected" | "disconnected" | "warn" (needs attention, e.g. no token yet).
+  // `detail` becomes the badge's tooltip (HTTP status, error text, ...).
+  function setStatusBadge(connected, label, detail, warn) {
     statusEl.textContent = label || (connected ? "connected" : "disconnected");
-    statusEl.className = connected ? "connected" : "disconnected";
+    statusEl.className = connected ? "connected" : (warn ? "warn" : "disconnected");
+    if (detail) statusEl.title = detail; else statusEl.removeAttribute("title");
+  }
+
+  // Toast — transient feedback for saves/failures that used to be silent.
+  // Identical messages are collapsed while one is still on screen so a
+  // slider drag (many change events) or a failing 1-3s sync can't stack
+  // dozens of toasts.
+  var toastRegion = document.getElementById("toast-region");
+  function notify(msg, isError, ms) {
+    if (!toastRegion || !msg) return;
+    var existing = toastRegion.children;
+    for (var i = 0; i < existing.length; i++) {
+      if (existing[i].textContent === msg) return;
+    }
+    var el = document.createElement("div");
+    el.className = "toast" + (isError ? " error" : "");
+    el.textContent = msg;
+    toastRegion.appendChild(el);
+    setTimeout(function () {
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, ms || (isError ? 5000 : 1600));
+  }
+
+  // Connection/auth state shared by poll() and api().
+  var authState = "unknown"; // "unknown" | "ok" | "bad"
+  var pollFailures = 0;
+
+  // One place for auth header, 401, non-OK status and network errors.
+  // Resolves to parsed JSON; rejects with an Error whose message is already
+  // user-presentable (and `.status` set for HTTP failures).
+  function api(method, path, body) {
+    var opts = { method: method, headers: authHeaders() };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    return fetch(path, opts).then(function (res) {
+      if (res.status === 401) {
+        // With no token at all poll() owns the "enter token" badge; only a
+        // token the server actually rejected is "bad".
+        if (getToken()) {
+          authState = "bad";
+          setStatusBadge(false, "bad token", "The server rejected the access token");
+        }
+        var e401 = new Error("Unauthorized — check the access token");
+        e401.status = 401;
+        throw e401;
+      }
+      if (!res.ok) {
+        var e = new Error("Server error (HTTP " + res.status + ")");
+        e.status = res.status;
+        throw e;
+      }
+      return res.json();
+    }, function () {
+      throw new Error("Cannot reach the Axiom host");
+    });
   }
 
   function authHeaders() {
@@ -132,7 +193,13 @@
     // block.
     setLocalJSON(LAST_TAB_KEY, name);
     tabButtons.forEach(function (btn) {
-      btn.classList.toggle("active", btn.getAttribute("data-tab") === name);
+      var on = btn.getAttribute("data-tab") === name;
+      btn.classList.toggle("active", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
+      btn.tabIndex = on ? 0 : -1;
+      if (on && btn.scrollIntoView) {
+        try { btn.scrollIntoView({ block: "nearest", inline: "center" }); } catch (e) { btn.scrollIntoView(); }
+      }
     });
     panels.forEach(function (panel) {
       panel.classList.toggle("active", panel.id === "panel-" + name);
@@ -583,9 +650,8 @@
     return el.value;
   }
 
-  function loadTabSettings(tab) {
-    fetch("/api/settings/" + tab, { headers: authHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
+  function loadTabSettings(tab, silent) {
+    api("GET", "/api/settings/" + tab)
       .then(function (data) {
         if (!data) return;
         lastSettings[tab] = data;
@@ -617,26 +683,33 @@
           convertPrecisionSelect.value = data.trt_fp16_enabled ? "fp16" : "fp32";
         }
       })
-      .catch(function () {});
+      .catch(function (err) {
+        // Background syncs stay quiet (the status badge already shows the
+        // connection state); a load the user just asked for (tab switch,
+        // preset load) says why it failed.
+        if (!silent && err && err.status !== 401) notify("Could not load " + tab + " settings: " + err.message, true);
+      });
   }
 
   function pushTabSetting(tab, key, value) {
     var body = {};
     body[key] = value;
-    fetch("/api/settings/" + tab, {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify(body),
-    })
-      .then(function (res) { return res.ok ? res.json() : null; })
+    api("POST", "/api/settings/" + tab, body)
       .then(function (data) {
         if (!data || data.ok === false) {
-          // Rejected — resync this tab's real values instead of leaving
-          // the UI showing an edit that never actually applied.
-          loadTabSettings(tab);
+          // Rejected — say why, and resync this tab's real values instead
+          // of leaving the UI showing an edit that never actually applied.
+          var why = data && data.reason ? String(data.reason).replace(/_/g, " ") : "rejected";
+          notify("Could not save " + key + ": " + why, true);
+          loadTabSettings(tab, true);
+        } else {
+          notify("Saved");
         }
       })
-      .catch(function () { loadTabSettings(tab); });
+      .catch(function (err) {
+        notify("Could not save " + key + ": " + (err && err.message ? err.message : "request failed"), true);
+        loadTabSettings(tab, true);
+      });
   }
 
   function wireGenericFields(tab) {
@@ -1965,39 +2038,92 @@
     }
   }
 
+  // Polling: chained setTimeout (not setInterval) so a slow response can't
+  // overlap the next tick, backoff while the host is unreachable, a slower
+  // retry while no/bad token, and fully paused while the tab is hidden.
+  var pollTimer = null;
+  var pollInFlight = false;
+  var lastSettingsSyncAt = 0;
+  var SETTINGS_SYNC_MS = 3000;
+  var POLL_MAX_BACKOFF_MS = 10000;
+
+  function nextPollDelay() {
+    if (!getToken()) return 3000;
+    if (authState === "bad") return 5000;
+    if (pollFailures > 0) return Math.min(POLL_MS * Math.pow(2, pollFailures - 1), POLL_MAX_BACKOFF_MS);
+    return POLL_MS;
+  }
+
+  function schedulePoll() {
+    clearTimeout(pollTimer);
+    if (document.hidden) return; // resumed by the visibilitychange handler
+    pollTimer = setTimeout(poll, nextPollDelay());
+  }
+
   function poll() {
+    clearTimeout(pollTimer);
+    if (document.hidden || pollInFlight) return;
+
+    if (!getToken()) {
+      setStatusBadge(false, "enter token", "Paste the access token in the sidebar, then Save", true);
+      tokenInput.classList.add("attn");
+      schedulePoll();
+      return;
+    }
+    tokenInput.classList.remove("attn");
+
+    pollInFlight = true;
     fetch("/api/status", { headers: authHeaders() })
       .then(function (res) {
         if (res.status === 401) {
-          setStatusBadge(false, "bad token");
+          authState = "bad";
+          pollFailures = 0;
+          setStatusBadge(false, "bad token", "The server rejected the access token");
           return null;
         }
         if (!res.ok) {
-          setStatusBadge(false);
+          pollFailures++;
+          setStatusBadge(false, "server error (HTTP " + res.status + ")", "GET /api/status returned HTTP " + res.status);
           return null;
         }
         return res.json();
       })
       .then(function (data) {
         if (data) {
+          authState = "ok";
+          pollFailures = 0;
           setStatusBadge(true);
           applyStatus(data);
+
+          // Keep whichever generic-schema tab is on-screen synced to the
+          // live Config (a Qt-side change surfaces within a few seconds, no
+          // reload). loadTabSettings()'s own guards (skip a focused field,
+          // skip a field whose paired range slider is mid-drag) keep this
+          // from fighting an in-progress edit here.
+          var now = Date.now();
+          if (GENERIC_SCHEMA_TABS.indexOf(currentTab) !== -1 && now - lastSettingsSyncAt >= SETTINGS_SYNC_MS) {
+            lastSettingsSyncAt = now;
+            loadTabSettings(currentTab, true);
+          }
         }
       })
       .catch(function () {
-        setStatusBadge(false);
+        pollFailures++;
+        setStatusBadge(false, "disconnected", "Cannot reach the Axiom host — retrying");
+      })
+      .then(function () {
+        pollInFlight = false;
+        schedulePoll();
       });
-
-    // Keep whichever generic-schema tab is on-screen synced to the live
-    // Config every tick too — not just on activation — so a change made
-    // from the Qt GUI while this page is sitting open on that tab surfaces
-    // within ~1s with no reload. loadTabSettings()'s own guards (skip a
-    // focused field, skip a field whose paired range slider is mid-drag)
-    // already keep this from fighting an in-progress edit here.
-    if (GENERIC_SCHEMA_TABS.indexOf(currentTab) !== -1) {
-      loadTabSettings(currentTab);
-    }
   }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) {
+      pollFailures = 0;
+      lastSettingsSyncAt = 0;
+      poll();
+    }
+  });
 
   alwaysAimToggle.addEventListener("change", function () {
     if (suppressToggleEcho) return;
@@ -2356,6 +2482,197 @@
     activateTab(lastTab);
   }
 
+  // ---------------------------------------------------------------------
+  // UI enhancements — accessibility wiring, collapsible groups, settings
+  // search, phone sidebar toggle, and the client-only Other tab. All of it
+  // is progressive: it only decorates markup that already works without it.
+  // ---------------------------------------------------------------------
+  var COLLAPSED_KEY = "axiom_collapsed_groups";
+
+  function initUiEnhancements() {
+    var i;
+
+    // Tab panels: roles + labelled-by (tab buttons already carry theirs).
+    panels.forEach(function (panel) {
+      panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", "tab-" + panel.id.replace("panel-", ""));
+    });
+
+    // Arrow-key / Home / End navigation across tabs.
+    var tabList = Array.prototype.slice.call(tabButtons);
+    tabList.forEach(function (btn, idx) {
+      btn.addEventListener("keydown", function (e) {
+        var target = -1;
+        if (e.key === "ArrowRight") target = (idx + 1) % tabList.length;
+        else if (e.key === "ArrowLeft") target = (idx - 1 + tabList.length) % tabList.length;
+        else if (e.key === "Home") target = 0;
+        else if (e.key === "End") target = tabList.length - 1;
+        if (target < 0) return;
+        e.preventDefault();
+        activateTab(tabList[target].getAttribute("data-tab"));
+        tabList[target].focus();
+      });
+    });
+
+    // Accessible names: every field control is named by its card's title
+    // (descriptions go in aria-describedby) instead of being an unlabeled
+    // checkbox/number/select to a screen reader.
+    var cards = document.querySelectorAll(".field-card");
+    var uid = 0;
+    Array.prototype.forEach.call(cards, function (card) {
+      var title = card.querySelector(".field-title");
+      if (!title) return;
+      if (!title.id) title.id = "ft-" + (++uid);
+      var desc = card.querySelector(".field-desc");
+      if (desc && !desc.id) desc.id = "fd-" + (++uid);
+      Array.prototype.forEach.call(card.querySelectorAll("input, select, textarea"), function (ctl) {
+        if (ctl.hasAttribute("aria-label") || ctl.hasAttribute("aria-labelledby")) return;
+        if (ctl.type === "file" || ctl.type === "hidden") return;
+        ctl.setAttribute("aria-labelledby", title.id);
+        if (desc) ctl.setAttribute("aria-describedby", desc.id);
+      });
+    });
+
+    // Collapsible groups (title click / Enter / Space), state remembered.
+    var collapsed = getLocalJSON(COLLAPSED_KEY) || {};
+    var groupTitles = document.querySelectorAll(".main .field-group-title");
+    Array.prototype.forEach.call(groupTitles, function (titleEl) {
+      var group = titleEl.nextElementSibling;
+      if (!group || !group.classList.contains("field-group")) return;
+      var panel = titleEl.closest(".panel");
+      var gkey = (panel ? panel.id : "") + "::" + titleEl.textContent.trim();
+      titleEl.classList.add("collapsible");
+      titleEl.setAttribute("role", "button");
+      titleEl.tabIndex = 0;
+      function setCollapsed(on) {
+        titleEl.classList.toggle("collapsed", on);
+        group.classList.toggle("collapsed", on);
+        titleEl.setAttribute("aria-expanded", on ? "false" : "true");
+      }
+      setCollapsed(!!collapsed[gkey]);
+      function toggle() {
+        var on = !titleEl.classList.contains("collapsed");
+        setCollapsed(on);
+        if (on) collapsed[gkey] = true; else delete collapsed[gkey];
+        setLocalJSON(COLLAPSED_KEY, collapsed);
+      }
+      titleEl.addEventListener("click", toggle);
+      titleEl.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+      });
+    });
+
+    // Settings search across every panel.
+    var searchInput = document.getElementById("settings-search");
+    var searchCount = document.getElementById("search-count");
+    function cardText(card) {
+      var t = card.querySelector(".field-title");
+      var d = card.querySelector(".field-desc");
+      if (!t && !d) return card.textContent.toLowerCase();
+      return ((t ? t.textContent : "") + " " + (d ? d.textContent : "")).toLowerCase();
+    }
+    function cardVisible(card) {
+      return !card.classList.contains("hidden") && !card.classList.contains("search-hidden")
+        && !(card.closest(".hidden"));
+    }
+    function applySearch() {
+      var q = searchInput.value.trim().toLowerCase();
+      document.body.classList.toggle("searching", !!q);
+      var matches = 0;
+      Array.prototype.forEach.call(document.querySelectorAll(".main .field-card"), function (card) {
+        var hit = !q || cardText(card).indexOf(q) !== -1;
+        card.classList.toggle("search-hidden", !hit);
+        if (q && hit && !card.classList.contains("hidden") && !card.closest(".hidden")) matches++;
+      });
+      Array.prototype.forEach.call(document.querySelectorAll(".main .panel"), function (panel) {
+        var anyInPanel = false;
+        var kids = panel.children;
+        for (var k = 0; k < kids.length; k++) {
+          var el = kids[k];
+          if (el.classList.contains("field-card")) {
+            if (cardVisible(el)) anyInPanel = true;
+          } else if (el.classList.contains("field-group")) {
+            var vis = el.querySelector(".field-card:not(.search-hidden):not(.hidden)") !== null;
+            el.classList.toggle("search-hidden", !!q && !vis);
+            var prev = el.previousElementSibling;
+            if (prev && prev.classList.contains("field-group-title")) prev.classList.toggle("search-hidden", !!q && !vis);
+            if (vis) anyInPanel = true;
+          } else if (!el.classList.contains("field-group-title") && !el.classList.contains("panel-title")) {
+            // hints, logs, bespoke blocks — keep out of the way while filtering
+            el.classList.toggle("search-hidden", !!q);
+          }
+        }
+        panel.classList.toggle("search-hidden", !!q && !anyInPanel);
+      });
+      searchCount.textContent = q ? (matches + (matches === 1 ? " setting" : " settings") + " match") : "";
+    }
+    if (searchInput) {
+      searchInput.addEventListener("input", applySearch);
+      searchInput.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { searchInput.value = ""; applySearch(); }
+      });
+    }
+
+    // Phones: the sidebar (token/status/presets) is collapsible so settings
+    // aren't buried underneath it. Starts collapsed once a token exists.
+    var sidebar = document.getElementById("sidebar");
+    var sidebarToggle = document.getElementById("sidebar-toggle");
+    if (sidebar && sidebarToggle) {
+      var narrow = window.matchMedia ? window.matchMedia("(max-width: 760px)") : null;
+      function setSidebar(open) {
+        sidebar.classList.toggle("collapsed", !open);
+        sidebarToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      }
+      setSidebar(!(narrow && narrow.matches && getToken()));
+      sidebarToggle.addEventListener("click", function () {
+        setSidebar(sidebar.classList.contains("collapsed"));
+      });
+    }
+
+    // Other tab — client-only tools (nothing here changes server state).
+    var testBtn = document.getElementById("other-test-btn");
+    var latencyEl = document.getElementById("other-latency");
+    if (testBtn) {
+      testBtn.addEventListener("click", function () {
+        var t0 = performance.now();
+        latencyEl.textContent = "Testing…";
+        api("GET", "/api/status").then(function () {
+          latencyEl.textContent = "Connected — round trip " + Math.round(performance.now() - t0) + " ms";
+        }).catch(function (err) {
+          latencyEl.textContent = "Failed: " + err.message;
+        });
+      });
+    }
+    var clearBtn = document.getElementById("other-clear-token-btn");
+    if (clearBtn) {
+      clearBtn.addEventListener("click", function () {
+        setToken("");
+        tokenInput.value = "";
+        authState = "unknown";
+        notify("Saved token cleared from this browser");
+        poll();
+      });
+    }
+    var resetUiBtn = document.getElementById("other-reset-ui-btn");
+    if (resetUiBtn) {
+      resetUiBtn.addEventListener("click", function () {
+        try {
+          localStorage.removeItem(COLLAPSED_KEY);
+          localStorage.removeItem(LAST_TAB_KEY);
+        } catch (e) { /* storage unavailable — nothing to reset */ }
+        collapsed = {};
+        Array.prototype.forEach.call(groupTitles, function (titleEl) {
+          var g = titleEl.nextElementSibling;
+          if (!g || !g.classList.contains("field-group")) return;
+          titleEl.classList.remove("collapsed");
+          g.classList.remove("collapsed");
+          titleEl.setAttribute("aria-expanded", "true");
+        });
+        notify("Page layout reset");
+      });
+    }
+  }
+
+  initUiEnhancements();
   poll();
-  setInterval(poll, POLL_MS);
 })();

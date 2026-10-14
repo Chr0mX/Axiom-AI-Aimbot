@@ -10,31 +10,38 @@
   <div class="app">
     <div class="topbar">
       <div class="wordmark">AXIOM<span>·</span> <span class="sub">Web Control</span></div>
-      <div class="tabs">
-        <button class="tab active" data-tab="model">Model</button>
-        <button class="tab" data-tab="capture">Capture</button>
-        <button class="tab" data-tab="inference">Inference</button>
-        <button class="tab" data-tab="aim">Aim</button>
-        <button class="tab" data-tab="trigger">Trigger</button>
-        <button class="tab" data-tab="keys">Keys &amp; HW</button>
-        <button class="tab" data-tab="visuals">Visuals</button>
-        <button class="tab" data-tab="configs">Configs</button>
-        <button class="tab" data-tab="convert">Convert</button>
-        <button class="tab" data-tab="other">Other</button>
+      <div class="tabs" role="tablist" aria-label="Settings sections">
+        <button class="tab active" data-tab="model" role="tab" id="tab-model" aria-selected="true" aria-controls="panel-model" tabindex="0">Model</button>
+        <button class="tab" data-tab="capture" role="tab" id="tab-capture" aria-selected="false" aria-controls="panel-capture" tabindex="-1">Capture</button>
+        <button class="tab" data-tab="inference" role="tab" id="tab-inference" aria-selected="false" aria-controls="panel-inference" tabindex="-1">Inference</button>
+        <button class="tab" data-tab="aim" role="tab" id="tab-aim" aria-selected="false" aria-controls="panel-aim" tabindex="-1">Aim</button>
+        <button class="tab" data-tab="trigger" role="tab" id="tab-trigger" aria-selected="false" aria-controls="panel-trigger" tabindex="-1">Trigger</button>
+        <button class="tab" data-tab="keys" role="tab" id="tab-keys" aria-selected="false" aria-controls="panel-keys" tabindex="-1">Keys &amp; HW</button>
+        <button class="tab" data-tab="visuals" role="tab" id="tab-visuals" aria-selected="false" aria-controls="panel-visuals" tabindex="-1">Visuals</button>
+        <button class="tab" data-tab="configs" role="tab" id="tab-configs" aria-selected="false" aria-controls="panel-configs" tabindex="-1">Configs</button>
+        <button class="tab" data-tab="convert" role="tab" id="tab-convert" aria-selected="false" aria-controls="panel-convert" tabindex="-1">Convert</button>
+        <button class="tab" data-tab="other" role="tab" id="tab-other" aria-selected="false" aria-controls="panel-other" tabindex="-1">Other</button>
       </div>
-      <div id="status" class="disconnected">connecting…</div>
+      <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebar">Status</button>
+      <div id="status" class="disconnected" role="status" aria-live="polite">connecting…</div>
     </div>
 
     <div class="content">
-      <div class="sidebar">
+      <div class="sidebar" id="sidebar">
         <div class="sidebar-section">
           <div class="card-title">Access Token</div>
           <div class="row">
-            <input type="password" id="token-input" placeholder="Paste the token from the app's Other page">
+            <input type="password" id="token-input" aria-label="Access token" placeholder="Paste the token from the app's Other page">
             <button id="token-save">Save</button>
-            <button id="token-show" title="Show/hide token">👁</button>
+            <button id="token-show" type="button" title="Show/hide token" aria-label="Show or hide token" aria-pressed="false">👁</button>
           </div>
           <div class="hint">Find or regenerate this under the app's <b>Other</b> page → <b>Remote Control</b>. Stored only in this browser.</div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="card-title">Search Settings</div>
+          <input type="search" id="settings-search" class="search-box" placeholder="Filter by name or description…" aria-label="Search settings" autocomplete="off">
+          <div class="search-count" id="search-count" aria-live="polite"></div>
         </div>
 
         <div class="sidebar-section">
@@ -2026,11 +2033,36 @@
 
         <div class="panel" id="panel-other">
           <div class="panel-title">Other</div>
-          <div class="panel-placeholder">Coming soon — see CLAUDE.md's Web Control rollout.</div>
+          <div class="field-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Test Connection</div>
+                <div class="field-desc" id="other-latency">Measures a round trip to the Axiom host.</div>
+              </div>
+              <div class="field-control"><button id="other-test-btn" type="button">Test</button></div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Clear Saved Token</div>
+                <div class="field-desc">Removes the access token stored in this browser only.</div>
+              </div>
+              <div class="field-control"><button id="other-clear-token-btn" type="button">Clear</button></div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reset Page Layout</div>
+                <div class="field-desc">Re-expands collapsed groups and forgets the last open tab (this browser only).</div>
+              </div>
+              <div class="field-control"><button id="other-reset-ui-btn" type="button">Reset</button></div>
+            </div>
+          </div>
+          <div class="hint">Token regeneration, ports and Exit &amp; Save are intentionally only available in the desktop app's <b>Other</b> page — they would cut off or end this remote session.</div>
         </div>
       </div>
     </div>
   </div>
+
+  <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
   <script src="app.js"></script>
 </body>

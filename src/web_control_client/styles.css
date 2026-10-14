@@ -6,7 +6,7 @@
   --surface-2: #1b1b26;
   --ink: #e8e8f4;
   --ink-soft: #b8b8c8;
-  --ink-faint: #7a7a8a;
+  --ink-faint: #8e8ea2; /* ≥4.5:1 on --bg/--surface for small text */
   --accent: #00e0a0;
   --line: rgba(0, 224, 160, 0.25);
   --bad: #ff6060;
@@ -532,3 +532,85 @@ textarea {
   .tabs { order: 3; width: 100%; }
   .panel-title { font-size: 22px; }
 }
+
+
+/* ---------------------------------------------------------------------
+   Feedback, accessibility, search, collapsible groups, mobile polish
+   --------------------------------------------------------------------- */
+
+/* Visible keyboard focus. The switch's real <input> is opacity:0, so its
+   ring is drawn on the sibling .slider instead. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 9px; }
+
+/* Toast — transient save/error feedback */
+.toast-region {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  z-index: 50;
+  pointer-events: none;
+  max-width: calc(100vw - 28px);
+}
+.toast {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.toast.error { border-color: rgba(255, 96, 96, 0.55); color: var(--bad); }
+
+/* Connection badge: neutral "needs attention" state (no token yet) */
+#status.warn { color: #ffc060; border-color: rgba(255, 192, 96, 0.4); }
+#token-input.attn { outline: 2px solid #ffc060; outline-offset: 1px; }
+
+/* Collapsible field groups */
+.field-group-title.collapsible { cursor: pointer; user-select: none; }
+.field-group-title.collapsible::before {
+  content: "▾";
+  display: inline-block;
+  width: 1.1em;
+  transition: transform 0.12s;
+}
+.field-group-title.collapsible.collapsed::before { transform: rotate(-90deg); }
+.field-group.collapsed { display: none; }
+
+/* Settings search — while a query is active every panel is shown and only
+   matching cards stay visible. */
+.search-box { width: 100%; }
+.search-count { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
+body.searching .panel { display: flex; flex-direction: column; gap: 16px; }
+body.searching .panel-title { font-size: 14px; color: var(--ink-faint); }
+.search-hidden { display: none !important; }
+body.searching .field-group.collapsed { display: flex; }
+
+/* Sidebar toggle (phones only) */
+.sidebar-toggle { display: none; }
+
+@media (max-width: 900px) {
+  .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
+  .tabs { order: 3; width: 100%; flex: 1 1 100%; scroll-snap-type: x proximity; }
+  .tab { scroll-snap-align: center; }
+}
+@media (max-width: 760px) {
+  .sidebar-toggle { display: inline-block; }
+  .sidebar.collapsed { display: none; }
+  .sidebar { padding: 14px; }
+  .main { padding: 14px; }
+  .field-card { flex-wrap: wrap; }
+  .field-control { min-width: 0; max-width: 100%; flex-shrink: 1; flex-wrap: wrap; }
+}
+input[type="range"] { max-width: 100%; }
+
+/* The token row (input + Save + show/hide) overflowed a 375px viewport. */
+.row input[type="password"], .row input[type="text"], .row input[type="search"], .row select { min-width: 0; }
+@media (max-width: 760px) { .sidebar .row { flex-wrap: wrap; } .sidebar .row input { flex: 1 1 140px; } }
