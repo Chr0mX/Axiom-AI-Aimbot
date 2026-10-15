@@ -33,11 +33,12 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
-    continue-on-error: true   # informational until a baseline is cleaned up
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install mypy numpy
-      - run: mypy src/core src/version.py
+      - name: mypy (informational until a baseline is cleaned up)
+        continue-on-error: true
+        run: mypy src/core src/version.py
