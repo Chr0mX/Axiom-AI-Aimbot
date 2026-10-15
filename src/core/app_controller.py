@@ -804,6 +804,14 @@ def _run_conversion_worker(config: "Config", onnx_path: str, cache_dir: str, fp1
                 save_config(config)
             except Exception:
                 pass
+        else:
+            # Same as ConvertPage._onConvertFinished()'s failure branch: the
+            # selection was already written to config.model_path, so roll it
+            # back to the model the inference loop is actually running.
+            from core.model_selection import rollback_failed_selection
+            restored = rollback_failed_selection(config, onnx_path, project_root)
+            if restored:
+                message += f" Reverted selection to the running model: {os.path.basename(restored)}."
         with _convert_lock:
             _convert_state.update(running=False, done=True, success=success, message=message)
 

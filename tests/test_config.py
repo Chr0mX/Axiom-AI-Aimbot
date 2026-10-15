@@ -43,7 +43,7 @@ class TestConfigInit:
 
     def test_capture_defaults_match_screen(self):
         c = _make_config()
-        assert c.screenshot_method == "mss"
+        assert c.screenshot_method == "dxcam"
 
     def test_crosshair_defaults(self):
         c = _make_config()
@@ -58,7 +58,7 @@ class TestConfigInit:
     def test_model_defaults(self):
         c = _make_config()
         assert c.model_input_size == 640
-        assert c.model_path == os.path.join('Model', 'Roblox_8n.onnx')
+        assert c.model_path == 'Model/ApexLegendsOrbeet_15k.onnx'
         assert c.current_provider == "DmlExecutionProvider"
         assert c.dml_cpu_fallback is True
 
@@ -68,23 +68,23 @@ class TestConfigInit:
 
     def test_fov_defaults(self):
         c = _make_config()
-        assert c.fov_size == 222
-        assert c.detect_range_size == 1080  # 等於 height
-        assert c.detect_interval == 0.008
-        assert c.screenshot_interval == 0.008
+        assert c.fov_size == 200
+        assert c.detect_range_size == 320  # 固定預設值，與螢幕高度無關
+        assert c.detect_interval == 0.01
+        assert c.screenshot_interval == 0.01
 
     def test_pid_defaults(self):
         c = _make_config()
         assert c.pid_kp_x == 0.26
         assert c.pid_ki_x == 0.0
-        assert c.pid_kd_x == 0.0
+        assert c.pid_kd_x == 0.12
         assert c.pid_kp_y == 0.26
         assert c.pid_ki_y == 0.0
-        assert c.pid_kd_y == 0.0
+        assert c.pid_kd_y == 0.08
 
     def test_mouse_method_defaults(self):
         c = _make_config()
-        assert c.mouse_move_method == "mouse_event"
+        assert c.mouse_move_method == "makcu"
         assert c.mouse_click_method == "mouse_event"
         assert c.arduino_com_port == ""
 
@@ -98,19 +98,19 @@ class TestConfigInit:
         assert c.auto_fire_key == 0x06
         assert c.always_auto_fire is False
         assert c.auto_fire_delay == 0.0
-        assert c.auto_fire_interval == 0.08
+        assert c.auto_fire_interval == 0.01
         assert c.auto_fire_target_part == "both"
 
     def test_display_switch_defaults(self):
         c = _make_config()
         assert c.show_fov is True
         assert c.show_boxes is True
-        assert c.show_detect_range is False
+        assert c.show_detect_range is True
         assert c.show_status_panel is True
         assert c.status_panel_show_auto_aim is True
         assert c.status_panel_show_model is True
-        assert c.status_panel_show_mouse_move is True
-        assert c.status_panel_show_mouse_click is True
+        assert c.status_panel_show_mouse_move is False
+        assert c.status_panel_show_mouse_click is False
         assert c.status_panel_show_screenshot_method is True
         assert c.status_panel_show_screenshot_fps is True
         assert c.status_panel_show_detection_fps is True
@@ -133,7 +133,7 @@ class TestConfigInit:
             c = Config()
             assert c.width == 2560
             assert c.height == 1440
-            assert c.detect_range_size == 1440
+            assert c.detect_range_size == 320  # 預設值與螢幕解析度無關
 
 
 # ============================================================
@@ -428,8 +428,18 @@ class TestConfigFileIO:
         try:
             result = load_config(c, filepath)
             assert result is False
+            # The unparseable file is preserved as <name>.corrupt-<time>
+            # instead of being left to be overwritten with defaults.
+            import glob
+            backups = glob.glob(filepath + ".corrupt-*")
+            assert len(backups) == 1
+            with open(backups[0], encoding='utf-8') as bf:
+                assert bf.read() == "NOT VALID JSON {{{"
         finally:
-            os.unlink(filepath)
+            import glob
+            for leftover in [filepath] + glob.glob(filepath + ".corrupt-*"):
+                if os.path.exists(leftover):
+                    os.unlink(leftover)
 
     def test_save_config_drops_extra_fields(self):
         """save_config 應只寫入 to_dict() 的欄位，不保留舊版殘留的未知欄位。

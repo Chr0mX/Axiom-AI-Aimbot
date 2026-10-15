@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main, GPU, GPU-feat, refactored-code]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: pip install numpy opencv-python-headless pytest ruff
+      - name: Lint (blocking - syntax errors and undefined names)
+        run: ruff check src tests --select E9,F63,F7,F82 --output-format=github
+      - name: Lint (informational - unused imports and similar)
+        continue-on-error: true
+        run: ruff check src tests --output-format=github
+      - name: Tests
+        # Non-blocking until the ~26 known Linux-only failures (stale mock
+        # assertions in test_makcu_mouse/test_mouse_methods, cv2-mock
+        # pollution in test_inference/test_screen_capture) are triaged.
+        continue-on-error: true
+        # Windows-only dependencies are reported as skips by tests/conftest.py.
+        run: pytest tests -q -rf
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install mypy numpy
+      - name: mypy (informational until a baseline is cleaned up)
+        continue-on-error: true
+        run: mypy src/core src/version.py

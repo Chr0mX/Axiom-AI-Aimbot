@@ -413,3 +413,40 @@ class TestBuildStatus:
         assert status["source_fps"] == 0.0
         assert status["udp_recv_fps"] == 0.0
         assert status["udp_dropped_fps"] == 0.0
+
+
+class TestTokenComparison:
+    """_tokens_match() backs both the X-Axiom-Token header check and the
+    preview_stream ?preview_token= check."""
+
+    def test_matching_token(self):
+        from core.web_control_server import _tokens_match
+        assert _tokens_match("s3cret-token_AZ09", "s3cret-token_AZ09") is True
+
+    def test_wrong_or_partial_token(self):
+        from core.web_control_server import _tokens_match
+        assert _tokens_match("s3cret", "s3cret-token") is False
+        assert _tokens_match("s3cret-token-extra", "s3cret-token") is False
+        assert _tokens_match("S3CRET-TOKEN", "s3cret-token") is False
+
+    def test_empty_expected_token_never_matches(self):
+        """An unconfigured server must stay closed, even to an empty header."""
+        from core.web_control_server import _tokens_match
+        assert _tokens_match("", "") is False
+        assert _tokens_match("anything", "") is False
+
+    def test_missing_supplied_token(self):
+        from core.web_control_server import _tokens_match
+        assert _tokens_match("", "real") is False
+        assert _tokens_match(None, "real") is False
+
+    def test_non_ascii_does_not_raise(self):
+        from core.web_control_server import _tokens_match
+        assert _tokens_match("tökén", "token") is False
+        assert _tokens_match("tökén", "tökén") is True
+
+    def test_uses_constant_time_primitive(self):
+        import inspect
+        from core import web_control_server
+        src = inspect.getsource(web_control_server._tokens_match)
+        assert "hmac.compare_digest" in src

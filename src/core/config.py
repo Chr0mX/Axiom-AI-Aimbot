@@ -8,6 +8,7 @@ import dataclasses
 import json
 import logging
 import os
+import time
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -441,6 +442,17 @@ class Config:
         # value.
         self.fov_effective_size: float = float(self.fov_size)
         self.fov_effective_height: float = float(self.fov_height)
+
+        # Runtime-only (unpersisted, same pattern as fov_effective_size):
+        # what the inference loop's live session is ACTUALLY running, as
+        # opposed to model_path/trt_fp16_enabled, which are the user's
+        # selection and may be ahead of it while a TensorRT build is pending.
+        # core/model_selection.py rolls the selection back to these when a
+        # conversion fails. model_load_error is the last hot-swap load
+        # failure ("" once a swap succeeds) so the GUI/Web UI can show it.
+        self.loaded_model_path: str = ""
+        self.loaded_model_fp16: bool = False
+        self.model_load_error: str = ""
 
         # AI detection range (square edge length): Separated from fov_size, but must not be smaller than fov_size, and must not be larger than screen height
         self.detect_range_size: int = 320 # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）
@@ -884,12 +896,60 @@ def _state_path_for(config_path: str) -> str:
     return os.path.join(os.path.dirname(config_path), 'state.json')
 
 
+def _atomic_write_text(filepath: str, text: str) -> None:
+    """Write `text` to `filepath` so a crash/kill/power loss can never leave a
+    truncated file behind.
+
+    The content is written to a sibling temp file, flushed and fsynced, then
+    swapped in with os.replace() (atomic on both Windows and POSIX when source
+    and target are on the same volume — they are, being siblings). The old
+    behaviour, ``open(filepath, 'w')`` + ``json.dump``, truncated the live file
+    *before* writing anything, so an interruption (or an exception while
+    serializing) left a 0-byte/partial config.json.
+    """
+    tmp_path = f"{filepath}.tmp"
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, filepath)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _quarantine_unreadable_file(filepath: str) -> str | None:
+    """Move a config file that could not be parsed aside instead of leaving it
+    to be silently overwritten.
+
+    load_config() falls back to defaults when the file is unreadable, and
+    main.py saves the live config again on shutdown — which used to replace
+    the user's (possibly hand-recoverable) file with defaults and leave no
+    trace. Renaming it to ``<name>.corrupt-<unix time>`` keeps the bytes. An
+    empty file has nothing to recover and is left alone. Returns the new path,
+    or None if nothing was moved.
+    """
+    try:
+        if os.path.getsize(filepath) == 0:
+            return None
+        backup = f"{filepath}.corrupt-{int(time.time())}"
+        os.replace(filepath, backup)
+        logger.warning("Unreadable config moved aside to %s", backup)
+        return backup
+    except OSError as e:
+        logger.error("Could not preserve unreadable config %s: %s", filepath, e)
+        return None
+
+
 def save_state(config_instance: Config, filepath: str = 'state.json') -> bool:
     """Persist one-time app state (STATE_FIELDS) to state.json."""
     try:
         data = {f: getattr(config_instance, f) for f in STATE_FIELDS}
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        _atomic_write_text(filepath, json.dumps(data, ensure_ascii=False, indent=2))
         return True
     except (OSError, TypeError, ValueError) as e:
         logger.error("State save failed: %s", e)
@@ -921,8 +981,12 @@ def save_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     config.json holds only user settings.
     """
     try:
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(config_instance.to_dict(), f, ensure_ascii=False, indent=2)
+        # Serialize fully first, then swap the file in atomically — a failure
+        # at either step leaves the existing config.json untouched.
+        _atomic_write_text(
+            filepath,
+            json.dumps(config_instance.to_dict(), ensure_ascii=False, indent=2),
+        )
         save_state(config_instance, _state_path_for(filepath))
         logger.info("Config saved")
         return True
@@ -962,6 +1026,14 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
+
+        if not isinstance(data, dict):
+            # Valid JSON but not a settings object (e.g. a list) — treat it
+            # like any other unreadable file rather than crashing at startup.
+            logger.error("Config load failed: top-level JSON value is %s, expected an object",
+                         type(data).__name__)
+            _quarantine_unreadable_file(filepath)
+            return False
 
         data = _migrate_config(data)
         config_instance.from_dict(data)
@@ -1006,6 +1078,7 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
         return False
     except json.JSONDecodeError as e:
         logger.error("Config load failed (JSON error): %s", e)
+        _quarantine_unreadable_file(filepath)
         return False
     except OSError as e:
         logger.error("Config load failed (IO): %s", e)

@@ -55,6 +55,7 @@ with a bare `typing.get_type_hints()` call on a nested function with a
 locally-scoped annotation, no fastapi/pydantic needed to see it).
 """
 
+import hmac
 import logging
 import os
 import secrets
@@ -90,6 +91,26 @@ _auto_fire_boxes_queue = None
 # there is no continuous broadcast loop here (REST is pull, not push).
 _fps_lock = threading.Lock()
 _fps_state = {"t": 0.0, "cap": 0, "inf": 0, "cap_fps": 0.0, "inf_fps": 0.0}
+
+
+def _tokens_match(supplied: str, expected: str) -> bool:
+    """Constant-time token comparison.
+
+    ``supplied != expected`` returns as soon as the first byte differs, which
+    leaks how much of a guess was right through response timing; this is the
+    only thing standing between the LAN and a control API, so compare with
+    hmac.compare_digest. Both sides are encoded first (compare_digest rejects
+    non-ASCII ``str``), and an empty expected token never matches anything —
+    including an empty header — so an unconfigured server stays closed.
+    """
+    if not expected:
+        return False
+    try:
+        return hmac.compare_digest(
+            str(supplied or "").encode("utf-8"), str(expected).encode("utf-8")
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def _lan_ip() -> str:
@@ -165,6 +186,8 @@ def _build_status(config) -> dict:
         # was leaving the dropdown stuck on its default "Auto".
         "selected_backend": str(getattr(config, "inference_backend", "auto")),
         "trt_fp16_enabled": bool(getattr(config, "trt_fp16_enabled", False)),
+        # Last hot-swap load failure ("" when none) — the Model panel shows it.
+        "model_load_error": str(getattr(config, "model_load_error", "") or ""),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
         "capture_fps": round(cap_fps, 1),
@@ -249,7 +272,7 @@ def start(
     token = config.web_control_token
 
     def _check_token(x_axiom_token: str = Header(default="")) -> None:
-        if not token or x_axiom_token != token:
+        if not _tokens_match(x_axiom_token, token):
             raise HTTPException(status_code=401, detail="invalid or missing X-Axiom-Token")
 
     class AlwaysAimBody(BaseModel):
@@ -653,7 +676,7 @@ def start(
         # pattern for embedding authenticated media in <img>/<video> tags
         # (e.g. pre-signed URLs). Same comparison, just a different
         # source for the value.
-        if not token or preview_token != token:
+        if not _tokens_match(preview_token, token):
             raise HTTPException(status_code=401, detail="invalid or missing preview_token")
 
     def _preview_jpeg_frames():
@@ -725,8 +748,18 @@ def start(
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
 
+    class _NoCacheStaticFiles(StaticFiles):
+        """Always revalidate (ETag/Last-Modified still make that cheap): the
+        client's index.html/app.js/styles.css must stay in lockstep, and a
+        browser reusing a stale styles.css with a newer app.js broke the UI."""
+
+        async def get_response(self, path, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
+
     if os.path.isdir(_WEB_DIR):
-        app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")
+        app.mount("/", _NoCacheStaticFiles(directory=_WEB_DIR, html=True), name="client")
     else:
         logger.warning("[WebControl] client directory not found: %s", _WEB_DIR)
 

@@ -1,12 +1,16 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
+  /* Sentinel: app.js only builds custom dropdowns when this stylesheet
+     version is actually loaded (a stale cached CSS would otherwise leave
+     the native <select> visible beside the trigger text). */
+  --axiom-css: 4;
   --bg: #0d0d13;
   --surface: #14141c;
   --surface-2: #1b1b26;
   --ink: #e8e8f4;
   --ink-soft: #b8b8c8;
-  --ink-faint: #7a7a8a;
+  --ink-faint: #8e8ea2; /* ≥4.5:1 on --bg/--surface for small text */
   --accent: #00e0a0;
   --line: rgba(0, 224, 160, 0.25);
   --bad: #ff6060;
@@ -183,7 +187,7 @@ html, body {
   gap: 8px;
   align-items: center;
 }
-input[type="password"], input[type="text"], select {
+input[type="password"], input[type="text"], input[type="search"], select {
   flex: 1;
   background: var(--surface-2);
   border: 1px solid var(--line);
@@ -531,4 +535,230 @@ textarea {
   .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
   .tabs { order: 3; width: 100%; }
   .panel-title { font-size: 22px; }
+}
+
+
+/* ---------------------------------------------------------------------
+   Feedback, accessibility, search, collapsible groups, mobile polish
+   --------------------------------------------------------------------- */
+
+/* Visible keyboard focus. The switch's real <input> is opacity:0, so its
+   ring is drawn on the sibling .slider instead. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 9px; }
+
+/* Toast — transient save/error feedback */
+.toast-region {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  z-index: 50;
+  pointer-events: none;
+  max-width: calc(100vw - 28px);
+}
+.toast {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.toast.error { border-color: rgba(255, 96, 96, 0.55); color: var(--bad); }
+
+/* Connection badge: neutral "needs attention" state (no token yet) */
+#status.warn { color: #ffc060; border-color: rgba(255, 192, 96, 0.4); }
+#token-input.attn { outline: 2px solid #ffc060; outline-offset: 1px; }
+
+/* Collapsible field groups */
+.field-group-title.collapsible { cursor: pointer; user-select: none; }
+.field-group-title.collapsible::before {
+  content: "▾";
+  display: inline-block;
+  width: 1.1em;
+  transition: transform 0.12s;
+}
+.field-group-title.collapsible.collapsed::before { transform: rotate(-90deg); }
+.field-group.collapsed { display: none; }
+
+/* Settings search — while a query is active every panel is shown and only
+   matching cards stay visible. */
+.search-box { width: 100%; box-sizing: border-box; }
+input[type="search"]::placeholder { color: var(--ink-faint); }
+.search-count { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
+body.searching .panel { display: flex; flex-direction: column; gap: 16px; }
+body.searching .panel-title { font-size: 14px; color: var(--ink-faint); }
+.search-hidden { display: none !important; }
+body.searching .field-group.collapsed { display: flex; }
+
+/* Sidebar toggle (phones only) */
+.sidebar-toggle { display: none; }
+
+@media (max-width: 900px) {
+  .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
+  .tabs { order: 3; width: 100%; flex: 1 1 100%; scroll-snap-type: x proximity; }
+  .tab { scroll-snap-align: center; }
+}
+@media (max-width: 760px) {
+  .sidebar-toggle { display: inline-block; }
+  .sidebar.collapsed { display: none; }
+  .sidebar { padding: 14px; }
+  .main { padding: 14px; }
+  .field-card { flex-wrap: wrap; }
+  .field-control { min-width: 0; max-width: 100%; flex-shrink: 1; flex-wrap: wrap; }
+}
+input[type="range"] { max-width: 100%; }
+
+/* The token row (input + Save + show/hide) overflowed a 375px viewport. */
+.row input[type="password"], .row input[type="text"], .row input[type="search"], .row select { min-width: 0; }
+@media (max-width: 760px) { .sidebar .row { flex-wrap: wrap; } .sidebar .row input { flex: 1 1 140px; } }
+
+
+/* ---------------------------------------------------------------------
+   Custom dropdowns (see enhanceSelects() in app.js)
+   --------------------------------------------------------------------- */
+.dd { position: relative; display: inline-block; flex: 1 1 auto; min-width: 140px; max-width: 100%; }
+.field-control .dd { flex: 0 1 auto; }
+.dd-native {
+  position: absolute !important;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+}
+.dd-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  padding: 8px 12px 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(135deg, var(--surface-2), #20202e);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 8px rgba(0, 0, 0, 0.35);
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s;
+}
+.dd-trigger:hover { border-color: rgba(0, 224, 160, 0.55); box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 4px 14px rgba(0, 224, 160, 0.12); }
+.dd-trigger:active { transform: translateY(1px); }
+.dd.open .dd-trigger,
+.dd-native:focus-visible + .dd-trigger {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 224, 160, 0.18), 0 4px 16px rgba(0, 224, 160, 0.18);
+}
+.dd-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.dd-label.placeholder { color: var(--ink-faint); }
+.dd-chevron {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background: rgba(0, 224, 160, 0.12);
+  position: relative;
+  transition: transform 0.18s, background 0.15s;
+}
+.dd-chevron::before {
+  content: "";
+  position: absolute;
+  left: 5px; top: 4px;
+  width: 5px; height: 5px;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(45deg);
+}
+.dd.open .dd-chevron { transform: rotate(180deg); background: rgba(0, 224, 160, 0.25); }
+.dd.disabled { opacity: 0.5; }
+.dd.disabled .dd-trigger { cursor: not-allowed; box-shadow: none; }
+
+.dd-menu {
+  position: fixed;
+  z-index: 70;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 224, 160, 0.4);
+  background:
+    linear-gradient(180deg, rgba(0, 224, 160, 0.07), rgba(0, 224, 160, 0) 38%),
+    rgba(22, 22, 32, 0.96);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 0 32px rgba(0, 224, 160, 0.1);
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+  transform-origin: top center;
+  transition: opacity 0.14s ease, transform 0.14s ease;
+  scrollbar-width: thin;
+}
+.dd-menu.flip { transform-origin: bottom center; transform: translateY(6px) scale(0.98); }
+.dd-menu.show { opacity: 1; transform: none; }
+.dd-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 9px 16px;
+  border-radius: 9px;
+  color: var(--ink-soft);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+.dd-option.active { background: rgba(0, 224, 160, 0.12); color: var(--ink); }
+.dd-option.selected { color: var(--accent); font-weight: 600; background: linear-gradient(90deg, rgba(0, 224, 160, 0.18), rgba(0, 224, 160, 0.04)); }
+.dd-option.selected::before {
+  content: "";
+  position: absolute;
+  left: 4px; top: 22%; bottom: 22%;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.dd-option.selected::after {
+  content: "";
+  margin-left: auto;
+  width: 5px; height: 10px;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(45deg) translate(-2px, -1px);
+}
+.dd-option.disabled { opacity: 0.4; cursor: not-allowed; }
+.dd-group { padding: 8px 12px 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+.dd-empty { padding: 10px 12px; color: var(--ink-faint); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) {
+  .dd-menu, .dd-trigger, .dd-chevron { transition: none; }
+}
+
+
+/* ---------------------------------------------------------------------
+   Slider rows: consistent track alignment + readable phone layout
+   --------------------------------------------------------------------- */
+/* Every slider row gets the same control width, and the unit label a fixed
+   slot (rows without a unit reserve it), so tracks and number boxes line up
+   down the whole panel instead of drifting with description/unit length. */
+.field-control:has(input[type="range"]) { width: 340px; min-width: 340px; max-width: 100%; }
+.field-control:has(input[type="range"]) input[type="range"] { flex: 1 1 auto; width: auto; min-width: 0; }
+.field-control:has(input[type="range"]) input[type="number"] { flex: none; width: 86px; min-width: 70px; }
+.field-control:has(input[type="range"]) .field-slider-value { flex: none; width: 28px; min-width: 28px; }
+.field-control:has(input[type="range"]):not(:has(.field-slider-value)) { padding-right: 36px; box-sizing: border-box; }
+
+@media (max-width: 760px) {
+  /* Info text was being squeezed to a sliver beside the slider; stack the
+     slider underneath the title/description instead. */
+  .field-card:has(.field-control input[type="range"]) { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
+  .field-card:has(.field-control input[type="range"]) .field-info { flex: none; width: 100%; }
+  .field-control:has(input[type="range"]) { width: 100%; min-width: 0; }
 }

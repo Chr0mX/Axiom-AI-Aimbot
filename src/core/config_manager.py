@@ -44,6 +44,34 @@ _AIM_PRESET_FIELDS = frozenset(
     if path.startswith('aim.') or path.startswith('tracking.')
 )
 
+# Fields a full-config snapshot must never carry or apply. Snapshots are the
+# thing users export, share and import, so anything that is a credential or
+# that grants a remote party control of this machine has to stay out of them:
+#   * web_control_token   — the LAN control API's access credential; it used to
+#                           be written into every exported snapshot.
+#   * web_control_enabled / web_control_port — an imported file could switch the
+#                           control server on (it binds 0.0.0.0) with a token the
+#                           file's author chose.
+#   * preset_slots        — web-client UI state, not settings.
+#   * uvc_ffmpeg_path     — path to an executable the app launches; an imported
+#                           file could point it at arbitrary code.
+# Enforced symmetrically, like the aim-preset scope: _get_config_data() omits
+# them on save, and load_config()/preview_config_changes() ignore them on load,
+# so snapshots saved before this existed (which still contain them) are safe too.
+_SNAPSHOT_EXCLUDED_FIELDS = frozenset({
+    'web_control_enabled',
+    'web_control_port',
+    'web_control_token',
+    'preset_slots',
+    'uvc_ffmpeg_path',
+})
+
+
+def _strip_snapshot_excluded(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop `_SNAPSHOT_EXCLUDED_FIELDS` from loaded snapshot data."""
+    return {k: v for k, v in data.items() if k not in _SNAPSHOT_EXCLUDED_FIELDS}
+
+
 # preview_config_changes() display helpers ─────────────────────────────────
 # Purely cosmetic: groups a handful of attrs that commonly change together
 # (e.g. all 6 PID gains) under one friendly label instead of listing every
@@ -309,7 +337,7 @@ class ConfigManager:
         data: Dict[str, Any] = {
             attr: getattr(config_instance, attr)
             for attr in field_names
-            if hasattr(config_instance, attr)
+            if attr not in _SNAPSHOT_EXCLUDED_FIELDS and hasattr(config_instance, attr)
         }
 
         # humanization is aim-behavior-shaping (post-PID mouse-output
@@ -347,6 +375,9 @@ class ConfigManager:
                 # produced. A full-config instance applies everything the
                 # file contains, unfiltered — that's the whole point of it.
                 config_data = _filter_to_aim_preset_fields(config_data)
+            # Credentials / remote-control / executable-path fields are never
+            # applied from a file, whatever the file contains.
+            config_data = _strip_snapshot_excluded(config_data)
             config_instance.from_dict(config_data)
             # Record what's now active for the status panel (Config.
             # active_preset_name/active_config_name). A full-config load
@@ -402,7 +433,7 @@ class ConfigManager:
             return None
 
         simulated = copy.deepcopy(config_instance)
-        simulated.from_dict(preset_data)
+        simulated.from_dict(_strip_snapshot_excluded(preset_data))
 
         current_flat = _flatten_preset_data(self._get_config_data(config_instance))
         simulated_flat = _flatten_preset_data(self._get_config_data(simulated))

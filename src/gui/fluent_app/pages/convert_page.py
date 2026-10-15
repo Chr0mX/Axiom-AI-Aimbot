@@ -518,6 +518,19 @@ class ConvertPage(BasePage):
             )
         else:
             self.logView.append(f"✗ {message}")
+            # The Model page already wrote the attempted model to
+            # config.model_path; put the selection back on what is actually
+            # running so config.json isn't left pointing at a model with no
+            # engine.
+            if self._config is not None and self._converting_onnx_path:
+                from core.model_selection import rollback_failed_selection
+                restored = rollback_failed_selection(self._config, self._converting_onnx_path)
+                if restored:
+                    self.logView.append(
+                        f"↩ Reverted selection to the running model: {os.path.basename(restored)}")
+                    message = f"{message}\n" + t(
+                        "trt_convert_reverted", "Reverted to the previously loaded model: {name}"
+                    ).format(name=os.path.basename(restored))
             InfoBar.error(
                 t("trt_convert_fail", "Conversion failed"),
                 message, duration=8000, isClosable=True,

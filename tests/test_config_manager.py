@@ -472,9 +472,12 @@ class TestConfigManagerFullConfigScope:
                 saved = json.load(f)["config"]
 
             # Every _FIELD_MAP attr the live Config actually has is present —
-            # not just the aim/tracking subset.
+            # not just the aim/tracking subset — except the credential /
+            # remote-control / executable-path fields that deliberately never
+            # travel in a shareable snapshot (see _SNAPSHOT_EXCLUDED_FIELDS).
+            from core.config_manager import _SNAPSHOT_EXCLUDED_FIELDS
             for attr in _FIELD_MAP:
-                if hasattr(c, attr):
+                if hasattr(c, attr) and attr not in _SNAPSHOT_EXCLUDED_FIELDS:
                     assert attr in saved, f"{attr} missing from a full config save"
             assert "humanization" in saved
 
@@ -489,7 +492,7 @@ class TestConfigManagerFullConfigScope:
 
             for non_aim in (
                 "screenshot_method", "mouse_move_method", "model_path",
-                "auto_fire_delay", "web_control_port",
+                "auto_fire_delay", "web_esp_http_port",
             ):
                 assert non_aim in saved
 
