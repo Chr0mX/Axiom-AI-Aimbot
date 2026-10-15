@@ -201,3 +201,18 @@ def test_schema_includes_parity_fields():
     assert "status_panel_show_preset_config" in wcs._SCHEMA["visuals"]
     intensity = wcs._SCHEMA["aim"]["humanization.intensity"]
     assert intensity.get("scale") == 100.0
+
+
+def test_hot_swap_throttles_engine_recheck_while_build_pending():
+    """With model_path no longer reverted, config.model_path != current_model_path
+    for the whole build, so the skip branch must not re-glob the engine cache
+    on every frame (ai_loop isn't importable here — assert the contract in source)."""
+    src = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "src", "core", "ai_loop.py",
+    )
+    text = open(src, encoding="utf-8").read()
+    assert "_HOT_SWAP_RECHECK_S" in text
+    gate = text.find("_now - _hot_swap_skip_state[1] < _HOT_SWAP_RECHECK_S")
+    call = text.find("if needs_trt_build(config, abs_model_path):")
+    assert 0 < gate < call, "throttle must run before needs_trt_build()"

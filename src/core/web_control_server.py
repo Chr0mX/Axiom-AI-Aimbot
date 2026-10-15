@@ -186,6 +186,8 @@ def _build_status(config) -> dict:
         # was leaving the dropdown stuck on its default "Auto".
         "selected_backend": str(getattr(config, "inference_backend", "auto")),
         "trt_fp16_enabled": bool(getattr(config, "trt_fp16_enabled", False)),
+        # Last hot-swap load failure ("" when none) — the Model panel shows it.
+        "model_load_error": str(getattr(config, "model_load_error", "") or ""),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
         "capture_fps": round(cap_fps, 1),
@@ -746,8 +748,18 @@ def start(
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
 
+    class _NoCacheStaticFiles(StaticFiles):
+        """Always revalidate (ETag/Last-Modified still make that cheap): the
+        client's index.html/app.js/styles.css must stay in lockstep, and a
+        browser reusing a stale styles.css with a newer app.js broke the UI."""
+
+        async def get_response(self, path, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-cache"
+            return response
+
     if os.path.isdir(_WEB_DIR):
-        app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="client")
+        app.mount("/", _NoCacheStaticFiles(directory=_WEB_DIR, html=True), name="client")
     else:
         logger.warning("[WebControl] client directory not found: %s", _WEB_DIR)
 

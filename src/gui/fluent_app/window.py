@@ -5,7 +5,7 @@ from ctypes.wintypes import DWORD
 from PyQt6.QtCore import QUrl, QTimer
 from PyQt6.QtGui import QIcon, QDesktopServices, QColor
 from qfluentwidgets import (FluentWindow, NavigationItemPosition, FluentIcon,
-                            Theme, setTheme, qconfig)
+                            Theme, setTheme, qconfig, InfoBar, InfoBarPosition)
 from qfluentwidgets.common.style_sheet import setCustomStyleSheet
 from qfluentwidgets.components.settings.setting_card import SettingCard
 
@@ -172,6 +172,12 @@ class AxiomWindow(FluentWindow):
         self._remoteConvertSince = 0
         self._remoteConvertActive = False
         self._configSyncTimer.timeout.connect(self._onRemoteConvertTick)
+
+        # ai_loop.py's hot-swap publishes config.model_load_error when a
+        # selected model fails to load (it keeps running the old one); show
+        # each distinct failure once instead of leaving it in the log only.
+        self._lastShownModelLoadError = ""
+        self._configSyncTimer.timeout.connect(self._onModelLoadErrorTick)
 
         from .components.capture_preview import CapturePreviewPanel
         from PyQt6.QtWidgets import QToolButton
@@ -545,6 +551,24 @@ class AxiomWindow(FluentWindow):
             if not (isinstance(focused, QAbstractSlider) and not focused.isSliderDown()):
                 return
         widget.setConfig(self._config)
+
+    def _onModelLoadErrorTick(self):
+        if self._config is None:
+            return
+        err = str(getattr(self._config, "model_load_error", "") or "")
+        if err == self._lastShownModelLoadError:
+            return
+        self._lastShownModelLoadError = err
+        if err:
+            InfoBar.error(
+                t("model_load_failed", "Model failed to load"), err,
+                duration=10000, isClosable=True,
+                position=InfoBarPosition.TOP, parent=self,
+            )
+            try:
+                self._refreshAllPages()  # selection was reverted — resync combos
+            except Exception:
+                pass
 
     def _onRemoteConvertTick(self):
         """Mirrors a TensorRT build triggered remotely via the Web Control

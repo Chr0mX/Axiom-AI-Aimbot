@@ -443,6 +443,17 @@ class Config:
         self.fov_effective_size: float = float(self.fov_size)
         self.fov_effective_height: float = float(self.fov_height)
 
+        # Runtime-only (unpersisted, same pattern as fov_effective_size):
+        # what the inference loop's live session is ACTUALLY running, as
+        # opposed to model_path/trt_fp16_enabled, which are the user's
+        # selection and may be ahead of it while a TensorRT build is pending.
+        # core/model_selection.py rolls the selection back to these when a
+        # conversion fails. model_load_error is the last hot-swap load
+        # failure ("" once a swap succeeds) so the GUI/Web UI can show it.
+        self.loaded_model_path: str = ""
+        self.loaded_model_fp16: bool = False
+        self.model_load_error: str = ""
+
         # AI detection range (square edge length): Separated from fov_size, but must not be smaller than fov_size, and must not be larger than screen height
         self.detect_range_size: int = 320 # AI 偵測範圍（正方形邊長），獨立於 fov_size，但不得小於 fov_size，且不得大於螢幕高度，預設為螢幕高度（與舊版行為相同）
         self.show_confidence: bool = True # 是否在框上顯示置信度

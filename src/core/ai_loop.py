@@ -155,6 +155,11 @@ def _probe_model_input_size(session, abs_model_path: str) -> int:
 
 
 _hot_swap_skip_logged: tuple | None = None
+# While a selected model has no TensorRT engine yet, config.model_path stays
+# != current_model_path (it must — see _try_hot_swap_model), so every frame
+# would re-run needs_trt_build()'s glob. Re-check the disk at most this often.
+_HOT_SWAP_RECHECK_S = 1.0
+_hot_swap_skip_state: tuple | None = None  # (skip_key, monotonic time of last check)
 
 
 def _try_hot_swap_model(
@@ -192,6 +197,10 @@ def _try_hot_swap_model(
 
     if not (os.path.exists(abs_model_path) and abs_model_path.lower().endswith('.onnx')):
         logger.warning("[Model HotSwap] Invalid path or file not found: %s", abs_model_path)
+        config.model_load_error = (
+            f"Model file not found or not .onnx: {os.path.basename(abs_model_path)} "
+            f"— keeping {os.path.basename(current_model_path)}"
+        )
         config.model_path = current_model_path
         config.trt_fp16_enabled = current_fp16
         return (
@@ -216,9 +225,20 @@ def _try_hot_swap_model(
     # whenever needs_trt_build() stayed true for a frame (cache race, untagged
     # engine filename, etc.) and a later save_config persisted the revert.
     from .session_utils import needs_trt_build
+    global _hot_swap_skip_logged, _hot_swap_skip_state
+    skip_key = (abs_model_path, config_fp16, config_backend)
+    _now = time.monotonic()
+    if (
+        _hot_swap_skip_state is not None
+        and _hot_swap_skip_state[0] == skip_key
+        and _now - _hot_swap_skip_state[1] < _HOT_SWAP_RECHECK_S
+    ):
+        return (
+            model, current_model_path, model.get_inputs()[0].name,
+            current_backend, current_dml_fallback, current_fp16,
+        )
     if needs_trt_build(config, abs_model_path):
-        global _hot_swap_skip_logged
-        skip_key = (abs_model_path, config_fp16, config_backend)
+        _hot_swap_skip_state = (skip_key, _now)
         if _hot_swap_skip_logged != skip_key:
             _hot_swap_skip_logged = skip_key
             logger.warning(
@@ -258,9 +278,16 @@ def _try_hot_swap_model(
         if actual_providers:
             config.current_provider = actual_providers[0]
         logger.info("[Model HotSwap] Switched to: %s / %s", os.path.basename(abs_model_path), config_backend)
+        config.loaded_model_path = new_model_path
+        config.loaded_model_fp16 = config_fp16
+        config.model_load_error = ""
         return new_model, new_model_path, input_name, config_backend, config_dml_fallback, config_fp16
     except Exception as e:
         logger.error("[Model HotSwap] Load failed: %s — continuing with current model", e)
+        config.model_load_error = (
+            f"Failed to load {os.path.basename(abs_model_path)}: {e} "
+            f"— keeping {os.path.basename(current_model_path)}"
+        )
         config.model_path = current_model_path
         config.trt_fp16_enabled = current_fp16
         return (
@@ -425,6 +452,10 @@ def ai_logic_loop(
     current_backend = str(getattr(config, "inference_backend", "auto")).lower()
     current_dml_fallback = bool(getattr(config, "dml_cpu_fallback", True))
     current_fp16 = bool(getattr(config, "trt_fp16_enabled", False))
+    # Publish what the live session is really running (see Config.loaded_model_path).
+    config.loaded_model_path = current_model_path
+    config.loaded_model_fp16 = current_fp16
+    config.model_load_error = ""
 
     ema_total = 0.0
     ema_overhead = 0.0   # this loop's per-iteration work before the tensor wait
