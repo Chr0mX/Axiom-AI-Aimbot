@@ -21,6 +21,14 @@ class VelocityPredictor:
     ) -> None:
         self._history: deque[Tuple[float, float, float]] = deque(maxlen=history_len)
         self._max_velocity = max_velocity_px_per_s
+        # Opt-in refinements (both off = the original endpoint estimate).
+        # lsq_fit: least-squares slope through every point in the history,
+        # steadier against per-frame box jitter than oldest-vs-newest.
+        # velocity_deadzone: speeds at or below this (px/s) give no lead, and
+        # faster ones are reduced by it, so a still target's jitter doesn't
+        # become a shaky lead and the lead ramps in without a jump.
+        self.lsq_fit = False
+        self.velocity_deadzone = 0.0
 
     def reset(self) -> None:
         """Clear history (call when target is lost or aim deactivated)."""
@@ -50,15 +58,20 @@ class VelocityPredictor:
         if len(self._history) < 2:
             return x, y
 
-        # Use the oldest and newest points to estimate velocity.
-        x0, y0, t0 = self._history[0]
         x1, y1, t1 = self._history[-1]
-        dt = t1 - t0
-        if dt <= 0:
-            return x, y
-
-        vx = (x1 - x0) / dt
-        vy = (y1 - y0) / dt
+        if self.lsq_fit:
+            est = _lsq_velocity(self._history)
+            if est is None:
+                return x, y
+            vx, vy = est
+        else:
+            # Use the oldest and newest points to estimate velocity.
+            x0, y0, t0 = self._history[0]
+            dt = t1 - t0
+            if dt <= 0:
+                return x, y
+            vx = (x1 - x0) / dt
+            vy = (y1 - y0) / dt
 
         speed = (vx * vx + vy * vy) ** 0.5
         if speed > self._max_velocity:
@@ -67,9 +80,30 @@ class VelocityPredictor:
             self._history.append((x, y, t))
             return x, y
 
+        if self.velocity_deadzone > 0.0:
+            if speed <= self.velocity_deadzone:
+                return x, y
+            keep = (speed - self.velocity_deadzone) / speed
+            vx *= keep
+            vy *= keep
+
         predicted_x = x1 + vx * prediction_horizon_s
         predicted_y = y1 + vy * prediction_horizon_s
         return predicted_x, predicted_y
+
+
+def _lsq_velocity(history) -> Tuple[float, float] | None:
+    """Least-squares slope (px/s) of x(t) and y(t); None if time doesn't vary."""
+    n = len(history)
+    mt = sum(p[2] for p in history) / n
+    mx = sum(p[0] for p in history) / n
+    my = sum(p[1] for p in history) / n
+    stt = sum((p[2] - mt) ** 2 for p in history)
+    if stt <= 0.0:
+        return None
+    vx = sum((p[2] - mt) * (p[0] - mx) for p in history) / stt
+    vy = sum((p[2] - mt) * (p[1] - my) for p in history) / stt
+    return vx, vy
 
 
 class EmaPredictor:

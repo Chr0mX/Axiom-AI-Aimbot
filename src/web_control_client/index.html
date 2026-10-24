@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Axiom Web Control</title>
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <div class="app">
@@ -1095,28 +1095,34 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Movement Path</div><div class="field-desc">PID is the default. Other paths travel a fraction of the remaining error</div></div>
+              <div class="field-info"><div class="field-title">Capture Timestamps</div><div class="field-desc">Time each sample by when its frame was captured, not when it was processed</div></div>
               <div class="field-control">
-                <select id="aim-aim_movement_path" data-key="aim_movement_path" data-type="choice">
-                  <option value="pid">PID</option>
-                  <option value="linear">Linear</option>
-                  <option value="exponential">Exponential</option>
-                  <option value="bezier">Bezier</option>
-                  <option value="adaptive">Adaptive</option>
-                  <option value="perlin">Perlin</option>
-                </select>
+                <label class="switch"><input type="checkbox" id="aim-prediction_capture_timestamps" data-key="prediction_capture_timestamps" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Path Sensitivity</div><div class="field-desc">Higher is slower. Fraction traveled is 1 minus this</div></div>
+              <div class="field-info"><div class="field-title">Least-Squares Velocity</div><div class="field-desc">Fit the speed through every point in the history, not just the oldest and newest</div></div>
               <div class="field-control">
-                <input type="number" id="aim-aim_path_sensitivity" data-key="aim_path_sensitivity" data-type="number" min="0.01" max="0.99" step="0.01">
+                <label class="switch"><input type="checkbox" id="aim-prediction_lsq_fit" data-key="prediction_lsq_fit" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Path Curve</div><div class="field-desc">Perpendicular bow for Bezier and Adaptive</div></div>
+              <div class="field-info"><div class="field-title">Velocity Deadzone</div><div class="field-desc">Speeds at or below this give no lead; 0 is off</div></div>
               <div class="field-control">
-                <input type="number" id="aim-aim_path_curve" data-key="aim_path_curve" data-type="number" min="0" max="0.5" step="0.01">
+                <input type="number" id="aim-prediction_velocity_deadzone_px_s" data-key="prediction_velocity_deadzone_px_s" data-type="number" min="0" max="300" step="1">
+                <span class="field-slider-value">px/s</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Own-Mouse Compensation</div><div class="field-desc">Don't count the camera turn from our own mouse moves as target motion. Ignored while Camera Motion Compensation is on</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="aim-prediction_ego_motion_comp" data-key="prediction_ego_motion_comp" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Pixels per Mouse Count</div><div class="field-desc">Screen pixels one mouse count turns the camera by</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-prediction_ego_motion_scale" data-key="prediction_ego_motion_scale" data-type="number" min="0.1" max="5" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1153,36 +1159,6 @@
               <div class="field-info"><div class="field-title">Gap Frames</div></div>
               <div class="field-control">
                 <input type="number" id="aim-sticky_gap_frames" data-key="sticky_gap_frames" data-type="number" min="1" max="8" step="1">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Dynamic FOV</div><div class="field-desc">While the key is held, use the dynamic FOV size (scope)</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-fov_dynamic_enabled" data-key="fov_dynamic_enabled" data-type="bool"><span class="slider"></span></label>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Dynamic FOV Key</div><div class="field-desc">Hold to use the dynamic FOV size (same VK options as Keys &amp; HW).</div></div>
-              <div class="field-control">
-                <select id="aim-fov_dynamic_key" class="vk-select" data-key="fov_dynamic_key" data-type="number"></select>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Dynamic FOV Size</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-fov_dynamic_size" data-key="fov_dynamic_size" data-type="number" min="10" max="640" step="1">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Dynamic FOV Height</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-fov_dynamic_height" data-key="fov_dynamic_height" data-type="number" min="10" max="640" step="1">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Third Person Mask</div><div class="field-desc">Black out the bottom-left quarter of the capture so your own body is not a target</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-third_person_mask" data-key="third_person_mask" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
@@ -2065,6 +2041,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=6"></script>
 </body>
 </html>

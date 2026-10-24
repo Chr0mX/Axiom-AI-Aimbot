@@ -4,7 +4,7 @@
   /* Sentinel: app.js only builds custom dropdowns when this stylesheet
      version is actually loaded (a stale cached CSS would otherwise leave
      the native <select> visible beside the trigger text). */
-  --axiom-css: 4;
+  --axiom-css: 6;
   --bg: #0d0d13;
   --surface: #14141c;
   --surface-2: #1b1b26;
