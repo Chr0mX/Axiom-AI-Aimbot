@@ -1164,6 +1164,32 @@ class AimPage(BasePage):
             t("prediction_adaptive_lead_desc", "Stretch the time lead when the mouse is moving slowly"),
             parent=self.mathGroup,
         )
+        self.captureTimestampsCard = SwitchSettingCard(
+            FluentIcon.STOP_WATCH,
+            t("prediction_capture_timestamps", "Capture Timestamps"),
+            t("prediction_capture_timestamps_desc", "Time each sample by when its frame was captured, not when it was processed"),
+            parent=self.mathGroup,
+        )
+        self.lsqFitCard = SwitchSettingCard(
+            FluentIcon.MARKET,
+            t("prediction_lsq_fit", "Least-Squares Velocity"),
+            t("prediction_lsq_fit_desc", "Fit the speed through every point in the history, not just the oldest and newest"),
+            parent=self.mathGroup,
+        )
+        self.velocityDeadzoneCard = SliderLabelCard(
+            FluentIcon.REMOVE_FROM, t("prediction_velocity_deadzone", "Velocity Deadzone"),
+            0, 300, format_func=lambda v: "Off" if v == 0 else f"{v} px/s", parent=self.mathGroup,
+        )
+        self.egoMotionCard = SwitchSettingCard(
+            FluentIcon.MOVE,
+            t("prediction_ego_motion_comp", "Own-Mouse Compensation"),
+            t("prediction_ego_motion_comp_desc", "Don't count the camera turn from our own mouse moves as target motion. Ignored while Camera Motion Compensation is on"),
+            parent=self.mathGroup,
+        )
+        self.egoScaleCard = SliderLabelCard(
+            FluentIcon.ZOOM, t("prediction_ego_motion_scale", "Pixels per Mouse Count"),
+            10, 500, format_func=lambda v: f"{v / 100:.2f}", parent=self.mathGroup,
+        )
         self.emaSmoothingCard = SwitchSettingCard(
             FluentIcon.SYNC,
             t("aim_ema_smoothing_enabled", "Output EMA"),
@@ -1194,6 +1220,8 @@ class AimPage(BasePage):
         )
         for card in (
             self.predictionMethodCard, self.predictionLeadFramesCard, self.predictionAdaptiveLeadCard,
+            self.captureTimestampsCard, self.lsqFitCard, self.velocityDeadzoneCard,
+            self.egoMotionCard, self.egoScaleCard,
             self.emaSmoothingCard, self.emaAmountCard, self.aimXOffsetCard, self.aimYOffsetCard,
             self.stickyGapCard, self.stickyGapFramesCard,
         ):
@@ -1287,6 +1315,11 @@ class AimPage(BasePage):
         self.predictionMethodCombo.currentTextChanged.connect(self._onAimMathChanged)
         self.predictionLeadFramesCard.valueChanged.connect(self._onAimMathChanged)
         self.predictionAdaptiveLeadCard.checkedChanged.connect(self._onAimMathChanged)
+        self.captureTimestampsCard.checkedChanged.connect(self._onAimMathChanged)
+        self.lsqFitCard.checkedChanged.connect(self._onAimMathChanged)
+        self.velocityDeadzoneCard.valueChanged.connect(self._onAimMathChanged)
+        self.egoMotionCard.checkedChanged.connect(self._onAimMathChanged)
+        self.egoScaleCard.valueChanged.connect(self._onAimMathChanged)
         self.emaSmoothingCard.checkedChanged.connect(self._onAimMathChanged)
         self.emaAmountCard.valueChanged.connect(self._onAimMathChanged)
         self.aimXOffsetCard.valueChanged.connect(self._onAimMathChanged)
@@ -1414,6 +1447,11 @@ class AimPage(BasePage):
                 str(getattr(self._config, 'prediction_method', 'velocity')), "Velocity"))
             self.predictionLeadFramesCard.setValue(int(getattr(self._config, 'prediction_lead_frames', 3)))
             self.predictionAdaptiveLeadCard.setChecked(bool(getattr(self._config, 'prediction_adaptive_lead', False)))
+            self.captureTimestampsCard.setChecked(bool(getattr(self._config, 'prediction_capture_timestamps', False)))
+            self.lsqFitCard.setChecked(bool(getattr(self._config, 'prediction_lsq_fit', False)))
+            self.velocityDeadzoneCard.setValue(int(float(getattr(self._config, 'prediction_velocity_deadzone_px_s', 0.0) or 0.0)))
+            self.egoMotionCard.setChecked(bool(getattr(self._config, 'prediction_ego_motion_comp', False)))
+            self.egoScaleCard.setValue(int(round(float(getattr(self._config, 'prediction_ego_motion_scale', 1.0) or 1.0) * 100)))
             self.emaSmoothingCard.setChecked(bool(getattr(self._config, 'aim_ema_smoothing_enabled', False)))
             self.emaAmountCard.setValue(int(float(getattr(self._config, 'aim_ema_smoothing', 0.5)) * 100))
             self.aimXOffsetCard.setValue(int(float(getattr(self._config, 'aim_x_offset_frac', 0.0)) * 100))
@@ -2019,6 +2057,11 @@ class AimPage(BasePage):
         self._config.prediction_method = method
         self._config.prediction_lead_frames = float(self.predictionLeadFramesCard.value())
         self._config.prediction_adaptive_lead = bool(self.predictionAdaptiveLeadCard.isChecked())
+        self._config.prediction_capture_timestamps = bool(self.captureTimestampsCard.isChecked())
+        self._config.prediction_lsq_fit = bool(self.lsqFitCard.isChecked())
+        self._config.prediction_velocity_deadzone_px_s = float(self.velocityDeadzoneCard.value())
+        self._config.prediction_ego_motion_comp = bool(self.egoMotionCard.isChecked())
+        self._config.prediction_ego_motion_scale = self.egoScaleCard.value() / 100.0
         self._config.aim_ema_smoothing_enabled = bool(self.emaSmoothingCard.isChecked())
         self._config.aim_ema_smoothing = self.emaAmountCard.value() / 100.0
         self._config.aim_x_offset_frac = self.aimXOffsetCard.value() / 100.0
@@ -2037,6 +2080,13 @@ class AimPage(BasePage):
         # Adaptive Lead stretches (ai_aiming skips it for Rolling).
         self.predictionLeadFramesCard.setVisible(pred_on and method == "Rolling")
         self.predictionAdaptiveLeadCard.setVisible(pred_on and method != "Rolling")
+        # Rolling uses a frame count, so timestamps don't apply to it; the
+        # least-squares fit and deadzone are Velocity-method options.
+        self.captureTimestampsCard.setVisible(pred_on and method != "Rolling")
+        self.lsqFitCard.setVisible(pred_on and method == "Velocity")
+        self.velocityDeadzoneCard.setVisible(pred_on and method == "Velocity")
+        self.egoMotionCard.setVisible(pred_on)
+        self.egoScaleCard.setVisible(pred_on and self.egoMotionCard.isChecked())
         self.emaAmountCard.setVisible(self.emaSmoothingCard.isChecked())
         self.stickyGapFramesCard.setVisible(self.stickyGapCard.isChecked())
 

@@ -71,3 +71,75 @@ def test_adaptive_lead_grows_when_the_mouse_is_slow_and_clamps():
 
 def test_ema_step_blends():
     assert ema_step(0.0, 10.0, 0.5) == 5.0
+
+
+# --- Velocity-estimate refinements (all opt-in) ---
+
+from core.target_predictor import VelocityPredictor
+
+
+def _feed(pred, points, horizon=0.1):
+    out = None
+    for x, t in points:
+        out = pred.update(x, 0.0, t, horizon)
+    return out
+
+
+def test_endpoint_default_unchanged():
+    pred = VelocityPredictor(history_len=3)
+    x, _ = _feed(pred, [(0, 0.0), (10, 0.1), (20, 0.2)])
+    assert abs(x - 30.0) < 1e-6  # 100 px/s * 0.1 s lead
+
+
+def test_lsq_fit_is_steadier_than_endpoints_on_a_jittery_middle_point():
+    pts = [(0, 0.0), (20, 0.1), (20, 0.2)]  # endpoints say 100 px/s
+    plain = VelocityPredictor(history_len=3)
+    lsq = VelocityPredictor(history_len=3)
+    lsq.lsq_fit = True
+    assert abs(_feed(plain, pts)[0] - 30.0) < 1e-6
+    assert abs(_feed(lsq, pts)[0] - 30.0) < 1e-6  # LSQ slope is also 100 here
+    pts2 = [(0, 0.0), (0, 0.1), (20, 0.2)]  # one late jump
+    lsq.reset()
+    assert _feed(lsq, pts2)[0] < 20 + 100 * 0.1 + 1e-6
+
+
+def test_lsq_fit_handles_identical_timestamps():
+    pred = VelocityPredictor(history_len=3)
+    pred.lsq_fit = True
+    assert _feed(pred, [(5, 1.0), (6, 1.0)]) == (6, 0.0)
+
+
+def test_velocity_deadzone_zeroes_slow_and_reduces_fast_motion():
+    slow = VelocityPredictor(history_len=2)
+    slow.velocity_deadzone = 50.0
+    assert _feed(slow, [(0, 0.0), (2, 0.1)]) == (2, 0.0)  # 20 px/s -> no lead
+    fast = VelocityPredictor(history_len=2)
+    fast.velocity_deadzone = 50.0
+    x, _ = _feed(fast, [(0, 0.0), (20, 0.1)])  # 200 px/s -> 150 px/s kept
+    assert abs(x - (20 + 150 * 0.1)) < 1e-6
+
+
+def test_ego_moves_only_count_once_their_frame_shows_them():
+    from core.ai_aiming import settle_ego_moves
+    from core.ai_loop_state import LoopState
+    state = LoopState()
+    state.ego_pending.append((1.0, 5.0, -2.0))
+    state.ego_pending.append((2.0, 3.0, 0.0))
+    settle_ego_moves(state, 1.5)
+    assert (state.ego_drift_x, state.ego_drift_y) == (5.0, -2.0)
+    assert len(state.ego_pending) == 1
+    settle_ego_moves(state, 2.0)
+    assert state.ego_drift_x == 8.0 and not state.ego_pending
+
+
+def test_new_prediction_options_are_persisted_and_clamped():
+    from types import SimpleNamespace
+    from core.config import _FIELD_MAP, _validate_aim_math
+    for key in ("prediction_capture_timestamps", "prediction_lsq_fit",
+                "prediction_velocity_deadzone_px_s", "prediction_ego_motion_comp",
+                "prediction_ego_motion_scale"):
+        assert _FIELD_MAP[key].startswith("tracking.prediction.")
+    cfg = SimpleNamespace(prediction_velocity_deadzone_px_s=9999, prediction_ego_motion_scale=0.01)
+    _validate_aim_math(cfg)
+    assert cfg.prediction_velocity_deadzone_px_s == 500.0
+    assert cfg.prediction_ego_motion_scale == 0.1

@@ -568,6 +568,7 @@ def ai_logic_loop(
                     continue
 
                 last_capture_perf = time.perf_counter()
+                captured_t = last_capture_perf
                 captured_frame = capture_frame(_capture_backend[0], target_region)
                 captured_region = target_region
 
@@ -592,6 +593,8 @@ def ai_logic_loop(
                 elif _last_valid_frame[0] is not None:
                     # dxcam returns None when screen content hasn't changed;
                     # reuse the last valid frame so FPS isn't throttled by VSync
+                    # captured_t stays "now": no new desktop frame means the
+                    # screen hasn't changed since, so the old content is current.
                     captured_frame, captured_region = _last_valid_frame[0]
                 else:
                     continue
@@ -599,6 +602,7 @@ def ai_logic_loop(
                 with frame_lock:
                     capture_state['latest_frame'] = captured_frame
                     capture_state['latest_region'] = captured_region
+                    capture_state['latest_capture_t'] = captured_t
                     capture_state['frame_seq'] = int(capture_state['frame_seq']) + 1
 
                 config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
@@ -619,6 +623,7 @@ def ai_logic_loop(
                 with frame_lock:
                     frame = capture_state.get('latest_frame')
                     region = capture_state.get('latest_region')
+                    frame_t = float(capture_state.get('latest_capture_t', 0.0) or 0.0)
                     frame_seq = int(capture_state['frame_seq'])
                 if frame is None or region is None or frame_seq == last_frame_seq:
                     time.sleep(0.001)
@@ -655,7 +660,7 @@ def ai_logic_loop(
                 tensor, lb_scale, lb_pad_x, lb_pad_y = preprocess_image(
                     frame, config.model_input_size, fast_resize=_frame_is_square
                 )
-                put_latest(_tensor_queue, (tensor, lb_scale, lb_pad_x, lb_pad_y, region), timeout=0.05)
+                put_latest(_tensor_queue, (tensor, lb_scale, lb_pad_x, lb_pad_y, region, frame_t), timeout=0.05)
             except Exception:
                 now_err = time.perf_counter()
                 if now_err - _last_error_log[0] >= _PREPROCESS_ERROR_LOG_INTERVAL_S:
@@ -898,7 +903,7 @@ def ai_logic_loop(
                     _pre_result = _tensor_queue.get(timeout=0.02)
                 except queue.Empty:
                     continue
-                input_tensor, lb_scale, lb_pad_x, lb_pad_y, latest_region = _pre_result
+                input_tensor, lb_scale, lb_pad_x, lb_pad_y, latest_region, state.frame_capture_t = _pre_result
                 if input_tensor.shape[2] != config.model_input_size:
                     continue  # stale tensor from a size transition; discard silently
                 t1 = time.perf_counter()
@@ -1063,6 +1068,9 @@ def ai_logic_loop(
                         state.sticky_last_t = 0.0
                         state.sticky_vx = 0.0
                         state.sticky_vy = 0.0
+                        state.ego_pending.clear()
+                        state.ego_drift_x = 0.0
+                        state.ego_drift_y = 0.0
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
                         config.aim_prediction_active = False

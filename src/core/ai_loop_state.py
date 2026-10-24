@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -64,6 +65,18 @@ class LoopState:
     # when cam_motion_comp_enabled itself is off (mirrors cam_shift_x/y).
     cam_drift_x: float = 0.0
     cam_drift_y: float = 0.0
+
+    # When the frame now being aimed at was captured (time.perf_counter()),
+    # carried from the capture worker through the tensor queue. 0.0 = unknown.
+    frame_capture_t: float = 0.0
+
+    # Own-mouse (ego-motion) compensation for the predictor input. Every move
+    # we send is queued with its send time; once a frame captured after that
+    # time is processed, the move is folded into ego_drift_x/y (in mouse
+    # counts). Like cam_drift, only frame-to-frame consistency matters.
+    ego_pending: deque = field(default_factory=lambda: deque(maxlen=256))
+    ego_drift_x: float = 0.0
+    ego_drift_y: float = 0.0
 
     # Timestamp the current lock was acquired — set once on a genuinely new
     # target (the same "is this a continuation of the previous pick"

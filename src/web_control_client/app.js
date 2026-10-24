@@ -776,7 +776,7 @@
 
   // Advanced Aim Tuning: each sub-setting is shown only while the option it
   // tunes is active, mirroring aim_page.py's _updateAimTuningVisibility().
-  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "aim_ema_smoothing_enabled", "sticky_gap_extrapolate"];
+  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "prediction_ego_motion_comp", "aim_ema_smoothing_enabled", "sticky_gap_extrapolate"];
 
   function updateAimTuningVisibility() {
     function el(id) { return document.getElementById(id); }
@@ -790,6 +790,11 @@
     setCard("aim-prediction_method", predOn);
     setCard("aim-prediction_lead_frames", predOn && method === "rolling");
     setCard("aim-prediction_adaptive_lead", predOn && method !== "rolling");
+    setCard("aim-prediction_capture_timestamps", predOn && method !== "rolling");
+    setCard("aim-prediction_lsq_fit", predOn && method === "velocity");
+    setCard("aim-prediction_velocity_deadzone_px_s", predOn && method === "velocity");
+    setCard("aim-prediction_ego_motion_comp", predOn);
+    setCard("aim-prediction_ego_motion_scale", predOn && !!(el("aim-prediction_ego_motion_comp") && el("aim-prediction_ego_motion_comp").checked));
     setCard("aim-aim_ema_smoothing", !!(el("aim-aim_ema_smoothing_enabled") && el("aim-aim_ema_smoothing_enabled").checked));
     setCard("aim-sticky_gap_frames", !!(el("aim-sticky_gap_extrapolate") && el("aim-sticky_gap_extrapolate").checked));
   }
@@ -2559,7 +2564,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "5") return;
+    if (cssVer !== "6") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

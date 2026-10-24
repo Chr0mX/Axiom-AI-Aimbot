@@ -45,6 +45,25 @@ def _get_kalman(config: Config) -> KalmanFilter2D:
     return _kalman
 
 
+def record_ego_move(config: Config, state: LoopState, dx: float, dy: float) -> None:
+    """Remember a mouse move we just sent, for own-mouse compensation."""
+    if getattr(config, 'prediction_ego_motion_comp', False):
+        state.ego_pending.append((time.perf_counter(), float(dx), float(dy)))
+
+
+def settle_ego_moves(state: LoopState, frame_t: float) -> None:
+    """Fold every move sent before ``frame_t`` into the ego drift.
+
+    A frame captured at ``frame_t`` already shows the camera turn caused by
+    moves sent earlier, and none of the later ones, so only those are counted.
+    """
+    pending = state.ego_pending
+    while pending and pending[0][0] <= frame_t:
+        _t, dx, dy = pending.popleft()
+        state.ego_drift_x += dx
+        state.ego_drift_y += dy
+
+
 def _get_predictor(config: Config) -> VelocityPredictor:
     """Return (and lazily create/reconfigure) the module-level VelocityPredictor."""
     global _predictor
@@ -57,6 +76,8 @@ def _get_predictor(config: Config) -> VelocityPredictor:
         _predictor._history = type(_predictor._history)(
             _predictor._history, maxlen=history_len
         )
+    _predictor.lsq_fit = bool(getattr(config, 'prediction_lsq_fit', False))
+    _predictor.velocity_deadzone = float(getattr(config, 'prediction_velocity_deadzone_px_s', 0.0) or 0.0)
     return _predictor
 
 
@@ -330,6 +351,23 @@ def process_aiming(
         else:
             pred_x, pred_y = target_x, target_y
 
+        # --- Own-mouse (ego-motion) compensation ---
+        # Our own mouse moves turn the camera, which slides the target across
+        # the screen the opposite way. Add the moves already visible in this
+        # frame back onto the position so the predictor/Kalman see the
+        # target's own motion only. Skipped while camera motion compensation
+        # is on, which already measures the whole background shift
+        # (including our moves) from the image.
+        _ego_comp = bool(getattr(config, 'prediction_ego_motion_comp', False)) and not _cam_comp
+        _ego_dx = _ego_dy = 0.0
+        if _ego_comp:
+            settle_ego_moves(state, state.frame_capture_t or time.perf_counter())
+            _ego_scale = float(getattr(config, 'prediction_ego_motion_scale', 1.0) or 1.0)
+            _ego_dx = state.ego_drift_x * _ego_scale
+            _ego_dy = state.ego_drift_y * _ego_scale
+            pred_x += _ego_dx
+            pred_y += _ego_dy
+
         # --- Acquisition-phase guard ---
         # For a short window right after a fresh lock, the crosshair is still
         # snapping onto the target under our own correction — that
@@ -366,7 +404,12 @@ def process_aiming(
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
             if getattr(config, 'prediction_adaptive_lead', False) and method != 'rolling':
                 horizon_s = adaptive_lead_s(horizon_s, float(getattr(state, 'last_mouse_speed_px_s', 0.0)))
-            now_t = time.perf_counter()
+            # Optionally time each sample by when its frame was captured, so
+            # a slow inference doesn't look like the target slowing down.
+            if getattr(config, 'prediction_capture_timestamps', False) and state.frame_capture_t > 0.0:
+                now_t = state.frame_capture_t
+            else:
+                now_t = time.perf_counter()
             if method == 'ema':
                 pred_x, pred_y = _get_ema_predictor().update(pred_x, pred_y, now_t, horizon_s)
             elif method == 'rolling':
@@ -388,6 +431,8 @@ def process_aiming(
             if _kalman is not None:
                 _kalman.reset()
 
+        pred_x -= _ego_dx
+        pred_y -= _ego_dy
         if _cam_comp:
             target_x, target_y = pred_x + state.cam_drift_x, pred_y + state.cam_drift_y
         else:
@@ -515,6 +560,7 @@ def _finish_aim_move(
 
     if move_x != 0 or move_y != 0:
         send_mouse_move(move_x, move_y, method=mouse_method)
+        record_ego_move(config, state, move_x, move_y)
 
 
 def process_sticky_gap(
@@ -591,3 +637,4 @@ def apply_idle_micro_jitter(config: "Config", state: LoopState, mouse_method: st
 
     if move_x != 0 or move_y != 0:
         send_mouse_move(move_x, move_y, method=mouse_method)
+        record_ego_move(config, state, move_x, move_y)
