@@ -1142,7 +1142,7 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.camMotionCompSizeCard)
         self.addContent(self.trackingGroup)
 
-        self.mathGroup = SettingCardGroup(t("aim_math_group", "Aim Math"), self.scrollWidget)
+        self.mathGroup = SettingCardGroup(t("aim_tuning_group", "Advanced Aim Tuning"), self.scrollWidget)
         self.predictionMethodCombo = ComboBox()
         self.predictionMethodCombo.addItems(["Velocity", "EMA", "Rolling"])
         self.predictionMethodCombo.setMinimumWidth(130)
@@ -1163,25 +1163,6 @@ class AimPage(BasePage):
             t("prediction_adaptive_lead", "Adaptive Lead"),
             t("prediction_adaptive_lead_desc", "Stretch the time lead when the mouse is moving slowly"),
             parent=self.mathGroup,
-        )
-        self.movementPathCombo = ComboBox()
-        self.movementPathCombo.addItems(["PID", "Linear", "Exponential", "Bezier", "Adaptive", "Perlin"])
-        self.movementPathCombo.setMinimumWidth(130)
-        self.movementPathCard = SettingCard(
-            FluentIcon.MOVE,
-            t("aim_movement_path", "Movement Path"),
-            t("aim_movement_path_desc", "PID is the default. Other paths travel a fraction of the remaining error"),
-            self.mathGroup,
-        )
-        self.movementPathCard.hBoxLayout.addWidget(self.movementPathCombo, 0)
-        self.movementPathCard.hBoxLayout.addSpacing(16)
-        self.pathSensitivityCard = SliderLabelCard(
-            FluentIcon.SPEED_HIGH, t("aim_path_sensitivity", "Path Sensitivity"),
-            1, 99, format_func=lambda v: f"{v}%", parent=self.mathGroup,
-        )
-        self.pathCurveCard = SliderLabelCard(
-            FluentIcon.FIT_PAGE, t("aim_path_curve", "Path Curve"),
-            0, 50, format_func=lambda v: f"{v}%", parent=self.mathGroup,
         )
         self.emaSmoothingCard = SwitchSettingCard(
             FluentIcon.SYNC,
@@ -1211,36 +1192,10 @@ class AimPage(BasePage):
             FluentIcon.HISTORY, t("sticky_gap_frames", "Gap Frames"),
             1, 8, parent=self.mathGroup,
         )
-        self.dynamicFovCard = SwitchSettingCard(
-            FluentIcon.FIT_PAGE,
-            t("fov_dynamic_enabled", "Dynamic FOV"),
-            t("fov_dynamic_enabled_desc", "While the key is held, use the dynamic FOV size"),
-            parent=self.mathGroup,
-        )
-        self.dynamicFovKeyCard = SliderLabelCard(
-            FluentIcon.VPN, t("fov_dynamic_key", "Dynamic FOV Key"),
-            0, 255, format_func=lambda v: str(int(v)), parent=self.mathGroup,
-        )
-        self.dynamicFovSizeCard = SliderLabelCard(
-            FluentIcon.FIT_PAGE, t("fov_dynamic_size", "Dynamic FOV Size"),
-            10, 640, parent=self.mathGroup,
-        )
-        self.dynamicFovHeightCard = SliderLabelCard(
-            FluentIcon.FIT_PAGE, t("fov_dynamic_height", "Dynamic FOV Height"),
-            10, 640, parent=self.mathGroup,
-        )
-        self.thirdPersonCard = SwitchSettingCard(
-            FluentIcon.PEOPLE,
-            t("third_person_mask", "Third Person Mask"),
-            t("third_person_mask_desc", "Black out the bottom-left quarter of the capture"),
-            parent=self.mathGroup,
-        )
         for card in (
             self.predictionMethodCard, self.predictionLeadFramesCard, self.predictionAdaptiveLeadCard,
-            self.movementPathCard, self.pathSensitivityCard, self.pathCurveCard,
             self.emaSmoothingCard, self.emaAmountCard, self.aimXOffsetCard, self.aimYOffsetCard,
-            self.stickyGapCard, self.stickyGapFramesCard, self.dynamicFovCard, self.dynamicFovKeyCard,
-            self.dynamicFovSizeCard, self.dynamicFovHeightCard, self.thirdPersonCard,
+            self.stickyGapCard, self.stickyGapFramesCard,
         ):
             self.mathGroup.addSettingCard(card)
         self.addContent(self.mathGroup)
@@ -1332,20 +1287,12 @@ class AimPage(BasePage):
         self.predictionMethodCombo.currentTextChanged.connect(self._onAimMathChanged)
         self.predictionLeadFramesCard.valueChanged.connect(self._onAimMathChanged)
         self.predictionAdaptiveLeadCard.checkedChanged.connect(self._onAimMathChanged)
-        self.movementPathCombo.currentTextChanged.connect(self._onAimMathChanged)
-        self.pathSensitivityCard.valueChanged.connect(self._onAimMathChanged)
-        self.pathCurveCard.valueChanged.connect(self._onAimMathChanged)
         self.emaSmoothingCard.checkedChanged.connect(self._onAimMathChanged)
         self.emaAmountCard.valueChanged.connect(self._onAimMathChanged)
         self.aimXOffsetCard.valueChanged.connect(self._onAimMathChanged)
         self.aimYOffsetCard.valueChanged.connect(self._onAimMathChanged)
         self.stickyGapCard.checkedChanged.connect(self._onAimMathChanged)
         self.stickyGapFramesCard.valueChanged.connect(self._onAimMathChanged)
-        self.dynamicFovCard.checkedChanged.connect(self._onAimMathChanged)
-        self.dynamicFovKeyCard.valueChanged.connect(self._onAimMathChanged)
-        self.dynamicFovSizeCard.valueChanged.connect(self._onAimMathChanged)
-        self.dynamicFovHeightCard.valueChanged.connect(self._onAimMathChanged)
-        self.thirdPersonCard.checkedChanged.connect(self._onAimMathChanged)
         self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
         self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
         self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
@@ -1467,25 +1414,13 @@ class AimPage(BasePage):
                 str(getattr(self._config, 'prediction_method', 'velocity')), "Velocity"))
             self.predictionLeadFramesCard.setValue(int(getattr(self._config, 'prediction_lead_frames', 3)))
             self.predictionAdaptiveLeadCard.setChecked(bool(getattr(self._config, 'prediction_adaptive_lead', False)))
-            path_map = {
-                "pid": "PID", "linear": "Linear", "exponential": "Exponential",
-                "bezier": "Bezier", "adaptive": "Adaptive", "perlin": "Perlin",
-            }
-            self.movementPathCombo.setCurrentText(path_map.get(
-                str(getattr(self._config, 'aim_movement_path', 'pid')), "PID"))
-            self.pathSensitivityCard.setValue(int(float(getattr(self._config, 'aim_path_sensitivity', 0.8)) * 100))
-            self.pathCurveCard.setValue(int(float(getattr(self._config, 'aim_path_curve', 0.15)) * 100))
             self.emaSmoothingCard.setChecked(bool(getattr(self._config, 'aim_ema_smoothing_enabled', False)))
             self.emaAmountCard.setValue(int(float(getattr(self._config, 'aim_ema_smoothing', 0.5)) * 100))
             self.aimXOffsetCard.setValue(int(float(getattr(self._config, 'aim_x_offset_frac', 0.0)) * 100))
             self.aimYOffsetCard.setValue(int(float(getattr(self._config, 'aim_y_offset_frac', 0.0)) * 100))
             self.stickyGapCard.setChecked(bool(getattr(self._config, 'sticky_gap_extrapolate', False)))
             self.stickyGapFramesCard.setValue(int(getattr(self._config, 'sticky_gap_frames', 3)))
-            self.dynamicFovCard.setChecked(bool(getattr(self._config, 'fov_dynamic_enabled', False)))
-            self.dynamicFovKeyCard.setValue(int(getattr(self._config, 'fov_dynamic_key', 0)))
-            self.dynamicFovSizeCard.setValue(int(getattr(self._config, 'fov_dynamic_size', 120)))
-            self.dynamicFovHeightCard.setValue(int(getattr(self._config, 'fov_dynamic_height', 120)))
-            self.thirdPersonCard.setChecked(bool(getattr(self._config, 'third_person_mask', False)))
+            self._updateAimTuningVisibility()
 
             # Target Area
             self.customYCard.setValue(int(getattr(self._config, 'aim_custom_y_pct', 30.0)))
@@ -2081,31 +2016,34 @@ class AimPage(BasePage):
             return
         method = {"Velocity": "velocity", "EMA": "ema", "Rolling": "rolling"}.get(
             self.predictionMethodCombo.currentText(), "velocity")
-        path = {
-            "PID": "pid", "Linear": "linear", "Exponential": "exponential",
-            "Bezier": "bezier", "Adaptive": "adaptive", "Perlin": "perlin",
-        }.get(self.movementPathCombo.currentText(), "pid")
         self._config.prediction_method = method
         self._config.prediction_lead_frames = float(self.predictionLeadFramesCard.value())
         self._config.prediction_adaptive_lead = bool(self.predictionAdaptiveLeadCard.isChecked())
-        self._config.aim_movement_path = path
-        self._config.aim_path_sensitivity = self.pathSensitivityCard.value() / 100.0
-        self._config.aim_path_curve = self.pathCurveCard.value() / 100.0
         self._config.aim_ema_smoothing_enabled = bool(self.emaSmoothingCard.isChecked())
         self._config.aim_ema_smoothing = self.emaAmountCard.value() / 100.0
         self._config.aim_x_offset_frac = self.aimXOffsetCard.value() / 100.0
         self._config.aim_y_offset_frac = self.aimYOffsetCard.value() / 100.0
         self._config.sticky_gap_extrapolate = bool(self.stickyGapCard.isChecked())
         self._config.sticky_gap_frames = int(self.stickyGapFramesCard.value())
-        self._config.fov_dynamic_enabled = bool(self.dynamicFovCard.isChecked())
-        self._config.fov_dynamic_key = int(self.dynamicFovKeyCard.value())
-        self._config.fov_dynamic_size = int(self.dynamicFovSizeCard.value())
-        self._config.fov_dynamic_height = int(self.dynamicFovHeightCard.value())
-        self._config.third_person_mask = bool(self.thirdPersonCard.isChecked())
+        self._updateAimTuningVisibility()
+
+    def _updateAimTuningVisibility(self):
+        """Show each Advanced Aim Tuning sub-setting only while the option it
+        tunes is active — hidden rather than greyed out, same as Humanization."""
+        pred_on = self.predictionEnableCard.isChecked()
+        method = self.predictionMethodCombo.currentText()
+        self.predictionMethodCard.setVisible(pred_on)
+        # Rolling uses a frame lead; Velocity/EMA use the time horizon, which
+        # Adaptive Lead stretches (ai_aiming skips it for Rolling).
+        self.predictionLeadFramesCard.setVisible(pred_on and method == "Rolling")
+        self.predictionAdaptiveLeadCard.setVisible(pred_on and method != "Rolling")
+        self.emaAmountCard.setVisible(self.emaSmoothingCard.isChecked())
+        self.stickyGapFramesCard.setVisible(self.stickyGapCard.isChecked())
 
     def _onPredictionEnableChanged(self, checked):
         if self._config:
             self._config.prediction_enabled = bool(checked)
+        self._updateAimTuningVisibility()
 
     def _onPredictionHorizonChanged(self, value):
         if self._config:
@@ -2310,10 +2248,8 @@ class AimPage(BasePage):
         self.targetPriorityWeightCard.contentLabel.setText(t("target_priority_weight_desc", "Used in Composite mode only"))
 
         self.trackingGroup.titleLabel.setText(t("target_tracking", "Target Tracking"))
-        self.mathGroup.titleLabel.setText(t("aim_math_group", "Aim Math"))
+        self.mathGroup.titleLabel.setText(t("aim_tuning_group", "Advanced Aim Tuning"))
         self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Prediction Method"))
-        self.movementPathCard.titleLabel.setText(t("aim_movement_path", "Movement Path"))
-        self.thirdPersonCard.titleLabel.setText(t("third_person_mask", "Third Person Mask"))
         self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
         self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
         self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))

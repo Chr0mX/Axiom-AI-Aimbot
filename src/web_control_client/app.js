@@ -674,6 +674,7 @@
         }
         if (tab === "aim") {
           updateHumanizationVisibility();
+          updateAimTuningVisibility();
           if (typeof data.pid_unsafe_mode === "boolean") applyPidUnsafeSliderLimits(!!data.pid_unsafe_mode);
         }
         if (tab === "keys") updateKeysVisibility(data);
@@ -727,6 +728,7 @@
         if (tab === "inference" && key === "fov_reduce_on_target_enabled") updateFovReduceVisibility(el.checked);
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
+        if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
         }
@@ -771,6 +773,26 @@
     "humanization.micro_stutter_enabled",
     "humanization.reaction_variability_enabled",
   ];
+
+  // Advanced Aim Tuning: each sub-setting is shown only while the option it
+  // tunes is active, mirroring aim_page.py's _updateAimTuningVisibility().
+  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "aim_ema_smoothing_enabled", "sticky_gap_extrapolate"];
+
+  function updateAimTuningVisibility() {
+    function el(id) { return document.getElementById(id); }
+    function setCard(id, show) {
+      var input = el(id);
+      var card = input && input.closest(".field-card");
+      if (card) card.classList.toggle("hidden", !show);
+    }
+    var predOn = !!(el("aim-prediction_enabled") && el("aim-prediction_enabled").checked);
+    var method = el("aim-prediction_method") ? el("aim-prediction_method").value : "velocity";
+    setCard("aim-prediction_method", predOn);
+    setCard("aim-prediction_lead_frames", predOn && method === "rolling");
+    setCard("aim-prediction_adaptive_lead", predOn && method !== "rolling");
+    setCard("aim-aim_ema_smoothing", !!(el("aim-aim_ema_smoothing_enabled") && el("aim-aim_ema_smoothing_enabled").checked));
+    setCard("aim-sticky_gap_frames", !!(el("aim-sticky_gap_extrapolate") && el("aim-sticky_gap_extrapolate").checked));
+  }
 
   function updateHumanizationVisibility() {
     var master = document.getElementById("aim-humanization-enabled").checked;
@@ -2537,7 +2559,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "4") return;
+    if (cssVer !== "5") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
