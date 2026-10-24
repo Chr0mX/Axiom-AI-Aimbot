@@ -40,6 +40,12 @@
     borderWidth:   1,
     borderRadius:  4,
     padding:       6,
+    // Detection boxes. "app"/0 = follow the app's own setting; anything
+    // else overrides it for this browser only (the Web ESP server is
+    // read-only, so it can't change the app's config).
+    boxStyle:      "app",   // "app" | "corners" | "full"
+    boxThickness:  0,       // px, 0 = app
+    boxCornerPct:  0,       // % of shorter side, 0 = app
   };
   const LS_CFG = "axiom_hud_cfg";
   const LS_POS = "axiom_hud_pos";
@@ -162,9 +168,26 @@
   }
 
   // ── Drawing primitives ─────────────────────────────────────────
-  function cornerBox(x1, y1, x2, y2, color, thickness) {
-    const w = x2 - x1, h = y2 - y1;
-    const len = Math.max(6, Math.min(w, h) * 0.22);
+  // Mirrors core/box_style.py: a fixed thickness / corner % when set,
+  // otherwise this page's original automatic look.
+  function boxThicknessFor(st, conf) {
+    const fixed = cfg.boxThickness > 0 ? cfg.boxThickness : (st.box_line_thickness || 0);
+    if (fixed > 0) return Math.min(10, fixed);
+    return Math.max(2, Math.min(4, 2 + Math.round(conf * 2)));
+  }
+  function cornerLenFor(st, w, h) {
+    const side = Math.max(0, Math.min(Math.abs(w), Math.abs(h)));
+    const pct = cfg.boxCornerPct > 0 ? cfg.boxCornerPct : (st.box_corner_length_pct || 0);
+    if (pct > 0) return Math.max(2, Math.min(side / 2, side * Math.min(50, pct) / 100));
+    return Math.max(6, side * 0.22);
+  }
+  function useFullRect(st) {
+    if (cfg.boxStyle === "full") return true;
+    if (cfg.boxStyle === "corners") return false;
+    return !!st.box_full_rect;
+  }
+
+  function cornerBox(x1, y1, x2, y2, color, thickness, len) {
     ctx.strokeStyle = rgba(color);
     ctx.lineWidth = thickness;
     ctx.beginPath();
@@ -299,7 +322,7 @@
           const b = boxes[i];
           const x1 = X(b[0]), y1 = Y(b[1]), x2 = X(b[2]), y2 = Y(b[3]);
           const conf = i < confs.length ? confs[i] : 0.5;
-          const thickness = Math.max(2, Math.min(4, 2 + Math.round(conf * 2)));
+          const thickness = boxThicknessFor(st, conf);
 
           const ox = state.center.x, oy = state.center.y;
           let inFov;
@@ -319,11 +342,11 @@
             const c = hsv2rgb(hue / 360, 1, 1); color = [c[0], c[1], c[2], 220];
           }
 
-          if (st.box_full_rect) {
+          if (useFullRect(st)) {
             ctx.strokeStyle = rgba(color); ctx.lineWidth = thickness;
             ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
           } else {
-            cornerBox(x1, y1, x2, y2, color, thickness);
+            cornerBox(x1, y1, x2, y2, color, thickness, cornerLenFor(st, x2 - x1, y2 - y1));
           }
 
           if (st.show_confidence && i < confs.length) {
@@ -510,6 +533,22 @@
   bindRange("cfg-border-radius",  "borderRadius",  "val-border-radius");
   bindRange("cfg-padding",        "padding",       "val-padding");
 
+  // Box overrides — 0 shows as "App" (follow the app's setting).
+  function bindBoxRange(id, key, valId, unit) {
+    const el = document.getElementById(id);
+    const vl = document.getElementById(valId);
+    const show = () => { vl.textContent = cfg[key] > 0 ? cfg[key] + unit : "App"; };
+    el.value = cfg[key];
+    show();
+    el.addEventListener("input", () => { cfg[key] = Number(el.value); show(); saveCfg(); });
+    return show;
+  }
+  const showBoxThickness = bindBoxRange("cfg-box-thickness", "boxThickness", "val-box-thickness", "px");
+  const showBoxCorner    = bindBoxRange("cfg-box-corner",    "boxCornerPct", "val-box-corner",    "%");
+  const boxStyleEl = document.getElementById("cfg-box-style");
+  boxStyleEl.value = cfg.boxStyle;
+  boxStyleEl.addEventListener("change", () => { cfg.boxStyle = boxStyleEl.value; saveCfg(); });
+
   document.getElementById("cfg-reset").addEventListener("click", () => {
     cfg = Object.assign({}, CFG_DEFAULTS);
     saveCfg();
@@ -527,6 +566,11 @@
     });
     document.getElementById("cfg-bg-color").value     = cfg.bgColor;
     document.getElementById("cfg-border-color").value = cfg.borderColor;
+    document.getElementById("cfg-box-thickness").value = cfg.boxThickness;
+    document.getElementById("cfg-box-corner").value = cfg.boxCornerPct;
+    boxStyleEl.value = cfg.boxStyle;
+    showBoxThickness();
+    showBoxCorner();
   });
 
   // ── HSV helper ─────────────────────────────────────────────────

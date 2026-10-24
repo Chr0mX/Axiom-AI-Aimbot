@@ -184,6 +184,8 @@ def _build_snapshot() -> dict:
             "show_fov": bool(getattr(c, "show_fov", True)),
             "show_boxes": bool(getattr(c, "show_boxes", True)),
             "box_full_rect": bool(getattr(c, "box_full_rect", False)),
+            "box_line_thickness": int(getattr(c, "box_line_thickness", 0) or 0),
+            "box_corner_length_pct": int(getattr(c, "box_corner_length_pct", 0) or 0),
             "show_detect_range": bool(getattr(c, "show_detect_range", True)),
             "show_confidence": bool(getattr(c, "show_confidence", True)),
             "show_tracer_line": bool(getattr(c, "show_tracer_line", True)),

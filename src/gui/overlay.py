@@ -202,8 +202,8 @@ class PyQtOverlay(QWidget):
 
     def draw_corner_box(self, painter, x1, y1, x2, y2):
         """Draw L-shaped corner brackets scaled to target size."""
-        box_size = min(abs(x2 - x1), abs(y2 - y1))
-        corner_len = max(6, min(24, int(box_size * 0.15)))
+        from core.box_style import corner_length
+        corner_len = corner_length(self.config, x2 - x1, y2 - y1)
 
         # Top-left
         painter.drawLine(x1, y1, x1 + corner_len, y1)
@@ -378,12 +378,13 @@ class PyQtOverlay(QWidget):
             aim_x_color     = OverlayColors.get_aim_marker_color()
             pen_aim_x       = QPen(aim_x_color, 1)
             calc_target     = _get_calculate_aim_target()
+            from core.box_style import box_thickness
 
             for i, box in enumerate(self.boxes):
                 x1, y1, x2, y2 = map(int, box)
                 conf = float(self.confidences[i]) if i < len(self.confidences) else 0.5
-                # Confidence-based thickness: low conf → 1px, high conf → 3px
-                thickness = max(1, min(3, 1 + round(conf * 2)))
+                # Auto: 1-3 px by confidence; or the fixed box_line_thickness.
+                thickness = box_thickness(self.config, conf)
 
                 # Determine if this box intersects the FOV region
                 bx1, by1, bx2, by2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])

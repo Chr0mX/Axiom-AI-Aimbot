@@ -193,6 +193,8 @@ _FIELD_MAP = {
     'show_fov':                   'display.show_fov',
     'show_boxes':                 'display.show_boxes',
     'box_full_rect':              'display.box_full_rect',
+    'box_line_thickness':         'display.box_line_thickness',
+    'box_corner_length_pct':      'display.box_corner_length_pct',
     'show_detect_range':          'display.show_detect_range',
     'show_confidence':            'display.show_confidence',
     'show_tracer_line':           'display.show_tracer_line',
@@ -627,6 +629,8 @@ class Config:
         self.show_fov: bool = True
         self.show_boxes: bool = True
         self.box_full_rect: bool = False
+        self.box_line_thickness: int = 0       # px; 0 = auto (1-3 px by confidence)
+        self.box_corner_length_pct: int = 0    # % of shorter side; 0 = auto (15%, 6-24 px)
         self.show_detect_range: bool = True
         self.show_status_panel: bool = True
         self.status_panel_show_auto_aim: bool = True
@@ -1052,6 +1056,7 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
         # 向後兼容：修正滑鼠移動方式
         _validate_mouse_method(config_instance)
         _validate_aim_math(config_instance)
+        _validate_box_style(config_instance)
 
         # 向後兼容：修正推理後端選擇
         _validate_inference_backend(config_instance)
@@ -1182,6 +1187,17 @@ def _validate_queue_and_confidence(config: Config) -> None:
     if clamped != conf:
         logger.warning("[Config] min_confidence %.3f out of range [0, 1] — clamped to %.3f", conf, clamped)
     config.min_confidence = clamped
+
+
+def _validate_box_style(config: Config) -> None:
+    """Clamp the detection-box line style (0 = auto for both)."""
+    def _int(name: str) -> int:
+        try:
+            return int(getattr(config, name, 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+    config.box_line_thickness = max(0, min(10, _int('box_line_thickness')))
+    config.box_corner_length_pct = max(0, min(50, _int('box_corner_length_pct')))
 
 
 def _validate_aim_math(config: Config) -> None:

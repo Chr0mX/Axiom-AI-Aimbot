@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Axiom Web Control</title>
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <div class="app">
@@ -1677,6 +1677,26 @@
               </div>
             </div>
             <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Box Line Thickness</div>
+                <div class="field-desc">Thickness of corner brackets and full boxes. 0 = Auto (1-3 px by confidence)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-box_line_thickness" data-key="box_line_thickness" data-type="number" min="0" max="10" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card" id="vis-box-corner-card">
+              <div class="field-info">
+                <div class="field-title">Corner Bracket Length</div>
+                <div class="field-desc">Bracket arm length as % of the box's shorter side. 0 = Auto (15%, 6-24 px)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-box_corner_length_pct" data-key="box_corner_length_pct" data-type="number" min="0" max="50" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card">
               <div class="field-info"><div class="field-title">Show Confidence</div></div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="vis-show_confidence" data-key="show_confidence" data-type="bool"><span class="slider"></span></label>
@@ -2041,6 +2061,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 </body>
 </html>

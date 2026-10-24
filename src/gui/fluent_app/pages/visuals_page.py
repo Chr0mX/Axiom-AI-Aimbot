@@ -77,6 +77,24 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Box line thickness (both styles) and corner-bracket arm length
+        self.boxThicknessCard = SliderLabelCard(
+            FluentIcon.PENCIL_INK,
+            t("box_line_thickness", "Box Line Thickness"),
+            0, 10,
+            format_func=lambda v: "Auto" if v == 0 else f"{v} px",
+            description=t("box_line_thickness_hint", "Thickness of corner brackets and full boxes. Auto = 1-3 px by confidence."),
+            parent=self.displayGroup
+        )
+        self.boxCornerLengthCard = SliderLabelCard(
+            FluentIcon.FIT_PAGE,
+            t("box_corner_length", "Corner Bracket Length"),
+            0, 50,
+            format_func=lambda v: "Auto" if v == 0 else f"{v}%",
+            description=t("box_corner_length_hint", "Bracket arm length as % of the box's shorter side. Auto = 15% (6-24 px)."),
+            parent=self.displayGroup
+        )
+
         # Show Confidence
         self.showConfidenceCard = SwitchSettingCard(
             FluentIcon.CERTIFICATE,
@@ -328,6 +346,8 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.showFovCard)
         self.displayGroup.addSettingCard(self.showBoxesCard)
         self.displayGroup.addSettingCard(self.boxFullRectCard)
+        self.displayGroup.addSettingCard(self.boxThicknessCard)
+        self.displayGroup.addSettingCard(self.boxCornerLengthCard)
         self.displayGroup.addSettingCard(self.showConfidenceCard)
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
         self.displayGroup.addSettingCard(self.showTracerLineCard)
@@ -378,6 +398,8 @@ class VisualsPage(BasePage):
         self.showAimPredictionCard.checkedChanged.connect(self._onShowAimPredictionChanged)
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
+        self.boxThicknessCard.valueChanged.connect(self._onBoxThicknessChanged)
+        self.boxCornerLengthCard.valueChanged.connect(self._onBoxCornerLengthChanged)
         self.spAutoAimCheck.stateChanged.connect(self._onStatusPanelAutoAimChanged)
         self.spAimToggleCheck.stateChanged.connect(self._onStatusPanelAimToggleChanged)
         self.spPresetConfigCheck.stateChanged.connect(self._onStatusPanelPresetConfigChanged)
@@ -417,6 +439,9 @@ class VisualsPage(BasePage):
         self.showFovCard.setChecked(self._config.show_fov)
         self.showBoxesCard.setChecked(self._config.show_boxes)
         self.boxFullRectCard.setChecked(bool(getattr(self._config, 'box_full_rect', False)))
+        self.boxThicknessCard.setValue(int(getattr(self._config, 'box_line_thickness', 0) or 0))
+        self.boxCornerLengthCard.setValue(int(getattr(self._config, 'box_corner_length_pct', 0) or 0))
+        self.boxCornerLengthCard.setVisible(not bool(getattr(self._config, 'box_full_rect', False)))
         self.showConfidenceCard.setChecked(self._config.show_confidence)
         self.showStatusCard.setChecked(self._config.show_status_panel)
         self.showDetectRangeCard.setChecked(self._config.show_detect_range)
@@ -474,6 +499,16 @@ class VisualsPage(BasePage):
     def _onBoxFullRectChanged(self, checked):
         if self._config:
             self._config.box_full_rect = bool(checked)
+        # Bracket length only applies to corner brackets.
+        self.boxCornerLengthCard.setVisible(not bool(checked))
+
+    def _onBoxThicknessChanged(self, value):
+        if self._config:
+            self._config.box_line_thickness = int(value)
+
+    def _onBoxCornerLengthChanged(self, value):
+        if self._config:
+            self._config.box_corner_length_pct = int(value)
 
     def _onShowConfidenceChanged(self, checked):
         if self._config:
@@ -705,6 +740,10 @@ class VisualsPage(BasePage):
         self.showFovCard.titleLabel.setText(t("show_fov"))
         self.showBoxesCard.titleLabel.setText(t("show_boxes"))
         self.boxFullRectCard.titleLabel.setText("Full Bounding Box")
+        self.boxThicknessCard.titleLabel.setText(t("box_line_thickness", "Box Line Thickness"))
+        self.boxCornerLengthCard.titleLabel.setText(t("box_corner_length", "Corner Bracket Length"))
+        self.boxThicknessCard.contentLabel.setText(t("box_line_thickness_hint", "Thickness of corner brackets and full boxes. Auto = 1-3 px by confidence."))
+        self.boxCornerLengthCard.contentLabel.setText(t("box_corner_length_hint", "Bracket arm length as % of the box's shorter side. Auto = 15% (6-24 px)."))
         self.showConfidenceCard.titleLabel.setText(t("show_confidence"))
         self.showStatusCard.titleLabel.setText(t("show_status_panel"))
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
