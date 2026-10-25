@@ -105,7 +105,7 @@ Both run in a separate child process so the main inference loop and Qt UI are ne
 
 ### Web ESP Overlay (`src/core/esp_server.py` + `src/web_overlay/`)
 Optional LAN-accessible browser overlay (`web_esp_enabled`), modeled as "backend streams state, frontend draws it" — the PyQt in-game overlay stays the on-device renderer. Three daemon threads:
-- **HTTP server** (stdlib `ThreadingHTTPServer`) serves the static client from `src/web_overlay/` (`index.html` / `app.js` / `styles.css`); bare `/` requests without a `?ws=` query 302-redirect to the actual bound WS port so the client never needs a manually-appended port
+- **HTTP server** (stdlib `ThreadingHTTPServer`) serves the static client from `src/web_overlay/` (`index.html` / `app.js` / `styles.css`) with `Cache-Control: no-cache` (`_Handler.end_headers()`) and versioned asset URLs (`app.js?v=N`/`styles.css?v=N` in `index.html` — bump N when changing the client), so a browser can't keep running a stale cached `app.js` after an update (that made the box-thickness setting look broken: new page, old drawing code); bare `/` requests without a `?ws=` query 302-redirect to the actual bound WS port so the client never needs a manually-appended port
 - **WebSocket server** — hand-rolled RFC 6455 (handshake + text-frame encoding, no external dependency), auto-increments the bind port on conflict (`_actual_ws_port`)
 - **Broadcast loop** — ~`web_esp_fps` Hz, latest-state-wins; serializes a JSON snapshot of `Config` (`_build_snapshot()`) to all connected clients, including 1 Hz-computed `capture_fps`/`inference_fps`
 
