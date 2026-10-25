@@ -678,7 +678,7 @@
           if (typeof data.pid_unsafe_mode === "boolean") applyPidUnsafeSliderLimits(!!data.pid_unsafe_mode);
         }
         if (tab === "keys") updateKeysVisibility(data);
-        if (tab === "visuals") applyVisualsExtras(data);
+        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); }
         if (tab === "convert" && typeof convertPrecisionSelect !== "undefined" && convertPrecisionSelect
             && document.activeElement !== convertPrecisionSelect && typeof data.trt_fp16_enabled === "boolean") {
           convertPrecisionSelect.value = data.trt_fp16_enabled ? "fp16" : "fp32";
@@ -729,6 +729,7 @@
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
+        if (tab === "visuals" && key === "box_full_rect") updateBoxStyleVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
         }
@@ -1350,6 +1351,13 @@
   // ---------------------------------------------------------------------
   var suppressWebEspToggleEcho = false;
   var webEspRestartTimer = null;
+
+  // Corner Bracket Length only applies while boxes are drawn as brackets.
+  function updateBoxStyleVisibility() {
+    var full = document.getElementById("vis-box_full_rect");
+    var card = document.getElementById("vis-box-corner-card");
+    if (card) card.classList.toggle("hidden", !!(full && full.checked));
+  }
 
   function applyVisualsExtras(data) {
     var toggle = document.getElementById("vis-web_esp_enabled");
@@ -2564,7 +2572,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "6") return;
+    if (cssVer !== "7") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

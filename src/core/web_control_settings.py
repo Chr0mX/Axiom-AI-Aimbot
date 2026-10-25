@@ -249,6 +249,8 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "show_fov": {"type": "bool"},
         "show_boxes": {"type": "bool"},
         "box_full_rect": {"type": "bool"},
+        "box_line_thickness": {"type": "int", "min": 0, "max": 10},
+        "box_corner_length_pct": {"type": "int", "min": 0, "max": 50},
         "show_confidence": {"type": "bool"},
         "show_detect_range": {"type": "bool"},
         "show_tracer_line": {"type": "bool"},

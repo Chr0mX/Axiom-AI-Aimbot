@@ -16,6 +16,8 @@ import cv2
 import mss
 import numpy as np
 
+from .box_style import box_thickness, corner_length, highlight_thickness
+
 if TYPE_CHECKING:
     from mss.base import MSSBase
 
@@ -485,8 +487,8 @@ def _draw_detection_overlay(
             x2 = max(0, min(w - 1, x2))
             y2 = max(0, min(h - 1, y2))
             conf      = float(confidences[i]) if i < len(confidences) else 0.5
-            thickness = max(1, min(3, 1 + round(conf * 2)))
-            clen      = max(6, min(24, int(min(x2 - x1, y2 - y1) * 0.15)))
+            thickness = box_thickness(cfg, conf)
+            clen      = corner_length(cfg, x2 - x1, y2 - y1)
             if use_circle:
                 # Same ellipse/AABB test as ai_loop_utils._ellipse_intersects_bbox
                 # (a circle when fov_half_x == fov_half_y, same as it always was).
@@ -538,7 +540,8 @@ def _draw_detection_overlay(
             x1, y1, x2, y2 = [int(v) for v in decay_box]
             x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
             x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
-            cv2.rectangle(frame, (x1, y1), (x2, y2), _c(0, 140, 255), 1, cv2.LINE_AA)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), _c(0, 140, 255),
+                          highlight_thickness(cfg, 1), cv2.LINE_AA)
         except Exception:
             pass
 

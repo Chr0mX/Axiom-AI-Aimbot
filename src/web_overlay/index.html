@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>Axiom HUD</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
   <canvas id="esp"></canvas>
@@ -60,9 +60,29 @@
       <span class="cfg-val" id="val-padding">6</span><span class="cfg-unit">px</span>
     </div>
 
+    <div class="cfg-section">Boxes (this browser)</div>
+    <div class="cfg-row">
+      <label>Style</label>
+      <select id="cfg-box-style">
+        <option value="app">App</option>
+        <option value="corners">Corners</option>
+        <option value="full">Full box</option>
+      </select>
+    </div>
+    <div class="cfg-row">
+      <label>Thickness</label>
+      <input type="range" id="cfg-box-thickness" min="0" max="10" value="0">
+      <span class="cfg-val" id="val-box-thickness">App</span>
+    </div>
+    <div class="cfg-row">
+      <label>Corner</label>
+      <input type="range" id="cfg-box-corner" min="0" max="50" value="0">
+      <span class="cfg-val" id="val-box-corner">App</span>
+    </div>
+
     <button id="cfg-reset">Reset to defaults</button>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>
