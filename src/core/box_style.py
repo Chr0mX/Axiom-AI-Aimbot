@@ -24,6 +24,16 @@ def box_thickness(config, confidence: float) -> int:
     return max(1, min(3, 1 + round(float(confidence) * 2)))
 
 
+def highlight_thickness(config, auto: int) -> int:
+    """Thickness for an extra outline drawn over a box (locked / fading lock).
+
+    Follows a fixed ``box_line_thickness`` so the outline never hides a
+    thicker box underneath; keeps its own ``auto`` width otherwise.
+    """
+    fixed = int(getattr(config, 'box_line_thickness', 0) or 0)
+    return min(MAX_THICKNESS, fixed) if fixed > 0 else auto
+
+
 def corner_length(config, width: float, height: float) -> int:
     """Length in px of each corner-bracket arm.
 

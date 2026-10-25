@@ -16,7 +16,7 @@ import cv2
 import mss
 import numpy as np
 
-from .box_style import box_thickness, corner_length
+from .box_style import box_thickness, corner_length, highlight_thickness
 
 if TYPE_CHECKING:
     from mss.base import MSSBase
@@ -540,7 +540,8 @@ def _draw_detection_overlay(
             x1, y1, x2, y2 = [int(v) for v in decay_box]
             x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
             x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
-            cv2.rectangle(frame, (x1, y1), (x2, y2), _c(0, 140, 255), 1, cv2.LINE_AA)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), _c(0, 140, 255),
+                          highlight_thickness(cfg, 1), cv2.LINE_AA)
         except Exception:
             pass
 

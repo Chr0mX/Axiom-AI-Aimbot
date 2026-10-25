@@ -55,3 +55,10 @@ def test_web_control_schema_exposes_both_fields():
     vis = _SCHEMA["visuals"]
     assert vis["box_line_thickness"]["max"] == 10
     assert vis["box_corner_length_pct"]["max"] == 50
+
+
+def test_highlight_outline_follows_a_fixed_thickness_only():
+    from core.box_style import highlight_thickness
+    assert highlight_thickness(cfg(box_line_thickness=0), 1) == 1
+    assert highlight_thickness(cfg(box_line_thickness=7), 1) == 7
+    assert highlight_thickness(cfg(box_line_thickness=50), 2) == 10

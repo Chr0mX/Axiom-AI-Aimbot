@@ -181,6 +181,10 @@
     if (pct > 0) return Math.max(2, Math.min(side / 2, side * Math.min(50, pct) / 100));
     return Math.max(6, side * 0.22);
   }
+  function lockedBoxThickness(st) {
+    const fixed = cfg.boxThickness > 0 ? cfg.boxThickness : (st.box_line_thickness || 0);
+    return fixed > 0 ? Math.min(10, fixed) : 2;
+  }
   function useFullRect(st) {
     if (cfg.boxStyle === "full") return true;
     if (cfg.boxStyle === "corners") return false;
@@ -367,7 +371,9 @@
       if (state.locked_box) {
         const lb = state.locked_box;
         ctx.strokeStyle = state.locked_decaying ? "rgba(255,170,0,0.9)" : "rgba(0,255,140,0.95)";
-        ctx.lineWidth = 2;
+        // Follows the box thickness setting too: this outline sits on top of
+        // the locked target's own box, so a fixed 2 px here hid any change.
+        ctx.lineWidth = lockedBoxThickness(state.settings || {});
         ctx.strokeRect(X(lb[0]), Y(lb[1]), X(lb[2]) - X(lb[0]), Y(lb[3]) - Y(lb[1]));
       }
 
