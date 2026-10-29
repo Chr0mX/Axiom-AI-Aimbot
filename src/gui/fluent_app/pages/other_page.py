@@ -273,9 +273,6 @@ class OtherPage(BasePage):
 
         self.githubOriginalBtn = PushButton(t("github_original", "Github (Original)"))
         self.githubOriginalBtn.setIcon(FluentIcon.GITHUB)
-
-        self.donateBtn = PushButton(t("donate"))
-        self.donateBtn.setIcon(FluentIcon.HEART)
     
     def _initLayout(self):
         """排版所有控制項"""
@@ -346,7 +343,6 @@ class OtherPage(BasePage):
         btnLayout.addWidget(self.githubBtn)
         btnLayout.addWidget(self.discordOriginalBtn)
         btnLayout.addWidget(self.githubOriginalBtn)
-        btnLayout.addWidget(self.donateBtn)
         btnLayout.addStretch(1)
         aboutLayout.addLayout(btnLayout)
 
@@ -388,7 +384,6 @@ class OtherPage(BasePage):
         self.githubBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/Chr0mX/Axiom-AI-Aimbot")))
         self.discordOriginalBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/h4dEh3b8Bt")))
         self.githubOriginalBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/iisHong0w0/Axiom-AI-Aimbot")))
-        self.donateBtn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(os.path.join(self.base_path, "..", "MVP.html")))))
     
     def _loadFromConfig(self):
         """從 Config 載入值"""
@@ -850,7 +845,6 @@ class OtherPage(BasePage):
         self.githubBtn.setText(t("github"))
         self.discordOriginalBtn.setText(t("discord_original", "Discord (Original)"))
         self.githubOriginalBtn.setText(t("github_original", "Github (Original)"))
-        self.donateBtn.setText(t("donate"))
 
         # MAKCU Hardware
         self.makcuHwGroup.titleLabel.setText(t("makcu_hw_info", "MAKCU Hardware"))
