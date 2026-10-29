@@ -694,15 +694,6 @@ class AxiomWindow(FluentWindow):
             onClick=lambda: QDesktopServices.openUrl(QUrl("https://github.com/Chr0mX/Axiom-AI-Aimbot")),
             position=NavigationItemPosition.BOTTOM
         )
-        
-        # Donate
-        self.donateButton = self.navigationInterface.addItem(
-            routeKey="donate",
-            icon=FluentIcon.HEART,
-            text=t("donate"),
-            onClick=lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(os.path.join(self.base_path, "..", "MVP.html")))),
-            position=NavigationItemPosition.BOTTOM
-        )
 
     def updateLogo(self):
         """Update window icon based on theme."""
@@ -1017,7 +1008,6 @@ class AxiomWindow(FluentWindow):
         self.languageButton.setText(t("language"))
         self.discordButton.setText(t("discord"))
         self.githubButton.setText(t("github"))
-        self.donateButton.setText(t("donate"))
         
         # Update all pages
         pages = [
