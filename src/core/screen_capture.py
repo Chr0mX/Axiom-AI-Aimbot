@@ -83,6 +83,16 @@ def _jpeg_dimensions(data: bytes) -> "tuple[int, int] | None":
 _preview_lock = threading.Lock()
 _preview_cell: list = [None]   # [np.ndarray | None]
 _preview_region_cell: list = [None]  # [dict | None]
+# perf_counter() of the last get_preview_frame() call. Every consumer (Qt
+# preview panel/pop-out, Web Control preview stream, HUD/OCR weapon scan)
+# polls get_preview_frame(), so "read recently" is "someone wants preview
+# frames" — _UVCPreviewThread and the NDI full-frame path skip their
+# copy+draw work otherwise.
+_preview_last_read: list = [float('-inf')]
+_PREVIEW_DEMAND_HOLD_S = 1.0
+# How long a uvc/udp reader keeps decoding after the last grab(). Longer than
+# any capture interval, so active inference never sees a gap.
+_DECODE_DEMAND_HOLD_S = 0.5
 
 
 def set_preview_frame(frame: np.ndarray) -> None:
@@ -92,7 +102,19 @@ def set_preview_frame(frame: np.ndarray) -> None:
 
 def get_preview_frame() -> "np.ndarray | None":
     with _preview_lock:
+        _preview_last_read[0] = time.perf_counter()
         return _preview_cell[0]
+
+
+def preview_wanted() -> bool:
+    """True if anything has read a preview frame in the last second."""
+    return time.perf_counter() - _preview_last_read[0] < _PREVIEW_DEMAND_HOLD_S
+
+
+def _decode_wanted(last_grab_t: float) -> bool:
+    """True if a uvc/udp reader's decoded frames have a consumer: inference
+    grabbed recently, or someone is reading preview frames."""
+    return time.perf_counter() - last_grab_t < _DECODE_DEMAND_HOLD_S or preview_wanted()
 
 
 def set_preview_region(region: "dict | None") -> None:
@@ -939,7 +961,7 @@ class NDICapture:
                 return arr.copy()
             return cv2.cvtColor(arr, cv2.COLOR_RGBA2BGRA)
 
-        if self.show_window:
+        if self.show_window and preview_wanted():
             full_bgra = _to_bgra(raw)
             with self._ndi_frame_lock:
                 self._ndi_frame_ref[0] = full_bgra
@@ -1307,6 +1329,10 @@ class _UVCPreviewThread(threading.Thread):
     def run(self) -> None:
         while not self._stop.is_set():
             t0 = time.perf_counter()
+            if not preview_wanted():
+                # Nobody is watching — skip the frame copy and overlay draw.
+                time.sleep(0.05)
+                continue
             with self._lock:
                 frame = self._frame_ref[0]
             if frame is not None:
@@ -1448,6 +1474,10 @@ def _crop_nv12(buffer: np.ndarray, luma_height: int, left: int, top: int, width:
 
 class UVCCapture:
     """OpenCV VideoCapture backend for UVC capture cards/cameras."""
+
+    # perf_counter() of the last grab(); the reader thread only decodes
+    # while this is recent (or preview frames are wanted).
+    _last_grab_t: float = float('-inf')
 
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -1932,7 +1962,11 @@ class UVCCapture:
                     )
                     self._fixed_region = _compute_fixed_uvc_crop_region(self.config, w, h)
 
-            if self._native_is_compressed:
+            if self._native_is_compressed and not _decode_wanted(self._last_grab_t):
+                # MJPEG nobody needs right now: skip the decode, store None
+                # so grab() can't return a stale frame later.
+                frame = None
+            elif self._native_is_compressed:
                 # MJPEG: decode to BGR here (same place UdpCapture's reader
                 # thread decodes its JPEG chunks) so grab()'s generic
                 # (non-raw-NV12) crop+BGRA path handles the rest unchanged.
@@ -2177,8 +2211,16 @@ class UVCCapture:
         _measurement_windows = 0
         _warned_broken_read = False
         while not self._reader_stop.is_set():
+            decode = _decode_wanted(self._last_grab_t)
             try:
-                ok, frame = self.cap.read()
+                if decode:
+                    ok, frame = self.cap.read()
+                else:
+                    # Nobody needs this frame: grab() still pulls it off the
+                    # device (keeps the driver queue drained and the fps and
+                    # staleness tracking honest) but skips retrieve()'s
+                    # decode/convert.
+                    ok, frame = bool(self.cap.grab()), None
             except Exception as exc:
                 # cap.isOpened() can lie (seen on some DirectShow driver
                 # stacks that fall through to OpenCV's internal obsensor
@@ -2196,7 +2238,9 @@ class UVCCapture:
                     )
                 ok, frame = False, None
                 time.sleep(0.05)
-            if ok and frame is not None:
+            if ok and (frame is not None or not decode):
+                # A skipped frame stores None so grab() can never hand out
+                # a stale frame once inference resumes.
                 with self._latest_frame_lock:
                     self._latest_frame_ref[0] = frame
                 self._last_frame_perf_time = time.perf_counter()
@@ -2268,6 +2312,7 @@ class UVCCapture:
         so the preview window is independent of the AI detection crop region.
         """
 
+        self._last_grab_t = time.perf_counter()
         with self._latest_frame_lock:
             frame_bgr = self._latest_frame_ref[0]
         if frame_bgr is None:
@@ -2401,6 +2446,10 @@ class UVCCapture:
 class UdpCapture:
     """UDP JPEG stream capture backend (OBS udp_stream_filter wire protocol)."""
 
+    # perf_counter() of the last grab(); the reader thread only decodes
+    # while this is recent (or preview frames are wanted).
+    _last_grab_t: float = float('-inf')
+
     def __init__(self, config: Config) -> None:
         from .udp_receiver import UdpJpegReceiver
 
@@ -2483,29 +2532,37 @@ class UdpCapture:
                 _logged_stream_dims = stream_dims
                 logger.info("[UDP] stream resolution: %dx%d", stream_dims[0], stream_dims[1])
 
-            arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
-            frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if frame_bgr is None:
-                continue
+            if not _decode_wanted(self._last_grab_t):
+                # Nobody needs this frame: skip the JPEG decode, but keep the
+                # staleness and fps tracking, and drop the stored frame so
+                # grab() can't return a stale one when inference resumes.
+                self._last_frame_perf_time = time.perf_counter()
+                with self._latest_frame_lock:
+                    self._latest_frame_ref[0] = None
+            else:
+                arr = np.frombuffer(jpeg_bytes, dtype=np.uint8)
+                frame_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if frame_bgr is None:
+                    continue
 
-            h, w = frame_bgr.shape[:2]
-            self._last_frame_perf_time = time.perf_counter()
-            with self._latest_frame_lock:
-                self._latest_frame_ref[0] = frame_bgr
-                if w != self.preview_width or h != self.preview_height:
-                    self.preview_width = w
-                    self.preview_height = h
-                    # Published so get_capture_dimensions() can size the
-                    # detection region against the real, current stream
-                    # resolution — the sender (e.g. an OBS udp_stream_filter
-                    # crop) can change this at any time, so it can't be a
-                    # fixed/user-configured value like uvc_width/uvc_height.
-                    # Without this, a region computed against config.width/
-                    # height (full desktop res) can fall entirely outside a
-                    # smaller cropped stream, making grab() return None every
-                    # frame and inference FPS drop to 0.
-                    self.config.udp_width = w
-                    self.config.udp_height = h
+                h, w = frame_bgr.shape[:2]
+                self._last_frame_perf_time = time.perf_counter()
+                with self._latest_frame_lock:
+                    self._latest_frame_ref[0] = frame_bgr
+                    if w != self.preview_width or h != self.preview_height:
+                        self.preview_width = w
+                        self.preview_height = h
+                        # Published so get_capture_dimensions() can size the
+                        # detection region against the real, current stream
+                        # resolution — the sender (e.g. an OBS udp_stream_filter
+                        # crop) can change this at any time, so it can't be a
+                        # fixed/user-configured value like uvc_width/uvc_height.
+                        # Without this, a region computed against config.width/
+                        # height (full desktop res) can fall entirely outside a
+                        # smaller cropped stream, making grab() return None every
+                        # frame and inference FPS drop to 0.
+                        self.config.udp_width = w
+                        self.config.udp_height = h
 
             _fps_count += 1
             _now = time.perf_counter()
@@ -2523,6 +2580,7 @@ class UdpCapture:
                 _fps_t0 = _now
 
     def grab(self, region: dict[str, int] | None = None, **_: Any) -> np.ndarray | None:
+        self._last_grab_t = time.perf_counter()
         with self._latest_frame_lock:
             frame_bgr = self._latest_frame_ref[0]
         if frame_bgr is None:
