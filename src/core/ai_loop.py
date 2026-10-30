@@ -50,6 +50,7 @@ from .screen_capture import (
     _detect_active_capture_method,
     capture_frame,
     initialize_screen_capture,
+    preview_wanted,
     reinitialize_if_method_changed,
 )
 
@@ -464,6 +465,7 @@ def ai_logic_loop(
     ema_post = 0.0
     last_stats_print = time.perf_counter()
     last_detection_run_time = 0.0
+    capture_resume_t = 0.0  # perf_counter() when capture last resumed after a detection pause
 
     # Two independent locks to eliminate cross-contention:
     #   region_lock  — inference writes target_region, capture reads it
@@ -558,6 +560,10 @@ def ai_logic_loop(
                     target_region = capture_state.get('target_region')
 
                 if target_region is None:
+                    # Detection is paused (see the main loop). Drop the cached
+                    # frame so a dxcam "no change" reuse can't hand a frame
+                    # from before the pause to the first detection after it.
+                    _last_valid_frame[0] = None
                     _sleep_precise(0.001)
                     continue
 
@@ -867,6 +873,20 @@ def ai_logic_loop(
                     config.display_locked_box_is_decaying = False
                     config.aim_prediction_active = False
                     _set_makcu_move_lock(config, False)
+                    # Pause capture and preprocessing as well, so the capture
+                    # thread, the uvc/udp decode (see _decode_wanted() in
+                    # screen_capture.py) and preprocessing stop instead of
+                    # running at full rate for nothing. NDI keeps capturing
+                    # while its preview is watched: its grab() is what feeds
+                    # the preview frames.
+                    if not (_active_method[0] == 'ndi' and preview_wanted()):
+                        with region_lock:
+                            capture_state['target_region'] = None
+                        while True:
+                            try:
+                                _tensor_queue.get_nowait()
+                            except queue.Empty:
+                                break
                     time.sleep(0.05)
                     continue
 
@@ -879,6 +899,11 @@ def ai_logic_loop(
                     continue
 
                 with region_lock:
+                    if capture_state['target_region'] is None:
+                        # Resuming after a pause: any frame captured before
+                        # this moment is stale (see the frame_capture_t check
+                        # below).
+                        capture_resume_t = time.perf_counter()
                     capture_state['target_region'] = region
 
                 idle_enabled = getattr(config, 'idle_detect_enabled', True)
@@ -904,6 +929,8 @@ def ai_logic_loop(
                 except queue.Empty:
                     continue
                 input_tensor, lb_scale, lb_pad_x, lb_pad_y, latest_region, state.frame_capture_t = _pre_result
+                if state.frame_capture_t < capture_resume_t:
+                    continue  # preprocessed before a detection pause; too old to aim at
                 if input_tensor.shape[2] != config.model_input_size:
                     continue  # stale tensor from a size transition; discard silently
                 t1 = time.perf_counter()

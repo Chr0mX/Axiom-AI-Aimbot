@@ -125,6 +125,10 @@ class PreviewPopOutWindow(_FpsMixin, QDialog):
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, wanted_on_top)
             self.show()  # re-apply native window flags — required after setWindowFlag()
 
+        if self.isMinimized():
+            # Not reading frames lets the capture side stop drawing them
+            # (see screen_capture.preview_wanted()).
+            return
         from core.screen_capture import get_preview_frame
         frame = get_preview_frame()
         if frame is None:
@@ -235,6 +239,10 @@ class CapturePreviewPanel(_FpsMixin, QWidget):
             self._popout._timer.start(_capture_interval_ms(self._config))
 
     def _refresh(self) -> None:
+        if not self.isVisible() or self.window().isMinimized():
+            # Not reading frames lets the capture side stop drawing them
+            # (see screen_capture.preview_wanted()).
+            return
         from core.screen_capture import get_preview_frame
         frame = get_preview_frame()
         if frame is None:
