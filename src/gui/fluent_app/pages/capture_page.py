@@ -237,12 +237,15 @@ class CapturePage(BasePage):
         self.screenshotMethodCard.hBoxLayout.addWidget(self.screenshotMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.screenshotMethodCard.hBoxLayout.addSpacing(16)
 
+        # Shown as FPS; stored as config.screenshot_interval (seconds per
+        # capture), so a rate like 144 isn't limited to whole milliseconds.
         self.screenshotIntervalCard = SliderSpinCard(
             FluentIcon.CAMERA,
-            t("screenshot_interval"),
-            1, 100,
-            suffix="ms",
-            description="",
+            t("capture_fps_limit", "Capture FPS Limit"),
+            10, 1000,
+            suffix="FPS",
+            description=t("capture_fps_limit_desc",
+                          "Maximum captures per second. For UDP/UVC, set this to your stream's FPS."),
             parent=self.captureGroup
         )
 
@@ -765,11 +768,12 @@ class CapturePage(BasePage):
             if screenshot_method in screenshot_methods:
                 self.screenshotMethodCombo.setCurrentIndex(screenshot_methods.index(screenshot_method))
 
-            screenshot_interval_ms = int(
+            screenshot_interval = float(
                 getattr(self._config, 'screenshot_interval',
-                        getattr(self._config, 'detect_interval', 0.01)) * 1000
+                        getattr(self._config, 'detect_interval', 0.01)) or 0.01
             )
-            self.screenshotIntervalCard.setValue(screenshot_interval_ms)
+            capture_fps = max(10, min(1000, round(1.0 / screenshot_interval)))
+            self.screenshotIntervalCard.setValue(capture_fps)
 
             _device_index = int(getattr(self._config, 'uvc_device_index', 0))
             # Seed synchronously with the configured value so the combo
@@ -1148,7 +1152,7 @@ class CapturePage(BasePage):
 
     def _onScreenshotIntervalChanged(self, value):
         if self._config:
-            self._config.screenshot_interval = value / 1000.0
+            self._config.screenshot_interval = 1.0 / max(1, value)
 
     def _onUvcDeviceChanged(self, text):
         if self._config:
@@ -1524,7 +1528,10 @@ class CapturePage(BasePage):
         super().retranslateUi()
         self.captureGroup.titleLabel.setText(t("capture_method_group", "Capture"))
         self.screenshotMethodCard.titleLabel.setText(t("screenshot_method"))
-        self.screenshotIntervalCard.titleLabel.setText(t("screenshot_interval"))
+        self.screenshotIntervalCard.titleLabel.setText(t("capture_fps_limit", "Capture FPS Limit"))
+        self.screenshotIntervalCard.contentLabel.setText(t(
+            "capture_fps_limit_desc",
+            "Maximum captures per second. For UDP/UVC, set this to your stream's FPS."))
         self.uvcGroup.titleLabel.setText("UVC Camera")
         self.uvcCaptureMethodCard.titleLabel.setText("UVC Capture Method")
         self.uvcCaptureMethodCard.contentLabel.setText(

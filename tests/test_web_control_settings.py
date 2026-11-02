@@ -38,10 +38,20 @@ class TestGetTabSettings:
         assert result["screenshot_method"] == "dxcam"
 
     def test_applies_display_scale(self):
-        # screenshot_interval is stored in seconds; scale=1000 shows ms.
+        # detect_interval is stored in seconds; scale=1000 shows ms.
+        config = _config(detect_interval=0.01)
+        result = wcs.get_tab_settings(config, "inference")
+        assert result["detect_interval"] == pytest.approx(10.0)
+
+    def test_capture_fps_limit_shows_screenshot_interval_as_fps(self):
         config = _config(screenshot_interval=0.01)
         result = wcs.get_tab_settings(config, "capture")
-        assert result["screenshot_interval"] == pytest.approx(10.0)
+        assert result["capture_fps_limit"] == 100
+        assert "screenshot_interval" not in result
+
+    def test_capture_fps_limit_zero_interval_is_none(self):
+        result = wcs.get_tab_settings(_config(screenshot_interval=0.0), "capture")
+        assert result["capture_fps_limit"] is None
 
     def test_missing_field_is_none(self):
         config = _config()
@@ -102,11 +112,30 @@ class TestApplyTabSettings:
         assert config.keep_detecting is True
 
     def test_scale_round_trips_through_config(self):
-        """A display value of 10 (ms) for screenshot_interval (scale=1000)
+        """A display value of 10 (ms) for detect_interval (scale=1000)
         must be stored on config as 0.01 (seconds)."""
-        config = _config(screenshot_interval=0.0)
-        wcs.apply_tab_settings(config, "capture", {"screenshot_interval": 10})
-        assert config.screenshot_interval == pytest.approx(0.01)
+        config = _config(detect_interval=0.0)
+        wcs.apply_tab_settings(config, "inference", {"detect_interval": 10})
+        assert config.detect_interval == pytest.approx(0.01)
+
+    def test_capture_fps_limit_stores_exact_reciprocal(self):
+        config = _config(screenshot_interval=0.01)
+        result = wcs.apply_tab_settings(config, "capture", {"capture_fps_limit": 144})
+        assert config.screenshot_interval == pytest.approx(1 / 144)
+        assert result["applied"]["capture_fps_limit"] == 144
+
+    def test_capture_fps_limit_clamps_to_range(self):
+        config = _config(screenshot_interval=0.01)
+        wcs.apply_tab_settings(config, "capture", {"capture_fps_limit": 5})
+        assert config.screenshot_interval == pytest.approx(0.1)
+        wcs.apply_tab_settings(config, "capture", {"capture_fps_limit": 5000})
+        assert config.screenshot_interval == pytest.approx(0.001)
+
+    def test_screenshot_interval_key_no_longer_accepted(self):
+        config = _config(screenshot_interval=0.01)
+        result = wcs.apply_tab_settings(config, "capture", {"screenshot_interval": 5})
+        assert result == {"ok": False, "reason": "unknown_field", "field": "screenshot_interval"}
+        assert config.screenshot_interval == 0.01
 
     def test_clamps_to_min_and_max(self):
         config = _config(fov_size=100)

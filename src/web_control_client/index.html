@@ -190,11 +190,12 @@
             </div>
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">Screenshot Interval</div>
+                <div class="field-title">Capture FPS Limit</div>
+                <div class="field-desc">Maximum captures per second. For UDP/UVC, set this to your stream's FPS.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="cap-screenshot_interval" data-key="screenshot_interval" data-type="number" min="1" max="100" step="1">
-                <span class="field-slider-value">ms</span>
+                <input type="number" id="cap-capture_fps_limit" data-key="capture_fps_limit" data-type="number" min="10" max="1000" step="1">
+                <span class="field-slider-value">FPS</span>
               </div>
             </div>
           </div>

@@ -56,6 +56,8 @@
   "delete_config": "Delete Preset",
   "detect_interval": "Inference Interval (ms)",
   "screenshot_interval": "Capture Interval (ms)",
+  "capture_fps_limit": "Capture FPS Limit",
+  "capture_fps_limit_desc": "Maximum captures per second. For UDP/UVC, set this to your stream's FPS.",
   "tab_model": "Model",
   "tab_capture": "Capture",
   "tab_hardware_output": "Keys & HW",
