@@ -26,10 +26,14 @@ _SCHEMA instead of one dedicated route per field:
 
 Every "int"/"float" field's min/max (and its optional display "scale") are
 expressed in the same units the GUI's own slider already uses — e.g.
-screenshot_interval is stored on Config in seconds, but the GUI slider (and
+detect_interval is stored on Config in seconds, but the GUI slider (and
 this schema, via scale=1000) shows/edits it in milliseconds. This keeps the
 web client's fields numerically identical to what the Qt page shows,
-without needing every value to also be renamed.
+without needing every value to also be renamed. Two optional keys cover a
+displayed value that isn't a plain multiple of the stored one: "attr" names
+the Config attribute when it differs from the schema key, and "reciprocal"
+shows 1/stored — capture_fps_limit is screenshot_interval (seconds per
+capture) shown as captures per second.
 
 Coupled writes the GUI does as a single action (e.g. picking an NDI source
 also sets ndi_force_reconnect=True; picking a game profile also sets
@@ -65,7 +69,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
     },
     "capture": {
         "screenshot_method": {"type": "choice", "choices": ["mss", "dxcam", "uvc", "ndi", "udp"]},
-        "screenshot_interval": {"type": "float", "scale": 1000.0, "min": 1, "max": 100},
+        # screenshot_interval shown as FPS (1/seconds), like the Qt page.
+        "capture_fps_limit": {"type": "int", "attr": "screenshot_interval", "reciprocal": True,
+                              "min": 10, "max": 1000},
         "uvc_capture_method": {"type": "choice", "choices": ["msmf", "dshow", "any"]},
         "uvc_dshow_backend": {"type": "choice", "choices": ["v1", "v2"]},
         "uvc_ffmpeg_enabled": {"type": "bool"},
@@ -266,6 +272,17 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "status_panel_show_screenshot_method": {"type": "bool"},
         "status_panel_show_screenshot_fps": {"type": "bool"},
         "status_panel_show_detection_fps": {"type": "bool"},
+        "status_panel_show_gpu": {"type": "bool"},
+        "status_panel_gpu_temp": {"type": "bool"},
+        "status_panel_gpu_hotspot": {"type": "bool"},
+        "status_panel_gpu_util": {"type": "bool"},
+        "status_panel_gpu_vram": {"type": "bool"},
+        "status_panel_gpu_fan": {"type": "bool"},
+        "status_panel_gpu_core_clock": {"type": "bool"},
+        "status_panel_gpu_mem_clock": {"type": "bool"},
+        "status_panel_gpu_power": {"type": "bool"},
+        "status_panel_gpu_voltage": {"type": "bool"},
+        "status_panel_gpu_interval_ms": {"type": "int", "min": 250, "max": 5000},
         "show_aim_prediction_marker": {"type": "bool"},
         "show_crosshair": {"type": "bool"},
         "crosshair_style": {"type": "choice", "choices": ["dot", "cross"]},
@@ -392,8 +409,10 @@ def get_tab_settings(config, tab: str) -> dict:
 
     result: dict = {}
     for field, spec in schema.items():
-        raw = _get_nested(config, field)
+        raw = _get_nested(config, spec.get("attr", field))
         ftype = spec["type"]
+        if spec.get("reciprocal") and raw is not None:
+            raw = 1.0 / float(raw) if float(raw) > 0 else None
         if raw is None:
             result[field] = None
         elif ftype == "bool":
@@ -446,6 +465,7 @@ def get_tab_settings(config, tab: str) -> dict:
         except Exception:
             result["web_esp_running"] = False
             result["web_esp_url"] = ""
+        result["gpu_monitor_status"] = gpu_monitor_status(config)
 
     return result
 
@@ -509,13 +529,34 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
                 num = max(num, lo)
             if hi is not None:
                 num = min(num, hi)
+            if spec.get("reciprocal"):
+                if num <= 0:
+                    return {"ok": False, "reason": "invalid_value", "field": field}
+                to_apply[field] = 1.0 / num  # stored as-is, never rounded
+                continue
             config_value = num / spec.get("scale", 1.0)
             to_apply[field] = int(round(config_value)) if ftype == "int" else config_value
 
     for field, coerced in to_apply.items():
-        _set_nested(config, field, coerced)
+        _set_nested(config, schema[field].get("attr", field), coerced)
 
     return {"ok": True, "applied": get_tab_settings(config, tab)}
+
+
+def gpu_monitor_status(config) -> str:
+    """One line for the Visuals tab's GPU Monitoring card, mirroring the Qt
+    page: whether NVML is installed and what the status panel's monitor found."""
+    from core.gpu_monitor import nvml_installed
+    if not nvml_installed():
+        return "NVML not installed: run Install NVML.bat in the Axiom folder, then restart Axiom."
+    support = getattr(config, "gpu_sensor_support", None) or {}
+    if not getattr(config, "status_panel_show_gpu", False):
+        return "NVML installed."
+    if support.get("status") == "ok":
+        return "Reading " + (support.get("name") or "NVIDIA GPU") + "."
+    if support.get("status") == "no_gpu":
+        return "NVML is installed, but no NVIDIA GPU or driver was found."
+    return "NVML installed. Waiting for the status panel to read the GPU."
 
 
 # ---------------------------------------------------------------------------

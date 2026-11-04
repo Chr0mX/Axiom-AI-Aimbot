@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Axiom Web Control</title>
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <div class="app">
@@ -190,11 +190,12 @@
             </div>
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">Screenshot Interval</div>
+                <div class="field-title">Capture FPS Limit</div>
+                <div class="field-desc">Maximum captures per second. For UDP/UVC, set this to your stream's FPS.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="cap-screenshot_interval" data-key="screenshot_interval" data-type="number" min="1" max="100" step="1">
-                <span class="field-slider-value">ms</span>
+                <input type="number" id="cap-capture_fps_limit" data-key="capture_fps_limit" data-type="number" min="10" max="1000" step="1">
+                <span class="field-slider-value">FPS</span>
               </div>
             </div>
           </div>
@@ -1815,6 +1816,77 @@
                 <label class="switch"><input type="checkbox" id="vis-status_panel_show_detection_fps" data-key="status_panel_show_detection_fps" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">GPU Monitoring</div>
+                <div class="field-desc">Show NVIDIA GPU sensors in the status panel (needs Install NVML.bat once). Sensors this GPU can't report stay hidden.</div>
+                <div class="field-desc" id="vis-gpu-monitor-status"></div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_show_gpu" data-key="status_panel_show_gpu" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Temp</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_temp" data-key="status_panel_gpu_temp" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Hotspot</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_hotspot" data-key="status_panel_gpu_hotspot" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Usage</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_util" data-key="status_panel_gpu_util" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU VRAM</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_vram" data-key="status_panel_gpu_vram" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Fan</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_fan" data-key="status_panel_gpu_fan" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Core Clock</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_core_clock" data-key="status_panel_gpu_core_clock" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Mem Clock</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_mem_clock" data-key="status_panel_gpu_mem_clock" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Power</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_power" data-key="status_panel_gpu_power" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Voltage</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_voltage" data-key="status_panel_gpu_voltage" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card gpu-sensor-card">
+              <div class="field-info"><div class="field-title">GPU Refresh</div></div>
+              <div class="field-control">
+                <input type="number" id="vis-status_panel_gpu_interval_ms" data-key="status_panel_gpu_interval_ms" data-type="number" min="250" max="5000" step="50">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
           </div>
 
           <div class="field-group-title">Crosshair</div>
@@ -2061,6 +2133,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=7"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>

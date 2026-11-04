@@ -678,7 +678,7 @@
           if (typeof data.pid_unsafe_mode === "boolean") applyPidUnsafeSliderLimits(!!data.pid_unsafe_mode);
         }
         if (tab === "keys") updateKeysVisibility(data);
-        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); }
+        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); updateGpuMonitorVisibility(); }
         if (tab === "convert" && typeof convertPrecisionSelect !== "undefined" && convertPrecisionSelect
             && document.activeElement !== convertPrecisionSelect && typeof data.trt_fp16_enabled === "boolean") {
           convertPrecisionSelect.value = data.trt_fp16_enabled ? "fp16" : "fp32";
@@ -730,6 +730,7 @@
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
         if (tab === "visuals" && key === "box_full_rect") updateBoxStyleVisibility();
+        if (tab === "visuals" && key === "status_panel_show_gpu") updateGpuMonitorVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
         }
@@ -1359,6 +1360,15 @@
     if (card) card.classList.toggle("hidden", !!(full && full.checked));
   }
 
+  // GPU sensor switches and refresh only matter while GPU Monitoring is on.
+  function updateGpuMonitorVisibility() {
+    var master = document.getElementById("vis-status_panel_show_gpu");
+    var on = !!(master && master.checked);
+    document.querySelectorAll(".gpu-sensor-card").forEach(function (card) {
+      card.classList.toggle("hidden", !on);
+    });
+  }
+
   function applyVisualsExtras(data) {
     var toggle = document.getElementById("vis-web_esp_enabled");
     if (toggle !== document.activeElement) {
@@ -1368,6 +1378,8 @@
     }
     var urlEl = document.getElementById("vis-web-esp-url");
     urlEl.textContent = data.web_esp_running && data.web_esp_url ? data.web_esp_url : "—  (not running)";
+    var gpuStatus = document.getElementById("vis-gpu-monitor-status");
+    if (gpuStatus) gpuStatus.textContent = data.gpu_monitor_status || "";
   }
 
   function scheduleWebEspRestart() {
@@ -2508,6 +2520,7 @@
   // until activated — see the .panel/.tab comment near the top of this
   // file), not tied to any one tab's activation.
   enhanceNumberInputsWithSliders();
+  updateGpuMonitorVisibility();
 
   loadModelList();
   // Model is the default-active panel (no click to trigger activateTab's
@@ -2572,7 +2585,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "7") return;
+    if (cssVer !== "8") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
