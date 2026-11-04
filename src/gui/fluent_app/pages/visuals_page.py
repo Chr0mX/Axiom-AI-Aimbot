@@ -647,12 +647,29 @@ class VisualsPage(BasePage):
         a sensor this GPU can't report gets an explanatory tooltip."""
         self.gpuSensorsCard.setVisible(enabled)
         self.gpuIntervalCard.setVisible(enabled)
+        hint = self._gpuMonitorHint(enabled)
+        if self.gpuMonitorCard.contentLabel.text() != hint:
+            self.gpuMonitorCard.contentLabel.setText(hint)
         support = getattr(self._config, 'gpu_sensor_support', None) if self._config else None
         supported = set((support or {}).get('supported') or ())
         known = bool(support) and support.get('status') == 'ok'
         for key, check in self._gpuSensorChecks.items():
             check.setToolTip("" if not known or key in supported
                              else t("gpu_sensor_unsupported", "Not supported on this GPU"))
+
+    def _gpuMonitorHint(self, enabled):
+        """Card description; while monitoring is on, says whether NVML works."""
+        from core.gpu_monitor import nvml_installed
+        if not nvml_installed():
+            return t("gpu_monitoring_no_nvml",
+                     "NVML not installed: run Install NVML.bat in the Axiom folder, then restart Axiom")
+        support = getattr(self._config, 'gpu_sensor_support', None) if self._config else None
+        status = (support or {}).get('status') if enabled else None
+        if status == 'ok':
+            return t("gpu_monitoring_ok", "Reading {name}").format(name=support.get('name') or "NVIDIA GPU")
+        if status == 'no_gpu':
+            return t("gpu_monitoring_no_gpu", "NVML is installed, but no NVIDIA GPU or driver was found")
+        return t("gpu_monitoring_hint", "Show NVIDIA GPU sensors in the status panel (needs Install NVML.bat once)")
 
     def _onShowCrosshairChanged(self, checked):
         if self._config:
@@ -848,8 +865,7 @@ class VisualsPage(BasePage):
         self.spScreenshotFpsCheck.setText(t("status_panel_screenshot_fps", "Capture FPS"))
         self.spDetectionFpsCheck.setText(t("status_panel_detection_fps", "Inference FPS"))
         self.gpuMonitorCard.titleLabel.setText(t("gpu_monitoring", "GPU Monitoring"))
-        self.gpuMonitorCard.contentLabel.setText(t(
-            "gpu_monitoring_hint", "Show NVIDIA GPU sensors in the status panel (needs Install NVML.bat once)"))
+        self.gpuMonitorCard.contentLabel.setText(self._gpuMonitorHint(self.gpuMonitorCard.isChecked()))
         self.gpuSensorsCard.titleLabel.setText(t("gpu_sensors", "GPU Sensors"))
         self.gpuSensorsCard.contentLabel.setText(t(
             "gpu_sensors_hint", "Choose which GPU readings are shown. Unsupported ones stay hidden."))

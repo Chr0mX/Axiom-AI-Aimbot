@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import ctypes
+import logging
 import threading
 from ctypes import POINTER, pointer, sizeof, byref, WinDLL, c_int
 from ctypes.wintypes import DWORD, ULONG
@@ -18,7 +19,7 @@ from PyQt6.QtGui import (QPainter, QColor, QFont, QPixmap, QLinearGradient,
 from PyQt6.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal
 
 from core.gpu_monitor import (SENSOR_KEYS, STATUS_NO_GPU, STATUS_NO_NVML, STATUS_OK,
-                              GpuMonitor, format_reading)
+                              GpuMonitor, format_reading, nvml_installed)
 from core.language_manager import get_text, language_manager
 from version import __version__
 
@@ -199,6 +200,7 @@ class GpuMonitorThread(QThread):
     def run(self) -> None:
         monitor = GpuMonitor()
         status = monitor.start()
+        logging.getLogger(__name__).info("[GPU] Monitor status: %s %s", status, monitor.gpu_name)
         last = None
         try:
             while not self._stop.is_set():
@@ -1088,7 +1090,10 @@ class StatusPanel(QWidget):
     def _start_gpu_monitor(self):
         if self._gpu_thread is not None:
             return
-        self._gpu_state = {'status': None, 'name': '', 'supported': [], 'readings': {}}
+        # Check up front so a missing package shows at once, not only after
+        # the thread's first report.
+        status = None if nvml_installed() else STATUS_NO_NVML
+        self._gpu_state = {'status': status, 'name': '', 'supported': [], 'readings': {}}
         self._gpu_texts = {}
         self._gpu_thread = GpuMonitorThread(self.config, self)
         self._gpu_thread.readingsReady.connect(self._on_gpu_readings)
@@ -1116,6 +1121,14 @@ class StatusPanel(QWidget):
 
     def _update_gpu_section(self):
         """Start/stop polling and show the rows the switches and GPU allow."""
+        try:
+            self._update_gpu_section_inner()
+        except Exception:
+            if not getattr(self, '_gpu_error_logged', False):
+                self._gpu_error_logged = True
+                logging.getLogger(__name__).exception("[GPU] Status panel GPU section failed")
+
+    def _update_gpu_section_inner(self):
         enabled = bool(getattr(self.config, 'status_panel_show_gpu', False))
         if enabled:
             self._start_gpu_monitor()
@@ -1128,6 +1141,7 @@ class StatusPanel(QWidget):
         self.gpu_header_row.setVisible(enabled)
         self._set_text_if_changed(self.gpu_header_row.label, get_text('status_panel_gpu', 'GPU'))
         problem = {
+            None: get_text('status_panel_gpu_checking', 'Checking…'),
             STATUS_NO_NVML: get_text('status_panel_gpu_no_nvml', 'NVML not installed'),
             STATUS_NO_GPU: get_text('status_panel_gpu_no_gpu', 'No NVIDIA GPU'),
         }.get(status)

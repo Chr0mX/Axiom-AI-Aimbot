@@ -35,6 +35,15 @@ STATUS_NO_GPU = "no_gpu"
 STATUS_OK = "ok"
 
 
+def nvml_installed() -> bool:
+    """True if nvidia-ml-py (module ``pynvml``) can be imported, without importing it."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec("pynvml") is not None
+    except (ImportError, ValueError):
+        return False
+
+
 class GpuMonitor:
     """Reads NVML sensors for GPU 0."""
 

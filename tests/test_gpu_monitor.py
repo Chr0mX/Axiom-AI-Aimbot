@@ -193,3 +193,26 @@ def test_web_control_visuals_gpu_fields():
                                                 "status_panel_gpu_interval_ms": 100})
     assert res["ok"] and c.status_panel_show_gpu is True
     assert c.status_panel_gpu_interval_ms == 250
+
+
+# -- installed check ---------------------------------------------------------
+
+def test_nvml_installed_reflects_find_spec(monkeypatch):
+    import importlib.util
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    assert gm.nvml_installed() is False
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    assert gm.nvml_installed() is True
+
+
+def test_web_control_gpu_status_line(monkeypatch):
+    from core import web_control_settings as wcs
+    monkeypatch.setattr(gm, "nvml_installed", lambda: False)
+    c = types.SimpleNamespace(status_panel_show_gpu=True)
+    assert wcs.gpu_monitor_status(c).startswith("NVML not installed")
+    monkeypatch.setattr(gm, "nvml_installed", lambda: True)
+    c.gpu_sensor_support = {"status": "ok", "name": "RTX 3060 Ti"}
+    assert wcs.gpu_monitor_status(c) == "Reading RTX 3060 Ti."
+    c.gpu_sensor_support = {"status": "no_gpu"}
+    assert "no NVIDIA GPU" in wcs.gpu_monitor_status(c)
+    assert "gpu_monitor_status" in wcs.get_tab_settings(c, "visuals")

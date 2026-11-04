@@ -1378,6 +1378,8 @@
     }
     var urlEl = document.getElementById("vis-web-esp-url");
     urlEl.textContent = data.web_esp_running && data.web_esp_url ? data.web_esp_url : "—  (not running)";
+    var gpuStatus = document.getElementById("vis-gpu-monitor-status");
+    if (gpuStatus) gpuStatus.textContent = data.gpu_monitor_status || "";
   }
 
   function scheduleWebEspRestart() {

@@ -465,6 +465,7 @@ def get_tab_settings(config, tab: str) -> dict:
         except Exception:
             result["web_esp_running"] = False
             result["web_esp_url"] = ""
+        result["gpu_monitor_status"] = gpu_monitor_status(config)
 
     return result
 
@@ -540,6 +541,22 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
         _set_nested(config, schema[field].get("attr", field), coerced)
 
     return {"ok": True, "applied": get_tab_settings(config, tab)}
+
+
+def gpu_monitor_status(config) -> str:
+    """One line for the Visuals tab's GPU Monitoring card, mirroring the Qt
+    page: whether NVML is installed and what the status panel's monitor found."""
+    from core.gpu_monitor import nvml_installed
+    if not nvml_installed():
+        return "NVML not installed: run Install NVML.bat in the Axiom folder, then restart Axiom."
+    support = getattr(config, "gpu_sensor_support", None) or {}
+    if not getattr(config, "status_panel_show_gpu", False):
+        return "NVML installed."
+    if support.get("status") == "ok":
+        return "Reading " + (support.get("name") or "NVIDIA GPU") + "."
+    if support.get("status") == "no_gpu":
+        return "NVML is installed, but no NVIDIA GPU or driver was found."
+    return "NVML installed. Waiting for the status panel to read the GPU."
 
 
 # ---------------------------------------------------------------------------
