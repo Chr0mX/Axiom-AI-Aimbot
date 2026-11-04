@@ -8,14 +8,17 @@ import os
 import sys
 import time
 import ctypes
+import threading
 from ctypes import POINTER, pointer, sizeof, byref, WinDLL, c_int
 from ctypes.wintypes import DWORD, ULONG
 from PyQt6.QtWidgets import (QWidget, QApplication, QVBoxLayout, QHBoxLayout,
                              QLabel, QFrame, QGraphicsDropShadowEffect)
 from PyQt6.QtGui import (QPainter, QColor, QFont, QPixmap, QLinearGradient, 
                          QBrush, QPainterPath, QPen)
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal
 
+from core.gpu_monitor import (SENSOR_KEYS, STATUS_NO_GPU, STATUS_NO_NVML, STATUS_OK,
+                              GpuMonitor, format_reading)
 from core.language_manager import get_text, language_manager
 from version import __version__
 
@@ -174,6 +177,51 @@ class StatusRow(QWidget):
             # Reset to default style
             pass
 
+class GpuMonitorThread(QThread):
+    """Polls NVML (core/gpu_monitor.py) off the GUI thread.
+
+    Emits readingsReady only when something changed, reads only the sensors
+    whose status_panel_gpu_<key> switch is on, and stops polling entirely
+    when NVML or a GPU isn't available. Also publishes the runtime-only
+    config.gpu_sensor_support for the settings pages' tooltips.
+    """
+
+    readingsReady = pyqtSignal(dict)
+
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self._config = config
+        self._stop = threading.Event()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def run(self) -> None:
+        monitor = GpuMonitor()
+        status = monitor.start()
+        last = None
+        try:
+            while not self._stop.is_set():
+                keys = [k for k in SENSOR_KEYS
+                        if k not in monitor.unsupported
+                        and getattr(self._config, f'status_panel_gpu_{k}', True)]
+                readings = monitor.read(keys) if status == STATUS_OK else {}
+                support = {'status': status, 'name': monitor.gpu_name,
+                           'supported': sorted(monitor.supported) if status == STATUS_OK else []}
+                self._config.gpu_sensor_support = support
+                payload = dict(support, readings=readings)
+                if payload != last:
+                    last = payload
+                    self.readingsReady.emit(payload)
+                if status != STATUS_OK:
+                    self._stop.wait()  # nothing to poll until stopped
+                    break
+                interval = getattr(self._config, 'status_panel_gpu_interval_ms', 1000)
+                self._stop.wait(max(250, min(5000, int(interval))) / 1000.0)
+        finally:
+            monitor.stop()
+
+
 class StatusPanel(QWidget):
     """
     Status Panel in MacOS style (Widget version)
@@ -241,6 +289,14 @@ class StatusPanel(QWidget):
         self._last_fps_calc_time = 0.0
         self._last_screenshot_frame_count = 0
         self._last_detection_frame_count = 0
+
+        # GPU section (see _update_gpu_section)
+        self._gpu_thread = None
+        self._gpu_state = {'status': None, 'name': '', 'supported': [], 'readings': {}}
+        self._gpu_texts = {}
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._stop_gpu_monitor)
 
         # 初次設置樣式
         self._apply_panel_size()
@@ -586,6 +642,18 @@ class StatusPanel(QWidget):
         # 10. 狀態行 - Source FPS (nominal rate reported by the source device)
         self.source_fps_row = StatusRow(get_text('status_panel_source_fps', 'Source FPS'))
 
+        # 11. GPU section (NVIDIA, via NVML) — hidden unless status_panel_show_gpu
+        self.gpu_separator = QFrame()
+        self.gpu_separator.setFrameShape(QFrame.Shape.HLine)
+        self.gpu_separator.setFrameShadow(QFrame.Shadow.Plain)
+        self.gpu_separator.setFixedHeight(1)
+        self.gpu_separator.setObjectName("separator")
+        self.gpu_header_row = StatusRow(get_text('status_panel_gpu', 'GPU'))
+        self.gpu_status_row = StatusRow("")
+        self.gpu_rows = {key: StatusRow(self._gpu_label(key)) for key in SENSOR_KEYS}
+        for widget in (self.gpu_separator, self.gpu_header_row, self.gpu_status_row, *self.gpu_rows.values()):
+            widget.setVisible(False)
+
         # 加入容器
         self.container_layout.addLayout(self.header_layout)
         self.container_layout.addWidget(self.separator)
@@ -600,6 +668,11 @@ class StatusPanel(QWidget):
         self.container_layout.addWidget(self.source_fps_row)
         self.container_layout.addWidget(self.screenshot_fps_row)
         self.container_layout.addWidget(self.detection_fps_row)
+        self.container_layout.addWidget(self.gpu_separator)
+        self.container_layout.addWidget(self.gpu_header_row)
+        self.container_layout.addWidget(self.gpu_status_row)
+        for key in SENSOR_KEYS:
+            self.container_layout.addWidget(self.gpu_rows[key])
         self.container_layout.addStretch()
 
         self.main_layout.addWidget(self.container)
@@ -687,6 +760,7 @@ class StatusPanel(QWidget):
         show_panel = getattr(self.config, 'show_status_panel', True)
         if not show_panel:
             if self.isVisible(): self.hide()
+            self._stop_gpu_monitor()
             return
         elif not self.isVisible():
             self.show()
@@ -992,6 +1066,82 @@ class StatusPanel(QWidget):
 
         self.screenshot_fps_row.label.setText(get_text('status_panel_screenshot_fps', 'Screenshot FPS'))
         self.detection_fps_row.label.setText(get_text('status_panel_detection_fps', 'Detection FPS'))
+
+        self._update_gpu_section()
+
+    # ── GPU section ─────────────────────────────────────────────────────────
+    _GPU_LABELS = {
+        'temp': 'Temp', 'hotspot': 'Hotspot', 'util': 'Usage', 'vram': 'VRAM',
+        'fan': 'Fan', 'core_clock': 'Core Clock', 'mem_clock': 'Mem Clock',
+        'power': 'Power', 'voltage': 'Voltage',
+    }
+
+    @classmethod
+    def _gpu_label(cls, key):
+        return get_text(f'status_panel_gpu_{key}', cls._GPU_LABELS[key])
+
+    @staticmethod
+    def _set_text_if_changed(label, text):
+        if label.text() != text:
+            label.setText(text)
+
+    def _start_gpu_monitor(self):
+        if self._gpu_thread is not None:
+            return
+        self._gpu_state = {'status': None, 'name': '', 'supported': [], 'readings': {}}
+        self._gpu_texts = {}
+        self._gpu_thread = GpuMonitorThread(self.config, self)
+        self._gpu_thread.readingsReady.connect(self._on_gpu_readings)
+        self._gpu_thread.start()
+
+    def _stop_gpu_monitor(self):
+        thread = self._gpu_thread
+        if thread is None:
+            return
+        self._gpu_thread = None
+        thread.readingsReady.disconnect(self._on_gpu_readings)
+        thread.stop()
+        thread.wait(2000)
+
+    def _on_gpu_readings(self, payload):
+        self._gpu_state = payload
+        for key, value in payload.get('readings', {}).items():
+            text = format_reading(key, value)
+            if self._gpu_texts.get(key) != text:
+                self._gpu_texts[key] = text
+                self.gpu_rows[key].set_value(text)
+        name = payload.get('name') or ''
+        self._set_text_if_changed(self.gpu_header_row.value_label,
+                                  name if len(name) <= 25 else name[:24] + '…')
+
+    def _update_gpu_section(self):
+        """Start/stop polling and show the rows the switches and GPU allow."""
+        enabled = bool(getattr(self.config, 'status_panel_show_gpu', False))
+        if enabled:
+            self._start_gpu_monitor()
+        else:
+            self._stop_gpu_monitor()
+
+        status = self._gpu_state.get('status')
+        supported = set(self._gpu_state.get('supported') or ())
+        self.gpu_separator.setVisible(enabled)
+        self.gpu_header_row.setVisible(enabled)
+        self._set_text_if_changed(self.gpu_header_row.label, get_text('status_panel_gpu', 'GPU'))
+        problem = {
+            STATUS_NO_NVML: get_text('status_panel_gpu_no_nvml', 'NVML not installed'),
+            STATUS_NO_GPU: get_text('status_panel_gpu_no_gpu', 'No NVIDIA GPU'),
+        }.get(status)
+        self.gpu_status_row.setVisible(enabled and problem is not None)
+        if problem is not None:
+            self._set_text_if_changed(self.gpu_status_row.value_label, problem)
+        for key, row in self.gpu_rows.items():
+            row.setVisible(enabled and status == STATUS_OK and key in supported
+                           and bool(getattr(self.config, f'status_panel_gpu_{key}', True)))
+            self._set_text_if_changed(row.label, self._gpu_label(key))
+
+    def closeEvent(self, event):
+        self._stop_gpu_monitor()
+        super().closeEvent(event)
 
     def _auto_nudge_panel(self):
         """每 5 秒水平位移 1px，方向在右/左之間交替"""

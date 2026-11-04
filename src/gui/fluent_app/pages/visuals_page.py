@@ -20,6 +20,13 @@ from ..language_manager import t
 class VisualsPage(BasePage):
     """Visual Settings Page"""
 
+    # (core/gpu_monitor.py sensor key, English label)
+    _GPU_SENSOR_LABELS = (
+        ("temp", "Temp"), ("hotspot", "Hotspot"), ("util", "Usage"),
+        ("vram", "VRAM"), ("fan", "Fan"), ("core_clock", "Core Clock"),
+        ("mem_clock", "Mem Clock"), ("power", "Power"), ("voltage", "Voltage"),
+    )
+
     def __init__(self, parent=None):
         super().__init__("tab_display", parent)
         self._config = None
@@ -203,6 +210,43 @@ class VisualsPage(BasePage):
         self.statusPanelElementsCard.hBoxLayout.addWidget(self.statusPanelElementsWidget, 0, Qt.AlignmentFlag.AlignRight)
         self.statusPanelElementsCard.hBoxLayout.addSpacing(16)
 
+        # GPU monitoring (NVIDIA, via NVML) — a section at the bottom of the
+        # status panel; see core/gpu_monitor.py and status_panel.py.
+        self.gpuMonitorCard = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("gpu_monitoring", "GPU Monitoring"),
+            t("gpu_monitoring_hint", "Show NVIDIA GPU sensors in the status panel (needs Install NVML.bat once)"),
+            parent=self.statusPanelGroup
+        )
+        self.gpuSensorsCard = SettingCard(
+            FluentIcon.INFO,
+            t("gpu_sensors", "GPU Sensors"),
+            t("gpu_sensors_hint", "Choose which GPU readings are shown. Unsupported ones stay hidden."),
+            self.statusPanelGroup
+        )
+        self.gpuSensorsWidget = QWidget(self.gpuSensorsCard)
+        self.gpuSensorsLayout = QGridLayout(self.gpuSensorsWidget)
+        self.gpuSensorsLayout.setContentsMargins(0, 0, 0, 0)
+        self.gpuSensorsLayout.setHorizontalSpacing(10)
+        self.gpuSensorsLayout.setVerticalSpacing(4)
+        self._gpuSensorChecks = {}
+        for index, (key, default) in enumerate(self._GPU_SENSOR_LABELS):
+            check = CheckBox(t(f"status_panel_gpu_{key}", default), self.gpuSensorsWidget)
+            check.stateChanged.connect(lambda state, k=key: self._onGpuSensorChanged(k, state))
+            self._gpuSensorChecks[key] = check
+            self.gpuSensorsLayout.addWidget(check, index % 3, index // 3)
+        self.gpuSensorsWidget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.gpuSensorsCard.hBoxLayout.addWidget(self.gpuSensorsWidget, 0, Qt.AlignmentFlag.AlignRight)
+        self.gpuSensorsCard.hBoxLayout.addSpacing(16)
+        self.gpuIntervalCard = SliderLabelCard(
+            FluentIcon.HISTORY,
+            t("gpu_refresh", "GPU Refresh"),
+            250, 5000,
+            format_func=lambda v: f"{v} ms",
+            description=t("gpu_refresh_hint", "How often the GPU sensors are read"),
+            parent=self.statusPanelGroup
+        )
+
         # === Crosshair Settings ===
         self.crosshairGroup = SettingCardGroup(t("crosshair_settings", "Crosshair"), self.scrollWidget)
 
@@ -359,6 +403,9 @@ class VisualsPage(BasePage):
         # Status panel settings
         self.statusPanelGroup.addSettingCard(self.showStatusCard)
         self.statusPanelGroup.addSettingCard(self.statusPanelElementsCard)
+        self.statusPanelGroup.addSettingCard(self.gpuMonitorCard)
+        self.statusPanelGroup.addSettingCard(self.gpuSensorsCard)
+        self.statusPanelGroup.addSettingCard(self.gpuIntervalCard)
         self.addContent(self.statusPanelGroup)
 
         # Crosshair settings
@@ -409,6 +456,8 @@ class VisualsPage(BasePage):
         self.spScreenshotMethodCheck.stateChanged.connect(self._onStatusPanelScreenshotMethodChanged)
         self.spScreenshotFpsCheck.stateChanged.connect(self._onStatusPanelScreenshotFpsChanged)
         self.spDetectionFpsCheck.stateChanged.connect(self._onStatusPanelDetectionFpsChanged)
+        self.gpuMonitorCard.checkedChanged.connect(self._onGpuMonitorChanged)
+        self.gpuIntervalCard.valueChanged.connect(self._onGpuIntervalChanged)
 
         # Crosshair settings
         self.showCrosshairCard.checkedChanged.connect(self._onShowCrosshairChanged)
@@ -460,6 +509,12 @@ class VisualsPage(BasePage):
         self.spScreenshotMethodCheck.setChecked(getattr(self._config, 'status_panel_show_screenshot_method', True))
         self.spScreenshotFpsCheck.setChecked(getattr(self._config, 'status_panel_show_screenshot_fps', True))
         self.spDetectionFpsCheck.setChecked(getattr(self._config, 'status_panel_show_detection_fps', True))
+        gpu_on = bool(getattr(self._config, 'status_panel_show_gpu', False))
+        self.gpuMonitorCard.setChecked(gpu_on)
+        for key, check in self._gpuSensorChecks.items():
+            check.setChecked(bool(getattr(self._config, f'status_panel_gpu_{key}', True)))
+        self.gpuIntervalCard.setValue(int(getattr(self._config, 'status_panel_gpu_interval_ms', 1000)))
+        self._updateGpuMonitorVisibility(gpu_on)
 
         # Crosshair settings
         self.showCrosshairCard.setChecked(bool(getattr(self._config, 'show_crosshair', False)))
@@ -573,6 +628,31 @@ class VisualsPage(BasePage):
     def _onStatusPanelDetectionFpsChanged(self, state):
         if self._config:
             self._config.status_panel_show_detection_fps = bool(state)
+
+    def _onGpuMonitorChanged(self, checked):
+        if self._config:
+            self._config.status_panel_show_gpu = bool(checked)
+        self._updateGpuMonitorVisibility(bool(checked))
+
+    def _onGpuSensorChanged(self, key, state):
+        if self._config:
+            setattr(self._config, f'status_panel_gpu_{key}', bool(state))
+
+    def _onGpuIntervalChanged(self, value):
+        if self._config:
+            self._config.status_panel_gpu_interval_ms = int(value)
+
+    def _updateGpuMonitorVisibility(self, enabled):
+        """Sensor switches and refresh only matter while GPU monitoring is on;
+        a sensor this GPU can't report gets an explanatory tooltip."""
+        self.gpuSensorsCard.setVisible(enabled)
+        self.gpuIntervalCard.setVisible(enabled)
+        support = getattr(self._config, 'gpu_sensor_support', None) if self._config else None
+        supported = set((support or {}).get('supported') or ())
+        known = bool(support) and support.get('status') == 'ok'
+        for key, check in self._gpuSensorChecks.items():
+            check.setToolTip("" if not known or key in supported
+                             else t("gpu_sensor_unsupported", "Not supported on this GPU"))
 
     def _onShowCrosshairChanged(self, checked):
         if self._config:
@@ -767,6 +847,16 @@ class VisualsPage(BasePage):
         self.spScreenshotMethodCheck.setText(self._shortText("screenshot_method"))
         self.spScreenshotFpsCheck.setText(t("status_panel_screenshot_fps", "Capture FPS"))
         self.spDetectionFpsCheck.setText(t("status_panel_detection_fps", "Inference FPS"))
+        self.gpuMonitorCard.titleLabel.setText(t("gpu_monitoring", "GPU Monitoring"))
+        self.gpuMonitorCard.contentLabel.setText(t(
+            "gpu_monitoring_hint", "Show NVIDIA GPU sensors in the status panel (needs Install NVML.bat once)"))
+        self.gpuSensorsCard.titleLabel.setText(t("gpu_sensors", "GPU Sensors"))
+        self.gpuSensorsCard.contentLabel.setText(t(
+            "gpu_sensors_hint", "Choose which GPU readings are shown. Unsupported ones stay hidden."))
+        for key, default in self._GPU_SENSOR_LABELS:
+            self._gpuSensorChecks[key].setText(t(f"status_panel_gpu_{key}", default))
+        self.gpuIntervalCard.titleLabel.setText(t("gpu_refresh", "GPU Refresh"))
+        self.gpuIntervalCard.contentLabel.setText(t("gpu_refresh_hint", "How often the GPU sensors are read"))
 
         # Crosshair settings
         self.crosshairGroup.titleLabel.setText(t("crosshair_settings", "Crosshair"))

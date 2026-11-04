@@ -19,5 +19,8 @@ vgamepad
 # Web ESP overlay (optional QR code for the connect URL)
 segno
 
+# Status panel NVIDIA GPU monitoring (optional; Install NVML.bat)
+nvidia-ml-py
+
 # Test dependencies
 pytest

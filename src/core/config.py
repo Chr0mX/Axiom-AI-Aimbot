@@ -211,6 +211,17 @@ _FIELD_MAP = {
     'status_panel_show_screenshot_method': 'display.status_panel.show_screenshot_method',
     'status_panel_show_screenshot_fps': 'display.status_panel.show_screenshot_fps',
     'status_panel_show_detection_fps': 'display.status_panel.show_detection_fps',
+    'status_panel_show_gpu':      'display.status_panel.gpu.enabled',
+    'status_panel_gpu_temp': 'display.status_panel.gpu.temp',
+    'status_panel_gpu_hotspot': 'display.status_panel.gpu.hotspot',
+    'status_panel_gpu_util': 'display.status_panel.gpu.util',
+    'status_panel_gpu_vram': 'display.status_panel.gpu.vram',
+    'status_panel_gpu_fan': 'display.status_panel.gpu.fan',
+    'status_panel_gpu_core_clock': 'display.status_panel.gpu.core_clock',
+    'status_panel_gpu_mem_clock': 'display.status_panel.gpu.mem_clock',
+    'status_panel_gpu_power': 'display.status_panel.gpu.power',
+    'status_panel_gpu_voltage': 'display.status_panel.gpu.voltage',
+    'status_panel_gpu_interval_ms': 'display.status_panel.gpu.interval_ms',
     'show_crosshair':             'display.crosshair.show',
     'crosshair_style':            'display.crosshair.style',
     'crosshair_size':             'display.crosshair.size',
@@ -642,6 +653,19 @@ class Config:
         self.status_panel_show_screenshot_method: bool = True
         self.status_panel_show_screenshot_fps: bool = True
         self.status_panel_show_detection_fps: bool = True
+        # NVIDIA GPU section of the status panel (core/gpu_monitor.py):
+        # master switch (off by default), one switch per sensor, poll rate.
+        self.status_panel_show_gpu: bool = False
+        self.status_panel_gpu_temp: bool = True
+        self.status_panel_gpu_hotspot: bool = True
+        self.status_panel_gpu_util: bool = True
+        self.status_panel_gpu_vram: bool = True
+        self.status_panel_gpu_fan: bool = True
+        self.status_panel_gpu_core_clock: bool = True
+        self.status_panel_gpu_mem_clock: bool = True
+        self.status_panel_gpu_power: bool = True
+        self.status_panel_gpu_voltage: bool = True
+        self.status_panel_gpu_interval_ms: int = 1000
         self.show_console: bool = True  # 終端視窗
 
         # Name of the most recently loaded/saved aim preset or full config
@@ -1057,6 +1081,7 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
         _validate_mouse_method(config_instance)
         _validate_aim_math(config_instance)
         _validate_box_style(config_instance)
+        _validate_gpu_monitor(config_instance)
 
         # 向後兼容：修正推理後端選擇
         _validate_inference_backend(config_instance)
@@ -1198,6 +1223,15 @@ def _validate_box_style(config: Config) -> None:
             return 0
     config.box_line_thickness = max(0, min(10, _int('box_line_thickness')))
     config.box_corner_length_pct = max(0, min(50, _int('box_corner_length_pct')))
+
+
+def _validate_gpu_monitor(config: Config) -> None:
+    """Clamp the status panel's GPU poll interval to 250-5000 ms."""
+    try:
+        interval = int(getattr(config, 'status_panel_gpu_interval_ms', 1000))
+    except (TypeError, ValueError):
+        interval = 1000
+    config.status_panel_gpu_interval_ms = max(250, min(5000, interval))
 
 
 def _validate_aim_math(config: Config) -> None:
