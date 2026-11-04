@@ -19,7 +19,7 @@ from PyQt6.QtGui import (QPainter, QColor, QFont, QPixmap, QLinearGradient,
 from PyQt6.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal
 
 from core.gpu_monitor import (SENSOR_KEYS, STATUS_NO_GPU, STATUS_NO_NVML, STATUS_OK,
-                              GpuMonitor, format_reading, nvml_installed)
+                              GpuMonitor, format_reading, nvml_installed, short_gpu_name)
 from core.language_manager import get_text, language_manager
 from version import __version__
 
@@ -1116,8 +1116,9 @@ class StatusPanel(QWidget):
                 self._gpu_texts[key] = text
                 self.gpu_rows[key].set_value(text)
         name = payload.get('name') or ''
-        self._set_text_if_changed(self.gpu_header_row.value_label,
-                                  name if len(name) <= 25 else name[:24] + '…')
+        self._set_text_if_changed(self.gpu_header_row.value_label, short_gpu_name(name))
+        if self.gpu_header_row.value_label.toolTip() != name:
+            self.gpu_header_row.value_label.setToolTip(name)
 
     def _update_gpu_section(self):
         """Start/stop polling and show the rows the switches and GPU allow."""

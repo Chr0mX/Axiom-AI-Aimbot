@@ -171,6 +171,15 @@ class GpuMonitor:
 
 # -- compact value text for the panel rows ----------------------------------
 
+def short_gpu_name(name: str, limit: int = 25) -> str:
+    """Drop the vendor/brand prefix ("NVIDIA GeForce RTX 3060 Ti" ->
+    "RTX 3060 Ti") so the name fits the panel; truncate only if still long."""
+    short = name.strip()
+    for prefix in ("NVIDIA ", "GeForce "):
+        if short.startswith(prefix):
+            short = short[len(prefix):]
+    return short if len(short) <= limit else short[:limit - 1] + "…"
+
 def format_reading(key: str, value: Any) -> str:
     if value is None:
         return "N/A"

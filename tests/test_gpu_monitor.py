@@ -216,3 +216,14 @@ def test_web_control_gpu_status_line(monkeypatch):
     c.gpu_sensor_support = {"status": "no_gpu"}
     assert "no NVIDIA GPU" in wcs.gpu_monitor_status(c)
     assert "gpu_monitor_status" in wcs.get_tab_settings(c, "visuals")
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("NVIDIA GeForce RTX 3060 Ti", "RTX 3060 Ti"),
+    ("NVIDIA GeForce RTX 2070 SUPER", "RTX 2070 SUPER"),
+    ("NVIDIA RTX A4000", "RTX A4000"),
+    ("Tesla T4", "Tesla T4"),
+    ("NVIDIA GeForce RTX 4090 Laptop GPU Extra Long Name", "RTX 4090 Laptop GPU Extr…"),
+])
+def test_short_gpu_name(name, expected):
+    assert gm.short_gpu_name(name) == expected
