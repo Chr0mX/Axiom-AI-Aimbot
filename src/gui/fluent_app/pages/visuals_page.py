@@ -786,9 +786,14 @@ class VisualsPage(BasePage):
         if not url:
             self.webEspQrLabel.clear()
             self.webEspOpenBtn.setEnabled(False)
+            self._lastQrUrl = ""
             return
 
         self.webEspOpenBtn.setEnabled(True)
+        # Runs on every 1 s refresh; only redraw the QR when the URL changed.
+        if url == getattr(self, '_lastQrUrl', ""):
+            return
+        self._lastQrUrl = url
         # QR code via segno if available; otherwise URL text alone is enough.
         try:
             import io

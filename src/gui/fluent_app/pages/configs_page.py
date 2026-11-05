@@ -523,6 +523,16 @@ class ConfigsPage(BasePage):
         self.presetBox.setConfig(config)
         self._applyPanelStyles()
 
+    def refreshFromConfig(self):
+        """1 s window tick: re-style only when the acrylic settings the
+        panels use actually changed (theme changes have their own signal)."""
+        if self._config is None:
+            return
+        key = (bool(getattr(self._config, 'enable_acrylic', False)),
+               int(getattr(self._config, 'acrylic_element_alpha', 25)))
+        if key != getattr(self, '_styleKey', None):
+            self._applyPanelStyles()
+
     def setConfigManager(self, manager):
         """Binds the aim-only Preset ConfigManager instance."""
         self._configManager = manager
@@ -536,6 +546,8 @@ class ConfigsPage(BasePage):
     def _applyPanelStyles(self, *_):
         if self._config is None:
             return
+        self._styleKey = (bool(getattr(self._config, 'enable_acrylic', False)),
+                          int(getattr(self._config, 'acrylic_element_alpha', 25)))
         self.configBox.applyPanelStyles(self._config)
         self.presetBox.applyPanelStyles(self._config)
 
