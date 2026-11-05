@@ -688,8 +688,8 @@ class OtherPage(BasePage):
         try:
             from core.session_utils import _TRT_CACHE_DIR as cache_dir
         except Exception:
-            from core.paths import project_root
-            cache_dir = os.path.join(project_root(), "trt_cache")
+            from core.paths import project_root as _axiom_root
+            cache_dir = os.path.join(_axiom_root(), "trt_cache")
         if os.path.isdir(cache_dir):
             self.trtCacheCard.contentLabel.setText(cache_dir)
             self.trtCacheCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
@@ -758,7 +758,7 @@ class OtherPage(BasePage):
 
         # System Python — search Windows PATH, skipping the embedded interpreter
         import shutil as _shutil
-        embedded_python_dir = os.path.abspath(os.path.join(project_root, "python"))
+        embedded_python_dir = os.path.abspath(os.path.join(src_dir, "python"))
         sys_python = None
         for _name in ("python3", "python"):
             _found = _shutil.which(_name)
@@ -769,8 +769,8 @@ class OtherPage(BasePage):
         self.trtSysPythonCard.contentLabel.setStyleSheet(
             f"color: {ThemeColors.SUCCESS.get()};" if sys_python else f"color: {ThemeColors.ERROR.get()};")
 
-        # Internal/Embedded Python (<project_root>/python/python.exe)
-        internal_python = os.path.join(project_root, "python", "python.exe")
+        # Internal/Embedded Python (<Axiom>/src/python/python.exe)
+        internal_python = os.path.join(src_dir, "python", "python.exe")
         if os.path.exists(internal_python):
             self.trtInternalPythonCard.contentLabel.setText(internal_python)
             self.trtInternalPythonCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
