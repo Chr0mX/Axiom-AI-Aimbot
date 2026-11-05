@@ -18,7 +18,7 @@ from core.config_manager import (
 )
 
 SECRET_FIELDS = ("web_control_enabled", "web_control_port", "web_control_token",
-                 "preset_slots", "uvc_ffmpeg_path")
+                 "preset_slots", "uvc_ffmpeg_path", "web_esp_enabled")
 
 
 def _config():
@@ -115,3 +115,76 @@ def test_aim_preset_behaviour_unchanged(aim_mgr):
     other.fov_size = 100
     assert aim_mgr.load_config(other, "mine") is True
     assert other.fov_size == 222
+
+
+def test_grouped_layout_cannot_reach_excluded_fields(full_mgr):
+    """from_dict also reads the nested v2 layout; that must not bypass the
+    exclusions either."""
+    victim = _config()
+    victim.web_control_enabled = False
+    victim.web_control_token = "victim-token"
+    victim.web_control_port = 8090
+    victim.web_esp_enabled = False
+    _write_snapshot(full_mgr, "nested", {
+        "web_control": {"enabled": True, "token": "known-to-attacker", "port": 1234},
+        "web_esp": {"enabled": True},
+        "capture": {"uvc": {"ffmpeg_path": r"C:\Users\Public\evil.exe"}},
+    })
+    assert full_mgr.load_config(victim, "nested") is True
+    assert victim.web_control_enabled is False
+    assert victim.web_control_token == "victim-token"
+    assert victim.web_control_port == 8090
+    assert victim.web_esp_enabled is False
+    assert victim.uvc_ffmpeg_path == ""
+
+
+def test_snapshot_cannot_set_one_time_state(full_mgr):
+    cfg = _config()
+    cfg.disclaimer_agreed = False
+    _write_snapshot(full_mgr, "s", {"disclaimer_agreed": True, "first_run_complete": True})
+    assert full_mgr.load_config(cfg, "s") is True
+    assert cfg.disclaimer_agreed is False
+
+
+@pytest.mark.parametrize("bad", [
+    r"C:\Users\Public\x.onnx",
+    r"\\server\share\x.onnx",
+    "//server/share/x.onnx",
+    "/abs/x.onnx",
+])
+def test_snapshot_model_path_must_stay_inside_app(full_mgr, bad):
+    cfg = _config()
+    before_model, before_hud = cfg.model_path, cfg.hud_model_path
+    _write_snapshot(full_mgr, "m", {"model_path": bad, "hud_model_path": bad, "fov_size": 260})
+    assert full_mgr.load_config(cfg, "m") is True
+    assert cfg.model_path == before_model
+    assert cfg.hud_model_path == before_hud
+    assert cfg.fov_size == 260
+    assert full_mgr.preview_config_changes(_config(), "m") == full_mgr.preview_config_changes(
+        _config(), "m")
+
+
+def test_snapshot_relative_model_path_is_applied(full_mgr):
+    cfg = _config()
+    _write_snapshot(full_mgr, "r", {"model_path": "Model/other.onnx"})
+    assert full_mgr.load_config(cfg, "r") is True
+    assert cfg.model_path == "Model/other.onnx"
+
+
+def test_snapshot_values_are_validated(full_mgr):
+    cfg = _config()
+    _write_snapshot(full_mgr, "v", {"detect_interval": 0, "max_queue_size": 0})
+    assert full_mgr.load_config(cfg, "v") is True
+    assert cfg.detect_interval == pytest.approx(0.001)
+    assert cfg.max_queue_size >= 1
+
+
+def test_preview_matches_what_a_load_does(full_mgr):
+    _write_snapshot(full_mgr, "pv", {
+        "model_path": r"C:\evil.onnx",
+        "web_control": {"enabled": True},
+        "fov_size": 270,
+    })
+    changes = full_mgr.preview_config_changes(_config(), "pv")
+    assert changes and len(changes) == 1
+    assert "evil" not in " ".join(changes)

@@ -165,6 +165,9 @@ class ModelPage(BasePage):
         self._isLoadingConfig = False
         self._trt_installer_launched = False
         self._inspect_worker = None
+        # Replaced workers still running: kept referenced until they finish,
+        # because destroying a running QThread aborts the whole process.
+        self._stale_inspect_workers = []
         self._all_model_files = []  # master list; modelSearchEdit filters a view of this
         self._model_engine_cached: dict = {}  # {model_basename: has_cached_.engine}, set by _refreshModelList()
         self._last_inspected_key = None  # (inspect_path, mtime) of the last file actually inspected
@@ -459,21 +462,36 @@ class ModelPage(BasePage):
 
         self.modelInfoCard.contentLabel.setText(t("model_inspecting", "Inspecting…"))
 
-        # Stop any in-flight worker safely — do NOT use deleteLater; let Python GC own lifetime
-        if self._inspect_worker is not None:
-            if self._inspect_worker.isRunning():
-                self._inspect_worker.quit()
-                self._inspect_worker.wait(200)
+        # Retire any in-flight worker without blocking or dropping the last
+        # reference to a running QThread (that aborts the process). Its result
+        # is disconnected so it can't overwrite the new inspection's text.
+        old = self._inspect_worker
+        self._inspect_worker = None
+        # Also prune any that finished without their signal reaching us.
+        self._stale_inspect_workers = [w for w in self._stale_inspect_workers if w.isRunning()]
+        if old is not None and old.isRunning():
+            try:
+                old.resultReady.disconnect()
+            except TypeError:
+                pass
+            self._stale_inspect_workers.append(old)
+            old.finished.connect(lambda w=old: self._dropStaleInspectWorker(w))
+
+        worker = _ModelInspectWorker(inspect_path)
+        worker.resultReady.connect(self.modelInfoCard.contentLabel.setText)
+        worker.finished.connect(lambda w=worker: self._onInspectWorkerDone(w))
+        self._inspect_worker = worker
+        worker.start()
+
+    def _onInspectWorkerDone(self, worker) -> None:
+        """Clear the reference once *this* worker finishes — but only if it is
+        still the current one, so a newer running worker is never dropped."""
+        if self._inspect_worker is worker:
             self._inspect_worker = None
 
-        self._inspect_worker = _ModelInspectWorker(inspect_path)
-        self._inspect_worker.resultReady.connect(self.modelInfoCard.contentLabel.setText)
-        self._inspect_worker.finished.connect(self._onInspectWorkerDone)
-        self._inspect_worker.start()
-
-    def _onInspectWorkerDone(self) -> None:
-        """Clear the worker reference once finished so isRunning() is never called on a dead object."""
-        self._inspect_worker = None
+    def _dropStaleInspectWorker(self, worker) -> None:
+        if worker in self._stale_inspect_workers:
+            self._stale_inspect_workers.remove(worker)
 
     # ──────────────────────────────────────────────
     # Helpers

@@ -91,3 +91,50 @@ def test_keeps_firing_while_detections_keep_arriving(auto_fire, monkeypatch):
     auto_fire.auto_fire_loop(config, q)
 
     assert max(clicks) - 1000.0 > 2.5
+
+
+def _spray_setup(auto_fire, monkeypatch, config, clock):
+    buttons = []
+    monkeypatch.setattr(auto_fire, "time", clock)
+    monkeypatch.setattr(auto_fire, "is_key_pressed", lambda _k: False)
+    monkeypatch.setattr(auto_fire, "send_mouse_click", lambda _m: None)
+    monkeypatch.setattr(auto_fire, "send_mouse_button",
+                        lambda _m, down: buttons.append(down) or True)
+    return buttons
+
+
+def test_stopping_mid_spray_releases_the_button(auto_fire, monkeypatch):
+    config = _config()
+    config.auto_fire_spray = True
+    clock = _FakeClock(config, stop_at=1000.5)
+    buttons = _spray_setup(auto_fire, monkeypatch, config, clock)
+
+    q = queue.Queue(maxsize=1)
+    q.put([[0, 0, 100, 100]])
+    auto_fire.auto_fire_loop(config, q)
+
+    assert buttons and buttons[0] is True, "should have started spraying"
+    assert buttons[-1] is False, "button left held after the loop stopped"
+
+
+def test_error_mid_spray_releases_the_button(auto_fire, monkeypatch):
+    config = _config()
+    config.auto_fire_spray = True
+    config.always_auto_fire = False
+    clock = _FakeClock(config, stop_at=1003.0)
+    buttons = _spray_setup(auto_fire, monkeypatch, config, clock)
+    calls = {"n": 0}
+
+    def key(_k):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("boom")
+        return True
+    monkeypatch.setattr(auto_fire, "is_key_pressed", key)
+
+    q = queue.Queue(maxsize=1)
+    q.put([[0, 0, 100, 100]])
+    auto_fire.auto_fire_loop(config, q)
+
+    # Pressed on the first pass, released by the error on the second.
+    assert buttons[:2] == [True, False]

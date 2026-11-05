@@ -1398,7 +1398,8 @@ def _resolve_ffmpeg_path(config: Config) -> str:
     Checked in order: an explicit ``uvc_ffmpeg_path`` override, a bundled
     copy at ``<project root>/ffmpeg/ffmpeg.exe`` (drop a build there,
     e.g. from https://www.gyan.dev/ffmpeg/builds/ — an LGPL build, not GPL,
-    to avoid extra licensing obligations), then the system PATH.
+    to avoid extra licensing obligations), the copy the repo ships at
+    ``<project root>/src/ffmpeg/ffmpeg.exe``, then the system PATH.
     """
 
     override = str(getattr(config, 'uvc_ffmpeg_path', '') or '').strip()
@@ -1407,9 +1408,10 @@ def _resolve_ffmpeg_path(config: Config) -> str:
 
     # screen_capture.py lives at <project root>/src/core/screen_capture.py
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    bundled = os.path.join(project_root, 'ffmpeg', 'ffmpeg.exe')
-    if os.path.isfile(bundled):
-        return bundled
+    for bundled in (os.path.join(project_root, 'ffmpeg', 'ffmpeg.exe'),
+                    os.path.join(project_root, 'src', 'ffmpeg', 'ffmpeg.exe')):
+        if os.path.isfile(bundled):
+            return bundled
 
     found = shutil.which('ffmpeg') or shutil.which('ffmpeg.exe')
     if found:

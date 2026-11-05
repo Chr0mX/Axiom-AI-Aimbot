@@ -754,7 +754,7 @@ class Config:
         # main-function actions the Qt GUI does (see core/app_controller.py).
         # Because it can mutate state rather than just observe it, it is
         # gated by a shared token (web_control_token) checked on every
-        # request/WS handshake — see core/web_control_server.py.
+        # request — see core/web_control_server.py.
         self.web_control_enabled: bool = False
         self.web_control_port: int = 8090
         # Empty until the feature is first enabled — web_control_server.start()
@@ -892,15 +892,20 @@ class Config:
                 setattr(self, attr, val)
 
         # Crosshair color: nested [r, g, b], else legacy flat r/g/b.
+        # Each channel is parsed on its own and clamped to 0-255; a bad value
+        # keeps the current one instead of crashing startup.
         color = _get_path(data, 'display.crosshair.color')
+        keys = ('crosshair_color_r', 'crosshair_color_g', 'crosshair_color_b')
         if isinstance(color, (list, tuple)) and len(color) >= 3:
-            self.crosshair_color_r = int(color[0])
-            self.crosshair_color_g = int(color[1])
-            self.crosshair_color_b = int(color[2])
+            channels = dict(zip(keys, color[:3]))
         else:
-            for k in ('crosshair_color_r', 'crosshair_color_g', 'crosshair_color_b'):
-                if k in data:
-                    setattr(self, k, data[k])
+            channels = {k: data[k] for k in keys if k in data}
+        for k, v in channels.items():
+            try:
+                setattr(self, k, max(0, min(255, int(v))))
+            except (TypeError, ValueError, OverflowError):
+                logger.warning("Config field '%s': invalid colour value %r, keeping %s",
+                               k, v, getattr(self, k))
 
         # Humanization dataclass — update in place, ignore unknown keys.
         hud = data.get('humanization')
@@ -1036,6 +1041,41 @@ def _migrate_config(data: dict) -> dict:
     return data
 
 
+def validate_config(config_instance: Config) -> None:
+    """Clamp/repair every field with a validator. Run after any load that
+    applies outside data: config.json (load_config) and preset/config
+    snapshots (ConfigManager.load_config)."""
+    # 向後兼容：確保檢測間隔在合理範圍內 (1-100ms)
+    _validate_detect_interval(config_instance)
+
+    # 向後兼容：確保截圖間隔在合理範圍內 (1-100ms)
+    _validate_screenshot_interval(config_instance)
+
+    # 向後兼容：確保閒置檢測間隔在合理範圍內 (5-500ms)
+    _validate_idle_detect_interval(config_instance)
+
+    # 向後兼容：修正截圖方式
+    _validate_screenshot_method(config_instance)
+
+    # 向後兼容：修正滑鼠移動方式
+    _validate_mouse_method(config_instance)
+    _validate_aim_math(config_instance)
+    _validate_box_style(config_instance)
+    _validate_gpu_monitor(config_instance)
+
+    # 向後兼容：修正推理後端選擇
+    _validate_inference_backend(config_instance)
+    _validate_thread_priority(config_instance)
+
+    # 向後兼容：確保偵測範圍在合理範圍內
+    _validate_detect_range_size(config_instance)
+
+    # 向後兼容：確保 UDP 接收緩衝區大於單一資料包最大值
+    _validate_udp_recv_buffer_size(config_instance)
+
+    _validate_queue_and_confidence(config_instance)
+
+
 def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
     """
     從 JSON 檔案載入配置
@@ -1065,36 +1105,8 @@ def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
         # One-time app state lives in state.json (overrides any legacy inline values).
         load_state(config_instance, _state_path_for(filepath))
 
-        # 向後兼容：確保檢測間隔在合理範圍內 (1-100ms)
-        _validate_detect_interval(config_instance)
+        validate_config(config_instance)
 
-        # 向後兼容：確保截圖間隔在合理範圍內 (1-100ms)
-        _validate_screenshot_interval(config_instance)
-
-        # 向後兼容：確保閒置檢測間隔在合理範圍內 (5-500ms)
-        _validate_idle_detect_interval(config_instance)
-
-        # 向後兼容：修正截圖方式
-        _validate_screenshot_method(config_instance)
-        
-        # 向後兼容：修正滑鼠移動方式
-        _validate_mouse_method(config_instance)
-        _validate_aim_math(config_instance)
-        _validate_box_style(config_instance)
-        _validate_gpu_monitor(config_instance)
-
-        # 向後兼容：修正推理後端選擇
-        _validate_inference_backend(config_instance)
-        _validate_thread_priority(config_instance)
-
-        # 向後兼容：確保偵測範圍在合理範圍內
-        _validate_detect_range_size(config_instance)
-
-        # 向後兼容：確保 UDP 接收緩衝區大於單一資料包最大值
-        _validate_udp_recv_buffer_size(config_instance)
-
-        _validate_queue_and_confidence(config_instance)
-        
         logger.info("Config loaded")
         return True
         
