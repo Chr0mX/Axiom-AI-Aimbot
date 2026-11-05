@@ -4,7 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Axiom Web Control</title>
-  <link rel="stylesheet" href="styles.css?v=8">
+  <script>
+    /* Interface style (Instrument / Studio) before first paint, so the page
+       never flashes the other look. Set from the Other tab; see app.js. */
+    (function () {
+      var ui = "instrument";
+      try { ui = localStorage.getItem("axiom_ui_style") || ui; } catch (e) {}
+      if (ui !== "instrument" && ui !== "studio") ui = "instrument";
+      document.documentElement.setAttribute("data-ui", ui);
+    })();
+  </script>
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <div class="app">
@@ -97,6 +107,7 @@
         <div class="panel active" id="panel-model">
           <div class="panel-title">Model</div>
 
+          <div class="deck" data-label="Active model">
           <div class="field-group">
             <input type="text" id="model-search-input" placeholder="Search models…">
             <div class="row model-select-row">
@@ -123,7 +134,11 @@
             <div class="stat"><div class="label">Model</div><div class="value" id="s-model">—</div></div>
             <div class="stat"><div class="label">Backend</div><div class="value" id="s-backend">—</div></div>
           </div>
+          </div>
 
+          <div class="modules">
+          <section class="module">
+            <div class="field-group-title module-title-only">Model Details</div>
           <div class="field-card stacked">
             <div class="field-title">Model Info</div>
             <div class="field-readonly" id="model-info-text">—</div>
@@ -146,7 +161,9 @@
               <button id="open-model-folder-btn">Open</button>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Model HUD Settings</div>
           <div class="field-group">
             <div class="field-card">
@@ -168,11 +185,14 @@
               </div>
             </div>
           </div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-capture">
           <div class="panel-title">Capture</div>
 
+          <div class="deck" data-label="Capture source">
           <div class="field-group">
             <div class="field-card">
               <div class="field-info">
@@ -199,12 +219,15 @@
               </div>
             </div>
           </div>
+          </div>
 
           <!-- Live capture preview — hidden unless screenshot_method is
                uvc/ndi/udp (mss/dxcam already show the desktop directly to
                whoever's sitting at that machine, so streaming those adds
                no value here). Only actually streams while this tab is the
                one on-screen — see app.js's updatePreviewStream(). -->
+          <div class="modules">
+          <section class="module">
           <div class="field-group-title hidden" id="cap-preview-group-title">Live Preview</div>
           <div class="field-group hidden" id="cap-preview-group">
             <div class="field-card stacked">
@@ -219,7 +242,9 @@
               <div class="hint" id="cap-preview-state" role="status"></div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title" id="cap-uvc-group-title">UVC Camera</div>
           <div class="field-group" id="cap-uvc-group">
             <div class="field-card">
@@ -327,7 +352,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title" id="cap-ndi-group-title">NDI</div>
           <div class="field-group" id="cap-ndi-group">
             <div class="field-card">
@@ -361,7 +388,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title" id="cap-udp-group-title">UDP Stream</div>
           <div class="field-group" id="cap-udp-group">
             <div class="field-card">
@@ -428,18 +457,25 @@
               </div>
             </div>
           </div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-inference">
           <div class="panel-title">Inference</div>
+          <div class="deck" data-label="Inference engine">
           <div class="row control-row">
             <button id="ai-start-btn">Start AI</button>
             <button id="ai-stop-btn">Stop AI</button>
             <div class="control-label" id="ai-control-reason"></div>
           </div>
+          </div>
 
+          <div class="modules">
+          <section class="module">
           <div class="field-group-title">FOV &amp; Detect Range</div>
           <div class="field-group">
+            <div class="micro-grid" data-cols="2" data-kind="pair">
             <div class="field-card">
               <div class="field-info"><div class="field-title">FOV Size</div></div>
               <div class="field-control">
@@ -454,6 +490,8 @@
                 <span class="field-slider-value">px</span>
               </div>
             </div>
+            </div>
+            <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Follow Mouse</div></div>
               <div class="field-control">
@@ -487,6 +525,7 @@
                 </label>
               </div>
             </div>
+            </div>
             <div class="field-card" id="inf-fov-min-size-card">
               <div class="field-info">
                 <div class="field-title">FOV Min Size</div>
@@ -517,7 +556,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Weapon Detection</div>
           <div class="field-group">
             <div class="field-card">
@@ -543,7 +584,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">General Parameters</div>
           <div class="field-group">
             <div class="field-card">
@@ -560,6 +603,7 @@
                 <span class="field-slider-value">%</span>
               </div>
             </div>
+            <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Semantic FP Filter</div>
@@ -590,6 +634,7 @@
                 </label>
               </div>
             </div>
+            </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Idle Detect Interval</div></div>
               <div class="field-control">
@@ -607,8 +652,10 @@
               </div>
             </div>
           </div>
+          </section>
 
-          <div class="field-group-title">Inference Performance</div>
+          <section class="module">
+          <div data-default-collapsed="1" class="field-group-title">Inference Performance</div>
           <div class="field-group">
             <div class="field-card">
               <div class="field-info">
@@ -644,11 +691,16 @@
               </div>
             </div>
           </div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-aim">
           <div class="panel-title">Aim</div>
 
+          <div class="modules">
+          <section class="module">
+            <div class="field-group-title module-title-only">General</div>
           <div class="field-group">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Aim Part</div></div>
@@ -688,7 +740,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Aim Speed (PID)</div>
           <div class="field-group">
             <div class="field-card">
@@ -703,6 +757,7 @@
                 </label>
               </div>
             </div>
+            <div class="micro-grid" data-cols="2" data-kind="pid">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Reaction Speed X (P)</div></div>
               <div class="field-control">
@@ -739,6 +794,7 @@
                 <input type="number" id="aim-pid_kd_y" data-key="pid_kd_y" data-type="number" min="0" max="1" step="0.01">
               </div>
             </div>
+            </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Max Move Per Frame</div>
@@ -750,8 +806,10 @@
               </div>
             </div>
           </div>
+          </section>
 
-          <div class="field-group-title">Y-Axis Recoil Suppression</div>
+          <section class="module">
+          <div data-default-collapsed="1" class="field-group-title">Y-Axis Recoil Suppression</div>
           <div class="field-group">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Enable Y-Axis Recoil Reset</div></div>
@@ -809,8 +867,10 @@
               </div>
             </div>
           </div>
+          </section>
 
-          <div class="field-group-title">Humanization</div>
+          <section class="module">
+          <div data-default-collapsed="1" class="field-group-title">Humanization</div>
           <div class="field-group">
             <div class="field-card">
               <div class="field-info">
@@ -846,7 +906,7 @@
                 </label>
               </div>
             </div>
-            <div class="field-group hidden" id="aim-humanization-jitter-subgroup">
+            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-jitter-subgroup">
               <div class="field-card">
                 <div class="field-info">
                   <div class="field-title">Jitter Base</div>
@@ -891,7 +951,7 @@
                 </label>
               </div>
             </div>
-            <div class="field-group hidden" id="aim-humanization-motion-variation-subgroup">
+            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-motion-variation-subgroup">
               <div class="field-card">
                 <div class="field-info">
                   <div class="field-title">Variation Range</div>
@@ -914,7 +974,7 @@
                 </label>
               </div>
             </div>
-            <div class="field-group hidden" id="aim-humanization-speed-shaping-subgroup">
+            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-speed-shaping-subgroup">
               <div class="field-card">
                 <div class="field-info">
                   <div class="field-title">Fine-Control Threshold</div>
@@ -957,7 +1017,7 @@
                 </label>
               </div>
             </div>
-            <div class="field-group hidden" id="aim-humanization-stutter-subgroup">
+            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-stutter-subgroup">
               <div class="field-card">
                 <div class="field-info">
                   <div class="field-title">Stutter Chance</div>
@@ -998,7 +1058,7 @@
                 </label>
               </div>
             </div>
-            <div class="field-group hidden" id="aim-humanization-reaction-subgroup">
+            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-reaction-subgroup">
               <div class="field-card">
                 <div class="field-info">
                   <div class="field-title">Skip Chance</div>
@@ -1019,7 +1079,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Target Priority</div>
           <div class="field-group">
             <div class="field-card">
@@ -1045,7 +1107,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Target Tracking</div>
           <div class="field-group">
             <div class="field-card">
@@ -1086,6 +1150,7 @@
                 <input type="number" id="aim-prediction_lead_frames" data-key="prediction_lead_frames" data-type="number" min="1" max="10" step="0.5">
               </div>
             </div>
+            <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Adaptive Lead</div><div class="field-desc">Stretch the time lead when the mouse is moving slowly</div></div>
               <div class="field-control">
@@ -1103,6 +1168,7 @@
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="aim-prediction_lsq_fit" data-key="prediction_lsq_fit" data-type="bool"><span class="slider"></span></label>
               </div>
+            </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Velocity Deadzone</div><div class="field-desc">Speeds at or below this give no lead; 0 is off</div></div>
@@ -1261,7 +1327,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Target Area Settings</div>
           <div class="field-group">
             <div class="field-card">
@@ -1339,11 +1407,15 @@
               </div>
             </div>
           </div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-trigger">
           <div class="panel-title">Trigger</div>
 
+          <div class="modules">
+          <section class="module">
           <div class="field-group-title">Auto-Fire</div>
           <div class="field-group">
             <div class="field-card">
@@ -1414,10 +1486,13 @@
               </div>
             </div>
           </div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-keys">
           <div class="panel-title">Keys &amp; HW</div>
+          <div class="deck" data-label="Aim &amp; device">
           <div class="row control-row">
             <label class="switch">
               <input type="checkbox" id="always-aim-toggle">
@@ -1432,9 +1507,14 @@
             </label>
             <div class="control-label">MAKCU Connect</div>
           </div>
+          </div>
 
+          <div class="modules">
+          <section class="module module-note">
           <div class="hint">Hotkey fields below are a named-option dropdown, not the Qt app's "press a key" live capture — a remote browser can't safely reproduce that (no global key polling, and browser key/mouse codes don't match this app's own VK scheme).</div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title" id="keys-aim-group-title">Aim Activation</div>
           <div class="field-group" id="keys-aim-group">
             <div class="field-card" id="keys-aim-key-1-card">
@@ -1465,7 +1545,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title" id="keys-fire-group-title">Keys &amp; Auto Fire</div>
           <div class="field-group" id="keys-fire-group">
             <div class="field-card">
@@ -1481,7 +1563,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title" id="keys-makcu-conn-group-title">MAKCU Connection</div>
           <div class="field-group" id="keys-makcu-conn-group">
             <div class="field-card" id="keys-makcu-transport-card">
@@ -1526,7 +1610,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title" id="keys-makcu-keys-group-title">MAKCU Keys</div>
           <div class="field-group" id="keys-makcu-keys-group">
             <div class="field-card" id="keys-makcu-inference-card">
@@ -1609,6 +1695,7 @@
                 </select>
               </div>
             </div>
+            <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card" id="keys-makcu-device-hotkeys-card">
               <div class="field-info">
                 <div class="field-title">Read Hotkeys Through MAKCU</div>
@@ -1636,6 +1723,7 @@
                 <label class="switch"><input type="checkbox" id="keys-makcu_mouse_spread_enabled" data-key="makcu_mouse_spread_enabled" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
+            </div>
             <div class="field-card" id="keys-makcu-spread-card">
               <div class="field-info">
                 <div class="field-title">Firmware Mouse Spread</div>
@@ -1646,13 +1734,18 @@
               </div>
             </div>
           </div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-visuals">
           <div class="panel-title">Visuals</div>
 
+          <div class="modules">
+          <section class="module">
           <div class="field-group-title">Display</div>
           <div class="field-group">
+            <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Show FOV</div></div>
               <div class="field-control">
@@ -1674,6 +1767,7 @@
                 <label class="switch"><input type="checkbox" id="vis-box_full_rect" data-key="box_full_rect" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
+            </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Box Line Thickness</div>
@@ -1694,6 +1788,7 @@
                 <span class="field-slider-value">%</span>
               </div>
             </div>
+            <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Show Confidence</div></div>
               <div class="field-control">
@@ -1724,6 +1819,7 @@
                 <label class="switch"><input type="checkbox" id="vis-show_aim_prediction_marker" data-key="show_aim_prediction_marker" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
+            </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Box Color Theme</div>
@@ -1750,9 +1846,12 @@
               </div>
             </div>
           </div>
+          </section>
 
-          <div class="field-group-title">Status Panel</div>
+          <section class="module">
+          <div data-default-collapsed="1" class="field-group-title">Status Panel</div>
           <div class="field-group">
+            <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Show Status Panel</div></div>
               <div class="field-control">
@@ -1877,6 +1976,7 @@
                 <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_voltage" data-key="status_panel_gpu_voltage" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
+            </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Refresh</div></div>
               <div class="field-control">
@@ -1885,7 +1985,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Crosshair</div>
           <div class="field-group">
             <div class="field-card">
@@ -1929,7 +2031,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Appearance</div>
           <div class="field-group">
             <div class="field-card">
@@ -1948,7 +2052,9 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Web ESP</div>
           <div class="field-group">
             <div class="field-card">
@@ -1987,11 +2093,15 @@
               <div class="field-readonly" id="vis-web-esp-url">—</div>
             </div>
           </div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-configs">
           <div class="panel-title">Configs</div>
 
+          <div class="modules">
+          <section class="module">
           <div class="field-group-title">Config (full settings snapshot)</div>
           <div class="field-card stacked">
             <div class="row" style="justify-content: space-between;">
@@ -2014,7 +2124,9 @@
           </div>
           <div class="hint">A config is a full settings snapshot — every setting, not just aiming. "Open Folder" opens the configs directory on the machine running Axiom, not this browser. "Export" downloads the config to this browser; "Import" reads a file from this browser and saves it as a new config (never overwrites an existing name — a duplicate is saved as "name_1", etc.).</div>
           <div class="hint" id="full-configs-reason"></div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Preset (aim-only settings)</div>
           <div class="field-card stacked">
             <div class="row" style="justify-content: space-between;">
@@ -2037,11 +2149,15 @@
           </div>
           <div class="hint">A preset only saves/loads aim-related settings, letting you swap aiming behavior without touching anything else. "Open Folder" opens the presets directory on the machine running Axiom, not this browser. "Export" downloads the preset to this browser; "Import" reads a file from this browser and saves it as a new preset (never overwrites an existing name — a duplicate is saved as "name_1", etc.).</div>
           <div class="hint" id="configs-reason"></div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-convert">
           <div class="panel-title">Convert</div>
 
+          <div class="modules">
+          <section class="module">
           <div class="field-group-title">Engine Conversion</div>
           <div class="field-group">
             <div class="field-card">
@@ -2089,17 +2205,36 @@
               </div>
             </div>
           </div>
+          </section>
 
+          <section class="module">
           <div class="field-group-title">Build Log</div>
           <div class="progress-bar hidden" id="convert-progress"><div class="progress-bar-fill"></div></div>
           <textarea id="convert-log" readonly placeholder="Conversion output will appear here. First build can take 1–5 minutes."></textarea>
           <div class="hint">The engine is cached in <code>trt_cache/</code>. On the next app launch, TensorRT loads it in under a second instead of rebuilding.</div>
           <div class="hint" id="convert-reason"></div>
+          </section>
+          </div>
         </div>
 
         <div class="panel" id="panel-other">
           <div class="panel-title">Other</div>
+          <div class="modules">
+          <section class="module">
+            <div class="field-group-title module-title-only">This Browser</div>
           <div class="field-group">
+            <div class="field-card" id="other-ui-style-card">
+              <div class="field-info">
+                <div class="field-title">Interface Style</div>
+                <div class="field-desc">How this page looks, in this browser only. Instrument is dense, Studio is roomier.</div>
+              </div>
+              <div class="field-control">
+                <div class="segmented" role="radiogroup" aria-label="Interface style">
+                  <label><input type="radio" name="ui-style" id="ui-style-instrument" value="instrument" aria-label="Instrument"><span>Instrument</span></label>
+                  <label><input type="radio" name="ui-style" id="ui-style-studio" value="studio" aria-label="Studio"><span>Studio</span></label>
+                </div>
+              </div>
+            </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Test Connection</div>
@@ -2117,12 +2252,14 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Reset Page Layout</div>
-                <div class="field-desc">Re-expands collapsed groups and forgets the last open tab (this browser only).</div>
+                <div class="field-desc">Restores the default folded groups and the Instrument style, and forgets the last open tab (this browser only).</div>
               </div>
               <div class="field-control"><button id="other-reset-ui-btn" type="button">Reset</button></div>
             </div>
           </div>
           <div class="hint">Token regeneration, ports and Exit &amp; Save are intentionally only available in the desktop app's <b>Other</b> page — they would cut off or end this remote session.</div>
+          </section>
+          </div>
         </div>
       </div>
     </div>
@@ -2130,6 +2267,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=9"></script>
 </body>
 </html>

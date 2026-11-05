@@ -2585,7 +2585,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "8") return;
+    if (cssVer !== "9") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
@@ -2859,11 +2859,14 @@
         group.classList.toggle("collapsed", on);
         titleEl.setAttribute("aria-expanded", on ? "false" : "true");
       }
-      setCollapsed(!!collapsed[gkey]);
+      // Saved choice wins; otherwise "advanced" groups marked
+      // data-default-collapsed start folded away.
+      var byDefault = titleEl.getAttribute("data-default-collapsed") === "1";
+      setCollapsed(Object.prototype.hasOwnProperty.call(collapsed, gkey) ? !!collapsed[gkey] : byDefault);
       function toggle() {
         var on = !titleEl.classList.contains("collapsed");
         setCollapsed(on);
-        if (on) collapsed[gkey] = true; else delete collapsed[gkey];
+        collapsed[gkey] = on;  // explicit true/false so an opened default-collapsed group stays open
         setLocalJSON(COLLAPSED_KEY, collapsed);
       }
       titleEl.addEventListener("click", toggle);
@@ -2894,24 +2897,27 @@
         card.classList.toggle("search-hidden", !hit);
         if (q && hit && !card.classList.contains("hidden") && !card.closest(".hidden")) matches++;
       });
+      function hasVisibleCard(el) {
+        return el.querySelector(".field-card:not(.search-hidden):not(.hidden)") !== null;
+      }
+      // Panels are: title, an optional .deck (primary controls) and a
+      // .modules wrapper of <section class="module"> blocks, each a group
+      // title + group (see index.html). While filtering, a module or deck
+      // with no matching card is hidden, as are hints/logs between cards.
       Array.prototype.forEach.call(document.querySelectorAll(".main .panel"), function (panel) {
         var anyInPanel = false;
-        var kids = panel.children;
-        for (var k = 0; k < kids.length; k++) {
-          var el = kids[k];
-          if (el.classList.contains("field-card")) {
-            if (cardVisible(el)) anyInPanel = true;
-          } else if (el.classList.contains("field-group")) {
-            var vis = el.querySelector(".field-card:not(.search-hidden):not(.hidden)") !== null;
-            el.classList.toggle("search-hidden", !!q && !vis);
-            var prev = el.previousElementSibling;
-            if (prev && prev.classList.contains("field-group-title")) prev.classList.toggle("search-hidden", !!q && !vis);
-            if (vis) anyInPanel = true;
-          } else if (!el.classList.contains("field-group-title") && !el.classList.contains("panel-title")) {
-            // hints, logs, bespoke blocks — keep out of the way while filtering
-            el.classList.toggle("search-hidden", !!q);
-          }
-        }
+        Array.prototype.forEach.call(panel.querySelectorAll(".deck, .module"), function (box) {
+          var vis = hasVisibleCard(box);
+          box.classList.toggle("search-hidden", !!q && !vis);
+          if (vis && !box.closest(".hidden")) anyInPanel = true;
+        });
+        Array.prototype.forEach.call(panel.querySelectorAll(".field-group"), function (g) {
+          g.classList.toggle("search-hidden", !!q && !hasVisibleCard(g));
+        });
+        Array.prototype.forEach.call(panel.querySelectorAll(".hint, textarea, .progress-bar, .preview-img, .module-note"), function (el) {
+          if (el.closest(".field-card")) return;
+          el.classList.toggle("search-hidden", !!q);
+        });
         panel.classList.toggle("search-hidden", !!q && !anyInPanel);
       });
       searchCount.textContent = q ? (matches + (matches === 1 ? " setting" : " settings") + " match") : "";
@@ -2940,6 +2946,23 @@
     }
 
     enhanceSelects();
+
+    // Interface style (Other tab): two looks over the same page, chosen per
+    // browser. The <head> script applies the saved one before first paint.
+    var UI_STYLE_KEY = "axiom_ui_style";
+    function applyUiStyle(style, announce) {
+      if (style !== "instrument" && style !== "studio") style = "instrument";
+      document.documentElement.setAttribute("data-ui", style);
+      try { localStorage.setItem(UI_STYLE_KEY, style); } catch (e) { /* storage unavailable */ }
+      Array.prototype.forEach.call(document.querySelectorAll('input[name="ui-style"]'), function (r) {
+        r.checked = r.value === style;
+      });
+      if (announce) notify("Interface style: " + (style === "studio" ? "Studio" : "Instrument"));
+    }
+    applyUiStyle(document.documentElement.getAttribute("data-ui"), false);
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="ui-style"]'), function (r) {
+      r.addEventListener("change", function () { if (r.checked) applyUiStyle(r.value, true); });
+    });
 
     // Other tab — client-only tools (nothing here changes server state).
     var testBtn = document.getElementById("other-test-btn");
@@ -2976,10 +2999,12 @@
         Array.prototype.forEach.call(groupTitles, function (titleEl) {
           var g = titleEl.nextElementSibling;
           if (!g || !g.classList.contains("field-group")) return;
-          titleEl.classList.remove("collapsed");
-          g.classList.remove("collapsed");
-          titleEl.setAttribute("aria-expanded", "true");
+          var on = titleEl.getAttribute("data-default-collapsed") === "1";
+          titleEl.classList.toggle("collapsed", on);
+          g.classList.toggle("collapsed", on);
+          titleEl.setAttribute("aria-expanded", on ? "false" : "true");
         });
+        applyUiStyle("instrument", false);
         notify("Page layout reset");
       });
     }
