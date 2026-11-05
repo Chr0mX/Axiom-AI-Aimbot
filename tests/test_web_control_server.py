@@ -414,6 +414,15 @@ class TestBuildStatus:
         assert status["udp_recv_fps"] == 0.0
         assert status["udp_dropped_fps"] == 0.0
 
+    def test_active_preset_and_config_names(self):
+        import core.web_control_server as wcserver
+
+        status = wcserver._build_status(
+            self._config(active_preset_name="Legit", active_config_name=None)
+        )
+        assert status["active_preset_name"] == "Legit"
+        assert status["active_config_name"] == ""
+
 
 class TestTokenComparison:
     """_tokens_match() backs both the X-Axiom-Token header check and the
