@@ -1436,7 +1436,7 @@
   // browser-native equivalent for this plain, no-framework client.
   // ---------------------------------------------------------------------
   // Card list over a config/preset <select size="8">: one row per entry
-  // (initial tile, name, "Loaded" pill), so entries read as separate items.
+  // (name, "Loaded" pill), so entries read as separate items.
   // The <select> stays the source of truth — every button reads .value.
   function enhanceConfigList(selectEl, noun, loadBtn) {
     var list = document.createElement("div");
@@ -1450,11 +1450,6 @@
     selectEl.parentNode.insertBefore(list, selectEl.nextSibling);
     var activeName = "";
 
-    function hue(name) {
-      var h = 0;
-      for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-      return h;
-    }
     function choose(name) {
       if (selectEl.value === name) return;
       selectEl.value = name;
@@ -1482,14 +1477,9 @@
         var selected = o.value === selectEl.value && selectEl.selectedIndex >= 0;
         row.setAttribute("aria-selected", selected ? "true" : "false");
         if (selected) { row.classList.add("selected"); list.setAttribute("aria-activedescendant", row.id); }
-        var tile = document.createElement("span");
-        tile.className = "cfg-tile";
-        tile.style.setProperty("--tile-h", String(hue(o.value)));
-        tile.textContent = (o.value.trim().charAt(0) || "?").toUpperCase();
         var name = document.createElement("span");
         name.className = "cfg-name";
         name.textContent = o.value;
-        row.appendChild(tile);
         row.appendChild(name);
         if (activeName && o.value === activeName) {
           row.classList.add("active");
@@ -2685,7 +2675,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "10") return;
+    if (cssVer !== "11") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

@@ -21,7 +21,7 @@
 :root {
   /* Sentinel: app.js only builds the custom dropdowns when this exact
      stylesheet version loaded (see enhanceSelects()). */
-  --axiom-css: 10;
+  --axiom-css: 11;
   color-scheme: dark;
 
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
@@ -414,7 +414,7 @@ button:disabled:hover { border-color: var(--line-strong); color: var(--ink); }
   align-items: center;
   gap: 12px;
   min-height: 44px;
-  padding: 7px 12px 7px 8px;
+  padding: 7px 12px 7px 14px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -427,19 +427,6 @@ button:disabled:hover { border-color: var(--line-strong); color: var(--ink); }
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, var(--surface));
   box-shadow: inset 3px 0 0 var(--accent);
-}
-.cfg-tile {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  font-weight: 700;
-  font-size: 14px;
-  color: hsl(var(--tile-h, 160) 75% 78%);
-  background: hsl(var(--tile-h, 160) 45% 22%);
-  border: 1px solid hsl(var(--tile-h, 160) 45% 34%);
 }
 .cfg-name {
   flex: 1;
