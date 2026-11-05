@@ -8,9 +8,9 @@
     /* Interface style (Instrument / Studio) before first paint, so the page
        never flashes the other look. Set from the Other tab; see app.js. */
     (function () {
-      var ui = "instrument";
+      var ui = "studio";
       try { ui = localStorage.getItem("axiom_ui_style") || ui; } catch (e) {}
-      if (ui !== "instrument" && ui !== "studio") ui = "instrument";
+      if (ui !== "instrument" && ui !== "studio") ui = "studio";
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
@@ -2226,7 +2226,7 @@
             <div class="field-card" id="other-ui-style-card">
               <div class="field-info">
                 <div class="field-title">Interface Style</div>
-                <div class="field-desc">How this page looks, in this browser only. Instrument is dense, Studio is roomier.</div>
+                <div class="field-desc">How this page looks, in this browser only. Studio (default) is roomy, Instrument is dense.</div>
               </div>
               <div class="field-control">
                 <div class="segmented" role="radiogroup" aria-label="Interface style">
@@ -2252,7 +2252,7 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Reset Page Layout</div>
-                <div class="field-desc">Restores the default folded groups and the Instrument style, and forgets the last open tab (this browser only).</div>
+                <div class="field-desc">Restores the default folded groups and the Studio style, and forgets the last open tab (this browser only).</div>
               </div>
               <div class="field-control"><button id="other-reset-ui-btn" type="button">Reset</button></div>
             </div>

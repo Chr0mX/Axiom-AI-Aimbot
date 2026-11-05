@@ -2951,7 +2951,7 @@
     // browser. The <head> script applies the saved one before first paint.
     var UI_STYLE_KEY = "axiom_ui_style";
     function applyUiStyle(style, announce) {
-      if (style !== "instrument" && style !== "studio") style = "instrument";
+      if (style !== "instrument" && style !== "studio") style = "studio";
       document.documentElement.setAttribute("data-ui", style);
       try { localStorage.setItem(UI_STYLE_KEY, style); } catch (e) { /* storage unavailable */ }
       Array.prototype.forEach.call(document.querySelectorAll('input[name="ui-style"]'), function (r) {
@@ -3004,7 +3004,7 @@
           g.classList.toggle("collapsed", on);
           titleEl.setAttribute("aria-expanded", on ? "false" : "true");
         });
-        applyUiStyle("instrument", false);
+        applyUiStyle("studio", false);
         notify("Page layout reset");
       });
     }

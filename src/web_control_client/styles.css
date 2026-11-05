@@ -1,8 +1,8 @@
 /* =====================================================================
    Axiom Web Control — two interface styles over one page
    ---------------------------------------------------------------------
-   <html data-ui="instrument">  dense pro-tool panel (default)
-   <html data-ui="studio">      calm desktop-settings app
+   <html data-ui="studio">      calm desktop-settings app (default)
+   <html data-ui="instrument">  dense pro-tool panel
    The <head> script in index.html sets data-ui before first paint; the
    Other tab switches it (app.js, applyUiStyle()).
 
@@ -742,6 +742,48 @@ body.searching .field-group.collapsed { display: flex; }
 :root[data-ui="studio"] #convert-btn, :root[data-ui="studio"] #token-save { color: #0a1024; }
 :root[data-ui="studio"] button { border-radius: var(--radius-sm); }
 :root[data-ui="studio"] .dd-menu { border-radius: 12px; padding: 6px; }
+
+/* Studio, Model tab: wide layout that uses the full content width
+   (trial on the first tab before rolling it out to the others). */
+@media (min-width: 1100px) {
+  :root[data-ui="studio"] #panel-model.active { max-width: 1640px; margin: 0; }
+  :root[data-ui="studio"] #panel-model #model-precision-select + .dd-trigger,
+  :root[data-ui="studio"] #panel-model .model-select-row > .dd:nth-child(2) { flex: 0 0 96px; min-width: 96px; }
+  :root[data-ui="studio"] #panel-model .model-select-row > .dd:nth-child(3) { flex: 0 0 132px; min-width: 132px; }
+  :root[data-ui="studio"] #panel-model .deck {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+    grid-template-areas: "label label" "pick stats";
+    column-gap: 28px;
+    align-items: start;
+  }
+  :root[data-ui="studio"] #panel-model .deck::before { grid-area: label; }
+  :root[data-ui="studio"] #panel-model .deck > .field-group { grid-area: pick; }
+  :root[data-ui="studio"] #panel-model .deck > .grid {
+    grid-area: stats;
+    grid-template-columns: 1fr;
+    max-width: none;
+    align-self: stretch;
+    align-content: start;
+  }
+  :root[data-ui="studio"] #panel-model .modules { display: grid; gap: 24px; align-items: start; }
+  :root[data-ui="studio"] #panel-model .module { margin-bottom: 0; }
+  /* Model Details: info and notes side by side, folder action under both. */
+  :root[data-ui="studio"] #panel-model .module:first-child {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: 12px;
+    align-items: stretch;
+  }
+  :root[data-ui="studio"] #panel-model .module:first-child > .field-group-title { grid-column: 1 / -1; margin-bottom: -2px; }
+  :root[data-ui="studio"] #panel-model .module:first-child > .field-card + .field-card { margin-top: 0; }
+  :root[data-ui="studio"] #panel-model .module:first-child > .field-card:last-child { grid-column: 1 / -1; }
+  :root[data-ui="studio"] #panel-model #model-notes-text { min-height: 150px; }
+}
+/* Side by side only once there's room for the HUD column to breathe. */
+@media (min-width: 1380px) {
+  :root[data-ui="studio"] #panel-model .modules { grid-template-columns: minmax(0, 3fr) minmax(340px, 2fr); }
+}
 
 /* ---------------------------------------------------------------------
    7. Responsive
