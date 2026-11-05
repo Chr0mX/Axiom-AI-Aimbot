@@ -133,3 +133,25 @@ def test_preview_thread_draws_only_while_wanted(sc):
     finally:
         stop.set()
         thread.join(timeout=1.0)
+
+
+def test_ffmpeg_found_where_the_repo_ships_it(sc, monkeypatch):
+    import os
+    seen = []
+    shipped = os.path.join('src', 'ffmpeg', 'ffmpeg.exe')
+
+    def isfile(path):
+        seen.append(path)
+        return path.endswith(shipped)
+    monkeypatch.setattr(sc.os.path, 'isfile', isfile)
+    monkeypatch.setattr(sc.shutil, 'which', lambda _name: None)
+
+    found = sc._resolve_ffmpeg_path(SimpleNamespace(uvc_ffmpeg_path=''))
+    assert found.endswith(shipped)
+    # <root>/ffmpeg/ffmpeg.exe is still checked first.
+    assert seen[0].endswith(os.path.join('ffmpeg', 'ffmpeg.exe')) and not seen[0].endswith(shipped)
+
+
+def test_ffmpeg_override_wins(sc, monkeypatch):
+    monkeypatch.setattr(sc.os.path, 'isfile', lambda _p: True)
+    assert sc._resolve_ffmpeg_path(SimpleNamespace(uvc_ffmpeg_path=' C:/x/ffmpeg.exe ')) == 'C:/x/ffmpeg.exe'

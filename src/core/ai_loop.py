@@ -79,6 +79,8 @@ _CAM_DRIFT_DEADZONE_PX = 0.5
 _SOURCE_FRAME_MAX_AGE_S = 0.5
 
 _PREPROCESS_ERROR_LOG_INTERVAL_S = 5.0
+# How often the capture thread retries opening a source that failed.
+_CAPTURE_REINIT_INTERVAL_S = 2.0
 
 # Identity of the ai_logic_loop() that currently owns the pipeline. config.Running
 # is shared by every loop, so a loop that outlived start_ai_threads()'s join
@@ -513,105 +515,143 @@ def ai_logic_loop(
 
     def _capture_worker() -> None:
         _set_thread_priority(getattr(config, 'thread_priority', 'high'))
-        _capture_backend[0] = initialize_screen_capture(config)
-        _active_method[0] = _detect_active_capture_method(
-            _capture_backend[0],
-            getattr(config, 'screenshot_method', 'mss'),
-        )
 
         high_res_timer_enabled = False
         last_capture_perf = 0.0
         last_method_check = 0.0
         source_stale_logged = False
+        last_init_attempt = float('-inf')
+        last_error_log = float('-inf')
+
+        def _init_backend() -> None:
+            """Open the configured capture backend. On failure the backend
+            stays None and the loop retries every _CAPTURE_REINIT_INTERVAL_S,
+            instead of the thread dying and detection silently stopping."""
+            try:
+                _capture_backend[0] = initialize_screen_capture(config)
+                _active_method[0] = _detect_active_capture_method(
+                    _capture_backend[0],
+                    getattr(config, 'screenshot_method', 'mss'),
+                )
+            except Exception:
+                logger.exception("[Capture] Could not open the capture source; retrying in %.0fs",
+                                 _CAPTURE_REINIT_INTERVAL_S)
+                _capture_backend[0] = None
 
         try:
             while config.Running and not capture_stop_event.is_set():
-                screenshot_interval = max(0.001, float(getattr(config, 'screenshot_interval', config.detect_interval)))
-                detect_interval = float(getattr(config, 'detect_interval', screenshot_interval))
-                # Windows' default Sleep()/time.sleep() granularity is ~15.6ms;
-                # any throttle interval tighter than that needs the high-res
-                # multimedia timer below or the configured interval is
-                # silently ignored — both screenshot_interval and
-                # detect_interval gate a _sleep_precise() call (this loop and
-                # the main inference loop respectively), and this timer
-                # resolution request is process-wide, so either interval
-                # needing it is enough to request it.
-                should_use_high_res_timer = min(screenshot_interval, detect_interval) < 0.015
-
-                if should_use_high_res_timer and not high_res_timer_enabled:
-                    high_res_timer_enabled = _set_windows_timer_resolution_1ms(True)
-                elif high_res_timer_enabled and not should_use_high_res_timer:
-                    _set_windows_timer_resolution_1ms(False)
-                    high_res_timer_enabled = False
-
-                # --- Hot-swap screenshot backend every 0.5s ---
-                now_check = time.perf_counter()
-                if now_check - last_method_check >= 0.5:
-                    last_method_check = now_check
-                    new_backend, new_method = reinitialize_if_method_changed(
-                        config, _capture_backend[0], _active_method[0],
-                    )
-                    if new_backend is not _capture_backend[0]:
-                        _capture_backend[0] = new_backend
-                        _active_method[0] = new_method
-                        _last_valid_frame[0] = None  # reset cached frame on backend change
-
-                with region_lock:
-                    target_region = capture_state.get('target_region')
-
-                if target_region is None:
-                    # Detection is paused (see the main loop). Drop the cached
-                    # frame so a dxcam "no change" reuse can't hand a frame
-                    # from before the pause to the first detection after it.
+                if _capture_backend[0] is None:
+                    now_init = time.perf_counter()
+                    if now_init - last_init_attempt < _CAPTURE_REINIT_INTERVAL_S:
+                        capture_stop_event.wait(0.05)
+                        continue
+                    last_init_attempt = now_init
+                    _init_backend()
                     _last_valid_frame[0] = None
-                    _sleep_precise(0.001)
                     continue
+                try:
+                    screenshot_interval = max(0.001, float(getattr(config, 'screenshot_interval', config.detect_interval)))
+                    detect_interval = float(getattr(config, 'detect_interval', screenshot_interval))
+                    # Windows' default Sleep()/time.sleep() granularity is ~15.6ms;
+                    # any throttle interval tighter than that needs the high-res
+                    # multimedia timer below or the configured interval is
+                    # silently ignored — both screenshot_interval and
+                    # detect_interval gate a _sleep_precise() call (this loop and
+                    # the main inference loop respectively), and this timer
+                    # resolution request is process-wide, so either interval
+                    # needing it is enough to request it.
+                    should_use_high_res_timer = min(screenshot_interval, detect_interval) < 0.015
 
-                now_capture = time.perf_counter()
-                wait_for = screenshot_interval - (now_capture - last_capture_perf)
-                if wait_for > 0:
-                    _sleep_precise(wait_for)
-                    continue
+                    if should_use_high_res_timer and not high_res_timer_enabled:
+                        high_res_timer_enabled = _set_windows_timer_resolution_1ms(True)
+                    elif high_res_timer_enabled and not should_use_high_res_timer:
+                        _set_windows_timer_resolution_1ms(False)
+                        high_res_timer_enabled = False
 
-                last_capture_perf = time.perf_counter()
-                captured_t = last_capture_perf
-                captured_frame = capture_frame(_capture_backend[0], target_region)
-                captured_region = target_region
-
-                if captured_frame is not None and _capture_backend_is_stale(
-                    _capture_backend[0], _SOURCE_FRAME_MAX_AGE_S
-                ):
-                    if not source_stale_logged:
-                        logger.warning(
-                            "[Capture] Source (%s) delivered no new frame for >%.1fs — "
-                            "pausing detection instead of re-inferring the frozen frame.",
-                            _active_method[0], _SOURCE_FRAME_MAX_AGE_S,
+                    # --- Hot-swap screenshot backend every 0.5s ---
+                    now_check = time.perf_counter()
+                    if now_check - last_method_check >= 0.5:
+                        last_method_check = now_check
+                        new_backend, new_method = reinitialize_if_method_changed(
+                            config, _capture_backend[0], _active_method[0],
                         )
-                        source_stale_logged = True
+                        if new_backend is not _capture_backend[0]:
+                            _capture_backend[0] = new_backend
+                            _active_method[0] = new_method
+                            _last_valid_frame[0] = None  # reset cached frame on backend change
+
+                    with region_lock:
+                        target_region = capture_state.get('target_region')
+
+                    if target_region is None:
+                        # Detection is paused (see the main loop). Drop the cached
+                        # frame so a dxcam "no change" reuse can't hand a frame
+                        # from before the pause to the first detection after it.
+                        _last_valid_frame[0] = None
+                        _sleep_precise(0.001)
+                        continue
+
+                    now_capture = time.perf_counter()
+                    wait_for = screenshot_interval - (now_capture - last_capture_perf)
+                    if wait_for > 0:
+                        _sleep_precise(wait_for)
+                        continue
+
+                    last_capture_perf = time.perf_counter()
+                    captured_t = last_capture_perf
+                    captured_frame = capture_frame(_capture_backend[0], target_region)
+                    captured_region = target_region
+
+                    if captured_frame is not None and _capture_backend_is_stale(
+                        _capture_backend[0], _SOURCE_FRAME_MAX_AGE_S
+                    ):
+                        if not source_stale_logged:
+                            logger.warning(
+                                "[Capture] Source (%s) delivered no new frame for >%.1fs — "
+                                "pausing detection instead of re-inferring the frozen frame.",
+                                _active_method[0], _SOURCE_FRAME_MAX_AGE_S,
+                            )
+                            source_stale_logged = True
+                        _last_valid_frame[0] = None
+                        continue
+                    if source_stale_logged and captured_frame is not None:
+                        logger.info("[Capture] Source (%s) is delivering frames again.", _active_method[0])
+                        source_stale_logged = False
+
+                    if captured_frame is not None:
+                        _last_valid_frame[0] = (captured_frame, target_region)
+                    elif _last_valid_frame[0] is not None:
+                        # dxcam returns None when screen content hasn't changed;
+                        # reuse the last valid frame so FPS isn't throttled by VSync
+                        # captured_t stays "now": no new desktop frame means the
+                        # screen hasn't changed since, so the old content is current.
+                        captured_frame, captured_region = _last_valid_frame[0]
+                    else:
+                        continue
+
+                    with frame_lock:
+                        capture_state['latest_frame'] = captured_frame
+                        capture_state['latest_region'] = captured_region
+                        capture_state['latest_capture_t'] = captured_t
+                        capture_state['frame_seq'] = int(capture_state['frame_seq']) + 1
+
+                    config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
+                except Exception:
+                    # A failing grab/backend must not kill the capture thread:
+                    # drop the backend and let the loop re-open it.
+                    now_err = time.perf_counter()
+                    if now_err - last_error_log >= _PREPROCESS_ERROR_LOG_INTERVAL_S:
+                        last_error_log = now_err
+                        logger.exception("[Capture] Capture failed (%s); re-opening the source",
+                                         _active_method[0])
+                    failed, _capture_backend[0] = _capture_backend[0], None
                     _last_valid_frame[0] = None
-                    continue
-                if source_stale_logged and captured_frame is not None:
-                    logger.info("[Capture] Source (%s) is delivering frames again.", _active_method[0])
-                    source_stale_logged = False
-
-                if captured_frame is not None:
-                    _last_valid_frame[0] = (captured_frame, target_region)
-                elif _last_valid_frame[0] is not None:
-                    # dxcam returns None when screen content hasn't changed;
-                    # reuse the last valid frame so FPS isn't throttled by VSync
-                    # captured_t stays "now": no new desktop frame means the
-                    # screen hasn't changed since, so the old content is current.
-                    captured_frame, captured_region = _last_valid_frame[0]
-                else:
-                    continue
-
-                with frame_lock:
-                    capture_state['latest_frame'] = captured_frame
-                    capture_state['latest_region'] = captured_region
-                    capture_state['latest_capture_t'] = captured_t
-                    capture_state['frame_seq'] = int(capture_state['frame_seq']) + 1
-
-                config.screenshot_frame_count = int(getattr(config, 'screenshot_frame_count', 0)) + 1
+                    if failed is not None:
+                        try:
+                            _cleanup_capture(failed)
+                        except Exception:
+                            logger.debug("[Capture] Cleanup after failure raised", exc_info=True)
+                    last_init_attempt = time.perf_counter() - _CAPTURE_REINIT_INTERVAL_S + 0.5
         finally:
             if high_res_timer_enabled:
                 _set_windows_timer_resolution_1ms(False)

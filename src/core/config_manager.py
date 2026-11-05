@@ -13,7 +13,7 @@ import shutil
 from datetime import datetime
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
-from .config import _FIELD_MAP
+from .config import _FIELD_MAP, STATE_FIELDS, validate_config
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,8 @@ _AIM_PRESET_FIELDS = frozenset(
 #   * preset_slots        — web-client UI state, not settings.
 #   * uvc_ffmpeg_path     — path to an executable the app launches; an imported
 #                           file could point it at arbitrary code.
+#   * web_esp_enabled     — starts the unauthenticated Web ESP server, which
+#                           binds 0.0.0.0; an imported file must not switch it on.
 # Enforced symmetrically, like the aim-preset scope: _get_config_data() omits
 # them on save, and load_config()/preview_config_changes() ignore them on load,
 # so snapshots saved before this existed (which still contain them) are safe too.
@@ -64,12 +66,54 @@ _SNAPSHOT_EXCLUDED_FIELDS = frozenset({
     'web_control_token',
     'preset_slots',
     'uvc_ffmpeg_path',
+    'web_esp_enabled',
 })
+
+# Model paths a snapshot may set must stay inside the app folder (e.g.
+# "Model/x.onnx"). An absolute or network path in a shared file could load a
+# model from anywhere, and on Windows a \\server path also leaks NTLM creds.
+_SNAPSHOT_RELATIVE_ONLY_FIELDS = ('model_path', 'hud_model_path')
 
 
 def _strip_snapshot_excluded(data: Dict[str, Any]) -> Dict[str, Any]:
     """Drop `_SNAPSHOT_EXCLUDED_FIELDS` from loaded snapshot data."""
     return {k: v for k, v in data.items() if k not in _SNAPSHOT_EXCLUDED_FIELDS}
+
+
+def _is_outside_app_path(path: Any) -> bool:
+    text = str(path or '').strip()
+    return bool(text) and (os.path.isabs(text) or text.startswith(('\\', '//'))
+                           or re.match(r'^[A-Za-z]:', text) is not None)
+
+
+def _apply_snapshot_data(config_instance: Config, data: Dict[str, Any]) -> None:
+    """Apply preset/snapshot data the way every file load must.
+
+    `_strip_snapshot_excluded` only removes flat keys, but `from_dict` also
+    reads the grouped layout ({"web_control": {"token": ...}}), so a
+    hand-made file could still reach an excluded field. This keeps the
+    current values of every excluded field and of the one-time state flags
+    (STATE_FIELDS, e.g. disclaimer_agreed) whatever layout the file uses,
+    refuses model paths outside the app folder, then runs the same
+    validators config.json gets.
+    """
+    protected = {attr: getattr(config_instance, attr)
+                 for attr in (*_SNAPSHOT_EXCLUDED_FIELDS, *STATE_FIELDS)
+                 if hasattr(config_instance, attr)}
+    previous_paths = {attr: getattr(config_instance, attr, '')
+                      for attr in _SNAPSHOT_RELATIVE_ONLY_FIELDS}
+
+    config_instance.from_dict(_strip_snapshot_excluded(data))
+
+    for attr, value in protected.items():
+        setattr(config_instance, attr, value)
+    for attr, old in previous_paths.items():
+        new = getattr(config_instance, attr, '')
+        if new != old and _is_outside_app_path(new):
+            logger.warning("Ignored %s %r from a preset/config file: only paths inside "
+                           "the Axiom folder (e.g. Model/x.onnx) can be loaded this way", attr, new)
+            setattr(config_instance, attr, old)
+    validate_config(config_instance)
 
 
 # preview_config_changes() display helpers ─────────────────────────────────
@@ -377,8 +421,7 @@ class ConfigManager:
                 config_data = _filter_to_aim_preset_fields(config_data)
             # Credentials / remote-control / executable-path fields are never
             # applied from a file, whatever the file contains.
-            config_data = _strip_snapshot_excluded(config_data)
-            config_instance.from_dict(config_data)
+            _apply_snapshot_data(config_instance, config_data)
             # Record what's now active for the status panel (Config.
             # active_preset_name/active_config_name). A full-config load
             # (aim_only=False) touches every aim./tracking.* field too, so
@@ -433,7 +476,9 @@ class ConfigManager:
             return None
 
         simulated = copy.deepcopy(config_instance)
-        simulated.from_dict(_strip_snapshot_excluded(preset_data))
+        if self.aim_only:
+            preset_data = _filter_to_aim_preset_fields(preset_data)
+        _apply_snapshot_data(simulated, preset_data)
 
         current_flat = _flatten_preset_data(self._get_config_data(config_instance))
         simulated_flat = _flatten_preset_data(self._get_config_data(simulated))

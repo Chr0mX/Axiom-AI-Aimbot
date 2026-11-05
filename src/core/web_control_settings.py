@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import glob
 import json
+import math
 import os
 import socket
 
@@ -81,7 +82,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "uvc_fps": {"type": "int"},
         "uvc_video_format": {"type": "choice", "choices": ["mjpeg", "yuy2", "nv12", "yuv420p"]},
         "uvc_crop_mode": {"type": "choice", "choices": ["dynamic", "fixed"]},
-        "uvc_ffmpeg_path": {"type": "str"},
+        # uvc_ffmpeg_path is deliberately absent: it names an executable the
+        # app launches (as admin), so it is only settable from the desktop
+        # Capture page — same reason config_manager excludes it from snapshots.
         "ndi_source_name": {"type": "str"},
         "ndi_force_reconnect": {"type": "bool"},
         "ndi_bandwidth": {"type": "choice", "choices": ["highest", "lowest"]},
@@ -470,6 +473,27 @@ def get_tab_settings(config, tab: str) -> dict:
     return result
 
 
+_TRUE_STRINGS = frozenset({"true", "1", "yes", "on"})
+_FALSE_STRINGS = frozenset({"false", "0", "no", "off", ""})
+
+
+def _parse_bool(value):
+    """Strict bool parse for request bodies: real bools, 0/1, and the usual
+    true/false words. Returns None for anything else (so "false" is False,
+    not True as bool("false") would be)."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in _TRUE_STRINGS:
+            return True
+        if text in _FALSE_STRINGS:
+            return False
+    return None
+
+
 def apply_tab_settings(config, tab: str, updates: dict) -> dict:
     """Validate + write a partial {field: display_value} dict.
 
@@ -496,7 +520,10 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
         ftype = spec["type"]
 
         if ftype == "bool":
-            to_apply[field] = bool(value)
+            parsed = _parse_bool(value)
+            if parsed is None:
+                return {"ok": False, "reason": "invalid_value", "field": field}
+            to_apply[field] = parsed
         elif ftype == "choice":
             # Choices are usually strings (e.g. "mss"), matched case-
             # insensitively — but a few fields (cam_motion_comp_size,
@@ -523,6 +550,10 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
             try:
                 num = float(value)
             except (TypeError, ValueError):
+                return {"ok": False, "reason": "invalid_value", "field": field}
+            # NaN slips through min/max clamping (max(nan, lo) is nan) and
+            # inf breaks int(round()); neither is ever a meaningful setting.
+            if not math.isfinite(num):
                 return {"ok": False, "reason": "invalid_value", "field": field}
             lo, hi = spec.get("min"), spec.get("max")
             if lo is not None:

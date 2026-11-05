@@ -111,6 +111,39 @@ class TestApplyTabSettings:
         wcs.apply_tab_settings(config, "inference", {"keep_detecting": 1})
         assert config.keep_detecting is True
 
+    @pytest.mark.parametrize("raw, expected", [
+        ("false", False), ("False", False), ("0", False), ("off", False), (0, False),
+        ("true", True), ("yes", True), ("1", True), (True, True),
+    ])
+    def test_bool_strings_parse_strictly(self, raw, expected):
+        config = _config(keep_detecting=not expected)
+        result = wcs.apply_tab_settings(config, "inference", {"keep_detecting": raw})
+        assert result["ok"] is True
+        assert config.keep_detecting is expected
+
+    @pytest.mark.parametrize("raw", ["maybe", 2, [], {}])
+    def test_bool_junk_rejected(self, raw):
+        config = _config(keep_detecting=True)
+        result = wcs.apply_tab_settings(config, "inference", {"keep_detecting": raw})
+        assert result == {"ok": False, "reason": "invalid_value", "field": "keep_detecting"}
+        assert config.keep_detecting is True
+
+    @pytest.mark.parametrize("raw", [float("nan"), float("inf"), float("-inf"), "nan", "inf"])
+    def test_non_finite_numbers_rejected(self, raw):
+        config = _config(fov_size=100, detect_interval=0.01)
+        for field in ("fov_size", "detect_interval"):
+            result = wcs.apply_tab_settings(config, "inference", {field: raw})
+            assert result == {"ok": False, "reason": "invalid_value", "field": field}
+        assert config.fov_size == 100 and config.detect_interval == 0.01
+
+    def test_ffmpeg_path_cannot_be_set_remotely(self):
+        config = _config(uvc_ffmpeg_path="")
+        result = wcs.apply_tab_settings(config, "capture",
+                                        {"uvc_ffmpeg_path": r"C:\\Users\\Public\\evil.exe"})
+        assert result == {"ok": False, "reason": "unknown_field", "field": "uvc_ffmpeg_path"}
+        assert config.uvc_ffmpeg_path == ""
+        assert "uvc_ffmpeg_path" not in wcs.get_tab_settings(config, "capture")
+
     def test_scale_round_trips_through_config(self):
         """A display value of 10 (ms) for detect_interval (scale=1000)
         must be stored on config as 0.01 (seconds)."""

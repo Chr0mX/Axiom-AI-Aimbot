@@ -942,3 +942,32 @@ class TestValidateQueueAndConfidence:
         assert load_config(c, str(path)) is True
         assert c.max_queue_size == 1
         assert c.min_confidence == 1.0
+
+class TestCrosshairColourFromDict:
+    """A bad colour in config.json used to crash startup (int('x'))."""
+
+    def test_bad_nested_colour_keeps_current_values(self):
+        c = _make_config()
+        before = (c.crosshair_color_r, c.crosshair_color_g, c.crosshair_color_b)
+        c.from_dict({"display": {"crosshair": {"color": ["x", None, 7]}}})
+        assert (c.crosshair_color_r, c.crosshair_color_g) == before[:2]
+        assert c.crosshair_color_b == 7
+
+    def test_colour_is_clamped(self):
+        c = _make_config()
+        c.from_dict({"display": {"crosshair": {"color": [300, -5, "12"]}}})
+        assert (c.crosshair_color_r, c.crosshair_color_g, c.crosshair_color_b) == (255, 0, 12)
+
+    def test_bad_flat_colour_keeps_current_value(self):
+        c = _make_config()
+        before = c.crosshair_color_r
+        c.from_dict({"crosshair_color_r": "red"})
+        assert c.crosshair_color_r == before
+
+
+def test_validate_config_clamps_like_load_config():
+    from core.config import validate_config
+    c = _make_config()
+    c.detect_interval = 0
+    validate_config(c)
+    assert c.detect_interval == 0.001
