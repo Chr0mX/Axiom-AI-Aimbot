@@ -1519,3 +1519,11 @@ def disconnect_makcu():
 
 def is_makcu_connected() -> bool:
     return makcu_mouse.is_connected()
+
+
+def is_makcu_watchdog_active() -> bool:
+    """True while the reconnect watchdog runs (from the first successful
+    connect until disconnect). The GUI's background retry stays out of the
+    way then, so two connects never race on the same port."""
+    thread = getattr(makcu_mouse, '_reconnect_thread', None)
+    return bool(thread is not None and thread.is_alive())

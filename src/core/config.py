@@ -608,6 +608,10 @@ class Config:
         self.makcu_aim_button: str = "lmb"   # "lmb", "rmb", "mmb", or "off"
         self.makcu_aim_mode: str = "hold"    # "hold" = aim while held; "toggle" = click to toggle
         self.makcu_aim_active: bool = False  # runtime state — not serialized
+        # Runtime only (not in _FIELD_MAP): True after the user pressed
+        # Disconnect (Keys & HW or Web Control); stops the GUI's MAKCU
+        # auto-connect and background retry until the next manual connect.
+        self.makcu_user_disconnected: bool = False
         self.makcu_disengage_delay: float = 0.0  # seconds to keep aiming after releasing aim button (0 = off)
         # Optional button-driven Always Aim — a second, independent
         # activation path alongside the plain always_aim checkbox: "off"

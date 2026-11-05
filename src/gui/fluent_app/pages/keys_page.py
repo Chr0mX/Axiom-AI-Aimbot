@@ -279,6 +279,26 @@ _MAKCU_PID = 0x55D3
 _MAKCU_DESC_KEYWORDS = ("USB-Enhanced-SERIAL CH343", "USB Single Serial")
 
 
+def _find_makcu_port() -> str | None:
+    """Return the first serial port that matches the MAKCU USB VID/PID or description."""
+    try:
+        import serial.tools.list_ports
+        for p in serial.tools.list_ports.comports():
+            if p.vid == _MAKCU_VID and p.pid == _MAKCU_PID:
+                return p.device
+            desc = f"{p.description or ''} {p.product or ''}"
+            if any(kw in desc for kw in _MAKCU_DESC_KEYWORDS):
+                return p.device
+    except Exception:
+        pass
+    return None
+
+
+def _note_makcu_port(config, port: str) -> None:
+    if config is not None and port:
+        config.makcu_com_port = port
+
+
 class _MakcuConnectWorker(QThread):
     """Runs connect_makcu() off the GUI thread.
 
@@ -292,10 +312,11 @@ class _MakcuConnectWorker(QThread):
     """
 
     finishedResult = pyqtSignal(bool)  # ok
+    portFound = pyqtSignal(str)  # auto mode: the port the scan found
 
-    def __init__(self, port: str, baud: int, parent=None, udp=None):
+    def __init__(self, port: str | None, baud: int, parent=None, udp=None):
         super().__init__(parent)
-        self._port = port
+        self._port = port  # None = auto mode: scan for a MAKCU first
         self._baud = baud
         self._udp = udp  # (host, port) for a UDP connection, else None
 
@@ -305,7 +326,15 @@ class _MakcuConnectWorker(QThread):
             if self._udp:
                 ok = connect_makcu_udp(*self._udp)
             else:
-                ok = connect_makcu(self._port, self._baud)
+                port = self._port
+                if port is None:
+                    # The port scan runs here, not on the GUI thread.
+                    port = _find_makcu_port()
+                    if not port:
+                        self.finishedResult.emit(False)
+                        return
+                    self.portFound.emit(port)
+                ok = connect_makcu(port, self._baud)
         except Exception:
             ok = False
         self.finishedResult.emit(ok)
@@ -329,11 +358,29 @@ class KeysPage(BasePage):
         self._aimStatusTimer.timeout.connect(self._updateMakcuAimStatus)
         self._aimStatusTimer.start()
 
+        # Connects a MAKCU plugged in after startup, whichever page is open.
+        # Once connected, makcu_mouse's own watchdog handles unplug/replug.
+        self._makcuAutoRetryTimer = QTimer(self)
+        self._makcuAutoRetryTimer.setInterval(3000)
+        self._makcuAutoRetryTimer.timeout.connect(self._onMakcuAutoRetryTick)
+        self._makcuAutoRetryTimer.start()
+
     def setConfig(self, config):
-        """設定 Config 實例並載入值"""
+        """設定 Config 實例並載入值 — full load, including the port scan and
+        the one-time MAKCU auto-connect."""
         self._config = config
         self._loadFromConfig()
         self._loadMakcuConnFromConfig()
+        self._updateMakcuVisibility()
+
+    def refreshFromConfig(self):
+        """Light re-sync for the 1 s window tick: widgets only — no port
+        scan, no connect, no Config writes."""
+        if not self._config:
+            return
+        self._loadFromConfig()
+        self._showMakcuConnSettings()
+        self._updateMakcuConnectionStatus()
         self._updateMakcuVisibility()
 
     def showEvent(self, event):
@@ -1058,7 +1105,10 @@ class KeysPage(BasePage):
             self._config.makcu_always_aim_mode = self._AIM_MODE_OPTIONS[idx][1]
 
     def _loadMakcuConnFromConfig(self):
-        """Load MAKCU COM port and baud rate from config, then auto-connect if device found."""
+        """Full load: detect the MAKCU port, show the saved settings, then
+        auto-connect once if a device is found (startup / setConfig only —
+        never from the 1 s refresh, and never after the user pressed
+        Disconnect)."""
         if not self._config:
             return
 
@@ -1066,30 +1116,13 @@ class KeysPage(BasePage):
         auto_port = self._findMakcuPort()
         saved_port = getattr(self._config, 'makcu_com_port', '')
         effective_port = auto_port or saved_port
+        if auto_port:
+            self._config.makcu_com_port = auto_port
 
-        if effective_port:
-            if auto_port:
-                self._config.makcu_com_port = auto_port
-            idx = self.makcuComPortCombo.findText(effective_port)
-            if idx >= 0:
-                self.makcuComPortCombo.blockSignals(True)
-                self.makcuComPortCombo.setCurrentIndex(idx)
-                self.makcuComPortCombo.blockSignals(False)
+        self._showMakcuConnSettings()
 
-        saved_baud = str(getattr(self._config, 'makcu_baud_rate', 4000000))
-        baud_idx = self.makcuBaudCombo.findText(saved_baud)
-        if baud_idx >= 0:
-            self.makcuBaudCombo.blockSignals(True)
-            self.makcuBaudCombo.setCurrentIndex(baud_idx)
-            self.makcuBaudCombo.blockSignals(False)
-        else:
-            four_m_idx = self.makcuBaudCombo.findText("4000000")
-            if four_m_idx >= 0:
-                self.makcuBaudCombo.blockSignals(True)
-                self.makcuBaudCombo.setCurrentIndex(four_m_idx)
-                self.makcuBaudCombo.blockSignals(False)
-
-        self._updateMakcuConnectionStatus()
+        if getattr(self._config, 'makcu_user_disconnected', False):
+            return
 
         # Auto-connect if a MAKCU device is detected and not yet connected
         udp_host = getattr(self._config, 'makcu_udp_host', '')
@@ -1109,23 +1142,40 @@ class KeysPage(BasePage):
             except Exception:
                 pass
 
+    def _showMakcuConnSettings(self):
+        """Show the saved COM port and baud rate (widgets only)."""
+        if not self._config:
+            return
+        saved_port = getattr(self._config, 'makcu_com_port', '')
+        if saved_port:
+            idx = self.makcuComPortCombo.findText(saved_port)
+            if idx >= 0 and idx != self.makcuComPortCombo.currentIndex():
+                self.makcuComPortCombo.blockSignals(True)
+                self.makcuComPortCombo.setCurrentIndex(idx)
+                self.makcuComPortCombo.blockSignals(False)
+
+        saved_baud = str(getattr(self._config, 'makcu_baud_rate', 4000000))
+        baud_idx = self.makcuBaudCombo.findText(saved_baud)
+        if baud_idx >= 0:
+            self.makcuBaudCombo.blockSignals(True)
+            self.makcuBaudCombo.setCurrentIndex(baud_idx)
+            self.makcuBaudCombo.blockSignals(False)
+        else:
+            four_m_idx = self.makcuBaudCombo.findText("4000000")
+            if four_m_idx >= 0:
+                self.makcuBaudCombo.blockSignals(True)
+                self.makcuBaudCombo.setCurrentIndex(four_m_idx)
+                self.makcuBaudCombo.blockSignals(False)
+
+        self._updateMakcuConnectionStatus()
+
     # ──────────────────────────────────────────────
     # MAKCU connection helpers
     # ──────────────────────────────────────────────
 
     def _findMakcuPort(self) -> str | None:
         """Return the first serial port that matches the MAKCU USB VID/PID or description."""
-        try:
-            import serial.tools.list_ports
-            for p in serial.tools.list_ports.comports():
-                if p.vid == _MAKCU_VID and p.pid == _MAKCU_PID:
-                    return p.device
-                desc = f"{p.description or ''} {p.product or ''}"
-                if any(kw in desc for kw in _MAKCU_DESC_KEYWORDS):
-                    return p.device
-        except Exception:
-            pass
-        return None
+        return _find_makcu_port()
 
     def _refreshMakcuComPorts(self):
         """Refresh MAKCU COM port list and auto-select a detected MAKCU device."""
@@ -1174,8 +1224,15 @@ class KeysPage(BasePage):
         if self._isMakcuConnected or is_makcu_connected():
             disconnect_makcu()
             self._isMakcuConnected = False
+            if self._config:
+                # Stay disconnected: no auto-connect or background retry
+                # until the user connects again.
+                self._config.makcu_user_disconnected = True
             self._updateMakcuConnectionStatus()
-        elif self._config and getattr(self._config, 'makcu_connection', 'serial') == 'udp':
+            return
+        if self._config:
+            self._config.makcu_user_disconnected = False
+        if self._config and getattr(self._config, 'makcu_connection', 'serial') == 'udp':
             self._onMakcuUdpAddressChanged()
             host = getattr(self._config, 'makcu_udp_host', '')
             if host:
@@ -1210,6 +1267,49 @@ class KeysPage(BasePage):
         self._updateMakcuConnectionStatus()
         if ok:
             self._applyMakcuFeatures()
+
+    def _onMakcuAutoRetryTick(self) -> None:
+        """Background retry for a MAKCU that wasn't there at startup.
+
+        Runs every 3 s on any page, but only while: not connected, no
+        connect attempt is in flight, the user hasn't pressed Disconnect,
+        and makcu_mouse's own reconnect watchdog isn't running (it owns
+        reconnects after a first successful connect). The port scan runs in
+        the worker thread; nothing on screen changes until a device is
+        actually found."""
+        cfg = self._config
+        if cfg is None or getattr(cfg, 'makcu_user_disconnected', False):
+            return
+        if self._makcuConnectWorker is not None and self._makcuConnectWorker.isRunning():
+            return
+        try:
+            from win_utils.makcu_mouse import is_makcu_connected, is_makcu_watchdog_active
+            if is_makcu_connected() or is_makcu_watchdog_active():
+                return
+        except Exception:
+            return
+        udp = None
+        if getattr(cfg, 'makcu_connection', 'serial') == 'udp':
+            host = getattr(cfg, 'makcu_udp_host', '')
+            if not host:
+                return
+            udp = (host, int(getattr(cfg, 'makcu_udp_port', 8080)))
+        worker = _MakcuConnectWorker(None, 4_000_000, parent=self, udp=udp)
+        worker.portFound.connect(self._onMakcuAutoPortFound)
+        worker.finishedResult.connect(self._onMakcuAutoConnectFinished)
+        self._makcuConnectWorker = worker
+        worker.start()
+
+    def _onMakcuAutoPortFound(self, port: str) -> None:
+        _note_makcu_port(self._config, port)
+        self._showMakcuConnSettings()
+        self.makcuConnectBtn.setEnabled(False)
+        self.makcuConnectionLabel.setText(t("connecting", "Connecting..."))
+
+    def _onMakcuAutoConnectFinished(self, ok: bool) -> None:
+        # A scan that found nothing changed nothing on screen; don't redraw.
+        if ok or not self.makcuConnectBtn.isEnabled():
+            self._onMakcuConnectFinished(ok)
 
     def _onMakcuTransportChanged(self, idx: int):
         if self._config and 0 <= idx < len(_MAKCU_TRANSPORT_OPTIONS):
