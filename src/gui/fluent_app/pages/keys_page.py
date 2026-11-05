@@ -1,6 +1,8 @@
 # keys_page.py
 """Hardware Output page — keybinds, MAKCU connection + keys"""
 
+import time
+
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from PyQt6.QtWidgets import QWidget, QHBoxLayout
 from PyQt6.QtGui import QKeySequence
@@ -312,11 +314,13 @@ class _MakcuConnectWorker(QThread):
     """
 
     finishedResult = pyqtSignal(bool)  # ok
-    portFound = pyqtSignal(str)  # auto mode: the port the scan found
+    portFound = pyqtSignal(str)  # auto mode: the port it is about to try
+    scanned = pyqtSignal(str)    # auto mode: what the scan found ('' = nothing)
 
-    def __init__(self, port: str | None, baud: int, parent=None, udp=None):
+    def __init__(self, port: str | None, baud: int, parent=None, udp=None, skip_port: str = ""):
         super().__init__(parent)
         self._port = port  # None = auto mode: scan for a MAKCU first
+        self._skip_port = skip_port  # auto mode: a port that already failed
         self._baud = baud
         self._udp = udp  # (host, port) for a UDP connection, else None
 
@@ -330,7 +334,8 @@ class _MakcuConnectWorker(QThread):
                 if port is None:
                     # The port scan runs here, not on the GUI thread.
                     port = _find_makcu_port()
-                    if not port:
+                    self.scanned.emit(port or "")
+                    if not port or port == self._skip_port:
                         self.finishedResult.emit(False)
                         return
                     self.portFound.emit(port)
@@ -348,6 +353,9 @@ class KeysPage(BasePage):
         self._config = None
         self._isMakcuConnected = False
         self._makcuConnectWorker: _MakcuConnectWorker | None = None
+        self._makcuAutoFailedPort = ""   # background retry: skip for 30 s / until replugged
+        self._makcuAutoTryingPort = ""
+        self._makcuAutoFailedAt = 0.0
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -1280,6 +1288,10 @@ class KeysPage(BasePage):
         cfg = self._config
         if cfg is None or getattr(cfg, 'makcu_user_disconnected', False):
             return
+        # A port that failed gets another try after 30 s (a MAKCU that was
+        # still booting), not every 3 s.
+        if self._makcuAutoFailedPort and time.monotonic() - self._makcuAutoFailedAt >= 30.0:
+            self._makcuAutoFailedPort = ""
         if self._makcuConnectWorker is not None and self._makcuConnectWorker.isRunning():
             return
         try:
@@ -1294,19 +1306,34 @@ class KeysPage(BasePage):
             if not host:
                 return
             udp = (host, int(getattr(cfg, 'makcu_udp_port', 8080)))
-        worker = _MakcuConnectWorker(None, 4_000_000, parent=self, udp=udp)
+        worker = _MakcuConnectWorker(None, 4_000_000, parent=self, udp=udp,
+                                     skip_port=self._makcuAutoFailedPort)
+        worker.scanned.connect(self._onMakcuAutoScanned)
         worker.portFound.connect(self._onMakcuAutoPortFound)
         worker.finishedResult.connect(self._onMakcuAutoConnectFinished)
         self._makcuConnectWorker = worker
         worker.start()
 
+    def _onMakcuAutoScanned(self, port: str) -> None:
+        # The port that failed is gone (unplugged): try it again next time.
+        if port != self._makcuAutoFailedPort:
+            self._makcuAutoFailedPort = ""
+
     def _onMakcuAutoPortFound(self, port: str) -> None:
+        self._makcuAutoTryingPort = port
         _note_makcu_port(self._config, port)
         self._showMakcuConnSettings()
         self.makcuConnectBtn.setEnabled(False)
         self.makcuConnectionLabel.setText(t("connecting", "Connecting..."))
 
     def _onMakcuAutoConnectFinished(self, ok: bool) -> None:
+        # A matching port that didn't answer as a MAKCU (e.g. another
+        # USB-serial device on the same chip) is retried after 30 s or once
+        # it is unplugged and plugged back in, not every 3 s.
+        if not ok and self._makcuAutoTryingPort:
+            self._makcuAutoFailedPort = self._makcuAutoTryingPort
+            self._makcuAutoFailedAt = time.monotonic()
+        self._makcuAutoTryingPort = ""
         # A scan that found nothing changed nothing on screen; don't redraw.
         if ok or not self.makcuConnectBtn.isEnabled():
             self._onMakcuConnectFinished(ok)
