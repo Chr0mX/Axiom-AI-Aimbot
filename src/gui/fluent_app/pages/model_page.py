@@ -9,7 +9,7 @@ import sys
 import time
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QMessageBox, QTextEdit, QVBoxLayout,
+    QApplication, QHBoxLayout, QLabel, QTextEdit, QVBoxLayout,
 )
 from qfluentwidgets import (
     CardWidget,
@@ -687,42 +687,6 @@ class ModelPage(BasePage):
         self.inferenceBackendCard.contentLabel.setText(
             f"{t('inference_backend_desc')} ({t('inference_backend_current')}: {provider})"
         )
-
-    def _getEmbeddedPythonExe(self) -> str:
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        python_exe = os.path.join(src_dir, "python", "python.exe")
-        if os.path.exists(python_exe):
-            return python_exe
-        return sys.executable
-
-    def _runLocalInstallerScript(self, script_name: str, feature_name: str, capture_output: bool = True) -> bool:
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        script_path = os.path.join(src_dir, script_name)
-        if not os.path.exists(script_path):
-            QMessageBox.warning(self, f"{feature_name} install failed", f"Missing installer script:\n{script_path}")
-            return False
-        python_exe = self._getEmbeddedPythonExe()
-        install_cmd = [python_exe, script_path]
-        try:
-            if capture_output:
-                result = subprocess.run(install_cmd, check=True, text=True, capture_output=True)
-                if result.stdout:
-                    print(f"[Dependency][{feature_name}][stdout]\n{result.stdout}")
-            else:
-                subprocess.run(install_cmd, check=True, text=True)
-            return True
-        except subprocess.CalledProcessError as exc:
-            parts = []
-            if getattr(exc, 'stderr', None):
-                parts.append(exc.stderr.strip())
-            if getattr(exc, 'stdout', None):
-                parts.append(exc.stdout.strip())
-            error_text = "\n".join(parts) if parts else str(exc)
-            QMessageBox.warning(
-                self, f"{feature_name} install failed",
-                f"Failed command: {' '.join(install_cmd)}\n\n{error_text}\n\nPlease run the installer script manually and try again."
-            )
-            return False
 
     def _ensureTrtInstalled(self) -> None:
         self._trt_installer_launched = False
