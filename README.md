@@ -303,15 +303,18 @@ Use these logs to verify which provider actually ended up active, or whether run
 
 ### Configuration Files
 
-Settings are persisted to three files in the project root:
+Everything you change is saved in one folder, `user/`, inside the Axiom folder. Back it up or copy it to keep your setup; delete it to start fresh. Files that used to sit in the Axiom folder itself are moved there automatically the first time a new version starts.
 
 | File | Contents |
 |---|---|
-| `config.json` | All tunable settings in the v2 grouped schema (aim, capture, display, hardware, etc.) |
-| `state.json` | One-time app state: disclaimer accepted, first-run complete, NDI installer flag |
-| `language.json` | Current UI language selection |
+| `user/config.json` | All tunable settings, grouped (aim, keys, inference, capture, display, hardware, …) |
+| `user/state.json` | App state: disclaimer accepted, first-run complete, NDI installer flag, the Web Control token, last loaded preset/config, Quick Preset slots |
+| `user/language.json` | Current UI language selection |
+| `user/model_notes.json` | Your notes for each model |
+| `user/presets/` | Aim presets (aim and tracking settings only; never key bindings) |
+| `user/configs/` | Full config snapshots |
 
-You can also save/load named presets via the **Configs** tab.
+Save and load presets and configs on the **Configs** tab. `config.json` doesn't contain your Web Control token, so it's safe to share.
 
 ## Project Structure
 
@@ -324,13 +327,11 @@ Axiom/
 ├── CHANGELOG.md                  # Version history
 ├── docs/
 │   └── MAKCU_Native_API.md       # MAKCU serial wire-protocol reference
-├── config/                       # Saved configuration presets
 ├── Model/                        # ONNX detection model files
 ├── Model_Hud/                    # Beta: YOLO weapon/attachment HUD detector models
 ├── trt_cache/                    # Built TensorRT engines (auto-created)
-├── config.json                   # Runtime settings (v2 grouped schema)
-├── state.json                    # One-time app state (disclaimer, first-run)
-├── language.json                 # UI language selection
+├── user/                         # Your settings: config.json, state.json, language.json,
+│                                 #   model_notes.json, presets/, configs/ (see core/paths.py)
 ├── src/
 │   ├── main.py                   # Application entry point
 │   ├── version.py                # Version constant — single source of truth for app version
@@ -344,7 +345,8 @@ Axiom/
 │   │   ├── ai_loop_utils.py      # Loop utility functions (FOV filtering, target selection)
 │   │   ├── ai_aiming.py          # Aiming, PID, Y-reduce, humanization dispatch
 │   │   ├── auto_fire.py          # Triggerbot logic
-│   │   ├── config.py             # Config class + _FIELD_MAP (v2 schema)
+│   │   ├── config.py             # Config class + _FIELD_MAP (schema v3)
+│   │   ├── paths.py              # Where user files live (user/) + one-time move from the root
 │   │   ├── config_manager.py     # Load/save/preset/migration lifecycle, preset pre-load diff
 │   │   ├── detection_semantics.py# Semantic target filtering
 │   │   ├── dshow_capture_native.py # ctypes binding for the native DirectShow v2 capture DLL
