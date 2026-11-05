@@ -568,7 +568,7 @@ class CapturePage(BasePage):
         # same source) sends the HUD strip here instead.
         self.hudUdpEnabledCard = SwitchSettingCard(
             FluentIcon.WIFI,
-            "Separate HUD UDP Stream",
+            "HUD UDP Stream",
             "Read the HUD strip from its own UDP stream/port instead of the "
             "main capture frame above — needed when the main UDP stream is "
             "itself a center crop that excludes the HUD",
@@ -1693,7 +1693,7 @@ class CapturePage(BasePage):
         self.udpPortCard.titleLabel.setText("UDP Port")
         self.udpRefreshCard.titleLabel.setText("Restart Receiver")
         self.udpRefreshCard.contentLabel.setText("Stop and re-bind the UDP socket")
-        self.hudUdpEnabledCard.titleLabel.setText("Separate HUD UDP Stream")
+        self.hudUdpEnabledCard.titleLabel.setText("HUD UDP Stream")
         self.hudUdpEnabledCard.contentLabel.setText(
             "Read the HUD strip from its own UDP stream/port instead of the "
             "main capture frame above — needed when the main UDP stream is "
