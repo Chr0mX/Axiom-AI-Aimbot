@@ -411,7 +411,9 @@ class OtherPage(BasePage):
         self.webControlConnectCard.setEnabled(web_control_on)
         self._refreshWebControlConnect()
 
-        self._refreshMakcuHwInfo()
+        # Labels only: the device query (150 ms wait) runs from the 3 s
+        # timer while this page is visible, not on every 1 s refresh.
+        self._refreshMakcuHwInfo(query=False)
     
     # === 回調函數 ===
     def _onChangeLanguage(self):
@@ -533,7 +535,14 @@ class OtherPage(BasePage):
             running = False
         self.webControlOpenBtn.setEnabled(running)
 
-    def _refreshMakcuHwInfo(self):
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._refreshMakcuHwInfo()
+
+    def _refreshMakcuHwInfo(self, query: bool = True):
+        """Update the MAKCU Hardware labels. query=True also asks the device
+        for its info (version, temperature, ...) — only while this page is
+        on screen, since that query blocks the UI for ~150 ms."""
         dash = "—"
         try:
             connected = is_makcu_connected()
@@ -556,7 +565,7 @@ class OtherPage(BasePage):
             baud = getattr(self._config, 'makcu_baud_rate', 115200) if self._config else 115200
         self.makcuHwBaudCard.contentLabel.setText(f"{int(baud):,}")
 
-        if connected:
+        if connected and query and self.isVisible():
             try:
                 _makcu_mouse.query_info()
             except Exception:
