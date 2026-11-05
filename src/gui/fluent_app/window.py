@@ -498,10 +498,31 @@ class AxiomWindow(FluentWindow):
         if hasattr(self.configInterface, 'setFullConfigManager'):
             self.configInterface.setFullConfigManager(manager)
 
-    def _refreshAllPages(self):
-        """刷新所有頁面的設定值"""
-        if self._config:
+    def _refreshAllPages(self, full: bool = True):
+        """刷新所有頁面的設定值
+
+        full=True re-binds every page (setConfig), which also redoes each
+        page's device/file work (model folder rescan, port scan, ...) — what
+        a finished TensorRT build needs. full=False only copies Config into
+        the widgets (refreshFromConfig), for e.g. a loaded preset."""
+        if not self._config:
+            return
+        if full:
             self.setConfig(self._config)
+            return
+        for i in range(self.stackedWidget.count()):
+            self._syncPage(self.stackedWidget.widget(i))
+
+    def _syncPage(self, widget) -> None:
+        """Copy the live Config into one page's widgets. Pages with
+        device/file work in their full load expose a light
+        refreshFromConfig(); the rest are cheap to setConfig() again."""
+        if widget is None or self._config is None:
+            return
+        if hasattr(widget, 'refreshFromConfig'):
+            widget.refreshFromConfig()
+        elif hasattr(widget, 'setConfig'):
+            widget.setConfig(self._config)
 
     def _onPageActivated(self, index):
         """Refreshes just the page becoming visible from the live Config —
@@ -515,9 +536,7 @@ class AxiomWindow(FluentWindow):
         """
         if self._config is None:
             return
-        widget = self.stackedWidget.widget(index)
-        if widget is not None and hasattr(widget, 'setConfig'):
-            widget.setConfig(self._config)
+        self._syncPage(self.stackedWidget.widget(index))
 
     def _onConfigSyncTick(self):
         """Continuously re-syncs the *currently visible* page from the live
@@ -550,7 +569,7 @@ class AxiomWindow(FluentWindow):
             # from an earlier interaction is not.
             if not (isinstance(focused, QAbstractSlider) and not focused.isSliderDown()):
                 return
-        widget.setConfig(self._config)
+        self._syncPage(widget)
 
     def _onModelLoadErrorTick(self):
         if self._config is None:
@@ -566,7 +585,7 @@ class AxiomWindow(FluentWindow):
                 position=InfoBarPosition.TOP, parent=self,
             )
             try:
-                self._refreshAllPages()  # selection was reverted — resync combos
+                self._refreshAllPages(full=False)  # selection was reverted — resync combos
             except Exception:
                 pass
 
