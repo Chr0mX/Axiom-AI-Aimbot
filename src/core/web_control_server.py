@@ -191,6 +191,9 @@ def _build_status(config) -> dict:
         "model_load_error": str(getattr(config, "model_load_error", "") or ""),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
+        # Last loaded/saved preset and config — the Configs tab marks them "Loaded".
+        "active_preset_name": str(getattr(config, "active_preset_name", "") or ""),
+        "active_config_name": str(getattr(config, "active_config_name", "") or ""),
         "capture_fps": round(cap_fps, 1),
         "inference_fps": round(inf_fps, 1),
         # Stream/source FPS — only meaningful for the three capture backends

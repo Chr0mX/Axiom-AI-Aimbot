@@ -1435,9 +1435,104 @@
   // stand in for configs_page.py's QInputDialog/QMessageBox — the direct
   // browser-native equivalent for this plain, no-framework client.
   // ---------------------------------------------------------------------
+  // Card list over a config/preset <select size="8">: one row per entry
+  // (initial tile, name, "Loaded" pill), so entries read as separate items.
+  // The <select> stays the source of truth — every button reads .value.
+  function enhanceConfigList(selectEl, noun, loadBtn) {
+    var list = document.createElement("div");
+    list.className = "cfg-list";
+    list.setAttribute("role", "listbox");
+    list.setAttribute("tabindex", "0");
+    list.setAttribute("aria-label", noun.charAt(0).toUpperCase() + noun.slice(1) + "s");
+    selectEl.classList.add("cfg-native");
+    selectEl.setAttribute("tabindex", "-1");
+    selectEl.setAttribute("aria-hidden", "true");
+    selectEl.parentNode.insertBefore(list, selectEl.nextSibling);
+    var activeName = "";
+
+    function hue(name) {
+      var h = 0;
+      for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+      return h;
+    }
+    function choose(name) {
+      if (selectEl.value === name) return;
+      selectEl.value = name;
+      selectEl.dispatchEvent(new Event("change", { bubbles: true }));
+      render();
+    }
+    function render() {
+      list.innerHTML = "";
+      var opts = Array.prototype.slice.call(selectEl.options);
+      if (!opts.length) {
+        var empty = document.createElement("div");
+        empty.className = "cfg-empty";
+        empty.textContent = noun === "preset"
+          ? "No presets yet — Create saves the current aim settings."
+          : "No configs yet — Create saves every current setting.";
+        list.appendChild(empty);
+        list.removeAttribute("aria-activedescendant");
+        return;
+      }
+      opts.forEach(function (o, i) {
+        var row = document.createElement("div");
+        row.className = "cfg-row";
+        row.id = selectEl.id + "-row-" + i;
+        row.setAttribute("role", "option");
+        var selected = o.value === selectEl.value && selectEl.selectedIndex >= 0;
+        row.setAttribute("aria-selected", selected ? "true" : "false");
+        if (selected) { row.classList.add("selected"); list.setAttribute("aria-activedescendant", row.id); }
+        var tile = document.createElement("span");
+        tile.className = "cfg-tile";
+        tile.style.setProperty("--tile-h", String(hue(o.value)));
+        tile.textContent = (o.value.trim().charAt(0) || "?").toUpperCase();
+        var name = document.createElement("span");
+        name.className = "cfg-name";
+        name.textContent = o.value;
+        row.appendChild(tile);
+        row.appendChild(name);
+        if (activeName && o.value === activeName) {
+          row.classList.add("active");
+          var pill = document.createElement("span");
+          pill.className = "cfg-pill";
+          pill.textContent = "Loaded";
+          row.appendChild(pill);
+        }
+        row.addEventListener("click", function () { choose(o.value); });
+        row.addEventListener("dblclick", function () { choose(o.value); loadBtn.click(); });
+        list.appendChild(row);
+      });
+      var sel = list.querySelector(".cfg-row.selected");
+      if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
+    }
+    list.addEventListener("keydown", function (e) {
+      var opts = selectEl.options;
+      if (!opts.length) return;
+      var i = selectEl.selectedIndex;
+      if (e.key === "ArrowDown") i = Math.min(opts.length - 1, i + 1);
+      else if (e.key === "ArrowUp") i = Math.max(0, i < 0 ? 0 : i - 1);
+      else if (e.key === "Home") i = 0;
+      else if (e.key === "End") i = opts.length - 1;
+      else if (e.key === "Enter") { if (i >= 0) loadBtn.click(); e.preventDefault(); return; }
+      else return;
+      e.preventDefault();
+      choose(opts[i].value);
+    });
+    return {
+      render: render,
+      setActive: function (name) {
+        name = name || "";
+        if (name === activeName) return;
+        activeName = name;
+        render();
+      },
+    };
+  }
+
   function wireConfigCrudPanel(cfg) {
     var selectEl = document.getElementById(cfg.selectId);
     var reasonEl = document.getElementById(cfg.reasonId);
+    var cardList = enhanceConfigList(selectEl, cfg.noun, document.getElementById(cfg.loadBtnId));
 
     function refreshList() {
       fetch(cfg.apiBase, { headers: authHeaders() })
@@ -1454,6 +1549,8 @@
           });
           var has = Array.prototype.some.call(selectEl.options, function (o) { return o.value === current; });
           if (has) selectEl.value = current;
+          else selectEl.selectedIndex = -1;
+          cardList.render();
           if (cfg.onListRefreshed) cfg.onListRefreshed(data.presets);
         })
         .catch(function () {});
@@ -1652,7 +1749,8 @@
         .then(function () { btn.disabled = false; });
     });
 
-    return { refreshList: refreshList };
+    cardList.render();
+    return { refreshList: refreshList, setActive: cardList.setActive };
   }
 
   var _presetPanel = wireConfigCrudPanel({
@@ -2030,6 +2128,8 @@
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
     document.getElementById("s-firing").textContent = s.aim_firing ? "Aiming" : "Idle";
     document.getElementById("s-model").textContent = s.model || "—";
+    _presetPanel.setActive(s.active_preset_name);
+    _fullConfigPanel.setActive(s.active_config_name);
     document.getElementById("s-backend").textContent = s.inference_backend || "—";
     document.getElementById("s-mouse").textContent = s.mouse_move_method || "—";
     document.getElementById("s-capfps").textContent = s.capture_fps != null ? s.capture_fps.toFixed(1) : "—";
@@ -2585,7 +2685,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "9") return;
+    if (cssVer !== "10") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
