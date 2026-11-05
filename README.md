@@ -35,7 +35,7 @@ These are early/incomplete — used at your own risk, and feedback is welcome:
 
 - **Weapon detector (Apex Legends only, for now)** — selectable in Inference settings as `second_inference_mode` (Off / OCR / ONNX), runs in its own process so it never blocks the main aim loop.
   - **PaddleOCR-based** weapon-name reader — functional but currently not reliable/useful enough to depend on; left in the codebase but effectively unused (`src/core/ocr_inference.py`).
-  - **YOLO-based** weapon HUD detector — trained models now ship in `Model_Hud/`, selectable from the Model page's HUD Model dropdown; still beta because results aren't yet wired into anything downstream.
+  - **YOLO-based** weapon HUD detector — trained models ship in `Model_Hud/`, selected from the Model page's HUD Model dropdown (the Game Profile there sets where the HUD is cropped from). Results show on the Capture page's Active Weapon section as a Weapon Status board: weapon, fire mode, optic, barrel, stock, mag, hop-up and turbo, with rarity colours. For a 2-PC setup whose UDP stream is cropped to the center, turn on **HUD UDP Stream** so the HUD arrives on its own port. Still beta: detections aren't used to change aiming yet.
   - Goal once this is trusted enough: automatically apply the matching recoil-control pattern for the detected weapon.
 
 Found a feature in the code that isn't listed above? Let us know rather than assuming — some things in progress aren't ready to be called a "feature" yet.
@@ -135,9 +135,10 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 | Apex Legends | multiple variants in `Model/`, e.g. `Apex_16.5k_ep100_Y26_640.onnx` (pick by epoch/resolution/architecture) |
 | Counter-Strike 2 | `CS2_8n.onnx` |
 | Fortnite | `Fornite_8n.onnx` |
-| PUBG | `Pubg_8n.onnx` |
+| PUBG | `Pubg_8n.onnx`, `Pubg-640x640.onnx` |
 | Roblox | `Roblox_8n.onnx` |
 | Valorant | `Valorant[PURPLE]_8s.onnx` |
+| Delta Force | `Delta Force Hawk 640 300 epoch.onnx` |
 
 > You can also train and import your own ONNX models.
 
@@ -299,19 +300,19 @@ Use these logs to verify which provider actually ended up active, or whether run
 
 1. **Launch the Application**
    - Run `啟動Launcher.bat` or `python src/main.py`.
-   - On first launch, the **Setup Wizard** will guide you through initial configuration (language, theme, model selection).
+   - On first launch, the **Setup Wizard** will guide you through initial configuration (language, theme, acrylic effect, performance).
 
 2. **Configure Settings**
-   - **Visuals Tab** — Customize overlays (FOV circle, bounding boxes, crosshair, status panel, chroma visuals, Web ESP).
-   - **Model Tab** — Select your ONNX model (searchable dropdown, with a cached-TensorRT-engine badge per entry) and view detailed model info.
-   - **Capture Tab** — Choose and configure your screen capture backend (dxcam / MSS / UVC / NDI / UDP); live preview panel.
-   - **Inference Tab** — Detection sensitivity, inference provider, and performance tuning.
-   - **Aim Tab** — FOV, PID tuning, prediction (Velocity/Kalman), smoothing, aim-point fine-tune, Humanization, Y-axis recoil suppression, sticky lock.
+   - **Model Tab** — Select your ONNX model (searchable dropdown, with a cached-TensorRT-engine badge per entry), pick the inference backend (Auto / DirectML / TensorRT / CPU) and precision, view model info and notes, and pick the game profile and HUD model for weapon detection.
+   - **Capture Tab** — Choose and configure your screen capture backend (dxcam / MSS / UVC / NDI / UDP), Capture FPS Limit, HUD UDP Stream; live preview panel.
+   - **Inference Tab** — FOV and detection range, detection sensitivity and other general parameters, and performance tuning.
+   - **Aim Tab** — Mouse method, FOV, PID tuning, prediction (Velocity/Kalman), smoothing, aim-point fine-tune, Humanization, Y-axis recoil suppression, sticky lock, target priority; Arduino and Xbox 360 controller setup.
    - **Trigger Tab** — Configure auto-fire delay, interval, and target priority.
-   - **Keys Tab** — Set your preferred hotkeys for toggling aim and auto-fire, with a warning if a rebind creates a genuinely confusing conflict.
+   - **Keys & HW Tab** — Hotkeys for aim, toggle and auto-fire (with a warning if a rebind creates a genuinely confusing conflict), plus MAKCU connection and MAKCU button settings.
+   - **Visuals Tab** — Customize overlays (FOV circle, bounding boxes, crosshair, status panel incl. GPU monitoring, chroma visuals, Web ESP).
    - **Configs Tab** — Save / load full configs and aim-only presets; loading shows a summary of what will actually change first.
    - **Convert Tab** — Convert ONNX models to TensorRT engines.
-   - **Other Tab** — Mouse method, Arduino, Xbox controller, MAKCU, performance options, Remote Control (Web Control), and detailed debugging info.
+   - **Other Tab** — Language, thread priority, console window, Exit & Save, Remote Control (Web Control), TensorRT / DirectML status and paths, MAKCU hardware info, Python paths, and links.
 
 3. **Start Detection**
    - Press the configured toggle key (default: `Insert`).
@@ -407,14 +408,14 @@ Axiom/
 │   │       ├── language_manager.py # Qt-signal wrapper around core's language manager
 │   │       ├── components/       # Shared widgets (sliders, capture preview panel)
 │   │       └── pages/            # One file per settings page
-│   │           ├── aim_page.py       # Aim parameters, Humanization
+│   │           ├── aim_page.py       # Mouse method, aim parameters, Humanization, Arduino/Xbox
 │   │           ├── capture_page.py   # Capture backend selection
 │   │           ├── configs_page.py   # Full configs + aim-only presets
 │   │           ├── convert_page.py   # ONNX → TensorRT conversion
 │   │           ├── inference_page.py # Inference / model settings
 │   │           ├── keys_page.py      # Hotkey bindings + MAKCU connection
 │   │           ├── model_page.py     # Model selection & notes
-│   │           ├── other_page.py     # Mouse method, performance, misc, debugging
+│   │           ├── other_page.py     # Language, performance, Remote Control, environment status
 │   │           ├── trigger_page.py   # Triggerbot / auto-fire
 │   │           └── visuals_page.py   # Overlay display settings (incl. Web ESP)
 │   └── win_utils/                # Windows-specific device backends
