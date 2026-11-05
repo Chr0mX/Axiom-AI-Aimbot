@@ -1,10 +1,10 @@
 ﻿# Axiom Disclaimer / Terms of Use
 
 - Document Version: v1.0
-- Effective Date: 2025-12-30
+- Effective Date: 2026-11-05
 - Product/Project Name: Axiom (hereinafter referred to as "the Software", "the Tool")
-- Provider: iisHong0w0 (hereinafter referred to as "the Provider")
-- Contact: iis20160512@gmail.com
+- Provider: [PROVIDER NAME] (hereinafter referred to as "the Provider")
+- Contact: [CONTACT EMAIL]
 
 > **WARNING: This agreement contains highly restrictive and strict terms. If you do not agree to any content, please stop using and delete all copies of this Software immediately; once used, you are deemed to unconditionally accept all terms of this agreement.**
 > This document is a general terms and risk disclosure, **does not constitute legal advice**.
