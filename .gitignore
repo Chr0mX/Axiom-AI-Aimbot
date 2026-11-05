@@ -24,6 +24,8 @@ env/
 Thumbs.db
 
 # Logs and local config
+# All user data (config.json, state.json, presets/, configs/, ...) — see src/core/paths.py
+user/
 *.log
 presets/*.json
 configs/*.json

@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
 from .config import _FIELD_MAP, STATE_FIELDS, validate_config
+from .paths import project_root, user_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ _BUILTIN_PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 # it never did; it only ever held presets). _migrate_legacy_config_dir()
 # does a one-time copy of anything found here into the new `presets/`
 # default so nobody's saved presets silently vanish across the rename.
-_LEGACY_CONFIGS_DIR = "config"
+_LEGACY_CONFIGS_DIR = os.path.join(project_root(), "config")
 
 _INVALID_NAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 
@@ -245,8 +246,9 @@ class ConfigManager:
             ConfigManager instances — see configs_page.py.
     """
 
-    def __init__(self, configs_dir: str = "presets", aim_only: bool = True) -> None:
-        self.configs_dir = configs_dir
+    def __init__(self, configs_dir: Optional[str] = None, aim_only: bool = True) -> None:
+        # Default: user/presets (aim presets) or user/configs (full configs).
+        self.configs_dir = configs_dir or user_path("presets" if aim_only else "configs")
         self.aim_only = aim_only
         self.ensure_configs_directory()
 

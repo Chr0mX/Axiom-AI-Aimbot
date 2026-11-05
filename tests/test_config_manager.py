@@ -535,6 +535,7 @@ class TestConfigManagerFullConfigScope:
         monkeypatch.chdir(tmp_path)
         legacy_dir = tmp_path / "config"
         legacy_dir.mkdir()
+        monkeypatch.setattr("core.config_manager._LEGACY_CONFIGS_DIR", str(legacy_dir))
         (legacy_dir / "old_preset.json").write_text(
             json.dumps({"name": "old_preset", "config": {"fov_size": 111}}), encoding="utf-8")
 
@@ -571,7 +572,8 @@ class TestConfigManagerLegacyDirMigration:
         from core.config_manager import ConfigManager
         monkeypatch.chdir(tmp_path)
         cm = ConfigManager()
-        assert cm.configs_dir == "presets"
+        # Default is user/presets; conftest points the user folder at tmp_path.
+        assert cm.configs_dir == os.path.join(str(tmp_path), "presets")
         assert os.path.isdir(tmp_path / "presets")
 
     def test_migrates_existing_legacy_presets(self, monkeypatch, tmp_path):
@@ -579,6 +581,7 @@ class TestConfigManagerLegacyDirMigration:
         monkeypatch.chdir(tmp_path)
         legacy_dir = tmp_path / "config"
         legacy_dir.mkdir()
+        monkeypatch.setattr("core.config_manager._LEGACY_CONFIGS_DIR", str(legacy_dir))
         (legacy_dir / "my_old_preset.json").write_text(
             json.dumps({"name": "my_old_preset", "config": {"fov_size": 111}}),
             encoding="utf-8",
@@ -594,6 +597,7 @@ class TestConfigManagerLegacyDirMigration:
         monkeypatch.chdir(tmp_path)
         legacy_dir = tmp_path / "config"
         legacy_dir.mkdir()
+        monkeypatch.setattr("core.config_manager._LEGACY_CONFIGS_DIR", str(legacy_dir))
         (legacy_dir / "shared_name.json").write_text(
             json.dumps({"name": "shared_name", "config": {"fov_size": 111}}), encoding="utf-8")
 

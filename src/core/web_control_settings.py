@@ -648,11 +648,12 @@ def get_model_info(config, model_path: str) -> dict:
 
 # ---------------------------------------------------------------------------
 # Model Notes — mirrors model_page.py's _load_notes()/_save_notes()/
-# _default_template() (same model_info.json, same default text)
+# _default_template() (same user/model_notes.json, same default text)
 # ---------------------------------------------------------------------------
 
 def _notes_path() -> str:
-    return os.path.join(project_root, "model_info.json")
+    from core.paths import user_path
+    return user_path("model_notes.json")
 
 
 def _default_template(model_name: str) -> str:
@@ -946,7 +947,7 @@ def _config_manager():
 
 def _full_config_manager():
     from core.config_manager import ConfigManager
-    return ConfigManager(configs_dir="configs", aim_only=False)
+    return ConfigManager(aim_only=False)
 
 
 def list_config_presets() -> list[str]:

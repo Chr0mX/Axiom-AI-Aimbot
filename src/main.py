@@ -120,7 +120,16 @@ import queue
 # whether to inject the AppData GPU packages.
 # DirectML users must NOT get the GPU build — it shadows DmlExecutionProvider.
 import json as _json
-_cfg_path = os.path.join(project_root, "config.json")
+# User files (config.json, state.json, presets/, configs/, ...) live in
+# <Axiom>/user/. Move them there from the project root once, before anything
+# reads them. Never overwrites; see core/paths.py.
+from core.paths import migrate_root_user_files as _migrate_user_files, user_path as _user_path
+try:
+    for _moved in _migrate_user_files():
+        print(f"[Axiom] Moved to user folder: {_moved}")
+except Exception as _exc:  # never block startup over this
+    print(f"[Axiom] Could not move user files into the user folder: {_exc}")
+_cfg_path = _user_path("config.json")
 try:
     with open(_cfg_path, "r", encoding="utf-8") as _f:
         _cfg_data = _json.load(_f)
@@ -421,7 +430,7 @@ def main():
     # 注入配置實例給 GUI
     settings_window.setConfig(config)
     settings_window.setConfigManager(ConfigManager())  # aim-only Preset manager (presets/)
-    settings_window.setFullConfigManager(ConfigManager(configs_dir="configs", aim_only=False))
+    settings_window.setFullConfigManager(ConfigManager(aim_only=False))
     
     if settings_window:
         settings_window.show()

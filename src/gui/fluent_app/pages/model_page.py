@@ -24,12 +24,12 @@ from ..language_manager import t
 
 
 # ──────────────────────────────────────────────
-# model_info.json helpers
+# model notes helpers (user/model_notes.json, formerly model_info.json)
 # ──────────────────────────────────────────────
 
 def _notes_path() -> str:
-    src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-    return os.path.join(os.path.dirname(src), "model_info.json")
+    from core.paths import user_path
+    return user_path("model_notes.json")
 
 
 def _load_notes() -> dict:
@@ -63,7 +63,7 @@ def _default_template(model_name: str) -> str:
 # ──────────────────────────────────────────────
 
 class _ModelNotesCard(CardWidget):
-    """Per-model notes card with view/edit mode, saved to model_info.json."""
+    """Per-model notes card with view/edit mode, saved to user/model_notes.json."""
 
     def __init__(self, parent=None):
         super().__init__(parent)

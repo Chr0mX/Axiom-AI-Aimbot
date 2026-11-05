@@ -9,11 +9,12 @@ import json
 import logging
 import os
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 from .humanization import HumanizationConfig
+from .paths import user_path
 
 
 def _get_screen_size() -> tuple[int, int]:
@@ -978,8 +979,9 @@ def _quarantine_unreadable_file(filepath: str) -> str | None:
         return None
 
 
-def save_state(config_instance: Config, filepath: str = 'state.json') -> bool:
-    """Persist one-time app state (STATE_FIELDS) to state.json."""
+def save_state(config_instance: Config, filepath: Optional[str] = None) -> bool:
+    """Persist one-time app state (STATE_FIELDS) to state.json (default: user/state.json)."""
+    filepath = filepath or user_path('state.json')
     try:
         data = {f: getattr(config_instance, f) for f in STATE_FIELDS}
         _atomic_write_text(filepath, json.dumps(data, ensure_ascii=False, indent=2))
@@ -989,8 +991,9 @@ def save_state(config_instance: Config, filepath: str = 'state.json') -> bool:
         return False
 
 
-def load_state(config_instance: Config, filepath: str = 'state.json') -> bool:
+def load_state(config_instance: Config, filepath: Optional[str] = None) -> bool:
     """Load one-time app state from state.json (overrides any inline values)."""
+    filepath = filepath or user_path('state.json')
     if not os.path.exists(filepath):
         return False
     try:
@@ -1005,14 +1008,15 @@ def load_state(config_instance: Config, filepath: str = 'state.json') -> bool:
         return False
 
 
-def save_config(config_instance: Config, filepath: str = 'config.json') -> bool:
+def save_config(config_instance: Config, filepath: Optional[str] = None) -> bool:
     """
-    將配置儲存到 JSON 檔案
+    將配置儲存到 JSON 檔案 (default: user/config.json — see core/paths.py)
 
     Writes the grouped (v2) schema via to_dict() — no stale keys survive. One-time
     app state goes to state.json, and language preference to language.json, so
     config.json holds only user settings.
     """
+    filepath = filepath or user_path('config.json')
     try:
         # Serialize fully first, then swap the file in atomically — a failure
         # at either step leaves the existing config.json untouched.
@@ -1080,17 +1084,18 @@ def validate_config(config_instance: Config) -> None:
     _validate_queue_and_confidence(config_instance)
 
 
-def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
+def load_config(config_instance: Config, filepath: Optional[str] = None) -> bool:
     """
     從 JSON 檔案載入配置
     
     Args:
         config_instance: Config 實例
-        filepath: 載入路徑
-        
+        filepath: 載入路徑 (default: user/config.json — see core/paths.py)
+
     Returns:
         是否成功載入
     """
+    filepath = filepath or user_path('config.json')
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
