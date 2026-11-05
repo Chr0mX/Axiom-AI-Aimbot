@@ -1,413 +1,445 @@
+/* =====================================================================
+   Axiom Web Control — two interface styles over one page
+   ---------------------------------------------------------------------
+   <html data-ui="studio">      calm desktop-settings app (default)
+   <html data-ui="instrument">  dense pro-tool panel
+   The <head> script in index.html sets data-ui before first paint; the
+   Other tab switches it (app.js, applyUiStyle()).
+
+   Layers: 1 tokens · 2 base · 3 layout primitives (deck / modules /
+   module / micro-grid / rows) · 4 controls · 5 Instrument · 6 Studio ·
+   7 responsive. Everything app.js relies on keeps its class names:
+   .field-card/.field-title/.field-desc/.field-control, .field-group(-title),
+   .hidden/.search-hidden, .dd*, .switch, input[type=range].
+   ===================================================================== */
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ---------------------------------------------------------------------
+   1. Tokens
+   --------------------------------------------------------------------- */
 :root {
-  /* Sentinel: app.js only builds custom dropdowns when this stylesheet
-     version is actually loaded (a stale cached CSS would otherwise leave
-     the native <select> visible beside the trigger text). */
-  --axiom-css: 8;
-  --bg: #0d0d13;
-  --surface: #14141c;
-  --surface-2: #1b1b26;
-  --ink: #e8e8f4;
-  --ink-soft: #b8b8c8;
-  --ink-faint: #8e8ea2; /* ≥4.5:1 on --bg/--surface for small text */
-  --accent: #00e0a0;
-  --line: rgba(0, 224, 160, 0.25);
-  --bad: #ff6060;
-  /* A step lighter than --surface-2, used only for a range slider's
-     unfilled track — --surface-2 itself is too close to --surface/--bg
-     to read as a distinct interactive control against the page/card
-     behind it. */
-  --track-empty: #2c2c3a;
-  /* This client is always dark, no light variant — telling the browser
-     so lets it render every native control (number-input spinner arrows,
-     checkboxes, date pickers, and the scrollbar itself) in its own dark
-     styling instead of the harsh light-mode default it'd otherwise use on
-     a dark page. */
+  /* Sentinel: app.js only builds the custom dropdowns when this exact
+     stylesheet version loaded (see enhanceSelects()). */
+  --axiom-css: 9;
   color-scheme: dark;
+
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-num: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+
+  /* Instrument (default) */
+  --bg: #0a0c0f;
+  --surface: #111418;
+  --surface-2: #171b20;
+  --raised: #1b2027;
+  --ink: #e4e8ee;
+  --ink-soft: #a9b1bc;
+  --ink-faint: #808a97;
+  --accent: #00e0a0;
+  --accent-rgb: 0, 224, 160;
+  --warn: #f2b84b;
+  --bad: #ff6b6b;
+  --line: #222830;
+  --line-strong: #2f3741;
+  --track-empty: #2a313a;
+  --font-head: Bahnschrift, "DIN Alternate", "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --row-y: 9px;
+  --row-x: 14px;
+}
+:root[data-ui="studio"] {
+  --bg: #101216;
+  --surface: #181b21;
+  --surface-2: #20242b;
+  --raised: #1d2128;
+  --ink: #eceef2;
+  --ink-soft: #b4bac4;
+  --ink-faint: #8b929d;
+  --accent: #7ea2ff;
+  --accent-rgb: 126, 162, 255;
+  --warn: #f0b860;
+  --bad: #ff7a7a;
+  --line: #2a2f37;
+  --line-strong: #353b45;
+  --track-empty: #2e333c;
+  --font-head: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --radius: 14px;
+  --radius-sm: 9px;
+  --row-y: 13px;
+  --row-x: 18px;
 }
 
+/* ---------------------------------------------------------------------
+   2. Base
+   --------------------------------------------------------------------- */
 html, body {
   height: 100%;
   background: var(--bg);
   color: var(--ink);
-  font: 14px/1.5 "Segoe UI", "Consolas", "Menlo", monospace, sans-serif;
-  /* Firefox's scrollbar theming knobs — Chromium/Edge/Safari use the
-     ::-webkit-scrollbar pseudo-elements below instead. */
+  font: 14px/1.5 var(--font-ui);
   scrollbar-width: thin;
-  scrollbar-color: var(--surface-2) var(--surface);
+  scrollbar-color: var(--line-strong) transparent;
 }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 6px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+code { font-family: var(--font-num); font-size: 0.92em; color: var(--ink-soft); }
 
-/* Scrollbar — Chromium/Edge/Safari. Thin, rounded, theme-colored, with an
-   accent-tinted hover state instead of the default light-gray bar that
-   otherwise clashes with this page's dark background. */
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: var(--surface);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--surface-2);
-  border-radius: 6px;
-  border: 2px solid var(--surface);
-}
-::-webkit-scrollbar-thumb:hover {
-  background: var(--accent);
-}
+.app { display: flex; flex-direction: column; min-height: 100%; }
+.hidden { display: none !important; }
+.search-hidden { display: none !important; }
 
-.app {
-  display: flex;
-  flex-direction: column;
-  min-height: 100%;
-}
-
-/* Topbar: wordmark + tab bar (mirrors the real Qt app's NavigationInterface
-   order — see CLAUDE.md's GUI section) + connection status badge */
+/* Top bar */
 .topbar {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 18px;
   padding: 0 20px;
-  height: 60px;
-  border-bottom: 1px solid var(--line);
+  height: 52px;
   position: sticky;
   top: 0;
   z-index: 10;
-  background: rgba(13, 13, 19, 0.9);
-  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(8px);
 }
 .wordmark {
+  font-family: var(--font-head);
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.14em;
+  font-size: 15px;
   white-space: nowrap;
 }
 .wordmark span { color: var(--accent); }
 .wordmark .sub {
   color: var(--ink-faint);
   font-weight: 400;
-  margin-left: 6px;
+  letter-spacing: 0.04em;
+  margin-left: 4px;
+  font-size: 13px;
 }
-
-.tabs {
-  display: flex;
-  gap: 4px;
-  flex: 1;
-  overflow-x: auto;
-}
+.tabs { display: flex; gap: 2px; flex: 1; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 6px 12px;
-  height: 34px;
-  color: var(--ink-soft);
+  border: 0;
+  border-radius: 0;
+  padding: 0 12px;
+  height: 52px;
+  color: var(--ink-faint);
   font: inherit;
   font-size: 13px;
   white-space: nowrap;
   cursor: pointer;
+  box-shadow: inset 0 -2px 0 transparent;
 }
-.tab:hover { color: var(--ink); border-color: var(--line); }
-.tab.active {
-  color: var(--accent);
-  background: rgba(0, 224, 160, 0.1);
-  border-color: var(--line);
-}
+.tab:hover { color: var(--ink); border-color: transparent; }
+.tab.active { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
 
 #status {
-  font-size: 12px;
-  padding: 3px 9px;
-  border-radius: 4px;
-  border: 1px solid var(--line);
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  padding: 3px 9px 3px 20px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
   white-space: nowrap;
+  position: relative;
+  color: var(--ink-soft);
+}
+#status::before {
+  content: "";
+  position: absolute;
+  left: 8px; top: 50%;
+  width: 6px; height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--ink-faint);
 }
 #status.connected { color: var(--accent); }
-#status.disconnected { color: var(--bad); border-color: rgba(255, 96, 96, 0.35); }
+#status.connected::before { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+#status.disconnected { color: var(--bad); }
+#status.disconnected::before { background: var(--bad); }
+#status.warn { color: var(--warn); }
+#status.warn::before { background: var(--warn); }
 
-/* Content: persistent left status sidebar + per-tab main panel */
-.content {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
+/* Sidebar + main */
+.content { display: flex; flex: 1; min-height: 0; }
 .sidebar {
-  width: 400px;
+  width: 320px;
   flex-shrink: 0;
-  padding: 20px;
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
   border-right: 1px solid var(--line);
+  background: var(--bg);
 }
-
+.sidebar-section { display: flex; flex-direction: column; gap: 10px; }
+.sidebar-section + .sidebar-section { padding-top: 18px; border-top: 1px solid var(--line); }
+.card-title {
+  font-family: var(--font-head);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
 .main {
   flex: 1;
-  padding: 20px;
-  max-width: 640px;
+  min-width: 0;
+  padding: 22px 26px 60px;
   overflow-y: auto;
 }
 
-.sidebar-section {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 16px 18px;
-}
-.card-title {
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  text-transform: uppercase;
-  margin-bottom: 12px;
+/* Status readouts (sidebar + Model deck) */
+/* Hairlines between readouts drawn per cell (clip-path trims the outer
+   edge), so an odd count never leaves a grey empty cell. */
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.grid > .stat { box-shadow: inset -1px 0 0 var(--line), inset 0 -1px 0 var(--line); margin: 0 -1px -1px 0; }
+.stat { background: var(--surface); padding: 8px 10px; min-width: 0; }
+.stat .label { font-size: 10.5px; color: var(--ink-faint); letter-spacing: 0.08em; text-transform: uppercase; }
+.stat .value {
+  font-family: var(--font-num);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* One .panel per tab; only the active one is shown. Cross-cutting facts
-   (running/aim/mouse/MAKCU/FPS) stay in the sidebar above, visible no
-   matter which tab is open — panel content is tab-specific only. */
-.panel { display: none; }
-.panel.active {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.panel-title {
-  font-size: 28px;
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-.panel-placeholder {
-  color: var(--ink-faint);
-  font-size: 13px;
-}
-
-.row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-input[type="password"], input[type="text"], input[type="search"], select {
-  flex: 1;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: var(--ink);
-  font: inherit;
-}
-/* Number fields get the same dark background/border/radius look as the
-   access-token box above (previously unstyled, falling back to the
-   browser's plain white default) — deliberately its own rule rather than
-   folded into the one above: it must NOT inherit that rule's flex: 1,
-   which would fight .field-control's own sizing (see below) and was one
-   of the sources of the per-row alignment drift. The native up/down
-   spinner arrows are left in place (never hidden) — color-scheme: dark on
-   :root already tints them to match this page instead of the light-mode
-   default. */
-input[type="number"] {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: var(--ink);
-  font: inherit;
-}
-button {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px 12px;
-  color: var(--ink);
-  font: inherit;
-  cursor: pointer;
-}
-button:hover { border-color: var(--accent); color: var(--accent); }
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-button:disabled:hover {
-  border-color: var(--line);
-  color: var(--ink);
-}
-
-.hint {
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--ink-faint);
-}
+.hint { font-size: 12px; color: var(--ink-faint); line-height: 1.45; }
+.hint:empty { display: none; }
 .hint b { color: var(--ink-soft); }
 .hint.error { color: var(--bad); }
 
-.row.model-select-row {
-  flex-wrap: wrap;
+.row { display: flex; gap: 8px; align-items: center; }
+.control-row { align-items: center; }
+.control-label { color: var(--ink-soft); }
+
+/* ---------------------------------------------------------------------
+   3. Layout primitives
+   --------------------------------------------------------------------- */
+.panel { display: none; }
+.panel.active { display: flex; flex-direction: column; gap: 18px; }
+.panel-title {
+  font-family: var(--font-head);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
 }
-.row.model-select-row select {
+
+/* Deck: the tab's primary controls, framed above everything else. */
+.deck {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+.deck[data-label]::before {
+  content: attr(data-label);
+  font-family: var(--font-head);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.deck .field-group { gap: 12px; }
+.deck .grid { max-width: 520px; }
+
+/* Modules: one framed block per setting group. */
+.modules { display: block; }
+.module { break-inside: avoid; margin-bottom: 16px; }
+.module:has(> .field-group-title.hidden + .field-group.hidden) { display: none; }
+.module-note > .hint { margin: 0; }
+
+.field-group { display: flex; flex-direction: column; }
+.field-group-title {
+  font-family: var(--font-head);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.field-group-title.collapsible { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+.field-group-title.collapsible::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform 0.15s;
+  flex: none;
+}
+.field-group-title.collapsible.collapsed::before { transform: rotate(-45deg); }
+.field-group-title.collapsible:hover { color: var(--ink); }
+.field-group.collapsed { display: none; }
+
+/* Rows: title + description on the left, control on the right. */
+.field-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: var(--row-y) var(--row-x);
   min-width: 0;
-  max-width: 100%;
-  text-overflow: ellipsis;
 }
-#model-select {
-  flex: 2 1 180px;
+.field-card.stacked { flex-direction: column; align-items: stretch; gap: 8px; }
+.field-info { flex: 1; min-width: 0; }
+.field-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.field-desc { font-size: 12px; color: var(--ink-faint); margin-top: 2px; line-height: 1.4; }
+.field-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
 }
-#model-precision-select,
-#backend-select {
-  flex: 0 1 110px;
+.field-control select, .field-control input[type="text"] { min-width: 160px; }
+.field-control input[type="number"] { width: 96px; }
+.field-control input[type="number"].has-slider { width: 76px; }
+.field-slider-value {
+  font-family: var(--font-num);
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  width: 26px;
+  flex: none;
 }
-#model-empty-hint {
-  margin-top: 6px;
+.field-readonly { font-family: var(--font-num); font-size: 12.5px; color: var(--ink-soft); word-break: break-word; white-space: pre-wrap; }
+
+/* Slider rows share one control width so tracks line up down a module. */
+.field-control:has(input[type="range"]) { width: 330px; max-width: 100%; }
+.field-control:has(input[type="range"]) input[type="range"] { flex: 1 1 auto; width: auto; min-width: 0; }
+.field-control:has(input[type="range"]):not(:has(.field-slider-value))::after { content: ""; width: 26px; flex: none; }
+
+/* Micro-grids: compact multi-column clusters (PID matrix, FOV pair,
+   Humanization sub-parameters, banks of switches). */
+.micro-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.micro-grid[data-kind="pid"] { grid-auto-flow: column; grid-template-rows: repeat(3, auto); }
+.micro-grid > .field-card { min-width: 0; }
+.micro-grid:not([data-kind="toggles"]) > .field-card { flex-direction: column; align-items: stretch; gap: 6px; }
+.micro-grid:not([data-kind="toggles"]) > .field-card .field-control { width: 100%; }
+.micro-grid > .field-card .field-control select { min-width: 0; flex: 1; }
+.subgroup { margin: 0; }
+
+/* ---------------------------------------------------------------------
+   4. Controls
+   --------------------------------------------------------------------- */
+input[type="password"], input[type="text"], input[type="search"], select, input[type="number"], textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  min-width: 0;
 }
+input[type="number"] { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+input[type="password"], input[type="text"], input[type="search"], select { flex: 1; }
+input::placeholder, textarea::placeholder { color: var(--ink-faint); }
+input:hover, select:hover, textarea:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--line-strong)); }
+textarea { width: 100%; min-height: 120px; resize: vertical; font-family: var(--font-num); font-size: 12.5px; line-height: 1.5; }
+
+button {
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:disabled:hover { border-color: var(--line-strong); color: var(--ink); }
+/* Primary actions get the accent fill. */
+#model-switch-btn, #ai-start-btn, #convert-btn, #token-save {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06120d;
+  font-weight: 600;
+}
+#model-switch-btn:hover, #ai-start-btn:hover, #convert-btn:hover, #token-save:hover {
+  color: #06120d;
+  filter: brightness(1.08);
+}
+#model-switch-btn:disabled:hover { color: #06120d; border-color: var(--accent); filter: none; }
+#ai-stop-btn { border-color: color-mix(in srgb, var(--bad) 55%, transparent); color: var(--bad); }
+#ai-stop-btn:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+
+.row.model-select-row { flex-wrap: wrap; }
+.row.model-select-row select { min-width: 0; max-width: 100%; }
+#model-select { flex: 2 1 220px; }
+#model-precision-select, #backend-select { flex: 0 1 120px; }
+.row.model-select-row .dd:first-child { flex: 2 1 220px; }
 
 .config-listbox {
   width: 100%;
   min-height: 10.5em;
   background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px;
   color: var(--ink);
   font: inherit;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px 16px;
-}
-.stat .label {
-  font-size: 11px;
-  color: var(--ink-faint);
-  letter-spacing: 0.04em;
-}
-.stat .value {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.control-row { align-items: center; }
-.control-label { color: var(--ink-soft); }
-
 /* Toggle switch */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 44px;
-  height: 24px;
-  flex-shrink: 0;
-}
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }
 .switch .slider {
   position: absolute;
   inset: 0;
   background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 .switch .slider::before {
   content: "";
   position: absolute;
-  height: 16px; width: 16px;
+  height: 14px; width: 14px;
   left: 3px; top: 3px;
   background: var(--ink-faint);
   border-radius: 50%;
   transition: transform 0.15s ease, background 0.15s ease;
 }
-.switch input:checked + .slider { background: rgba(0, 224, 160, 0.18); border-color: var(--accent); }
-.switch input:checked + .slider::before { transform: translateX(20px); background: var(--accent); }
+.switch input:checked + .slider { background: rgba(var(--accent-rgb), 0.2); border-color: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(18px); background: var(--accent); }
 
-/* Field cards — a generic settings-row look mirroring the Qt app's
-   SettingCard (title + description, control right-aligned), used to
-   build out the Model/Capture/Inference panels' real content. */
-.field-group { display: flex; flex-direction: column; gap: 10px; }
-.field-group-title {
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  color: var(--accent);
-  text-transform: uppercase;
-  margin: 10px 0 -2px;
-}
-.field-card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 12px 16px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.field-card.stacked { flex-direction: column; align-items: stretch; }
-.field-info { flex: 1; min-width: 0; }
-.field-title { font-size: 13px; font-weight: 600; color: var(--ink); }
-.field-desc { font-size: 12px; color: var(--ink-faint); margin-top: 2px; }
-.field-control {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  /* Right-justified, same as every Qt SettingCard's own widget (always
-     added with Qt.AlignmentFlag.AlignRight) — with a fixed min-width this
-     also lines up every field-card's control column consistently down a
-     whole panel, regardless of how many children one particular row has
-     (a lone toggle vs. a range+number+unit trio). */
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 200px;
-}
-.field-control select,
-.field-control input[type="text"] {
-  min-width: 140px;
-}
-.field-control input[type="number"] {
-  min-width: 140px;
-}
-/* Narrower once a range slider is paired onto it (see
-   enhanceNumberInputsWithSliders() in app.js, which adds this class) —
-   the slider itself is already the wide/precise input, so the number box
-   next to it only needs to comfortably fit typical values + its spinner
-   arrows, not the full 140px a standalone number field wants. */
-.field-control input[type="number"].has-slider {
-  min-width: 70px;
-}
-.field-slider-value {
-  font-size: 12px;
-  color: var(--ink-soft);
-  min-width: 32px;
-  text-align: right;
-}
-.field-readonly {
-  font-size: 13px;
-  color: var(--ink-soft);
-  word-break: break-word;
-}
+/* Segmented control (Interface Style) */
+.segmented { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); overflow: hidden; }
+.segmented label { position: relative; cursor: pointer; }
+.segmented input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.segmented span { display: block; padding: 6px 14px; font-size: 13px; color: var(--ink-soft); }
+.segmented label + label span { border-left: 1px solid var(--line-strong); }
+.segmented input:checked + span { background: rgba(var(--accent-rgb), 0.16); color: var(--accent); font-weight: 600; }
+.segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Filled-progress slider — a plain flat track on a dark page barely read
-   as interactive at all. The unfilled portion uses --track-empty (a step
-   lighter than every surface tone so it doesn't blend into the card
-   behind it), and the filled portion (0 up to the current value) is
-   solid --accent, updated live via the --range-progress custom property
-   (set in app.js's updateRangeFill(), called on every value change —
-   drag, typing in the paired number box, or a server-driven refresh).
-   Neither -webkit nor -moz has a cross-browser "fill" pseudo-element, so
-   this two-color split is done as a background gradient instead — the
-   standard technique for a themed range input.
-
-   The base <input> is a plain, generously-tall (40px) hit target —
-   deliberately NOT sized to match the thumb (an earlier attempt tried
-   that, on the theory that WebKit positions ::-webkit-slider-thumb
-   relative to the input's own box height; a user-supplied, actually
-   browser-verified demo proved that theory wrong and confirmed the values
-   below instead). The thin 6px line is drawn on a dedicated track
-   pseudo-element (::-webkit-slider-runnable-track / ::-moz-range-track),
-   and the thumb is positioned relative to THAT track's own box, not the
-   outer input's — the correct offset is (track-height − thumb-height)/2 =
-   (6−18)/2 = -6px regardless of how tall the outer input itself is. */
+/* Range slider — geometry (40px input, 6px track, 18px thumb) must stay
+   as is: app.js's updateRangeFill() assumes RANGE_THUMB_PX = 18. */
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   width: 160px;
+  max-width: 100%;
   height: 40px;
   background: transparent;
   outline: none;
@@ -417,141 +449,50 @@ input[type="range"]::-webkit-slider-runnable-track {
   width: 100%;
   height: 6px;
   border-radius: 999px;
-  background: linear-gradient(
-    to right,
+  background: linear-gradient(to right,
     var(--accent) 0%, var(--accent) var(--range-progress, 0%),
-    var(--track-empty) var(--range-progress, 0%), var(--track-empty) 100%
-  );
+    var(--track-empty) var(--range-progress, 0%), var(--track-empty) 100%);
 }
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  /* The global `* { box-sizing: border-box }` reset (top of this file)
-     does NOT reach ::-webkit-slider-thumb — the universal selector never
-     matches a pseudo-element unless explicitly listed. Left at the
-     content-box default, this thumb's 2px border would render outside the
-     declared 18x18 box; border-box keeps the border inside it instead. */
   box-sizing: border-box;
   width: 18px;
   height: 18px;
-  margin-top: -6px; /* (track height 6px − thumb 18px) / 2 — centers the thumb on the runnable-track, not the outer input */
+  margin-top: -6px; /* (track 6 − thumb 18) / 2 */
   border-radius: 50%;
-  background: var(--accent);
-  border: 2px solid var(--bg);
-  box-shadow: 0 0 0 1px rgba(0, 224, 160, 0.4), 0 0 8px rgba(0, 224, 160, 0.7);
+  background: var(--ink);
+  border: 4px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   cursor: pointer;
 }
 input[type="range"]::-moz-range-thumb {
-  /* Firefox has always auto-centered this thumb over its own track
-     natively (unlike WebKit/Blink above, hence no margin-top here) —
-     box-sizing still matters though, for the same border-inflation
-     reason as the -webkit- rule. */
   box-sizing: border-box;
   width: 18px;
   height: 18px;
-  border: 2px solid var(--bg);
   border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 1px rgba(0, 224, 160, 0.4), 0 0 8px rgba(0, 224, 160, 0.7);
+  background: var(--ink);
+  border: 4px solid var(--accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   cursor: pointer;
 }
-/* Firefox draws its own track color per side of the thumb via these two
-   pseudo-elements, auto-centered within the (taller) base input the same
-   way ::-webkit-slider-runnable-track is above. */
-input[type="range"]::-moz-range-track {
-  height: 6px;
-  border-radius: 999px;
-  background: var(--track-empty);
-}
-input[type="range"]::-moz-range-progress {
-  height: 6px;
-  border-radius: 999px;
-  background: var(--accent);
-}
+input[type="range"]::-moz-range-track { height: 6px; border-radius: 999px; background: var(--track-empty); }
+input[type="range"]::-moz-range-progress { height: 6px; border-radius: 999px; background: var(--accent); }
 
-/* Live capture preview <img> (Capture panel) — the MJPEG stream from
-   GET /api/preview_stream. max-width keeps it from overflowing the
-   panel on a narrow window; background gives it a visible placeholder
-   before the first frame (or while the stream is stopped/off-tab)
-   instead of a jarring blank/broken-image box. */
-.preview-img {
-  width: 100%;
-  max-width: 480px;
-  border-radius: 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  display: block;
-}
-
-textarea {
-  width: 100%;
-  min-height: 120px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 8px 10px;
-  color: var(--ink);
-  font: inherit;
-  resize: vertical;
-}
-
-.hidden { display: none !important; }
-
-/* Indeterminate progress bar — Convert tab's build-in-progress indicator,
-   mirroring the Qt app's IndeterminateProgressBar. Hidden (via .hidden)
-   except while a conversion is actually running. */
-.progress-bar {
-  width: 100%;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--surface-2);
-  overflow: hidden;
-  margin: 4px 0 12px;
-}
-.progress-bar-fill {
-  width: 40%;
-  height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  animation: progress-bar-slide 1.2s ease-in-out infinite;
-}
-@keyframes progress-bar-slide {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(350%); }
-}
-
-@media (max-width: 760px) {
-  .content { flex-direction: column; }
-  .sidebar {
-    width: auto;
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-  }
-  .main { max-width: none; }
-}
-
-@media (max-width: 460px) {
-  .grid { grid-template-columns: 1fr; }
-  .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
-  .tabs { order: 3; width: 100%; }
-  .panel-title { font-size: 22px; }
-}
-
-
-/* ---------------------------------------------------------------------
-   Feedback, accessibility, search, collapsible groups, mobile polish
-   --------------------------------------------------------------------- */
-
-/* Visible keyboard focus. The switch's real <input> is opacity:0, so its
-   ring is drawn on the sibling .slider instead. */
+/* Focus */
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }
 input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 9px; }
 
-/* Toast — transient save/error feedback */
+/* Live preview, progress, toasts */
+.preview-img { width: 100%; max-width: 520px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--line); display: block; }
+.progress-bar { width: 100%; height: 3px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
+.progress-bar-fill { width: 40%; height: 100%; background: var(--accent); border-radius: 2px; animation: progress-bar-slide 1.2s ease-in-out infinite; }
+@keyframes progress-bar-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
+
 .toast-region {
   position: fixed;
-  bottom: 18px;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -563,202 +504,320 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
   max-width: calc(100vw - 28px);
 }
 .toast {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
   color: var(--ink);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 8px 14px;
   font-size: 13px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
 }
-.toast.error { border-color: rgba(255, 96, 96, 0.55); color: var(--bad); }
+.toast.error { border-color: color-mix(in srgb, var(--bad) 60%, transparent); color: var(--bad); }
 
-/* Connection badge: neutral "needs attention" state (no token yet) */
-#status.warn { color: #ffc060; border-color: rgba(255, 192, 96, 0.4); }
-#token-input.attn { outline: 2px solid #ffc060; outline-offset: 1px; }
-
-/* Collapsible field groups */
-.field-group-title.collapsible { cursor: pointer; user-select: none; }
-.field-group-title.collapsible::before {
-  content: "▾";
-  display: inline-block;
-  width: 1.1em;
-  transition: transform 0.12s;
-}
-.field-group-title.collapsible.collapsed::before { transform: rotate(-90deg); }
-.field-group.collapsed { display: none; }
-
-/* Settings search — while a query is active every panel is shown and only
-   matching cards stay visible. */
-.search-box { width: 100%; box-sizing: border-box; }
-input[type="search"]::placeholder { color: var(--ink-faint); }
-.search-count { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
-body.searching .panel { display: flex; flex-direction: column; gap: 16px; }
-body.searching .panel-title { font-size: 14px; color: var(--ink-faint); }
-.search-hidden { display: none !important; }
+#token-input.attn { outline: 2px solid var(--warn); outline-offset: 1px; }
+.search-box { width: 100%; }
+.search-count { font-size: 12px; color: var(--ink-faint); }
+.search-count:empty { display: none; }
+body.searching .panel { display: flex; flex-direction: column; gap: 18px; }
+body.searching .panel-title { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
 body.searching .field-group.collapsed { display: flex; }
-
-/* Sidebar toggle (phones only) */
 .sidebar-toggle { display: none; }
 
-@media (max-width: 900px) {
-  .topbar { flex-wrap: wrap; height: auto; padding: 10px 14px; gap: 10px; }
-  .tabs { order: 3; width: 100%; flex: 1 1 100%; scroll-snap-type: x proximity; }
-  .tab { scroll-snap-align: center; }
-}
-@media (max-width: 760px) {
-  .sidebar-toggle { display: inline-block; }
-  .sidebar.collapsed { display: none; }
-  .sidebar { padding: 14px; }
-  .main { padding: 14px; }
-  .field-card { flex-wrap: wrap; }
-  .field-control { min-width: 0; max-width: 100%; flex-shrink: 1; flex-wrap: wrap; }
-}
-input[type="range"] { max-width: 100%; }
-
-/* The token row (input + Save + show/hide) overflowed a 375px viewport. */
-.row input[type="password"], .row input[type="text"], .row input[type="search"], .row select { min-width: 0; }
-@media (max-width: 760px) { .sidebar .row { flex-wrap: wrap; } .sidebar .row input { flex: 1 1 140px; } }
-
-
-/* ---------------------------------------------------------------------
-   Custom dropdowns (see enhanceSelects() in app.js)
-   --------------------------------------------------------------------- */
+/* Custom dropdowns (enhanceSelects() in app.js) */
 .dd { position: relative; display: inline-block; flex: 1 1 auto; min-width: 140px; max-width: 100%; }
-.field-control .dd { flex: 0 1 auto; }
-.dd-native {
-  position: absolute !important;
-  inset: 0;
-  width: 100% !important;
-  height: 100% !important;
-  min-width: 0 !important;
-  opacity: 0;
-  pointer-events: none;
-}
+.field-control .dd { flex: 0 1 auto; min-width: 170px; }
+.dd-native { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; min-width: 0 !important; opacity: 0; pointer-events: none; }
 .dd-trigger {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 38px;
-  padding: 8px 12px 8px 14px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0) 55%),
-    linear-gradient(135deg, var(--surface-2), #20202e);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 2px 8px rgba(0, 0, 0, 0.35);
+  min-height: 34px;
+  padding: 6px 10px 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
   color: var(--ink);
   cursor: pointer;
   user-select: none;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.08s;
+  transition: border-color 0.12s;
 }
-.dd-trigger:hover { border-color: rgba(0, 224, 160, 0.55); box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 4px 14px rgba(0, 224, 160, 0.12); }
-.dd-trigger:active { transform: translateY(1px); }
-.dd.open .dd-trigger,
-.dd-native:focus-visible + .dd-trigger {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(0, 224, 160, 0.18), 0 4px 16px rgba(0, 224, 160, 0.18);
-}
-.dd-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.dd-trigger:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-strong)); }
+.dd.open .dd-trigger, .dd-native:focus-visible + .dd-trigger { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16); }
+.dd-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
 .dd-label.placeholder { color: var(--ink-faint); }
-.dd-chevron {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 6px;
-  background: rgba(0, 224, 160, 0.12);
-  position: relative;
-  transition: transform 0.18s, background 0.15s;
-}
+.dd-chevron { flex: none; width: 14px; height: 14px; position: relative; transition: transform 0.18s; }
 .dd-chevron::before {
   content: "";
   position: absolute;
-  left: 5px; top: 4px;
-  width: 5px; height: 5px;
-  border-right: 2px solid var(--accent);
-  border-bottom: 2px solid var(--accent);
+  left: 3px; top: 2px;
+  width: 6px; height: 6px;
+  border-right: 1.5px solid var(--ink-soft);
+  border-bottom: 1.5px solid var(--ink-soft);
   transform: rotate(45deg);
 }
-.dd.open .dd-chevron { transform: rotate(180deg); background: rgba(0, 224, 160, 0.25); }
+.dd.open .dd-chevron { transform: rotate(180deg); }
 .dd.disabled { opacity: 0.5; }
-.dd.disabled .dd-trigger { cursor: not-allowed; box-shadow: none; }
-
+.dd.disabled .dd-trigger { cursor: not-allowed; }
 .dd-menu {
   position: fixed;
   z-index: 70;
   overflow-y: auto;
-  padding: 6px;
-  border-radius: 14px;
-  border: 1px solid rgba(0, 224, 160, 0.4);
-  background:
-    linear-gradient(180deg, rgba(0, 224, 160, 0.07), rgba(0, 224, 160, 0) 38%),
-    rgba(22, 22, 32, 0.96);
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04) inset, 0 0 32px rgba(0, 224, 160, 0.1);
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
   opacity: 0;
-  transform: translateY(-6px) scale(0.98);
+  transform: translateY(-4px);
   transform-origin: top center;
-  transition: opacity 0.14s ease, transform 0.14s ease;
+  transition: opacity 0.12s ease, transform 0.12s ease;
   scrollbar-width: thin;
 }
-.dd-menu.flip { transform-origin: bottom center; transform: translateY(6px) scale(0.98); }
+.dd-menu.flip { transform-origin: bottom center; transform: translateY(4px); }
 .dd-menu.show { opacity: 1; transform: none; }
 .dd-option {
   position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px 9px 16px;
-  border-radius: 9px;
+  padding: 7px 10px 7px 14px;
+  border-radius: calc(var(--radius-sm) - 2px);
   color: var(--ink-soft);
-  font-size: 14px;
+  font-size: 13.5px;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
 }
-.dd-option.active { background: rgba(0, 224, 160, 0.12); color: var(--ink); }
-.dd-option.selected { color: var(--accent); font-weight: 600; background: linear-gradient(90deg, rgba(0, 224, 160, 0.18), rgba(0, 224, 160, 0.04)); }
-.dd-option.selected::before {
-  content: "";
-  position: absolute;
-  left: 4px; top: 22%; bottom: 22%;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent);
-}
-.dd-option.selected::after {
-  content: "";
-  margin-left: auto;
-  width: 5px; height: 10px;
-  border-right: 2px solid var(--accent);
-  border-bottom: 2px solid var(--accent);
-  transform: rotate(45deg) translate(-2px, -1px);
-}
+.dd-option.active { background: var(--surface-2); color: var(--ink); }
+.dd-option.selected { color: var(--accent); font-weight: 600; }
+.dd-option.selected::before { content: ""; position: absolute; left: 4px; top: 25%; bottom: 25%; width: 2px; border-radius: 2px; background: var(--accent); }
 .dd-option.disabled { opacity: 0.4; cursor: not-allowed; }
-.dd-group { padding: 8px 12px 4px; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+.dd-group { padding: 8px 10px 4px; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
 .dd-empty { padding: 10px 12px; color: var(--ink-faint); font-size: 13px; }
-@media (prefers-reduced-motion: reduce) {
-  .dd-menu, .dd-trigger, .dd-chevron { transition: none; }
-}
-
 
 /* ---------------------------------------------------------------------
-   Slider rows: consistent track alignment + readable phone layout
+   5. Instrument — dense pro-tool panel
    --------------------------------------------------------------------- */
-/* Every slider row gets the same control width, and the unit label a fixed
-   slot (rows without a unit reserve it), so tracks and number boxes line up
-   down the whole panel instead of drifting with description/unit length. */
-.field-control:has(input[type="range"]) { width: 340px; min-width: 340px; max-width: 100%; }
-.field-control:has(input[type="range"]) input[type="range"] { flex: 1 1 auto; width: auto; min-width: 0; }
-.field-control:has(input[type="range"]) input[type="number"] { flex: none; width: 86px; min-width: 70px; }
-.field-control:has(input[type="range"]) .field-slider-value { flex: none; width: 28px; min-width: 28px; }
-.field-control:has(input[type="range"]):not(:has(.field-slider-value)) { padding-right: 36px; box-sizing: border-box; }
+:root:not([data-ui="studio"]) .main { max-width: 1380px; }
+@media (min-width: 1240px) {
+  :root:not([data-ui="studio"]) .modules { columns: 2; column-gap: 16px; }
+}
+:root:not([data-ui="studio"]) .module {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+:root:not([data-ui="studio"]) .module > .field-group-title {
+  padding: 9px var(--row-x);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border-bottom: 1px solid var(--line);
+  position: relative;
+}
+:root:not([data-ui="studio"]) .module > .field-group-title::after {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.7;
+}
+:root:not([data-ui="studio"]) .module > .field-group-title.collapsed { border-bottom-color: transparent; }
+:root:not([data-ui="studio"]) .module-note { background: transparent; border: 0; }
+:root:not([data-ui="studio"]) .module .field-card + .field-card,
+:root:not([data-ui="studio"]) .module .field-card + .micro-grid,
+:root:not([data-ui="studio"]) .module .micro-grid + .field-card,
+:root:not([data-ui="studio"]) .module .field-group + .field-group,
+:root:not([data-ui="studio"]) .module .field-card + .field-group,
+:root:not([data-ui="studio"]) .module .field-group + .field-card,
+:root:not([data-ui="studio"]) .module .field-group + .micro-grid { border-top: 1px solid var(--line); }
+:root:not([data-ui="studio"]) .module > .hint,
+:root:not([data-ui="studio"]) .module > .row,
+:root:not([data-ui="studio"]) .module > textarea,
+:root:not([data-ui="studio"]) .module > .progress-bar { margin: 10px var(--row-x); width: auto; }
+:root:not([data-ui="studio"]) .module > textarea { width: calc(100% - 2 * var(--row-x)); }
+/* Micro-grid cells with hairlines between them (clip-path trims the
+   outer edge so cells never double the module border). */
+:root:not([data-ui="studio"]) .micro-grid { clip-path: inset(0 1px 1px 0); }
+:root:not([data-ui="studio"]) .micro-grid > .field-card {
+  box-shadow: inset -1px 0 0 var(--line), inset 0 -1px 0 var(--line);
+  padding: 8px 12px;
+}
+:root:not([data-ui="studio"]) .micro-grid > .field-card .field-title { font-size: 12.5px; }
+:root:not([data-ui="studio"]) .micro-grid > .field-card .field-desc { font-size: 11.5px; }
+:root:not([data-ui="studio"]) .subgroup { background: var(--bg); }
+:root:not([data-ui="studio"]) .deck {
+  background:
+    linear-gradient(180deg, rgba(var(--accent-rgb), 0.06), transparent 60%),
+    var(--raised);
+  border-color: var(--line-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+:root:not([data-ui="studio"]) .deck .field-card { padding: 0; }
+:root:not([data-ui="studio"]) .deck > .row.control-row { display: inline-flex; margin-right: 22px; }
+:root:not([data-ui="studio"]) .deck:has(> .row.control-row) { flex-direction: row; flex-wrap: wrap; align-items: center; column-gap: 26px; }
+:root:not([data-ui="studio"]) .deck:has(> .row.control-row)::before { flex-basis: 100%; }
+:root:not([data-ui="studio"]) .deck .control-label { font-weight: 600; color: var(--ink); }
+:root:not([data-ui="studio"]) .sidebar .grid .stat { background: var(--surface); }
 
+/* ---------------------------------------------------------------------
+   6. Studio — calm desktop-settings app
+   --------------------------------------------------------------------- */
+:root[data-ui="studio"] .topbar { height: 60px; gap: 22px; padding: 0 26px; }
+:root[data-ui="studio"] .tabs { gap: 4px; }
+:root[data-ui="studio"] .tab { height: 34px; border-radius: 999px; padding: 0 14px; box-shadow: none; }
+:root[data-ui="studio"] .tab.active { background: rgba(var(--accent-rgb), 0.16); color: var(--ink); box-shadow: none; }
+:root[data-ui="studio"] .tab:hover:not(.active) { background: var(--surface); }
+:root[data-ui="studio"] .sidebar { width: 340px; padding: 22px; background: var(--bg); }
+:root[data-ui="studio"] .sidebar-section {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+:root[data-ui="studio"] .sidebar-section + .sidebar-section { padding-top: 16px; border-top: 1px solid var(--line); }
+:root[data-ui="studio"] .card-title { letter-spacing: 0.02em; text-transform: none; font-size: 13px; color: var(--ink-soft); }
+:root[data-ui="studio"] .main { padding: 30px 34px 70px; }
+:root[data-ui="studio"] .panel.active { max-width: 780px; margin: 0 auto; gap: 26px; }
+:root[data-ui="studio"] .panel-title { font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
+:root[data-ui="studio"] .deck {
+  padding: 22px 24px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.14), transparent 55%),
+    var(--surface);
+  gap: 14px;
+}
+:root[data-ui="studio"] .deck[data-label]::before { letter-spacing: 0.02em; text-transform: none; font-size: 13px; color: var(--ink-soft); }
+:root[data-ui="studio"] .deck .field-card { padding: 0; }
+:root[data-ui="studio"] .deck > .row.control-row { padding: 10px 14px; background: var(--surface-2); border-radius: var(--radius-sm); }
+:root[data-ui="studio"] .deck .control-label { color: var(--ink); font-weight: 600; }
+:root[data-ui="studio"] .deck button, :root[data-ui="studio"] .deck .dd-trigger { min-height: 40px; }
+:root[data-ui="studio"] .module { margin-bottom: 26px; }
+:root[data-ui="studio"] .module > .field-group-title {
+  letter-spacing: 0.01em;
+  text-transform: none;
+  font-size: 14px;
+  color: var(--ink);
+  margin: 0 4px 10px;
+}
+/* Rounded inset group: the field-group is the container, rows divided by
+   inset hairlines. */
+:root[data-ui="studio"] .module > .field-group,
+:root[data-ui="studio"] .module > .field-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+:root[data-ui="studio"] .module > .field-card + .field-card { margin-top: 10px; }
+:root[data-ui="studio"] .module .field-group .field-card + .field-card,
+:root[data-ui="studio"] .module .field-group .field-card + .micro-grid,
+:root[data-ui="studio"] .module .field-group .micro-grid + .field-card,
+:root[data-ui="studio"] .module .field-group .field-group + .field-card,
+:root[data-ui="studio"] .module .field-group .field-card + .field-group {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+:root[data-ui="studio"] .module > .hint,
+:root[data-ui="studio"] .module > .row,
+:root[data-ui="studio"] .module > .progress-bar { margin: 12px 4px 0; }
+:root[data-ui="studio"] .module > textarea { margin-top: 12px; }
+:root[data-ui="studio"] .micro-grid { gap: 10px; padding: 10px; }
+:root[data-ui="studio"] .micro-grid > .field-card {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  box-shadow: none !important;
+}
+:root[data-ui="studio"] .subgroup { background: color-mix(in srgb, var(--surface) 70%, var(--bg)); }
+:root[data-ui="studio"] .field-title { font-size: 14px; font-weight: 500; }
+:root[data-ui="studio"] .field-desc { font-size: 12.5px; }
+:root[data-ui="studio"] .grid { gap: 8px; background: transparent; border: 0; border-radius: 0; overflow: visible; }
+:root[data-ui="studio"] .stat, :root[data-ui="studio"] .grid > .stat { background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; box-shadow: none; margin: 0; }
+:root[data-ui="studio"] .stat .label { text-transform: none; letter-spacing: 0.01em; font-size: 12px; }
+:root[data-ui="studio"] .switch { width: 44px; height: 24px; }
+:root[data-ui="studio"] .switch .slider::before { width: 16px; height: 16px; }
+:root[data-ui="studio"] .switch input:checked + .slider { background: var(--accent); }
+:root[data-ui="studio"] .switch input:checked + .slider::before { transform: translateX(20px); background: #fff; }
+:root[data-ui="studio"] #model-switch-btn, :root[data-ui="studio"] #ai-start-btn,
+:root[data-ui="studio"] #convert-btn, :root[data-ui="studio"] #token-save { color: #0a1024; }
+:root[data-ui="studio"] button { border-radius: var(--radius-sm); }
+:root[data-ui="studio"] .dd-menu { border-radius: 12px; padding: 6px; }
+
+/* Studio, Model tab: wide layout that uses the full content width
+   (trial on the first tab before rolling it out to the others). */
+@media (min-width: 1100px) {
+  :root[data-ui="studio"] #panel-model.active { max-width: 1640px; margin: 0; }
+  :root[data-ui="studio"] #panel-model #model-precision-select + .dd-trigger,
+  :root[data-ui="studio"] #panel-model .model-select-row > .dd:nth-child(2) { flex: 0 0 96px; min-width: 96px; }
+  :root[data-ui="studio"] #panel-model .model-select-row > .dd:nth-child(3) { flex: 0 0 132px; min-width: 132px; }
+  :root[data-ui="studio"] #panel-model .deck {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+    grid-template-areas: "label label" "pick stats";
+    column-gap: 28px;
+    align-items: start;
+  }
+  :root[data-ui="studio"] #panel-model .deck::before { grid-area: label; }
+  :root[data-ui="studio"] #panel-model .deck > .field-group { grid-area: pick; }
+  :root[data-ui="studio"] #panel-model .deck > .grid {
+    grid-area: stats;
+    grid-template-columns: 1fr;
+    max-width: none;
+    align-self: stretch;
+    align-content: start;
+  }
+  :root[data-ui="studio"] #panel-model .modules { display: grid; gap: 24px; align-items: start; }
+  :root[data-ui="studio"] #panel-model .module { margin-bottom: 0; }
+  /* Model Details: info and notes side by side, folder action under both. */
+  :root[data-ui="studio"] #panel-model .module:first-child {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: 12px;
+    align-items: stretch;
+  }
+  :root[data-ui="studio"] #panel-model .module:first-child > .field-group-title { grid-column: 1 / -1; margin-bottom: -2px; }
+  :root[data-ui="studio"] #panel-model .module:first-child > .field-card + .field-card { margin-top: 0; }
+  :root[data-ui="studio"] #panel-model .module:first-child > .field-card:last-child { grid-column: 1 / -1; }
+  :root[data-ui="studio"] #panel-model #model-notes-text { min-height: 150px; }
+}
+/* Side by side only once there's room for the HUD column to breathe. */
+@media (min-width: 1380px) {
+  :root[data-ui="studio"] #panel-model .modules { grid-template-columns: minmax(0, 3fr) minmax(340px, 2fr); }
+}
+
+/* ---------------------------------------------------------------------
+   7. Responsive
+   --------------------------------------------------------------------- */
+@media (max-width: 1100px) {
+  .sidebar { width: 280px; }
+  :root[data-ui="studio"] .sidebar { width: 300px; }
+}
+@media (max-width: 900px) {
+  .topbar, :root[data-ui="studio"] .topbar { flex-wrap: wrap; height: auto; padding: 8px 14px; gap: 8px 12px; }
+  .tabs { order: 3; flex: 1 1 100%; scroll-snap-type: x proximity; }
+  .tab { scroll-snap-align: center; height: 40px; }
+}
 @media (max-width: 760px) {
-  /* Info text was being squeezed to a sliver beside the slider; stack the
-     slider underneath the title/description instead. */
+  .content { flex-direction: column; }
+  .sidebar, :root[data-ui="studio"] .sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 14px; }
+  .sidebar-toggle { display: inline-block; padding: 4px 10px; }
+  .sidebar.collapsed { display: none; }
+  .main, :root[data-ui="studio"] .main { padding: 16px 14px 60px; }
+  .sidebar .row { flex-wrap: wrap; }
+  .sidebar .row input { flex: 1 1 140px; }
+  .field-card { flex-wrap: wrap; }
+  .field-control { flex-shrink: 1; flex-wrap: wrap; max-width: 100%; }
   .field-card:has(.field-control input[type="range"]) { flex-direction: column; align-items: stretch; flex-wrap: nowrap; }
-  .field-card:has(.field-control input[type="range"]) .field-info { flex: none; width: 100%; }
-  .field-control:has(input[type="range"]) { width: 100%; min-width: 0; }
+  .field-card:has(.field-control input[type="range"]) .field-info { width: 100%; }
+  .field-control:has(input[type="range"]) { width: 100%; }
+  .field-control select, .field-control input[type="text"], .field-control .dd { min-width: 0; }
+  .deck .row.model-select-row > * { flex: 1 1 140px; }
+}
+@media (max-width: 520px) {
+  .micro-grid, .micro-grid[data-kind="pid"] { grid-template-columns: 1fr; grid-auto-flow: row; grid-template-rows: none; }
+  .panel-title, :root[data-ui="studio"] .panel-title { font-size: 22px; }
+  .grid { grid-template-columns: 1fr 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation-duration: 0.01ms !important; }
 }
