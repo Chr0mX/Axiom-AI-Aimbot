@@ -172,12 +172,12 @@ PyQt6 + PyQt6-Fluent-Widgets. `window.py` hosts a `NavigationInterface` (min 40 
 | `ModelPage` | `modelInterface` | Model selection & notes |
 | `CapturePage` | `captureInterface` | Screen capture backend |
 | `InferencePage` | `inferenceInterface` | Model inference settings |
-| `AimPage` | `aimInterface` | Aiming algorithm parameters, Anti-Recoil |
+| `AimPage` | `aimInterface` | Mouse method, aiming parameters, Humanization, Arduino / Xbox setup |
 | `TriggerPage` | `triggerInterface` | Triggerbot / auto-fire |
 | `KeysPage` | `keysInterface` | Hotkey bindings + MAKCU device connection (nav label: "Keys & HW") |
 | `ConfigsPage` | `configInterface` | Full config snapshots + aim-only presets, as two separate boxes — see the ConfigManager section |
 | `ConvertPage` | `convertInterface` | ONNX → TensorRT conversion |
-| `OtherPage` | `otherInterface` | Mouse method, performance, misc |
+| `OtherPage` | `otherInterface` | Language, thread priority, console, Remote Control, TensorRT/DirectML/Python status, MAKCU hardware info |
 
 Each page extends `BasePage` and calls `setConfig(config)` to bind to the live `Config` object. Shared widget primitives live in `fluent_app/components/slider_spin_card.py` (`SliderLabelCard`, `SliderSpinCard`, `SliderDoubleSpinCard`) — every `setValue()` re-reads the underlying `QSlider`'s own post-clamp value (rather than trusting the raw value passed in) before formatting the label/SpinBox, so an out-of-range value from a stale/older preset file can't leave the label or SpinBox disagreeing with where the thumb actually landed.
 
