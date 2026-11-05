@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
+from core.config_manager import _settings_from_file
+
 
 def _make_config():
     """建立一個 mock Config"""
@@ -68,14 +70,16 @@ class TestConfigManagerSaveLoad:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             assert data['name'] == "test_profile"
-            assert 'config' in data
+            assert 'settings' in data and 'config' not in data
             # A preset is aim-only, not a full config snapshot: aim/tracking
             # fields round-trip...
-            assert data['config']['fov_size'] == 777
-            assert data['config']['pid_kp_x'] == 0.42
+            assert data['kind'] == 'preset' and data['config_version'] == 3
+            assert data['settings']['aim']['fov_size'] == 777  # grouped, like config.json
+            assert _settings_from_file(data)['fov_size'] == 777
+            assert _settings_from_file(data)['pid_kp_x'] == 0.42
             # ...but a display-prefixed field never makes it into the file
             # at all, regardless of its value.
-            assert 'status_panel_show_mouse_click' not in data['config']
+            assert 'status_panel_show_mouse_click' not in _settings_from_file(data)
 
     def test_load_config_restores_values(self):
         from core.config_manager import ConfigManager
@@ -378,7 +382,7 @@ class TestConfigManagerAimOnlyScope:
             c = _make_config()
             cm.save_config(c, "scoped")
             with open(os.path.join(tmpdir, "scoped.json"), encoding="utf-8") as f:
-                saved = json.load(f)["config"]
+                saved = _settings_from_file(json.load(f))
 
             # Every key present is either a known aim/tracking field or the
             # separately-handled humanization block — nothing else leaked in.
@@ -395,7 +399,7 @@ class TestConfigManagerAimOnlyScope:
             c = _make_config()
             cm.save_config(c, "scoped")
             with open(os.path.join(tmpdir, "scoped.json"), encoding="utf-8") as f:
-                saved = json.load(f)["config"]
+                saved = _settings_from_file(json.load(f))
 
             for non_aim in (
                 "screenshot_method", "mouse_move_method", "model_path",
@@ -468,7 +472,7 @@ class TestConfigManagerFullConfigScope:
             c = _make_config()
             cm.save_config(c, "full")
             with open(os.path.join(tmpdir, "full.json"), encoding="utf-8") as f:
-                saved = json.load(f)["config"]
+                saved = _settings_from_file(json.load(f))
 
             # Every _FIELD_MAP attr the live Config actually has is present —
             # not just the aim/tracking subset — except the credential /
@@ -487,7 +491,7 @@ class TestConfigManagerFullConfigScope:
             c = _make_config()
             cm.save_config(c, "full")
             with open(os.path.join(tmpdir, "full.json"), encoding="utf-8") as f:
-                saved = json.load(f)["config"]
+                saved = _settings_from_file(json.load(f))
 
             for non_aim in (
                 "screenshot_method", "mouse_move_method", "model_path",
@@ -555,9 +559,9 @@ class TestConfigManagerFullConfigScope:
             full_cm.save_config(c, "same_name")
 
             with open(os.path.join(preset_dir, "same_name.json"), encoding="utf-8") as f:
-                preset_saved = json.load(f)["config"]
+                preset_saved = _settings_from_file(json.load(f))
             with open(os.path.join(full_dir, "same_name.json"), encoding="utf-8") as f:
-                full_saved = json.load(f)["config"]
+                full_saved = _settings_from_file(json.load(f))
 
             assert "screenshot_method" not in preset_saved
             assert full_saved["screenshot_method"] == "udp"
@@ -709,3 +713,36 @@ class TestAimPresetsLeaveKeysAlone:
                      "detect_range_size", "keep_detecting", "auto_fire_key"):
             assert attr not in _AIM_PRESET_FIELDS
         assert {"fov_size", "pid_kp_x", "prediction_enabled"} <= _AIM_PRESET_FIELDS
+
+
+class TestPresetFileFormat:
+    """Presets/configs save with config.json's grouped names; old flat files
+    and v2-grouped files still load."""
+
+    def test_round_trip_new_format(self, tmp_path):
+        from core.config_manager import ConfigManager
+        cm = ConfigManager(str(tmp_path / "c"), aim_only=False)
+        c = _make_config()
+        c.pid_kp_x, c.screenshot_method = 0.61, "udp"
+        assert cm.save_config(c, "mine")
+        data = json.loads((tmp_path / "c" / "mine.json").read_text(encoding="utf-8"))
+        assert data["kind"] == "config"
+        assert data["settings"]["aim"]["pid"]["x"]["kp"] == 0.61
+        assert data["settings"]["capture"]["screenshot_method"] == "udp"
+        assert "pid_kp_x" not in json.dumps(data)
+        assert not list((tmp_path / "c").glob("*.tmp"))  # atomic write left nothing behind
+        other = _make_config()
+        assert cm.load_config(other, "mine") is True
+        assert other.pid_kp_x == 0.61 and other.screenshot_method == "udp"
+
+    def test_v2_grouped_file_loads(self, tmp_path):
+        from core.config_manager import ConfigManager
+        cm = ConfigManager(str(tmp_path / "c"), aim_only=False)
+        (tmp_path / "c" / "old.json").write_text(json.dumps({
+            "name": "old", "config": {"config_version": 2,
+                                      "aim": {"min_confidence": 0.42, "fov_size": 260},
+                                      "hardware": {"devices": {"makcu": {"port": "COM8"}}}},
+        }), encoding="utf-8")
+        c = _make_config()
+        assert cm.load_config(c, "old") is True
+        assert (c.min_confidence, c.fov_size, c.makcu_com_port) == (0.42, 260, "COM8")

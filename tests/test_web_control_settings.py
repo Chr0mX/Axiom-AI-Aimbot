@@ -14,6 +14,7 @@ import types
 import pytest
 
 from core import web_control_settings as wcs
+from core.config_manager import _settings_from_file
 
 
 def _config(**kwargs):
@@ -875,7 +876,7 @@ class TestExportImportConfigPreset:
         assert result["name"] == "export_me"
         import json
         parsed = json.loads(result["content"])
-        assert parsed["config"]["fov_size"] == 321
+        assert _settings_from_file(parsed)["fov_size"] == 321
 
     def test_import_invalid_json_rejected(self):
         result = wcs.import_config_preset_content("not valid json")
@@ -977,7 +978,7 @@ class TestFullConfigs:
         result = wcs.export_full_config_content("with_non_aim")
         import json
         parsed = json.loads(result["content"])
-        assert parsed["config"]["screenshot_method"] == "udp"
+        assert _settings_from_file(parsed)["screenshot_method"] == "udp"
 
     def test_load_applies_non_aim_field(self):
         saved = self._real_config()
