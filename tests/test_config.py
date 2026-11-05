@@ -305,22 +305,57 @@ class TestConfigSerialization:
         assert c2.aim_y_reduce_enabled is True
 
     def test_active_preset_config_name_fields_round_trip(self):
-        """Set by ConfigManager.save_config()/load_config(), not by hand,
-        but they're plain persisted Config fields like any other — see
-        Config.active_preset_name's docstring."""
+        """Set by ConfigManager.save_config()/load_config(). They're app
+        state, so they persist in state.json, not config.json."""
+        from core.config import save_state, load_state
         c = _make_config()
         assert c.active_preset_name == ""
         assert c.active_config_name == ""
         c.active_preset_name = "My Preset"
         c.active_config_name = "My Full Config"
         d = c.to_dict()
-        assert d['ui']['active_preset_name'] == "My Preset"
-        assert d['ui']['active_config_name'] == "My Full Config"
+        assert 'active_preset_name' not in d.get('ui', {})
+        assert save_state(c) is True
 
         c2 = _make_config()
-        c2.from_dict(d)
+        assert load_state(c2) is True
         assert c2.active_preset_name == "My Preset"
         assert c2.active_config_name == "My Full Config"
+
+    def test_token_and_slots_live_in_state_json_not_config_json(self):
+        from core.config import save_config, load_config
+        c = _make_config()
+        c.web_control_token = "fake-token-for-test"
+        c.preset_slots = ["Legit", "", "", "", ""]
+        assert save_config(c, "config.json") is True
+        raw = open("config.json", encoding="utf-8").read()
+        assert "fake-token-for-test" not in raw and "preset_slots" not in raw
+        state = json.load(open("state.json", encoding="utf-8"))
+        assert state["web_control_token"] == "fake-token-for-test"
+        assert state["preset_slots"][0] == "Legit"
+        c2 = _make_config()
+        assert load_config(c2, "config.json") is True
+        assert c2.web_control_token == "fake-token-for-test"
+        assert c2.preset_slots[0] == "Legit"
+
+    def test_old_config_json_token_survives_the_move(self):
+        """First launch after the update: the token is still in config.json
+        and state.json doesn't have it yet."""
+        from core.config import save_config, load_config
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump({"config_version": 2,
+                       "web_control": {"enabled": True, "token": "old-token"},
+                       "ui": {"active_preset_name": "giveup"}}, f)
+        with open("state.json", "w", encoding="utf-8") as f:
+            json.dump({"disclaimer_agreed": True}, f)
+        c = _make_config()
+        assert load_config(c, "config.json") is True
+        assert c.web_control_token == "old-token"
+        assert c.active_preset_name == "giveup"
+        assert c.disclaimer_agreed is True
+        save_config(c, "config.json")
+        assert "old-token" not in open("config.json", encoding="utf-8").read()
+        assert json.load(open("state.json", encoding="utf-8"))["web_control_token"] == "old-token"
 
     def test_status_panel_show_preset_config_defaults_true_and_round_trips(self):
         c = _make_config()

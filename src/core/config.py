@@ -26,8 +26,24 @@ def _get_screen_size() -> tuple[int, int]:
 
 _MISSING = object()
 
-# One-time app state — persisted to state.json, NOT config.json.
-STATE_FIELDS = ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_once')
+# App state — persisted to state.json, NOT config.json. Besides the one-time
+# flags this holds the Web Control token (a password: config.json gets shared,
+# state.json shouldn't be), the last loaded preset/config names and the Web
+# Control Quick Preset slots — state the app keeps, not settings you tune.
+STATE_FIELDS = (
+    'disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_once',
+    'web_control_token', 'active_preset_name', 'active_config_name', 'preset_slots',
+)
+
+# Where config.json kept the newer state fields before they moved to
+# state.json. from_dict() still reads them so the first launch after the move
+# keeps the old token/slots; the next save writes them to state.json only.
+_LEGACY_STATE_PATHS = {
+    'web_control_token':  'web_control.token',
+    'preset_slots':       'web_control.preset_slots',
+    'active_preset_name': 'ui.active_preset_name',
+    'active_config_name': 'ui.active_config_name',
+}
 
 _TRUE_STRINGS = frozenset({'1', 'true', 'yes', 'on'})
 _FALSE_STRINGS = frozenset({'0', 'false', 'no', 'off'})
@@ -232,8 +248,6 @@ _FIELD_MAP = {
     'web_esp_fps':                'web_esp.fps',
     'web_control_enabled':        'web_control.enabled',
     'web_control_port':           'web_control.port',
-    'web_control_token':          'web_control.token',
-    'preset_slots':               'web_control.preset_slots',
 
     # --- hardware ---
     'mouse_move_method':          'hardware.mouse_move_method',
@@ -263,8 +277,6 @@ _FIELD_MAP = {
     'acrylic_window_alpha':       'ui.acrylic_window_alpha',
     'acrylic_element_alpha':      'ui.acrylic_element_alpha',
     'show_console':               'ui.show_console',
-    'active_preset_name':         'ui.active_preset_name',
-    'active_config_name':         'ui.active_config_name',
 
     # --- ocr / 2nd inference ---
     'second_inference_mode':      'ocr.mode',
@@ -919,10 +931,15 @@ class Config:
                 if hasattr(self.humanization, hk):
                     setattr(self.humanization, hk, hv)
 
-        # Legacy flat state fields (back-compat; canonical source is state.json).
+        # Legacy state fields (back-compat; canonical source is state.json):
+        # flat keys, and the grouped spots config.json used before.
         for f in STATE_FIELDS:
             if f in data and hasattr(self, f):
                 setattr(self, f, data[f])
+        for f, path in _LEGACY_STATE_PATHS.items():
+            val = _get_path(data, path)
+            if val is not _MISSING:
+                setattr(self, f, val)
 
 
 def _state_path_for(config_path: str) -> str:
