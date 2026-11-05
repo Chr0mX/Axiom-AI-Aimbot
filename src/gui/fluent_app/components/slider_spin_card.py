@@ -164,7 +164,7 @@ class SliderDoubleSpinCard(SettingCard):
 
     def _onSpinChanged(self, value: float):
         """SpinBox 改變時同步滑桿"""
-        int_val = int(value * self._multiplier)
+        int_val = int(round(value * self._multiplier))
         self.slider.blockSignals(True)
         self.slider.setValue(int_val)
         self.slider.blockSignals(False)
@@ -175,7 +175,7 @@ class SliderDoubleSpinCard(SettingCard):
         """設定值（同時更新滑桿和 SpinBox）"""
         self.slider.blockSignals(True)
         self.spinBox.blockSignals(True)
-        self.slider.setValue(int(value * self._multiplier))
+        self.slider.setValue(int(round(value * self._multiplier)))
         # Same clamp re-read as SliderSpinCard.setValue() above — derive the
         # DoubleSpinBox's value from where the slider's integer range actually
         # clamped it to, not the raw float, so the two can't disagree.

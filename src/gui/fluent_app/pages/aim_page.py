@@ -1385,8 +1385,8 @@ class AimPage(BasePage):
             self._updateArduinoConnectionStatus()
 
             # Xbox
-            self.xboxSensitivityCard.setValue(int(getattr(self._config, 'xbox_sensitivity', 1.0) * 100))
-            self.xboxDeadzoneCard.setValue(int(getattr(self._config, 'xbox_deadzone', 0.05) * 100))
+            self.xboxSensitivityCard.setValue(int(round(getattr(self._config, 'xbox_sensitivity', 1.0) * 100)))
+            self.xboxDeadzoneCard.setValue(int(round(getattr(self._config, 'xbox_deadzone', 0.05) * 100)))
             self._updateXboxConnectionStatus()
 
             # PID — Kp sliders are scaled x200 normally (slider 0–100 → config
@@ -1395,17 +1395,17 @@ class AimPage(BasePage):
             self.pidUnsafeCard.setChecked(bool(getattr(self._config, 'pid_unsafe_mode', False)))
             self._applyPidKpFormat(self.pidUnsafeCard.isChecked())
             kp_divisor = self._pidKpDivisor()
-            self.pidPxCard.setValue(min(100, int(self._config.pid_kp_x * kp_divisor)))
-            self.pidIxCard.setValue(int(self._config.pid_ki_x * 100))
-            self.pidDxCard.setValue(int(self._config.pid_kd_x * 100))
-            self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * kp_divisor)))
-            self.pidIyCard.setValue(int(self._config.pid_ki_y * 100))
-            self.pidDyCard.setValue(int(self._config.pid_kd_y * 100))
+            self.pidPxCard.setValue(min(100, int(round(self._config.pid_kp_x * kp_divisor))))
+            self.pidIxCard.setValue(int(round(self._config.pid_ki_x * 100)))
+            self.pidDxCard.setValue(int(round(self._config.pid_kd_x * 100)))
+            self.pidPyCard.setValue(min(100, int(round(self._config.pid_kp_y * kp_divisor))))
+            self.pidIyCard.setValue(int(round(self._config.pid_ki_y * 100)))
+            self.pidDyCard.setValue(int(round(self._config.pid_kd_y * 100)))
             self.maxMovePerFrameCard.setValue(min(500, max(0, int(getattr(self._config, 'max_move_per_frame_px', 85.0)))))
             self.pidYReduceEnableCard.setChecked(getattr(self._config, 'aim_y_reduce_enabled', False))
-            self.pidYReduceDelayCard.setValue(int(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100))
-            self.pidYReduceFloorCard.setValue(int(getattr(self._config, 'aim_y_reduce_floor', 0.0) * 100))
-            self.pidYReduceRampCard.setValue(int(getattr(self._config, 'aim_y_reduce_ramp', 0.0) * 100))
+            self.pidYReduceDelayCard.setValue(int(round(getattr(self._config, 'aim_y_reduce_delay', 0.6) * 100)))
+            self.pidYReduceFloorCard.setValue(int(round(getattr(self._config, 'aim_y_reduce_floor', 0.0) * 100)))
+            self.pidYReduceRampCard.setValue(int(round(getattr(self._config, 'aim_y_reduce_ramp', 0.0) * 100)))
             self.pidYReduceSettleCard.setValue(int(getattr(self._config, 'aim_y_reduce_settle_px', 0.0)))
             self.pidYReduceVelCard.setValue(int(getattr(self._config, 'aim_y_vel_restore_px_s', 0.0)))
 
@@ -1416,7 +1416,7 @@ class AimPage(BasePage):
             mode_map = {"distance": "Distance", "confidence": "Confidence", "composite": "Composite"}
             mode_text = mode_map.get(str(getattr(self._config, 'target_priority_mode', 'distance')), "Distance")
             self.targetPriorityModeCombo.setCurrentText(mode_text)
-            self.targetPriorityWeightCard.setValue(int(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100))
+            self.targetPriorityWeightCard.setValue(int(round(getattr(self._config, 'target_priority_confidence_weight', 0.5) * 100)))
 
             # Target Tracking
             self.predictionEnableCard.setChecked(bool(getattr(self._config, 'prediction_enabled', False)))
@@ -1425,12 +1425,12 @@ class AimPage(BasePage):
             self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
             self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
-            self.lockIouCard.setValue(int(getattr(self._config, 'lock_iou_threshold', 0.3) * 100))
+            self.lockIouCard.setValue(int(round(getattr(self._config, 'lock_iou_threshold', 0.3) * 100)))
 
             kalman_on = bool(getattr(self._config, 'kalman_enabled', False))
             self.kalmanEnableCard.setChecked(kalman_on)
-            self.kalmanProcessNoiseCard.setValue(int(getattr(self._config, 'kalman_process_noise', 0.01) * 100))
-            self.kalmanMeasNoiseCard.setValue(int(getattr(self._config, 'kalman_measurement_noise', 0.1) * 100))
+            self.kalmanProcessNoiseCard.setValue(int(round(getattr(self._config, 'kalman_process_noise', 0.01) * 100)))
+            self.kalmanMeasNoiseCard.setValue(int(round(getattr(self._config, 'kalman_measurement_noise', 0.1) * 100)))
             self.kalmanProcessNoiseCard.setEnabled(kalman_on)
             self.kalmanMeasNoiseCard.setEnabled(kalman_on)
 
@@ -1453,25 +1453,25 @@ class AimPage(BasePage):
             self.egoMotionCard.setChecked(bool(getattr(self._config, 'prediction_ego_motion_comp', False)))
             self.egoScaleCard.setValue(int(round(float(getattr(self._config, 'prediction_ego_motion_scale', 1.0) or 1.0) * 100)))
             self.emaSmoothingCard.setChecked(bool(getattr(self._config, 'aim_ema_smoothing_enabled', False)))
-            self.emaAmountCard.setValue(int(float(getattr(self._config, 'aim_ema_smoothing', 0.5)) * 100))
-            self.aimXOffsetCard.setValue(int(float(getattr(self._config, 'aim_x_offset_frac', 0.0)) * 100))
-            self.aimYOffsetCard.setValue(int(float(getattr(self._config, 'aim_y_offset_frac', 0.0)) * 100))
+            self.emaAmountCard.setValue(int(round(float(getattr(self._config, 'aim_ema_smoothing', 0.5)) * 100)))
+            self.aimXOffsetCard.setValue(int(round(float(getattr(self._config, 'aim_x_offset_frac', 0.0)) * 100)))
+            self.aimYOffsetCard.setValue(int(round(float(getattr(self._config, 'aim_y_offset_frac', 0.0)) * 100)))
             self.stickyGapCard.setChecked(bool(getattr(self._config, 'sticky_gap_extrapolate', False)))
             self.stickyGapFramesCard.setValue(int(getattr(self._config, 'sticky_gap_frames', 3)))
             self._updateAimTuningVisibility()
 
             # Target Area
             self.customYCard.setValue(int(getattr(self._config, 'aim_custom_y_pct', 30.0)))
-            self.headWidthCard.setValue(int(self._config.head_width_ratio * 100))
-            self.headHeightCard.setValue(int(self._config.head_height_ratio * 100))
-            self.bodyWidthCard.setValue(int(self._config.body_width_ratio * 100))
+            self.headWidthCard.setValue(int(round(self._config.head_width_ratio * 100)))
+            self.headHeightCard.setValue(int(round(self._config.head_height_ratio * 100)))
+            self.bodyWidthCard.setValue(int(round(self._config.body_width_ratio * 100)))
             adaptive_on = bool(getattr(self._config, 'aim_adaptive_ratio_enabled', False))
             self.adaptiveRatioCard.setChecked(adaptive_on)
             self.adaptiveRatioRefHCard.setValue(int(getattr(self._config, 'aim_adaptive_ratio_ref_h', 80.0)))
             self.adaptiveRatioRefHCard.setEnabled(adaptive_on)
             posture_on = bool(getattr(self._config, 'aim_posture_aware_enabled', False))
             self.postureAwareCard.setChecked(posture_on)
-            self.crouchAspectCard.setValue(int(getattr(self._config, 'aim_crouch_aspect_threshold', 1.2) * 100))
+            self.crouchAspectCard.setValue(int(round(getattr(self._config, 'aim_crouch_aspect_threshold', 1.2) * 100)))
             self.crouchAspectCard.setEnabled(posture_on)
 
             # Target class multi-select — class names are entirely
@@ -1853,8 +1853,8 @@ class AimPage(BasePage):
                 self._config.pid_kp_y = min(self._config.pid_kp_y, 0.5)
         kp_divisor = self._pidKpDivisor()
         if self._config:
-            self.pidPxCard.setValue(min(100, int(self._config.pid_kp_x * kp_divisor)))
-            self.pidPyCard.setValue(min(100, int(self._config.pid_kp_y * kp_divisor)))
+            self.pidPxCard.setValue(min(100, int(round(self._config.pid_kp_x * kp_divisor))))
+            self.pidPyCard.setValue(min(100, int(round(self._config.pid_kp_y * kp_divisor))))
 
     def _onPidChanged(self, attr, value, is_bool=False):
         if self._config:
@@ -1879,33 +1879,33 @@ class AimPage(BasePage):
         hcfg = getattr(self._config, 'humanization', None)
         h_on = bool(getattr(hcfg, 'enabled', False))
         self.humanizationEnableCard.setChecked(h_on)
-        self.humanizationIntensityCard.setValue(int(getattr(hcfg, 'intensity', 0.5) * 100))
+        self.humanizationIntensityCard.setValue(int(round(getattr(hcfg, 'intensity', 0.5) * 100)))
         self.humanizationMicroJitterCard.setChecked(bool(getattr(hcfg, 'micro_jitter_enabled', True)))
         self.humanizationJitterBaseCard.setValue(
-            min(200, max(0, int(getattr(hcfg, 'micro_jitter_base', 0.20) * 100))))
+            min(200, max(0, int(round(getattr(hcfg, 'micro_jitter_base', 0.20) * 100)))))
         self.humanizationJitterScaleCard.setValue(
-            min(200, max(0, int(getattr(hcfg, 'micro_jitter_scale', 0.025) * 1000))))
+            min(200, max(0, int(round(getattr(hcfg, 'micro_jitter_scale', 0.025) * 1000)))))
         self.humanizationMicroJitterIdleCard.setChecked(bool(getattr(hcfg, 'micro_jitter_idle_enabled', False)))
         self.humanizationMotionVariationCard.setChecked(bool(getattr(hcfg, 'motion_variation_enabled', True)))
         self.humanizationMotionVariationRangeCard.setValue(
-            min(200, max(0, int(getattr(hcfg, 'motion_variation_range', 0.06) * 1000))))
+            min(200, max(0, int(round(getattr(hcfg, 'motion_variation_range', 0.06) * 1000)))))
         self.humanizationSpeedShapingCard.setChecked(bool(getattr(hcfg, 'speed_shaping_enabled', True)))
         self.humanizationSpeedShapingLowCard.setValue(
-            min(100, max(0, int(getattr(hcfg, 'speed_shaping_low', 4.0) * 5))))
+            min(100, max(0, int(round(getattr(hcfg, 'speed_shaping_low', 4.0) * 5)))))
         self.humanizationSpeedShapingHighCard.setValue(
-            min(100, max(0, int(getattr(hcfg, 'speed_shaping_high', 22.0) * 2))))
+            min(100, max(0, int(round(getattr(hcfg, 'speed_shaping_high', 22.0) * 2)))))
         self.humanizationSpeedShapingLowFactorCard.setValue(
-            min(100, max(0, int(getattr(hcfg, 'speed_shaping_low_factor', 0.88) * 100))))
+            min(100, max(0, int(round(getattr(hcfg, 'speed_shaping_low_factor', 0.88) * 100)))))
         self.humanizationMicroStutterCard.setChecked(bool(getattr(hcfg, 'micro_stutter_enabled', False)))
         self.humanizationStutterProbCard.setValue(
-            min(200, max(0, int(getattr(hcfg, 'micro_stutter_prob', 0.03) * 1000))))
+            min(200, max(0, int(round(getattr(hcfg, 'micro_stutter_prob', 0.03) * 1000)))))
         self.humanizationStutterMinCard.setValue(
-            min(100, max(0, int(getattr(hcfg, 'micro_stutter_min', 0.65) * 100))))
+            min(100, max(0, int(round(getattr(hcfg, 'micro_stutter_min', 0.65) * 100)))))
         self.humanizationStutterMaxCard.setValue(
-            min(100, max(0, int(getattr(hcfg, 'micro_stutter_max', 0.90) * 100))))
+            min(100, max(0, int(round(getattr(hcfg, 'micro_stutter_max', 0.90) * 100)))))
         self.humanizationReactionVariabilityCard.setChecked(bool(getattr(hcfg, 'reaction_variability_enabled', False)))
         self.humanizationReactionSkipProbCard.setValue(
-            min(100, max(0, int(getattr(hcfg, 'reaction_skip_prob', 0.015) * 1000))))
+            min(100, max(0, int(round(getattr(hcfg, 'reaction_skip_prob', 0.015) * 1000)))))
         self.humanizationIntensityCard.setEnabled(h_on)
         self.humanizationMicroJitterCard.setEnabled(h_on)
         self.humanizationMotionVariationCard.setEnabled(h_on)
@@ -2050,7 +2050,10 @@ class AimPage(BasePage):
     # === Target Tracking Callbacks ===
 
     def _onAimMathChanged(self, *_args):
-        if not self._config:
+        # Reads all 14 Advanced Aim Tuning widgets; while _loadFromConfig()
+        # is still setting them it would write the not-yet-updated ones'
+        # old values back over a preset/web change.
+        if not self._config or self._isLoadingConfig:
             return
         method = {"Velocity": "velocity", "EMA": "ema", "Rolling": "rolling"}.get(
             self.predictionMethodCombo.currentText(), "velocity")
