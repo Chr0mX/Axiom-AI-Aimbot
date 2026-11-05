@@ -32,3 +32,9 @@ echo [Axiom] Visual C++ Redistributable installation completed.
 
 :VC_DONE
 src\python\python.exe src\main.py
+if %errorlevel% NEQ 0 (
+	echo.
+	echo [Axiom] Axiom closed with an error ^(exit code %errorlevel%^). The error is shown above.
+	echo [Axiom] Copy the lines starting at "Traceback" if you want to report it.
+	pause
+)

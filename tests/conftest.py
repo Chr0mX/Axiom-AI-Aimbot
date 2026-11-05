@@ -28,6 +28,9 @@ def _isolated_cwd(tmp_path, monkeypatch):
     ``sys.path`` by absolute path above, so nothing here depends on the CWD.
     """
     monkeypatch.chdir(tmp_path)
+    # User files (config.json, state.json, presets/, ...) default to
+    # <Axiom>/user/ via core/paths.py; point that at the temp dir too.
+    monkeypatch.setenv("AXIOM_USER_DIR", str(tmp_path))
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,9 @@ class LanguageManager:
     def __init__(self) -> None:
         self.translations: Dict[str, Dict[str, str]] = {}
         self.current_language: str = self.DEFAULT_LANGUAGE
+        # language.json lives in the user folder (core/paths.py), not the CWD.
+        from .paths import user_path
+        self.CONFIG_FILE = user_path(self.CONFIG_FILE)
         
         # Get absolute path of language_data
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -112,9 +115,10 @@ class LanguageManager:
     def load_language_config(self) -> None:
         try:
             # One-time migration: promote "language" from legacy config.json → language.json
-            if not os.path.exists(self.CONFIG_FILE) and os.path.exists('config.json'):
+            _legacy_path = os.path.join(os.path.dirname(self.CONFIG_FILE), 'config.json')
+            if not os.path.exists(self.CONFIG_FILE) and os.path.exists(_legacy_path):
                 try:
-                    with open('config.json', 'r', encoding='utf-8') as _f:
+                    with open(_legacy_path, 'r', encoding='utf-8') as _f:
                         _legacy = json.load(_f)
                     if 'language' in _legacy:
                         self.current_language = _legacy['language']

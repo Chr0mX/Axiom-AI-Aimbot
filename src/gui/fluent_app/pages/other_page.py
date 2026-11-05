@@ -678,14 +678,26 @@ class OtherPage(BasePage):
             self.trtStatusCard.contentLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()};")
 
         self.trtVersionCard.contentLabel.setText(trt_version or "—")
+        # Same green-found / red-missing colouring as the DirectML DLL path below.
         self.trtLibsCard.contentLabel.setText(dll_path or t("trt_not_found", "Not found"))
+        self.trtLibsCard.contentLabel.setStyleSheet(
+            f"color: {(ThemeColors.SUCCESS if dll_path else ThemeColors.ERROR).get()};")
 
-        # Engine cache directory path
-        project_root = os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        cache_dir = os.path.join(project_root, "trt_cache")
-        self.trtCacheCard.contentLabel.setText(cache_dir)
-        self.trtCacheCard.contentLabel.setStyleSheet(f"color: {ThemeColors.TEXT_PRIMARY.get()};")
+        # Engine cache directory — the exact folder session_utils builds and
+        # reads engines from (<Axiom>/trt_cache), not a separately derived one.
+        try:
+            from core.session_utils import _TRT_CACHE_DIR as cache_dir
+        except Exception:
+            from core.paths import project_root as _axiom_root
+            cache_dir = os.path.join(_axiom_root(), "trt_cache")
+        if os.path.isdir(cache_dir):
+            self.trtCacheCard.contentLabel.setText(cache_dir)
+            self.trtCacheCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")
+        else:
+            # Not an error: the folder is created by the first TensorRT build.
+            self.trtCacheCard.contentLabel.setText(
+                f"{cache_dir} " + t("trt_cache_not_created", "(created on the first TensorRT build)"))
+            self.trtCacheCard.contentLabel.setStyleSheet(f"color: {ThemeColors.WARNING.get()};")
 
         # AppData packages path
         localappdata = os.environ.get("LOCALAPPDATA", "")
@@ -746,7 +758,7 @@ class OtherPage(BasePage):
 
         # System Python — search Windows PATH, skipping the embedded interpreter
         import shutil as _shutil
-        embedded_python_dir = os.path.abspath(os.path.join(project_root, "python"))
+        embedded_python_dir = os.path.abspath(os.path.join(src_dir, "python"))
         sys_python = None
         for _name in ("python3", "python"):
             _found = _shutil.which(_name)
@@ -757,8 +769,8 @@ class OtherPage(BasePage):
         self.trtSysPythonCard.contentLabel.setStyleSheet(
             f"color: {ThemeColors.SUCCESS.get()};" if sys_python else f"color: {ThemeColors.ERROR.get()};")
 
-        # Internal/Embedded Python (<project_root>/python/python.exe)
-        internal_python = os.path.join(project_root, "python", "python.exe")
+        # Internal/Embedded Python (<Axiom>/src/python/python.exe)
+        internal_python = os.path.join(src_dir, "python", "python.exe")
         if os.path.exists(internal_python):
             self.trtInternalPythonCard.contentLabel.setText(internal_python)
             self.trtInternalPythonCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")

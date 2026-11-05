@@ -148,14 +148,15 @@ class TestConfigSerialization:
         d = c.to_dict()
         # v2 grouped schema: top-level sections present, config_version stays top-level.
         for section in ('model', 'capture', 'aim', 'autofire', 'tracking',
-                        'performance', 'display', 'hardware', 'ui', 'humanization'):
+                        'performance', 'display', 'hardware', 'ui', 'humanization',
+                        'keys', 'inference', 'weapon_detection'):
             assert section in d, f"Missing section: {section}"
-        assert d['config_version'] == 2
+        assert d['config_version'] == 3
         # Spot-check nested paths.
         assert 'fov_size' in d['aim']
         assert d['aim']['pid']['x']['kp'] == c.pid_kp_x
         assert d['model']['backend'] == c.inference_backend
-        assert d['hardware']['devices']['makcu']['port'] == c.makcu_com_port
+        assert d['hardware']['makcu']['port'] == c.makcu_com_port
         assert d['display']['crosshair']['color'] == [
             c.crosshair_color_r, c.crosshair_color_g, c.crosshair_color_b]
         # Dropped/derived/state keys must NOT be persisted.
@@ -226,9 +227,9 @@ class TestConfigSerialization:
         c.hud_udp_bind_ip = "192.168.1.50"
         c.hud_udp_bind_port = 5602
         d = c.to_dict()
-        assert d['ocr']['hud_udp_enabled'] is True
-        assert d['ocr']['hud_udp_bind_ip'] == "192.168.1.50"
-        assert d['ocr']['hud_udp_bind_port'] == 5602
+        assert d['weapon_detection']['hud_udp_enabled'] is True
+        assert d['weapon_detection']['hud_udp_bind_ip'] == "192.168.1.50"
+        assert d['weapon_detection']['hud_udp_bind_port'] == 5602
 
         c2 = _make_config()
         c2.from_dict(d)
@@ -305,22 +306,57 @@ class TestConfigSerialization:
         assert c2.aim_y_reduce_enabled is True
 
     def test_active_preset_config_name_fields_round_trip(self):
-        """Set by ConfigManager.save_config()/load_config(), not by hand,
-        but they're plain persisted Config fields like any other — see
-        Config.active_preset_name's docstring."""
+        """Set by ConfigManager.save_config()/load_config(). They're app
+        state, so they persist in state.json, not config.json."""
+        from core.config import save_state, load_state
         c = _make_config()
         assert c.active_preset_name == ""
         assert c.active_config_name == ""
         c.active_preset_name = "My Preset"
         c.active_config_name = "My Full Config"
         d = c.to_dict()
-        assert d['ui']['active_preset_name'] == "My Preset"
-        assert d['ui']['active_config_name'] == "My Full Config"
+        assert 'active_preset_name' not in d.get('ui', {})
+        assert save_state(c) is True
 
         c2 = _make_config()
-        c2.from_dict(d)
+        assert load_state(c2) is True
         assert c2.active_preset_name == "My Preset"
         assert c2.active_config_name == "My Full Config"
+
+    def test_token_and_slots_live_in_state_json_not_config_json(self):
+        from core.config import save_config, load_config
+        c = _make_config()
+        c.web_control_token = "fake-token-for-test"
+        c.preset_slots = ["Legit", "", "", "", ""]
+        assert save_config(c, "config.json") is True
+        raw = open("config.json", encoding="utf-8").read()
+        assert "fake-token-for-test" not in raw and "preset_slots" not in raw
+        state = json.load(open("state.json", encoding="utf-8"))
+        assert state["web_control_token"] == "fake-token-for-test"
+        assert state["preset_slots"][0] == "Legit"
+        c2 = _make_config()
+        assert load_config(c2, "config.json") is True
+        assert c2.web_control_token == "fake-token-for-test"
+        assert c2.preset_slots[0] == "Legit"
+
+    def test_old_config_json_token_survives_the_move(self):
+        """First launch after the update: the token is still in config.json
+        and state.json doesn't have it yet."""
+        from core.config import save_config, load_config
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump({"config_version": 2,
+                       "web_control": {"enabled": True, "token": "old-token"},
+                       "ui": {"active_preset_name": "giveup"}}, f)
+        with open("state.json", "w", encoding="utf-8") as f:
+            json.dump({"disclaimer_agreed": True}, f)
+        c = _make_config()
+        assert load_config(c, "config.json") is True
+        assert c.web_control_token == "old-token"
+        assert c.active_preset_name == "giveup"
+        assert c.disclaimer_agreed is True
+        save_config(c, "config.json")
+        assert "old-token" not in open("config.json", encoding="utf-8").read()
+        assert json.load(open("state.json", encoding="utf-8"))["web_control_token"] == "old-token"
 
     def test_status_panel_show_preset_config_defaults_true_and_round_trips(self):
         c = _make_config()
@@ -340,7 +376,7 @@ class TestConfigSerialization:
         assert c.aim_target_class_ids == []
         c.aim_target_class_ids = [0, 2]
         d = c.to_dict()
-        assert d['aim']['target_class_ids'] == [0, 2]
+        assert d['inference']['target_class_ids'] == [0, 2]
 
         c2 = _make_config()
         c2.from_dict(d)
@@ -458,7 +494,7 @@ class TestConfigFileIO:
             assert 'language' not in data
             assert 'ghost_key' not in data
             # config_version must be present (v2 grouped schema)
-            assert data.get('config_version') == 2
+            assert data.get('config_version') == 3
         finally:
             os.unlink(filepath)
             _sp = os.path.join(os.path.dirname(filepath), 'state.json')
@@ -495,7 +531,7 @@ class TestConfigFileIO:
             save_config(c, filepath)
             with open(filepath, 'r', encoding='utf-8') as f:
                 nested = json.load(f)
-            assert nested['config_version'] == 2
+            assert nested['config_version'] == 3
             assert nested['aim']['fov_size'] == 277
             assert nested['model']['backend'] == 'tensorrt'
             assert 'disclaimer_agreed' not in json.dumps(nested)
@@ -971,3 +1007,52 @@ def test_validate_config_clamps_like_load_config():
     c.detect_interval = 0
     validate_config(c)
     assert c.detect_interval == 0.001
+
+
+class TestV3Layout:
+    """config_version 3: keys/inference out of aim, MAKCU and Arduino in one
+    group each, ocr -> weapon_detection. Old v2 files keep loading."""
+
+    def test_moved_fields_are_in_their_new_groups(self):
+        d = _make_config().to_dict()
+        assert d['keys']['aim_keys'] and 'toggle_key' in d['keys'] and 'auto_fire' in d['keys']
+        assert {'min_confidence', 'detect_range_size', 'keep_detecting',
+                'single_target_mode'} <= set(d['inference'])
+        assert 'enabled' in d['inference']['semantic_filter']
+        for gone in ('aim_keys', 'aim_toggle_key', 'min_confidence', 'semantic_filter'):
+            assert gone not in d['aim']
+        assert 'key' not in d['autofire'] and 'devices' not in d['hardware']
+        assert d['hardware']['makcu']['aim_button'] and 'port' in d['hardware']['arduino']
+        assert 'ocr' not in d and 'mode' in d['weapon_detection']
+        assert 'show_aim_status' in d['display']['status_panel']
+
+    def test_v2_config_still_loads(self):
+        v2 = {
+            "config_version": 2,
+            "aim": {"aim_keys": [1, 6, 2], "aim_toggle_key": 45, "min_confidence": 0.3,
+                    "detect_range_size": 640, "keep_detecting": True, "target_class_ids": [0],
+                    "detect_semantic_filter_enabled": True,
+                    "semantic_filter": {"min_bbox_area_px": 12.0}, "fov_size": 222},
+            "autofire": {"key": 5, "key2": 6},
+            "hardware": {"devices": {"makcu": {"port": "COM7", "connection": "udp"},
+                                     "arduino": {"port": "COM3"}},
+                         "makcu": {"aim_button": "rmb"}},
+            "ocr": {"mode": "v2_onnx", "hud_model_path": "Model_Hud\\x.onnx"},
+            "display": {"status_panel": {"show_auto_aim": False}},
+        }
+        c = _make_config()
+        c.from_dict(v2)
+        assert c.AimKeys == [1, 6, 2] and c.aim_toggle_key == 45
+        assert c.min_confidence == 0.3 and c.detect_range_size == 640
+        assert c.aim_target_class_ids == [0] and c.detect_semantic_filter_enabled is True
+        assert c.detect_min_bbox_area_px == 12.0 and c.fov_size == 222
+        assert (c.auto_fire_key, c.auto_fire_key2) == (5, 6)
+        assert c.makcu_com_port == "COM7" and c.makcu_connection == "udp"
+        assert c.arduino_com_port == "COM3" and c.makcu_aim_button == "rmb"
+        assert c.second_inference_mode == "v2_onnx"
+        assert c.status_panel_show_auto_aim is False
+        # Saved back out in the v3 layout, with forward slashes.
+        d = c.to_dict()
+        assert d['config_version'] == 3 and d['keys']['aim_keys'] == [1, 6, 2]
+        assert d['weapon_detection']['hud_model_path'] == "Model_Hud/x.onnx"
+

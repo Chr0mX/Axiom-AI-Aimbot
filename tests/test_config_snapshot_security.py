@@ -15,6 +15,7 @@ import pytest
 from core.config_manager import (
     _SNAPSHOT_EXCLUDED_FIELDS,
     ConfigManager,
+    _settings_from_file,
 )
 
 SECRET_FIELDS = ("web_control_enabled", "web_control_port", "web_control_token",
@@ -56,7 +57,7 @@ def test_exported_snapshot_contains_no_secret_fields(full_mgr):
 
     path = os.path.join(full_mgr.configs_dir, "mine.json")
     raw = open(path, encoding="utf-8").read()
-    saved = json.loads(raw)["config"]
+    saved = _settings_from_file(json.loads(raw))
     assert "super-secret-token" not in raw
     for field in SECRET_FIELDS:
         assert field not in saved

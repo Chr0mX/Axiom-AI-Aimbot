@@ -490,11 +490,11 @@ class ConfigsPage(BasePage):
 
     - **Config** (top): full settings snapshots — every Config field,
       the same "everything" a hand-edited config.json would carry. Backed
-      by a ConfigManager(configs_dir="configs", aim_only=False).
+      by a ConfigManager(aim_only=False) (user/configs/).
     - **Preset** (bottom): aim-only settings — lets the user swap
       aiming/tracking/humanization behavior without touching capture,
       model, display, hardware, or any other setting. Backed by the
-      existing ConfigManager(configs_dir="presets") (aim_only=True, the
+      existing ConfigManager() (user/presets/, aim_only=True, the
       default).
 
     Both boxes are plain _ManagerBox instances differing only in which

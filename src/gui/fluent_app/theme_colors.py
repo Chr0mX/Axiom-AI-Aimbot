@@ -45,7 +45,9 @@ class ColorConfigLoader:
         """Loads the JSON configuration file"""
         try:
             # Try multiple possible paths
+            from core.paths import user_path
             possible_paths = [
+                user_path("theme_colors.json"),
                 os.path.join(os.path.dirname(__file__), "..", "..", "..", "theme_colors.json"),
                 os.path.join(os.path.dirname(__file__), "..", "..", "theme_colors.json"),
                 "theme_colors.json",

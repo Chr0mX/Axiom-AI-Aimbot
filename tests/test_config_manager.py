@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
+from core.config_manager import _settings_from_file
+
 
 def _make_config():
     """建立一個 mock Config"""
@@ -68,14 +70,16 @@ class TestConfigManagerSaveLoad:
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             assert data['name'] == "test_profile"
-            assert 'config' in data
+            assert 'settings' in data and 'config' not in data
             # A preset is aim-only, not a full config snapshot: aim/tracking
             # fields round-trip...
-            assert data['config']['fov_size'] == 777
-            assert data['config']['pid_kp_x'] == 0.42
+            assert data['kind'] == 'preset' and data['config_version'] == 3
+            assert data['settings']['aim']['fov_size'] == 777  # grouped, like config.json
+            assert _settings_from_file(data)['fov_size'] == 777
+            assert _settings_from_file(data)['pid_kp_x'] == 0.42
             # ...but a display-prefixed field never makes it into the file
             # at all, regardless of its value.
-            assert 'status_panel_show_mouse_click' not in data['config']
+            assert 'status_panel_show_mouse_click' not in _settings_from_file(data)
 
     def test_load_config_restores_values(self):
         from core.config_manager import ConfigManager
@@ -238,17 +242,16 @@ class TestConfigManagerPreview:
         with tempfile.TemporaryDirectory() as tmpdir:
             cm = ConfigManager(tmpdir)
             tuned = _make_config()
-            # detect_range_size (aim.detect_range_size) — model_path isn't
-            # aim-scoped anymore and would never appear in a preset diff at
-            # all now. Deliberately not an fov_*/pid_*/etc. field, which
+            # max_move_per_frame_px (aim.max_move_per_frame_px) — an aim
+            # field that isn't an fov_*/pid_*/etc. one, which
             # _PRESET_DIFF_GROUPS would fold into a named group instead of
             # reporting standalone.
-            tuned.detect_range_size = 321
+            tuned.max_move_per_frame_px = 321.0
             cm.save_config(tuned, "tuned")
 
             current = _make_config()
             result = cm.preview_config_changes(current, "tuned")
-            assert result == ["detect range size"]
+            assert result == ["max move per frame px"]
 
     def test_groups_multiple_pid_changes_together(self):
         from core.config_manager import ConfigManager
@@ -379,7 +382,7 @@ class TestConfigManagerAimOnlyScope:
             c = _make_config()
             cm.save_config(c, "scoped")
             with open(os.path.join(tmpdir, "scoped.json"), encoding="utf-8") as f:
-                saved = json.load(f)["config"]
+                saved = _settings_from_file(json.load(f))
 
             # Every key present is either a known aim/tracking field or the
             # separately-handled humanization block — nothing else leaked in.
@@ -396,7 +399,7 @@ class TestConfigManagerAimOnlyScope:
             c = _make_config()
             cm.save_config(c, "scoped")
             with open(os.path.join(tmpdir, "scoped.json"), encoding="utf-8") as f:
-                saved = json.load(f)["config"]
+                saved = _settings_from_file(json.load(f))
 
             for non_aim in (
                 "screenshot_method", "mouse_move_method", "model_path",
@@ -469,7 +472,7 @@ class TestConfigManagerFullConfigScope:
             c = _make_config()
             cm.save_config(c, "full")
             with open(os.path.join(tmpdir, "full.json"), encoding="utf-8") as f:
-                saved = json.load(f)["config"]
+                saved = _settings_from_file(json.load(f))
 
             # Every _FIELD_MAP attr the live Config actually has is present —
             # not just the aim/tracking subset — except the credential /
@@ -488,7 +491,7 @@ class TestConfigManagerFullConfigScope:
             c = _make_config()
             cm.save_config(c, "full")
             with open(os.path.join(tmpdir, "full.json"), encoding="utf-8") as f:
-                saved = json.load(f)["config"]
+                saved = _settings_from_file(json.load(f))
 
             for non_aim in (
                 "screenshot_method", "mouse_move_method", "model_path",
@@ -535,6 +538,7 @@ class TestConfigManagerFullConfigScope:
         monkeypatch.chdir(tmp_path)
         legacy_dir = tmp_path / "config"
         legacy_dir.mkdir()
+        monkeypatch.setattr("core.config_manager._LEGACY_CONFIGS_DIR", str(legacy_dir))
         (legacy_dir / "old_preset.json").write_text(
             json.dumps({"name": "old_preset", "config": {"fov_size": 111}}), encoding="utf-8")
 
@@ -555,9 +559,9 @@ class TestConfigManagerFullConfigScope:
             full_cm.save_config(c, "same_name")
 
             with open(os.path.join(preset_dir, "same_name.json"), encoding="utf-8") as f:
-                preset_saved = json.load(f)["config"]
+                preset_saved = _settings_from_file(json.load(f))
             with open(os.path.join(full_dir, "same_name.json"), encoding="utf-8") as f:
-                full_saved = json.load(f)["config"]
+                full_saved = _settings_from_file(json.load(f))
 
             assert "screenshot_method" not in preset_saved
             assert full_saved["screenshot_method"] == "udp"
@@ -571,7 +575,8 @@ class TestConfigManagerLegacyDirMigration:
         from core.config_manager import ConfigManager
         monkeypatch.chdir(tmp_path)
         cm = ConfigManager()
-        assert cm.configs_dir == "presets"
+        # Default is user/presets; conftest points the user folder at tmp_path.
+        assert cm.configs_dir == os.path.join(str(tmp_path), "presets")
         assert os.path.isdir(tmp_path / "presets")
 
     def test_migrates_existing_legacy_presets(self, monkeypatch, tmp_path):
@@ -579,6 +584,7 @@ class TestConfigManagerLegacyDirMigration:
         monkeypatch.chdir(tmp_path)
         legacy_dir = tmp_path / "config"
         legacy_dir.mkdir()
+        monkeypatch.setattr("core.config_manager._LEGACY_CONFIGS_DIR", str(legacy_dir))
         (legacy_dir / "my_old_preset.json").write_text(
             json.dumps({"name": "my_old_preset", "config": {"fov_size": 111}}),
             encoding="utf-8",
@@ -594,6 +600,7 @@ class TestConfigManagerLegacyDirMigration:
         monkeypatch.chdir(tmp_path)
         legacy_dir = tmp_path / "config"
         legacy_dir.mkdir()
+        monkeypatch.setattr("core.config_manager._LEGACY_CONFIGS_DIR", str(legacy_dir))
         (legacy_dir / "shared_name.json").write_text(
             json.dumps({"name": "shared_name", "config": {"fov_size": 111}}), encoding="utf-8")
 
@@ -678,3 +685,64 @@ class TestConfigManagerActiveNameTracking:
             c.active_preset_name = "unchanged"
             assert cm.load_config(c, "does_not_exist") is False
             assert c.active_preset_name == "unchanged"
+
+
+class TestAimPresetsLeaveKeysAlone:
+    """Aim presets only change aiming: key bindings and inference settings
+    moved out of the aim group (config_version 3), so they never travel."""
+
+    def test_old_preset_with_keys_does_not_rebind(self, tmp_path):
+        from core.config_manager import ConfigManager
+        cm = ConfigManager(str(tmp_path / "presets"))
+        (tmp_path / "presets" / "Legit.json").write_text(json.dumps({
+            "name": "Legit",
+            "config": {"AimKeys": [2, 2, 2], "aim_toggle_key": 99, "min_confidence": 0.95,
+                       "keep_detecting": False, "always_aim": True, "fov_size": 150},
+        }), encoding="utf-8")
+        c = _make_config()
+        keys, toggle = list(c.AimKeys), c.aim_toggle_key
+        conf, keep, always = c.min_confidence, c.keep_detecting, c.always_aim
+        assert cm.load_config(c, "Legit") is True
+        assert c.fov_size == 150  # aim setting applied
+        assert c.AimKeys == keys and c.aim_toggle_key == toggle
+        assert (c.min_confidence, c.keep_detecting, c.always_aim) == (conf, keep, always)
+
+    def test_new_preset_does_not_save_keys(self, tmp_path):
+        from core.config_manager import ConfigManager, _AIM_PRESET_FIELDS
+        for attr in ("AimKeys", "aim_toggle_key", "always_aim", "min_confidence",
+                     "detect_range_size", "keep_detecting", "auto_fire_key"):
+            assert attr not in _AIM_PRESET_FIELDS
+        assert {"fov_size", "pid_kp_x", "prediction_enabled"} <= _AIM_PRESET_FIELDS
+
+
+class TestPresetFileFormat:
+    """Presets/configs save with config.json's grouped names; old flat files
+    and v2-grouped files still load."""
+
+    def test_round_trip_new_format(self, tmp_path):
+        from core.config_manager import ConfigManager
+        cm = ConfigManager(str(tmp_path / "c"), aim_only=False)
+        c = _make_config()
+        c.pid_kp_x, c.screenshot_method = 0.61, "udp"
+        assert cm.save_config(c, "mine")
+        data = json.loads((tmp_path / "c" / "mine.json").read_text(encoding="utf-8"))
+        assert data["kind"] == "config"
+        assert data["settings"]["aim"]["pid"]["x"]["kp"] == 0.61
+        assert data["settings"]["capture"]["screenshot_method"] == "udp"
+        assert "pid_kp_x" not in json.dumps(data)
+        assert not list((tmp_path / "c").glob("*.tmp"))  # atomic write left nothing behind
+        other = _make_config()
+        assert cm.load_config(other, "mine") is True
+        assert other.pid_kp_x == 0.61 and other.screenshot_method == "udp"
+
+    def test_v2_grouped_file_loads(self, tmp_path):
+        from core.config_manager import ConfigManager
+        cm = ConfigManager(str(tmp_path / "c"), aim_only=False)
+        (tmp_path / "c" / "old.json").write_text(json.dumps({
+            "name": "old", "config": {"config_version": 2,
+                                      "aim": {"min_confidence": 0.42, "fov_size": 260},
+                                      "hardware": {"devices": {"makcu": {"port": "COM8"}}}},
+        }), encoding="utf-8")
+        c = _make_config()
+        assert cm.load_config(c, "old") is True
+        assert (c.min_confidence, c.fov_size, c.makcu_com_port) == (0.42, 260, "COM8")

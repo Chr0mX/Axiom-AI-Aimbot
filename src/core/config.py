@@ -9,11 +9,12 @@ import json
 import logging
 import os
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
 from .humanization import HumanizationConfig
+from .paths import user_path
 
 
 def _get_screen_size() -> tuple[int, int]:
@@ -25,8 +26,24 @@ def _get_screen_size() -> tuple[int, int]:
 
 _MISSING = object()
 
-# One-time app state — persisted to state.json, NOT config.json.
-STATE_FIELDS = ('disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_once')
+# App state — persisted to state.json, NOT config.json. Besides the one-time
+# flags this holds the Web Control token (a password: config.json gets shared,
+# state.json shouldn't be), the last loaded preset/config names and the Web
+# Control Quick Preset slots — state the app keeps, not settings you tune.
+STATE_FIELDS = (
+    'disclaimer_agreed', 'first_run_complete', 'ndi_installer_ran_once',
+    'web_control_token', 'active_preset_name', 'active_config_name', 'preset_slots',
+)
+
+# Where config.json kept the newer state fields before they moved to
+# state.json. from_dict() still reads them so the first launch after the move
+# keeps the old token/slots; the next save writes them to state.json only.
+_LEGACY_STATE_PATHS = {
+    'web_control_token':  'web_control.token',
+    'preset_slots':       'web_control.preset_slots',
+    'active_preset_name': 'ui.active_preset_name',
+    'active_config_name': 'ui.active_config_name',
+}
 
 _TRUE_STRINGS = frozenset({'1', 'true', 'yes', 'on'})
 _FALSE_STRINGS = frozenset({'0', 'false', 'no', 'off'})
@@ -90,26 +107,26 @@ _FIELD_MAP = {
     # --- aim ---
     'fov_size':                   'aim.fov_size',
     'fov_height':                 'aim.fov_height',
-    'detect_range_size':          'aim.detect_range_size',
-    'min_confidence':             'aim.min_confidence',
+    'detect_range_size':          'inference.detect_range_size',
+    'min_confidence':             'inference.min_confidence',
     'aim_part':                   'aim.aim_part',
-    'AimKeys':                    'aim.aim_keys',
-    'aim_toggle_key':             'aim.aim_toggle_key',
-    'AimToggle':                  'aim.aim_toggle',
-    'always_aim':                 'aim.always_aim',
+    'AimKeys':                    'keys.aim_keys',
+    'aim_toggle_key':             'keys.toggle_key',
+    'AimToggle':                  'keys.aim_toggle',
+    'always_aim':                 'keys.always_aim',
     'aim_start_delay_ms':         'aim.start_delay_ms',
-    'keep_detecting':             'aim.keep_detecting',
-    'single_target_mode':         'aim.single_target_mode',
+    'keep_detecting':             'inference.keep_detecting',
+    'single_target_mode':         'inference.single_target_mode',
     'fov_follow_mouse':           'aim.fov_follow_mouse',
     'fov_circle_filter_enabled':  'aim.fov_circle_filter_enabled',
     'fov_reduce_on_target_enabled': 'aim.fov_reduce.enabled',
     'fov_min_size_pct':           'aim.fov_reduce.min_size_pct',
     'fov_min_size_duration':      'aim.fov_reduce.duration',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
-    'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
-    'detect_min_bbox_area_px':    'aim.semantic_filter.min_bbox_area_px',
-    'detect_min_bbox_short_side_px': 'aim.semantic_filter.min_bbox_short_side_px',
-    'detect_min_bbox_max_side_frac': 'aim.semantic_filter.min_bbox_max_side_frac',
+    'detect_semantic_filter_enabled': 'inference.semantic_filter.enabled',
+    'detect_min_bbox_area_px':    'inference.semantic_filter.min_bbox_area_px',
+    'detect_min_bbox_short_side_px': 'inference.semantic_filter.min_bbox_short_side_px',
+    'detect_min_bbox_max_side_frac': 'inference.semantic_filter.min_bbox_max_side_frac',
     'pid_kp_x':                   'aim.pid.x.kp',
     'pid_ki_x':                   'aim.pid.x.ki',
     'pid_kd_x':                   'aim.pid.x.kd',
@@ -143,11 +160,11 @@ _FIELD_MAP = {
     'aim_y_offset_frac':          'aim.target_area.y_offset_frac',
     'aim_ema_smoothing_enabled':  'aim.movement.ema_enabled',
     'aim_ema_smoothing':          'aim.movement.ema',
-    'aim_target_class_ids':       'aim.target_class_ids',
+    'aim_target_class_ids':       'inference.target_class_ids',
 
     # --- autofire ---
-    'auto_fire_key':              'autofire.key',
-    'auto_fire_key2':             'autofire.key2',
+    'auto_fire_key':              'keys.auto_fire',
+    'auto_fire_key2':             'keys.auto_fire2',
     'always_auto_fire':           'autofire.always',
     'auto_fire_delay':            'autofire.delay',
     'auto_fire_interval':         'autofire.interval',
@@ -202,7 +219,7 @@ _FIELD_MAP = {
     'box_color_theme':            'display.box_color_theme',
     'chroma_box_speed':           'display.chroma_box_speed',
     'show_status_panel':          'display.status_panel.show',
-    'status_panel_show_auto_aim': 'display.status_panel.show_auto_aim',
+    'status_panel_show_auto_aim': 'display.status_panel.show_aim_status',
     'status_panel_show_aim_toggle': 'display.status_panel.show_aim_toggle',
     'status_panel_show_preset_config': 'display.status_panel.show_preset_config',
     'status_panel_show_model':    'display.status_panel.show_model',
@@ -231,24 +248,22 @@ _FIELD_MAP = {
     'web_esp_fps':                'web_esp.fps',
     'web_control_enabled':        'web_control.enabled',
     'web_control_port':           'web_control.port',
-    'web_control_token':          'web_control.token',
-    'preset_slots':               'web_control.preset_slots',
 
     # --- hardware ---
     'mouse_move_method':          'hardware.mouse_move_method',
     'mouse_click_method':         'hardware.mouse_click_method',
-    'arduino_com_port':           'hardware.devices.arduino.port',
-    'arduino_baud_rate':          'hardware.devices.arduino.baud_rate',
-    'makcu_com_port':             'hardware.devices.makcu.port',
-    'makcu_baud_rate':            'hardware.devices.makcu.baud_rate',
+    'arduino_com_port':           'hardware.arduino.port',
+    'arduino_baud_rate':          'hardware.arduino.baud_rate',
+    'makcu_com_port':             'hardware.makcu.port',
+    'makcu_baud_rate':            'hardware.makcu.baud_rate',
     'makcu_aim_button':           'hardware.makcu.aim_button',
     'makcu_aim_mode':             'hardware.makcu.aim_mode',
     'makcu_disengage_delay':      'hardware.makcu.disengage_delay',
     'makcu_always_aim_button':    'hardware.makcu.always_aim_button',
     'makcu_always_aim_mode':      'hardware.makcu.always_aim_mode',
-    'makcu_connection':           'hardware.devices.makcu.connection',
-    'makcu_udp_host':             'hardware.devices.makcu.udp_host',
-    'makcu_udp_port':             'hardware.devices.makcu.udp_port',
+    'makcu_connection':           'hardware.makcu.connection',
+    'makcu_udp_host':             'hardware.makcu.udp_host',
+    'makcu_udp_port':             'hardware.makcu.udp_port',
     'makcu_device_hotkeys':       'hardware.makcu.device_hotkeys',
     'makcu_lock_physical_move':   'hardware.makcu.lock_physical_move',
     'makcu_mouse_spread_enabled': 'hardware.makcu.mouse_spread.enabled',
@@ -262,21 +277,57 @@ _FIELD_MAP = {
     'acrylic_window_alpha':       'ui.acrylic_window_alpha',
     'acrylic_element_alpha':      'ui.acrylic_element_alpha',
     'show_console':               'ui.show_console',
-    'active_preset_name':         'ui.active_preset_name',
-    'active_config_name':         'ui.active_config_name',
 
     # --- ocr / 2nd inference ---
-    'second_inference_mode':      'ocr.mode',
-    'second_inference_fps':       'ocr.fps',
-    'hud_model_path':             'ocr.hud_model_path',
-    'hud_confidence':             'ocr.hud_confidence',
-    'hud_game':                   'ocr.hud_game',
-    'hud_roi_coords':             'ocr.hud_roi_coords',
-    'hud_udp_enabled':            'ocr.hud_udp_enabled',
-    'hud_udp_bind_ip':            'ocr.hud_udp_bind_ip',
-    'hud_udp_bind_port':          'ocr.hud_udp_bind_port',
+    'second_inference_mode':      'weapon_detection.mode',
+    'second_inference_fps':       'weapon_detection.fps',
+    'hud_model_path':             'weapon_detection.hud_model_path',
+    'hud_confidence':             'weapon_detection.hud_confidence',
+    'hud_game':                   'weapon_detection.hud_game',
+    'hud_roi_coords':             'weapon_detection.hud_roi_coords',
+    'hud_udp_enabled':            'weapon_detection.hud_udp_enabled',
+    'hud_udp_bind_ip':            'weapon_detection.hud_udp_bind_ip',
+    'hud_udp_bind_port':          'weapon_detection.hud_udp_bind_port',
 }
 
+
+# v2 paths of fields that moved in config_version 3 (keys/inference groups
+# split out of aim, MAKCU/Arduino merged, ocr -> weapon_detection). from_dict()
+# still reads these, so v2 config.json files and grouped presets load unchanged.
+_V2_PATHS = {
+    'AimKeys': 'aim.aim_keys',
+    'aim_toggle_key': 'aim.aim_toggle_key',
+    'AimToggle': 'aim.aim_toggle',
+    'always_aim': 'aim.always_aim',
+    'auto_fire_key': 'autofire.key',
+    'auto_fire_key2': 'autofire.key2',
+    'min_confidence': 'aim.min_confidence',
+    'detect_range_size': 'aim.detect_range_size',
+    'keep_detecting': 'aim.keep_detecting',
+    'single_target_mode': 'aim.single_target_mode',
+    'aim_target_class_ids': 'aim.target_class_ids',
+    'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
+    'detect_min_bbox_area_px': 'aim.semantic_filter.min_bbox_area_px',
+    'detect_min_bbox_short_side_px': 'aim.semantic_filter.min_bbox_short_side_px',
+    'detect_min_bbox_max_side_frac': 'aim.semantic_filter.min_bbox_max_side_frac',
+    'makcu_com_port': 'hardware.devices.makcu.port',
+    'makcu_baud_rate': 'hardware.devices.makcu.baud_rate',
+    'makcu_connection': 'hardware.devices.makcu.connection',
+    'makcu_udp_host': 'hardware.devices.makcu.udp_host',
+    'makcu_udp_port': 'hardware.devices.makcu.udp_port',
+    'arduino_com_port': 'hardware.devices.arduino.port',
+    'arduino_baud_rate': 'hardware.devices.arduino.baud_rate',
+    'status_panel_show_auto_aim': 'display.status_panel.show_auto_aim',
+    'second_inference_mode': 'ocr.mode',
+    'second_inference_fps': 'ocr.fps',
+    'hud_model_path': 'ocr.hud_model_path',
+    'hud_confidence': 'ocr.hud_confidence',
+    'hud_game': 'ocr.hud_game',
+    'hud_roi_coords': 'ocr.hud_roi_coords',
+    'hud_udp_enabled': 'ocr.hud_udp_enabled',
+    'hud_udp_bind_ip': 'ocr.hud_udp_bind_ip',
+    'hud_udp_bind_port': 'ocr.hud_udp_bind_port',
+}
 
 def _set_path(d: Dict[str, Any], path: str, value: Any) -> None:
     """Set a nested dict value from a dotted path, creating intermediate dicts."""
@@ -313,7 +364,7 @@ class Config:
     """
     
     def __init__(self) -> None:
-        self.config_version: int = 2
+        self.config_version: int = 3
 
         # Automatically get screen resolution
         self.width, self.height = _get_screen_size()
@@ -859,14 +910,17 @@ class Config:
         self.humanization: HumanizationConfig = HumanizationConfig()
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize persisted config into the grouped (v2) JSON schema.
+        """Serialize persisted config into the grouped JSON schema (config_version 3).
 
         State flags (STATE_FIELDS) are written to state.json instead and are
         intentionally excluded here.
         """
         out: Dict[str, Any] = {'config_version': self.config_version}
         for attr, path in _FIELD_MAP.items():
-            _set_path(out, path, getattr(self, attr))
+            val = getattr(self, attr)
+            if attr in ('model_path', 'hud_model_path') and isinstance(val, str):
+                val = val.replace('\\', '/')  # one separator style in the file
+            _set_path(out, path, val)
         # Crosshair RGB triplet → single [r, g, b] array.
         _set_path(out, 'display.crosshair.color',
                   [self.crosshair_color_r, self.crosshair_color_g, self.crosshair_color_b])
@@ -882,6 +936,8 @@ class Config:
         """
         for attr, path in _FIELD_MAP.items():
             val = _get_path(data, path)
+            if val is _MISSING and attr in _V2_PATHS:
+                val = _get_path(data, _V2_PATHS[attr])  # v2 layout fallback
             if val is _MISSING:
                 val = data.get(attr, _MISSING)  # legacy flat fallback
             if val is not _MISSING and hasattr(self, attr):
@@ -918,10 +974,15 @@ class Config:
                 if hasattr(self.humanization, hk):
                     setattr(self.humanization, hk, hv)
 
-        # Legacy flat state fields (back-compat; canonical source is state.json).
+        # Legacy state fields (back-compat; canonical source is state.json):
+        # flat keys, and the grouped spots config.json used before.
         for f in STATE_FIELDS:
             if f in data and hasattr(self, f):
                 setattr(self, f, data[f])
+        for f, path in _LEGACY_STATE_PATHS.items():
+            val = _get_path(data, path)
+            if val is not _MISSING:
+                setattr(self, f, val)
 
 
 def _state_path_for(config_path: str) -> str:
@@ -978,8 +1039,9 @@ def _quarantine_unreadable_file(filepath: str) -> str | None:
         return None
 
 
-def save_state(config_instance: Config, filepath: str = 'state.json') -> bool:
-    """Persist one-time app state (STATE_FIELDS) to state.json."""
+def save_state(config_instance: Config, filepath: Optional[str] = None) -> bool:
+    """Persist one-time app state (STATE_FIELDS) to state.json (default: user/state.json)."""
+    filepath = filepath or user_path('state.json')
     try:
         data = {f: getattr(config_instance, f) for f in STATE_FIELDS}
         _atomic_write_text(filepath, json.dumps(data, ensure_ascii=False, indent=2))
@@ -989,8 +1051,9 @@ def save_state(config_instance: Config, filepath: str = 'state.json') -> bool:
         return False
 
 
-def load_state(config_instance: Config, filepath: str = 'state.json') -> bool:
+def load_state(config_instance: Config, filepath: Optional[str] = None) -> bool:
     """Load one-time app state from state.json (overrides any inline values)."""
+    filepath = filepath or user_path('state.json')
     if not os.path.exists(filepath):
         return False
     try:
@@ -1005,14 +1068,15 @@ def load_state(config_instance: Config, filepath: str = 'state.json') -> bool:
         return False
 
 
-def save_config(config_instance: Config, filepath: str = 'config.json') -> bool:
+def save_config(config_instance: Config, filepath: Optional[str] = None) -> bool:
     """
-    將配置儲存到 JSON 檔案
+    將配置儲存到 JSON 檔案 (default: user/config.json — see core/paths.py)
 
     Writes the grouped (v2) schema via to_dict() — no stale keys survive. One-time
     app state goes to state.json, and language preference to language.json, so
     config.json holds only user settings.
     """
+    filepath = filepath or user_path('config.json')
     try:
         # Serialize fully first, then swap the file in atomically — a failure
         # at either step leaves the existing config.json untouched.
@@ -1080,17 +1144,18 @@ def validate_config(config_instance: Config) -> None:
     _validate_queue_and_confidence(config_instance)
 
 
-def load_config(config_instance: Config, filepath: str = 'config.json') -> bool:
+def load_config(config_instance: Config, filepath: Optional[str] = None) -> bool:
     """
     從 JSON 檔案載入配置
     
     Args:
         config_instance: Config 實例
-        filepath: 載入路徑
-        
+        filepath: 載入路徑 (default: user/config.json — see core/paths.py)
+
     Returns:
         是否成功載入
     """
+    filepath = filepath or user_path('config.json')
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)

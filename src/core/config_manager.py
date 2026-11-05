@@ -13,7 +13,9 @@ import shutil
 from datetime import datetime
 from typing import List, Optional, Dict, Any, TYPE_CHECKING
 
-from .config import _FIELD_MAP, STATE_FIELDS, validate_config
+from .config import (_FIELD_MAP, STATE_FIELDS, validate_config, _MISSING, _V2_PATHS,
+                     _atomic_write_text, _get_path, _set_path)
+from .paths import project_root, user_path
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ _BUILTIN_PRESETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 # it never did; it only ever held presets). _migrate_legacy_config_dir()
 # does a one-time copy of anything found here into the new `presets/`
 # default so nobody's saved presets silently vanish across the rename.
-_LEGACY_CONFIGS_DIR = "config"
+_LEGACY_CONFIGS_DIR = os.path.join(project_root(), "config")
 
 _INVALID_NAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 
@@ -78,6 +80,52 @@ _SNAPSHOT_RELATIVE_ONLY_FIELDS = ('model_path', 'hud_model_path')
 def _strip_snapshot_excluded(data: Dict[str, Any]) -> Dict[str, Any]:
     """Drop `_SNAPSHOT_EXCLUDED_FIELDS` from loaded snapshot data."""
     return {k: v for k, v in data.items() if k not in _SNAPSHOT_EXCLUDED_FIELDS}
+
+
+# Preset/config file format. Files saved now look like
+#   {"kind": "preset"|"config", "config_version": 3, "name": ..., "saved_at": ...,
+#    "settings": {<same grouped layout as config.json>}}
+# Older files wrap flat attr names under "config" ({"pid_kp_x": ...}); both load.
+_FILE_FORMAT_VERSION = 3
+
+
+def _flat_to_grouped(flat: Dict[str, Any]) -> Dict[str, Any]:
+    """{attr: value} -> the grouped layout config.json uses."""
+    out: Dict[str, Any] = {}
+    for attr, value in flat.items():
+        if attr == 'humanization':
+            out['humanization'] = value
+        elif attr in _FIELD_MAP:
+            _set_path(out, _FIELD_MAP[attr], value)
+    return out
+
+
+def _grouped_to_flat(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Grouped (v3 or v2) or flat settings -> {attr: value}. Unknown keys
+    are dropped; humanization is kept as its own block."""
+    flat: Dict[str, Any] = {}
+    for attr, path in _FIELD_MAP.items():
+        val = _get_path(data, path)
+        if val is _MISSING and attr in _V2_PATHS:
+            val = _get_path(data, _V2_PATHS[attr])
+        if val is _MISSING:
+            val = data.get(attr, _MISSING)
+        if val is not _MISSING:
+            flat[attr] = val
+    if isinstance(data.get('humanization'), dict):
+        flat['humanization'] = data['humanization']
+    return flat
+
+
+def _settings_from_file(raw: Any) -> Dict[str, Any]:
+    """The flat {attr: value} settings of a preset/config file, whatever
+    format it was saved in."""
+    if not isinstance(raw, dict):
+        return {}
+    body = raw.get('settings', raw.get('config', raw))
+    if not isinstance(body, dict):
+        return {}
+    return _grouped_to_flat(body)
 
 
 def _is_outside_app_path(path: Any) -> bool:
@@ -245,8 +293,9 @@ class ConfigManager:
             ConfigManager instances — see configs_page.py.
     """
 
-    def __init__(self, configs_dir: str = "presets", aim_only: bool = True) -> None:
-        self.configs_dir = configs_dir
+    def __init__(self, configs_dir: Optional[str] = None, aim_only: bool = True) -> None:
+        # Default: user/presets (aim presets) or user/configs (full configs).
+        self.configs_dir = configs_dir or user_path("presets" if aim_only else "configs")
         self.aim_only = aim_only
         self.ensure_configs_directory()
 
@@ -330,15 +379,18 @@ class ConfigManager:
 
         # Build the config/preset data payload
         config_data = {
+            'kind': 'preset' if self.aim_only else 'config',
+            'config_version': _FILE_FORMAT_VERSION,
             'name': config_name,
-            'created_time': datetime.now().isoformat(),
-            'description': f"{'Preset' if self.aim_only else 'Config'} - {config_name}",
-            'config': self._get_config_data(config_instance)
+            'saved_at': datetime.now().isoformat(timespec='seconds'),
+            # Same grouped names as config.json (aim.pid.x.kp, not pid_kp_x).
+            'settings': _flat_to_grouped(self._get_config_data(config_instance)),
         }
-        
+
         try:
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(config_data, f, ensure_ascii=False, indent=2)
+            # Temp file + rename, like config.json: a crash mid-save can't
+            # leave a truncated preset behind.
+            _atomic_write_text(config_path, json.dumps(config_data, ensure_ascii=False, indent=2))
             # The live config now *is* this named preset/config — mirrors a
             # typical "Save As" (see load_config()'s matching update, and
             # Config.active_preset_name/active_config_name's docstring).
@@ -408,8 +460,9 @@ class ConfigManager:
             with open(config_path, 'r', encoding='utf-8') as f:
                 raw = json.load(f)
 
-            # Preset/config files wrap settings under a 'config' key; support both wrapped and flat.
-            config_data = raw.get('config', raw)
+            # New files keep grouped names under 'settings'; older ones flat
+            # attr names under 'config'. Both become {attr: value} here.
+            config_data = _settings_from_file(raw)
             if self.aim_only:
                 # Enforce the aim-only scope on the way in too, not just on
                 # the way out via _get_config_data() — a preset file saved
@@ -470,7 +523,7 @@ class ConfigManager:
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 raw = json.load(f)
-            preset_data = raw.get('config', raw)
+            preset_data = _settings_from_file(raw)
         except (OSError, json.JSONDecodeError) as e:
             logger.error("Failed to read preset '%s' for preview: %s", config_name, e)
             return None
