@@ -1383,7 +1383,9 @@ class TestMakcuStreamHealth:
 
 
 def test_watchdog_active_follows_the_reconnect_thread():
-    from win_utils import makcu_mouse as mm
+    import importlib
+    # The module, not the win_utils.makcu_mouse instance the package exports.
+    mm = importlib.import_module("win_utils.makcu_mouse")
     original = mm.makcu_mouse._reconnect_thread
     try:
         mm.makcu_mouse._reconnect_thread = None
