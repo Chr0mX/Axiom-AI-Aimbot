@@ -45,6 +45,9 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 - **Advanced Aim Control**
   - PID controller with separate X/Y axis tuning; an **Unsafe Mode** toggle re-maps the reaction-speed (Kp) sliders from the default safe 0–0.5 range up to a full 0–1.0 for users who want to push past the normally-capped travel.
   - Customizable FOV with independent width/height (so it can be a rectangle, not just a square) and an optional circle/ellipse shape, plus an independent detection range.
+  - **Reduce FOV on Active Target** — once a target is locked the FOV shrinks gradually to a set percentage, so another target near the edge can't steal the lock.
+  - **Target class filter** — pick which model classes count as targets (e.g. enemies only on a model that also detects teammates).
+  - **Aim Start Delay** — wait a set number of milliseconds after aim engages before moving.
   - Single-target mode for focusing on the nearest threat.
   - FOV follows mouse cursor for dynamic aiming.
   - Configurable head/body region ratios, plus manual fine-tune for the exact aim point; the head ratio can also scale automatically with target distance (box height).
@@ -62,6 +65,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 - **Smart Tracker (Prediction System)**
   - Velocity-based (constant-velocity extrapolation) and 2D Kalman-filter-based motion prediction for leading moving targets — independent toggles, so both can run together (prediction extrapolates ahead, Kalman then smooths the result).
   - Configurable prediction horizon, history length, and a velocity sanity cap that discards history and resets cleanly on a sudden detection jump (e.g. a new target acquired far from the last one) instead of extrapolating garbage.
+  - Optional refinements: capture timestamps, least-squares velocity, a velocity deadzone, and own-mouse compensation; a second overlay marker shows the predicted aim point next to the raw one.
   - Both predictors also reset on true target loss so stale velocity never carries into whatever's acquired next.
   - Sticky lock with IOU-based target persistence across frames — tolerates a few bad detection frames without dropping the target; the IOU threshold adapts to FOV size.
   - Smart center-mass aim point that adapts to crouching targets.
@@ -84,22 +88,34 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
     - **ddxoft**
     - **Arduino Leonardo**
     - **Xbox 360 Virtual Controller**
-    - **MAKCU** (USB HID, 4 Mbaud, auto-reconnect, hardware button-state reads, Hold/Toggle aim mode with a configurable disengage delay)
+    - **MAKCU** (USB HID, 4 Mbaud, auto-reconnect, hardware button-state reads, Hold/Toggle aim mode with a configurable disengage delay). Connects automatically at startup or when plugged in later. V4 / MAKXD firmware adds a binary protocol, a UDP connection, device keys as hotkeys, physical-move lock while aiming, and mouse spread.
 
 - **Live Capture Preview**
   - Collapsible side panel shows the active capture feed in real-time with FPS counter.
   - Supports pop-out mode and optional crop to detection region.
   - Works with all backends: dxcam, MSS, UVC (with an optional native DirectShow v2 capture path for lower, OBS-like latency), NDI, and UDP (an MJPEG-over-UDP stream matching OBS's `udp_stream_filter` plugin, for capturing from a second PC).
+  - **Capture FPS Limit**, and frames are only decoded or drawn when something is actually using them.
+  - **HUD UDP Stream** — for a 2-PC setup whose main UDP stream is a small center crop: a second OBS filter sends just the weapon HUD to its own port (default 5601) so weapon detection still works.
 
 - **Web ESP Overlay**
   - Streams live detection boxes/state to a lightweight web page over WebSocket.
   - Point an OBS Browser Source (or any browser, on any machine on the network) at it to render ESP without capturing the main game overlay.
   - HUD shows aim on/off, aim active/idle, model, capture method, capture FPS, inference FPS, target count, and network latency — draggable and stylable from the in-page settings panel.
 
+- **Web Control (remote settings from any browser on your network)**
+  - Turn on in **Other → Remote Control**; open the shown address and paste the access token.
+  - Every desktop tab is mirrored: switch model/backend (with a confirmed restart when needed), start/stop AI, connect MAKCU, run a TensorRT conversion with a live log, change any setting, and watch a live capture preview for UVC/NDI/UDP.
+  - Presets and configs as a card list (the loaded one is marked), plus five Quick Preset shortcut slots in the sidebar.
+  - Two looks to choose from on its Other tab: **Studio** (default, uses the full window width) and **Instrument** (dense).
+
+- **Status Panel GPU Monitoring** (optional, NVIDIA)
+  - Temperature, load, VRAM, fan, clocks and power on the in-game status panel, each switchable. Run `Install NVML.bat` once to enable it.
+
 - **Model & Config Management**
   - Searchable, filter-as-you-type model dropdown on both the Model and Convert pages.
   - Hotkey conflict warning — flags genuinely confusing rebinds (a redundant duplicate within the same key group, or the toggle key landing on the same button as a hold key) without flagging intentional "one button does two things" setups as a problem.
-  - Loading a saved config preset shows a summary of exactly what it will change first, instead of silently overwriting your current settings.
+  - **Presets** hold only the Aim tab's settings (aim, tracking, humanization); **Configs** are full snapshots of every setting. Both live on the Configs tab.
+  - Loading either shows a summary of exactly what it will change first, instead of silently overwriting your current settings. The status panel shows which one is loaded.
 
 - **Modern Fluent Design UI**
   - Built with PyQt6 + QFluentWidgets for a native Windows 11 look.
@@ -293,9 +309,9 @@ Use these logs to verify which provider actually ended up active, or whether run
    - **Aim Tab** — FOV, PID tuning, prediction (Velocity/Kalman), smoothing, aim-point fine-tune, Humanization, Y-axis recoil suppression, sticky lock.
    - **Trigger Tab** — Configure auto-fire delay, interval, and target priority.
    - **Keys Tab** — Set your preferred hotkeys for toggling aim and auto-fire, with a warning if a rebind creates a genuinely confusing conflict.
-   - **Configs Tab** — Save / load configuration presets; loading shows a summary of what will actually change first.
+   - **Configs Tab** — Save / load full configs and aim-only presets; loading shows a summary of what will actually change first.
    - **Convert Tab** — Convert ONNX models to TensorRT engines.
-   - **Other Tab** — Mouse method, Arduino, Xbox controller, MAKCU, performance options, and detailed debugging info.
+   - **Other Tab** — Mouse method, Arduino, Xbox controller, MAKCU, performance options, Remote Control (Web Control), and detailed debugging info.
 
 3. **Start Detection**
    - Press the configured toggle key (default: `Insert`).
@@ -323,6 +339,7 @@ Axiom/
 ├── 啟動Launcher.bat              # Quick-start launcher
 ├── Install TensorRT.bat          # One-time TensorRT pip-package installer
 ├── Install PaddleOCR.bat         # One-time PaddleOCR installer (secondary weapon-name OCR)
+├── Install NVML.bat              # One-time nvidia-ml-py installer (status panel GPU monitoring)
 ├── requirements.txt / requirements-directml.txt / requirements-cuda.txt / requirements-tensorrt.txt
 ├── CHANGELOG.md                  # Version history
 ├── docs/
@@ -351,6 +368,10 @@ Axiom/
 │   │   ├── detection_semantics.py# Semantic target filtering
 │   │   ├── dshow_capture_native.py # ctypes binding for the native DirectShow v2 capture DLL
 │   │   ├── esp_server.py         # Web ESP WebSocket/HTTP server
+│   │   ├── web_control_server.py # Web Control API (FastAPI/uvicorn, token-protected)
+│   │   ├── web_control_settings.py # Web Control per-tab settings schema and helpers
+│   │   ├── app_controller.py     # Actions shared by the GUI and Web Control (AI start/stop, model switch, convert)
+│   │   ├── gpu_monitor.py        # NVML GPU sensors for the status panel
 │   │   ├── hud_inference.py      # Beta: YOLO-based weapon HUD detector (process-isolated)
 │   │   ├── ocr_inference.py      # Beta: PaddleOCR weapon-name reader (process-isolated)
 │   │   ├── humanization.py       # Micro-jitter, motion variation, speed shaping, micro-stutter, reaction variability
@@ -359,7 +380,7 @@ Axiom/
 │   │   ├── key_listener.py       # Global hotkey listener
 │   │   ├── language_manager.py   # Multi-language runtime support
 │   │   ├── language_data/        # Per-language JSON string files
-│   │   ├── presets/              # Bundled built-in config presets
+│   │   ├── presets/              # Bundled built-in presets (ships empty)
 │   │   ├── screen_capture.py     # Capture backends: dxcam / MSS / UVC / NDI / UDP + preview API
 │   │   ├── udp_receiver.py       # UDP JPEG stream receiver (OBS udp_stream_filter protocol)
 │   │   ├── session_utils.py      # ONNX session setup, TensorRT cache detection
@@ -369,6 +390,7 @@ Axiom/
 │   │   ├── updater.py            # Auto-update checker
 │   │   ├── obs_inspect_filters.py# Dev tool: dump OBS WebSocket filter settings
 │   │   └── bench_udp.py          # Dev tool: UDP capture pipeline benchmark
+│   ├── web_control_client/        # Web Control page (index.html / app.js / styles.css)
 │   ├── web_overlay/               # Web ESP static client (served to the browser)
 │   │   ├── index.html
 │   │   ├── app.js
@@ -387,7 +409,7 @@ Axiom/
 │   │       └── pages/            # One file per settings page
 │   │           ├── aim_page.py       # Aim parameters, Humanization
 │   │           ├── capture_page.py   # Capture backend selection
-│   │           ├── configs_page.py   # Config preset management
+│   │           ├── configs_page.py   # Full configs + aim-only presets
 │   │           ├── convert_page.py   # ONNX → TensorRT conversion
 │   │           ├── inference_page.py # Inference / model settings
 │   │           ├── keys_page.py      # Hotkey bindings + MAKCU connection
