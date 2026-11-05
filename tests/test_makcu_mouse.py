@@ -1380,3 +1380,21 @@ class TestMakcuStreamHealth:
         assert m._keys_down == set()
         assert mp.stream_enable_frame(mp.STREAM_KIND_MOUSE, True) in m._serial.writes
         assert mp.stream_enable_frame(mp.STREAM_KIND_KEYBOARD, True) in m._serial.writes
+
+
+def test_watchdog_active_follows_the_reconnect_thread():
+    import importlib
+    # The module, not the win_utils.makcu_mouse instance the package exports.
+    mm = importlib.import_module("win_utils.makcu_mouse")
+    original = mm.makcu_mouse._reconnect_thread
+    try:
+        mm.makcu_mouse._reconnect_thread = None
+        assert mm.is_makcu_watchdog_active() is False
+        alive = MagicMock()
+        alive.is_alive.return_value = True
+        mm.makcu_mouse._reconnect_thread = alive
+        assert mm.is_makcu_watchdog_active() is True
+        alive.is_alive.return_value = False
+        assert mm.is_makcu_watchdog_active() is False
+    finally:
+        mm.makcu_mouse._reconnect_thread = original

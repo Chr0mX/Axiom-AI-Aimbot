@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMessageBox, QTextEdit, QVBoxLayout,
@@ -170,14 +171,28 @@ class ModelPage(BasePage):
         self._stale_inspect_workers = []
         self._all_model_files = []  # master list; modelSearchEdit filters a view of this
         self._model_engine_cached: dict = {}  # {model_basename: has_cached_.engine}, set by _refreshModelList()
+        self._last_folder_scan = 0.0  # monotonic time of the last folder rescan
         self._last_inspected_key = None  # (inspect_path, mtime) of the last file actually inspected
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
 
     def setConfig(self, config):
+        """Full load, including the Model/ and Model_Hud/ folder scans."""
         self._config = config
-        self._loadFromConfig()
+        self._loadFromConfig(devices=True)
+
+    def refreshFromConfig(self):
+        """Light re-sync for the 1 s window tick: select what Config says in
+        the existing lists — no folder scans, no game.json read, and the
+        notes card only reloads when the model actually changed."""
+        self._loadFromConfig(devices=False)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Pick up added/removed model files on page open, at most every 10 s.
+        if self._config and time.monotonic() - self._last_folder_scan >= 10.0:
+            self._loadFromConfig(devices=True)
 
     # ──────────────────────────────────────────────
     # Widget initialisation
@@ -311,13 +326,19 @@ class ModelPage(BasePage):
     # Config load
     # ──────────────────────────────────────────────
 
-    def _loadFromConfig(self):
+    def _loadFromConfig(self, devices: bool = True):
+        """Copy Config into the widgets. devices=True also rescans the model
+        folders and game.json (full load / page open); devices=False only
+        selects entries in the lists already shown."""
         if not self._config:
             return
         self._isLoadingConfig = True
+        if devices:
+            self._last_folder_scan = time.monotonic()
         try:
             self.modelCombo.blockSignals(True)
-            self._refreshModelList()
+            if devices:
+                self._refreshModelList()
             model_name = os.path.basename(self._config.model_path or "")
             idx = -1
             for i in range(self.modelCombo.count()):
@@ -325,7 +346,14 @@ class ModelPage(BasePage):
                     idx = i
                     break
             if idx >= 0:
-                self.modelCombo.setCurrentIndex(idx)
+                if idx != self.modelCombo.currentIndex():
+                    self.modelCombo.setCurrentIndex(idx)
+            elif model_name:
+                # Keep a model that isn't in Model/ (or was removed) instead
+                # of silently switching to another one: show it as an extra
+                # entry that carries its real path.
+                self.modelCombo.addItem(model_name, userData=self._config.model_path)
+                self.modelCombo.setCurrentIndex(self.modelCombo.count() - 1)
             elif self.modelCombo.count() > 0:
                 default_name = "ApexLegendsOrbeet_15k.onnx"
                 default_idx = -1
@@ -363,10 +391,11 @@ class ModelPage(BasePage):
 
         # Load game profile combo (game.json)
         self.hudGameCombo.blockSignals(True)
-        game_data = self._loadGameJson()
-        self.hudGameCombo.clear()
-        for game_name in game_data:
-            self.hudGameCombo.addItem(game_name)
+        game_data = self._loadGameJson() if devices else None
+        if game_data is not None:
+            self.hudGameCombo.clear()
+            for game_name in game_data:
+                self.hudGameCombo.addItem(game_name)
         saved_game = getattr(self._config, 'hud_game', 'Apex Legends')
         game_idx = -1
         for i in range(self.hudGameCombo.count()):
@@ -374,8 +403,9 @@ class ModelPage(BasePage):
                 game_idx = i
                 break
         if game_idx >= 0:
-            self.hudGameCombo.setCurrentIndex(game_idx)
-        elif self.hudGameCombo.count() > 0:
+            if game_idx != self.hudGameCombo.currentIndex():
+                self.hudGameCombo.setCurrentIndex(game_idx)
+        elif game_data is not None and self.hudGameCombo.count() > 0:
             self.hudGameCombo.setCurrentIndex(0)
             first_game = self.hudGameCombo.itemText(0)
             if self._config:
@@ -385,15 +415,22 @@ class ModelPage(BasePage):
 
         # Load HUD model combo
         self.hudModelCombo.blockSignals(True)
-        self._refreshHudModelList()
-        hud_name = os.path.basename(getattr(self._config, 'hud_model_path', '') or "")
+        if devices:
+            self._refreshHudModelList()
+        hud_path = getattr(self._config, 'hud_model_path', '') or ""
+        hud_name = os.path.basename(hud_path)
         hud_idx = -1
         for i in range(self.hudModelCombo.count()):
             if self.hudModelCombo.itemText(i).lower() == hud_name.lower():
                 hud_idx = i
                 break
         if hud_idx >= 0:
-            self.hudModelCombo.setCurrentIndex(hud_idx)
+            if hud_idx != self.hudModelCombo.currentIndex():
+                self.hudModelCombo.setCurrentIndex(hud_idx)
+        elif hud_name:
+            # Same as the main model: keep a HUD model that isn't listed.
+            self.hudModelCombo.addItem(hud_name, userData=hud_path)
+            self.hudModelCombo.setCurrentIndex(self.hudModelCombo.count() - 1)
         elif self.hudModelCombo.count() > 0:
             self.hudModelCombo.setCurrentIndex(0)
             if self._config:
@@ -402,7 +439,11 @@ class ModelPage(BasePage):
 
         # Kick off model inspection and load notes after config load
         self._updateModelInfo(self._config.model_path)
-        self.modelNotesCard.setModel(os.path.basename(self._config.model_path or ""))
+        # Reloading the notes card resets it (and drops an unsaved edit), so
+        # only do it when the model actually changed.
+        notes_model = os.path.basename(self._config.model_path or "")
+        if notes_model != self.modelNotesCard._current_model:
+            self.modelNotesCard.setModel(notes_model)
 
     # ──────────────────────────────────────────────
     # Model inspector
@@ -601,7 +642,7 @@ class ModelPage(BasePage):
                 if name.lower() == current_name.lower():
                     matched_current = True
         if not matched_current and current_name:
-            self.modelCombo.addItem(current_name)
+            self.modelCombo.addItem(current_name, userData=self._config.model_path)
         idx = self.modelCombo.findText(current_name)
         if idx >= 0:
             self.modelCombo.setCurrentIndex(idx)
@@ -771,7 +812,12 @@ class ModelPage(BasePage):
         # and Convert (re)applies the same path on success. Leaving it unset
         # until Convert finished was the old failure mode: a skipped/raced
         # build left config.json pointing at the previous model forever.
-        new_path = os.path.join("Model", text).replace("\\", "/")
+        # An extra entry for a model outside Model/ carries its real path.
+        data = self.modelCombo.currentData()
+        if isinstance(data, str) and data and os.path.basename(data) == text:
+            new_path = data
+        else:
+            new_path = os.path.join("Model", text).replace("\\", "/")
         self._config.model_path = new_path
         self._updateModelInfo(self._config.model_path)
         self.modelNotesCard.setModel(os.path.basename(text))
@@ -844,7 +890,11 @@ class ModelPage(BasePage):
 
     def _onHudModelChanged(self, text):
         if self._config and text:
-            self._config.hud_model_path = os.path.join("Model_Hud", text)
+            data = self.hudModelCombo.currentData()
+            if isinstance(data, str) and data and os.path.basename(data) == text:
+                self._config.hud_model_path = data
+            else:
+                self._config.hud_model_path = os.path.join("Model_Hud", text)
 
     def _onInferenceBackendChanged(self, text):
         if not self._config:

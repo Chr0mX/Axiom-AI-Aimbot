@@ -301,20 +301,20 @@ class InferencePage(BasePage):
             self._updateFovReduceVisibility(fov_reduce_on)
             self.detectRangeCard.setValue(self._config.detect_range_size)
 
-            interval_ms = int(self._config.detect_interval * 1000)
+            interval_ms = int(round(self._config.detect_interval * 1000))
             self.detectIntervalCard.setValue(interval_ms)
-            confidence_pct = int(self._config.min_confidence * 100)
+            confidence_pct = int(round(self._config.min_confidence * 100))
             self.confidenceCard.setValue(confidence_pct)
             self.semanticFilterCard.setChecked(bool(getattr(self._config, 'detect_semantic_filter_enabled', False)))
 
             self.idleDetectEnableCard.setChecked(getattr(self._config, 'idle_detect_enabled', True))
-            idle_ms = int(getattr(self._config, 'idle_detect_interval', 0.05) * 1000)
+            idle_ms = int(round(getattr(self._config, 'idle_detect_interval', 0.05) * 1000))
             self.idleDetectIntervalCard.setValue(max(5, min(500, idle_ms)))
             self.singleTargetCard.setChecked(getattr(self._config, 'single_target_mode', False))
 
             self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
             self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
-            self.frameSkipThresholdCard.setValue(int(getattr(self._config, 'frame_skip_threshold', 2.0) * 10))
+            self.frameSkipThresholdCard.setValue(int(round(getattr(self._config, 'frame_skip_threshold', 2.0) * 10)))
 
             mode = getattr(self._config, 'second_inference_mode', 'off')
             self.secondInferSegment.setCurrentItem(mode if mode in ("off", "v1_ocr", "v2_onnx") else "off")

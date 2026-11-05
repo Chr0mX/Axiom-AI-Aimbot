@@ -64,7 +64,8 @@ import threading
 import time
 from typing import Literal, Optional
 
-logger = logging.getLogger(__name__)
+# Fixed short log name ("core.web_control: [WebControl] ..."), not the module name.
+logger = logging.getLogger("core.web_control")
 
 _WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web_control_client")
 

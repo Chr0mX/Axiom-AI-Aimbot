@@ -407,6 +407,8 @@ def connect_makcu(config: "Config") -> bool:
     and the empty-port/host guard, and to serialize concurrent connect
     attempts via `_makcu_connect_lock`, not to add any new hardware logic.
     """
+    # A manual connect re-enables the GUI's auto-connect/background retry.
+    config.makcu_user_disconnected = False
     connection = str(getattr(config, "makcu_connection", "serial") or "serial")
     if connection == "udp":
         host = str(getattr(config, "makcu_udp_host", "") or "").strip()
@@ -443,10 +445,11 @@ def connect_makcu(config: "Config") -> bool:
 def disconnect_makcu(config: "Config") -> None:
     """Disconnect the MAKCU device, if connected.
 
-    `config` is accepted (and currently unused) to match this module's
-    "plain functions, config first" convention and keep the signature
-    stable if a future revision needs to read/write Config here too.
+    Sets the runtime-only `config.makcu_user_disconnected`, so the GUI's
+    auto-connect and background retry leave the device disconnected until
+    a manual connect (either here or the Keys & HW button) clears it.
     """
+    config.makcu_user_disconnected = True
     try:
         from win_utils.makcu_mouse import disconnect_makcu as _disconnect_makcu
     except ImportError:

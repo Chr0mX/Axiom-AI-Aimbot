@@ -260,6 +260,22 @@ class TestDisconnectMakcu:
         assert calls == [True]
 
 
+class TestMakcuUserDisconnectedFlag:
+    """Disconnect must stop the GUI's MAKCU auto-connect/background retry
+    (runtime flag on Config); any manual connect re-enables it."""
+
+    def test_disconnect_sets_flag(self):
+        config = _FakeConfig()
+        app_controller.disconnect_makcu(config)
+        assert config.makcu_user_disconnected is True
+
+    def test_connect_clears_flag(self):
+        config = _FakeConfig()
+        config.makcu_user_disconnected = True
+        config.makcu_com_port = ""
+        app_controller.connect_makcu(config)
+        assert config.makcu_user_disconnected is False
+
 class TestResolveModelPath:
     """resolve_model_path() is pure os.path logic — no onnxruntime/win32api
     import at all — so every branch is genuinely testable here with no

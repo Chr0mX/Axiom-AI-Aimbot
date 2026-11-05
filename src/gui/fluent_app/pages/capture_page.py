@@ -198,16 +198,49 @@ class CapturePage(BasePage):
         self._scan_started: float = 0.0
         self._uvc_probe_generation = 0
         self._uvc_probe_worker = None
+        self._last_device_refresh = 0.0  # monotonic time of the last _refreshDevices()
+        self._devices_method = ''  # screenshot_method the device lists were built for
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
 
     def setConfig(self, config):
+        """Full load: widgets plus device work (UVC probe, NDI discovery)."""
         self._config = config
-        self._loadFromConfig()
+        self._loadFromConfig(devices=True)
+        self._last_device_refresh = time.monotonic()
+        self._devices_method = str(getattr(config, 'screenshot_method', '')).lower()
+
+    def refreshFromConfig(self):
+        """Light re-sync for the 1 s window tick: widgets only. No NDI
+        discovery (it can block ~3 s and used to force a reconnect), no UVC
+        probe, and the device/resolution combos aren't cleared."""
+        if not self._config:
+            return
+        method = str(getattr(self._config, 'screenshot_method', '')).lower()
+        self._loadFromConfig(devices=False)
+        # The method was changed elsewhere (e.g. Web Control): enumerate the
+        # new source's devices once, as switching it here would.
+        if method != self._devices_method:
+            self._refreshDevices()
+
+    def _refreshDevices(self):
+        """UVC probe / NDI discovery for the active method."""
+        if not self._config:
+            return
+        self._last_device_refresh = time.monotonic()
+        method = str(getattr(self._config, 'screenshot_method', '')).lower()
+        self._devices_method = method
+        if method == 'uvc':
+            self._startUvcProbeDelayed()
+        elif method == 'ndi':
+            self._refreshNdiSources()
 
     def showEvent(self, event):
         super().showEvent(event)
+        # Re-enumerate devices on page open, at most every 10 s.
+        if self._config and time.monotonic() - self._last_device_refresh >= 10.0:
+            self._refreshDevices()
         if self._config and str(getattr(self._config, 'screenshot_method', '')).lower() == 'uvc':
             # Cheap config read after the uvc_actual_* fix below — no device
             # I/O, so no throttle needed. Resolution/FPS support lists don't
@@ -744,7 +777,7 @@ class CapturePage(BasePage):
         self.uvcAlwaysOnTopCard.checkedChanged.connect(self._onAlwaysOnTopChanged)
         self.previewFpsCapSegment.currentItemChanged.connect(self._onPreviewFpsCapChanged)
         self.ndiSourceCombo.currentTextChanged.connect(self._onNdiSourceChanged)
-        self.ndiRefreshBtn.clicked.connect(self._refreshNdiSources)
+        self.ndiRefreshBtn.clicked.connect(lambda: self._refreshNdiSources(force_reconnect=True))
         self.ndiBandwidthCombo.currentTextChanged.connect(self._onNdiBandwidthChanged)
         self.udpBindIpCombo.currentTextChanged.connect(self._onUdpBindIpChanged)
         self.udpPortCard.valueChanged.connect(self._onUdpPortChanged)
@@ -758,7 +791,10 @@ class CapturePage(BasePage):
     # Config load
     # ──────────────────────────────────────────────
 
-    def _loadFromConfig(self):
+    def _loadFromConfig(self, devices: bool = True):
+        """Copy Config into the widgets. devices=False (the 1 s refresh)
+        skips the UVC probe and NDI discovery and leaves the UVC device /
+        resolution lists in place, only selecting the configured entry."""
         if not self._config:
             return
         self._isLoadingConfig = True
@@ -781,10 +817,13 @@ class CapturePage(BasePage):
             # for screenshot_method == 'uvc') enriches it with the full
             # enumerated device list in the background and preserves this
             # selection once it arrives (see _onUvcProbeResult).
-            self.uvcDeviceCombo.blockSignals(True)
-            self.uvcDeviceCombo.clear()
-            self.uvcDeviceCombo.addItem(f"Device {_device_index}", userData=_device_index)
-            self.uvcDeviceCombo.blockSignals(False)
+            if devices:
+                self.uvcDeviceCombo.blockSignals(True)
+                self.uvcDeviceCombo.clear()
+                self.uvcDeviceCombo.addItem(f"Device {_device_index}", userData=_device_index)
+                self.uvcDeviceCombo.blockSignals(False)
+            else:
+                self._selectComboData(self.uvcDeviceCombo, _device_index, f"Device {_device_index}")
             _capture_method = str(getattr(self._config, 'uvc_capture_method', 'msmf'))
             self.uvcCaptureMethodCombo.setCurrentText(_capture_method)
             self.uvcDshowV2Card.setChecked(str(getattr(self._config, 'uvc_dshow_backend', 'v1')).lower() == 'v2')
@@ -799,7 +838,9 @@ class CapturePage(BasePage):
             resolution_text = (
                 f"{getattr(self._config, 'uvc_width', self._config.width)}"
                 f"x{getattr(self._config, 'uvc_height', self._config.height)}")
-            if screenshot_method == 'uvc':
+            if not devices:
+                self._selectComboText(self.uvcResolutionCombo, resolution_text)
+            elif screenshot_method == 'uvc':
                 # Seed synchronously with the configured value so the combo
                 # shows something immediately; _startUvcProbeDelayed()
                 # enriches it with the full supported list in the background
@@ -826,7 +867,10 @@ class CapturePage(BasePage):
             self.previewFpsCapSegment.setCurrentItem(_cap_key)
 
             ndi_source = str(getattr(self._config, 'ndi_source_name', '')).strip()
-            if screenshot_method == 'ndi':
+            if not devices:
+                if ndi_source:
+                    self._selectComboData(self.ndiSourceCombo, ndi_source, ndi_source)
+            elif screenshot_method == 'ndi':
                 self._refreshNdiSources()
                 if ndi_source:
                     idx = self.ndiSourceCombo.findText(ndi_source)
@@ -862,6 +906,33 @@ class CapturePage(BasePage):
     # ──────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────
+
+    @staticmethod
+    def _selectComboData(combo, data, label):
+        """Select the item whose data (or text) is `data`, adding it if it's
+        missing — without clearing the list or emitting change signals."""
+        for i in range(combo.count()):
+            if combo.itemData(i) == data or combo.itemText(i) == str(data):
+                if i != combo.currentIndex():
+                    combo.blockSignals(True)
+                    combo.setCurrentIndex(i)
+                    combo.blockSignals(False)
+                return
+        combo.blockSignals(True)
+        combo.addItem(label, userData=data)
+        combo.setCurrentIndex(combo.count() - 1)
+        combo.blockSignals(False)
+
+    @staticmethod
+    def _selectComboText(combo, text):
+        idx = combo.findText(text)
+        combo.blockSignals(True)
+        if idx < 0:
+            combo.addItem(text)
+            idx = combo.count() - 1
+        if idx != combo.currentIndex():
+            combo.setCurrentIndex(idx)
+        combo.blockSignals(False)
 
     def _syncRoiLabelSize(self):
         mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
@@ -1048,7 +1119,9 @@ class CapturePage(BasePage):
             self.uvcFpsCombo.setCurrentIndex(idx)
         self.uvcFpsCombo.blockSignals(False)
 
-    def _refreshNdiSources(self):
+    def _refreshNdiSources(self, force_reconnect: bool = False):
+        """Re-discover NDI sources. Reconnects the stream only when the
+        selected source changed, or when asked (the Refresh button)."""
         if not self._config:
             return
         print("[Capture][NDI] Refreshing available NDI sources...")
@@ -1091,9 +1164,11 @@ class CapturePage(BasePage):
         if not isinstance(selected_name, str) or not selected_name.strip():
             selected_name = self.ndiSourceCombo.currentText().strip()
         if selected_name:
+            changed = selected_name != configured
             self._config.ndi_source_name = selected_name
-            self._config.ndi_force_reconnect = True
-            print(f"[Capture][NDI] Reconnecting to '{selected_name}'...")
+            if changed or force_reconnect:
+                self._config.ndi_force_reconnect = True
+                print(f"[Capture][NDI] Reconnecting to '{selected_name}'...")
 
     def _getEmbeddedPythonExe(self) -> str:
         src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -1138,6 +1213,8 @@ class CapturePage(BasePage):
     def _onScreenshotMethodChanged(self, text):
         if self._config:
             self._config.screenshot_method = text
+        if not self._isLoadingConfig:
+            self._devices_method = str(text).strip().lower()
         if str(text).strip().lower() == 'uvc' and not self._isLoadingConfig:
             self._startUvcProbeDelayed()
         if str(text).strip().lower() == "ndi" and not self._isLoadingConfig:
@@ -1145,6 +1222,8 @@ class CapturePage(BasePage):
             if not has_ran:
                 if self._runLocalInstallerScript("install_cyndilib.py", "NDI"):
                     self._config.ndi_installer_ran_once = True
+            # Discovery used to happen on the next 1 s refresh; do it here now.
+            self._refreshNdiSources()
         self._updateCaptureControlsVisibility(text)
         main_window = self.window()
         if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
