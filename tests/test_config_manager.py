@@ -238,17 +238,16 @@ class TestConfigManagerPreview:
         with tempfile.TemporaryDirectory() as tmpdir:
             cm = ConfigManager(tmpdir)
             tuned = _make_config()
-            # detect_range_size (aim.detect_range_size) — model_path isn't
-            # aim-scoped anymore and would never appear in a preset diff at
-            # all now. Deliberately not an fov_*/pid_*/etc. field, which
+            # max_move_per_frame_px (aim.max_move_per_frame_px) — an aim
+            # field that isn't an fov_*/pid_*/etc. one, which
             # _PRESET_DIFF_GROUPS would fold into a named group instead of
             # reporting standalone.
-            tuned.detect_range_size = 321
+            tuned.max_move_per_frame_px = 321.0
             cm.save_config(tuned, "tuned")
 
             current = _make_config()
             result = cm.preview_config_changes(current, "tuned")
-            assert result == ["detect range size"]
+            assert result == ["max move per frame px"]
 
     def test_groups_multiple_pid_changes_together(self):
         from core.config_manager import ConfigManager
@@ -682,3 +681,31 @@ class TestConfigManagerActiveNameTracking:
             c.active_preset_name = "unchanged"
             assert cm.load_config(c, "does_not_exist") is False
             assert c.active_preset_name == "unchanged"
+
+
+class TestAimPresetsLeaveKeysAlone:
+    """Aim presets only change aiming: key bindings and inference settings
+    moved out of the aim group (config_version 3), so they never travel."""
+
+    def test_old_preset_with_keys_does_not_rebind(self, tmp_path):
+        from core.config_manager import ConfigManager
+        cm = ConfigManager(str(tmp_path / "presets"))
+        (tmp_path / "presets" / "Legit.json").write_text(json.dumps({
+            "name": "Legit",
+            "config": {"AimKeys": [2, 2, 2], "aim_toggle_key": 99, "min_confidence": 0.95,
+                       "keep_detecting": False, "always_aim": True, "fov_size": 150},
+        }), encoding="utf-8")
+        c = _make_config()
+        keys, toggle = list(c.AimKeys), c.aim_toggle_key
+        conf, keep, always = c.min_confidence, c.keep_detecting, c.always_aim
+        assert cm.load_config(c, "Legit") is True
+        assert c.fov_size == 150  # aim setting applied
+        assert c.AimKeys == keys and c.aim_toggle_key == toggle
+        assert (c.min_confidence, c.keep_detecting, c.always_aim) == (conf, keep, always)
+
+    def test_new_preset_does_not_save_keys(self, tmp_path):
+        from core.config_manager import ConfigManager, _AIM_PRESET_FIELDS
+        for attr in ("AimKeys", "aim_toggle_key", "always_aim", "min_confidence",
+                     "detect_range_size", "keep_detecting", "auto_fire_key"):
+            assert attr not in _AIM_PRESET_FIELDS
+        assert {"fov_size", "pid_kp_x", "prediction_enabled"} <= _AIM_PRESET_FIELDS
