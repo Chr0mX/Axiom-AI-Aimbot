@@ -13,6 +13,7 @@ targets" choice, not a false-positive heuristic.
 from __future__ import annotations
 
 import logging
+import re
 from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
@@ -80,12 +81,41 @@ def _looks_like_environment_box(bw: float, bh: float, conf: float) -> bool:
     return False
 
 
+# Deny terms shorter than this must match a whole word of the class name.
+# Short terms are the ones that collide with ordinary words as raw substrings
+# ('tie' in "entities", 'bin' in "cabin", 'star' in "start", 'car' in "scar",
+# 'box' in "hitbox"); longer terms ('vegetation', 'billboard') are specific
+# enough that substring matching is still the right call (it keeps catching
+# "vegetationpatch"). The trade-off: a compound of only short words with no
+# separator or case change ("treetrunk") is no longer caught.
+_WHOLE_WORD_BELOW = 6
+_WORD_RE = re.compile(r'[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+')
+
+
+def _label_words(name: str) -> frozenset:
+    """Lower-cased words of a class name, split on non-alphanumerics and
+    camelCase ("EnemyHead_01" -> enemy, head, 01), plus a singular form of
+    each plural so 'trees' hits 'tree'."""
+    words = set()
+    for w in _WORD_RE.findall(name):
+        w = w.lower()
+        words.add(w)
+        if len(w) > 3 and w.endswith('s'):
+            words.add(w[:-1])
+    return frozenset(words)
+
+
 def _semantic_keep_label(name: str) -> bool:
     if not name:
         return True
-    nl = name.lower().strip()
+    name = name.strip()
+    nl = name.lower()
+    words = _label_words(name)
     for deny in _DENY_SUBSTR:
-        if deny in nl:
+        if len(deny) >= _WHOLE_WORD_BELOW:
+            if deny in nl:
+                return False
+        elif deny in words:
             return False
     for allow in _ALLOW_SUBSTR:
         if allow in nl:

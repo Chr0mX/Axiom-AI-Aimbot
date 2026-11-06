@@ -612,3 +612,29 @@ class TestStickyTrackingIntegration:
         assert st.locked_box == a2
         fresh_st = self._setup(sent_moves, tracking_confidence=0.5)[1]
         assert self._step(cfg, fresh_st, px, py, [a], [0.55], 2000.0) is False  # but can't acquire at 55 %
+
+
+class TestPidTimeNormalizeWiring:
+    """config.pid_time_normalize makes process_aiming hand the frame time to the
+    PID; off (the default) keeps the original per-frame output."""
+
+    @staticmethod
+    def _second_move(sent_moves, normalize, dt):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        cfg = _make_config(pid_time_normalize=normalize)
+        state, px, py = LoopState(), PIDController(0.5, 0, 0), PIDController(0.5, 0, 0)
+        box = [580.0, 480.0, 620.0, 520.0]          # 100 px right of the crosshair
+        process_aiming(cfg, [box], 500, 500, px, py, "sendinput", state, current_time=1000.0, confidences=[0.9])
+        sent_moves.clear()
+        process_aiming(cfg, [box], 500, 500, px, py, "sendinput", state, current_time=1000.0 + dt, confidences=[0.9])
+        return sent_moves[0][0]
+
+    def test_off_ignores_frame_time(self, sent_moves):
+        assert self._second_move(sent_moves, False, 1 / 240) == self._second_move(sent_moves, False, 1 / 30)
+
+    def test_on_scales_with_frame_time(self, sent_moves):
+        fast = self._second_move(sent_moves, True, 1 / 240)
+        slow = self._second_move(sent_moves, True, 1 / 30)
+        assert 0 < fast < slow                      # shorter frame -> smaller per-frame move

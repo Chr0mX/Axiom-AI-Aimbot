@@ -8,6 +8,10 @@ Everything merged since the 6.3 release. `src/version.py` still says 6.3; bump i
 - MAKCU docs now point to https://makcu.com/mcp/documentation; the old k4tech Rust library docs were removed.
 - Stopping inference now restores the process priority it raised to (HIGH by default); before, Axiom stayed at HIGH until it closed.
 - `performance.latency_stats.enabled` now logs its per-frame timings at INFO, so they appear in the console; they were logged at DEBUG and never shown.
+- FOV shrinking has three modes (Fixed, Adaptive, Dynamic) with an expansion delay and recovery duration; target tracking gained a lock state machine, time-based Lock Persistence (replaces Lock Decay Frames; old values convert), Lost Target Timeout, Reacquisition Radius, Minimum Lock Duration, Target Switch Threshold and a separate Tracking Confidence. Configs saved with FOV reduce on keep the old fixed behaviour.
+- New opt-in "Frame-Rate Independent PID" (Aim → Aim Speed): scales the P and I response by elapsed time so aim speed doesn't change with the inference FPS. Off by default; identical at 60 FPS.
+- The semantic filter's short deny words (`tie`, `bin`, `box`, `car`, `star`, ...) now match whole words of a class name, so names like `entities` or `cabin` are no longer dropped by accident. Longer deny words still match as substrings, and a deny word still wins over an allow word.
+- Dev scripts (`bench_udp.py`, `_bench_udp_sender.py`, `obs_inspect_filters.py`) moved from `src/core/` to `tools/`; run them as `python tools/<script>.py`.
 
 ### New Features
 - **Web Control:** a LAN control panel (token-protected) that mirrors every desktop tab: model/backend switching with confirmed restart, AI start/stop, MAKCU connect, TensorRT conversion with a live log, presets and full configs, Quick Preset slots, live capture preview for UVC/NDI/UDP, settings search. Two interface styles (Studio, the default, and Instrument) chosen on the Other tab; Studio uses the full window width. Presets and configs are shown as a card list with a "Loaded" tag.

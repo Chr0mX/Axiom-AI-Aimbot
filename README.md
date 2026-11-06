@@ -389,8 +389,6 @@ Axiom/
 │   │   ├── convert_to_engine.py  # ONNX → TensorRT engine builder
 │   │   ├── logging_config.py     # Logging setup
 │   │   ├── updater.py            # Auto-update checker
-│   │   ├── obs_inspect_filters.py# Dev tool: dump OBS WebSocket filter settings
-│   │   └── bench_udp.py          # Dev tool: UDP capture pipeline benchmark
 │   ├── web_control_client/        # Web Control page (index.html / app.js / styles.css)
 │   ├── web_overlay/               # Web ESP static client (served to the browser)
 │   │   ├── index.html
@@ -430,6 +428,7 @@ Axiom/
 │       ├── xbox_controller.py    # ViGEmBus Xbox 360 emulation
 │       ├── key_utils.py          # Key code helpers
 │       └── vk_codes.py           # Virtual key code table
+├── tools/                        # Standalone dev tools (OBS filter inspector, UDP capture benchmark)
 └── tests/                        # Pytest test suite (see CLAUDE.md for sandbox-testability notes)
     ├── conftest.py               # Adds src/ to sys.path
     ├── test_config.py

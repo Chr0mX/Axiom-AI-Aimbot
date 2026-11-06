@@ -120,6 +120,59 @@ class TestPIDController:
         assert pid._calculate_adjusted_kp(0.3) == 0.3
 
 
+class TestPIDTimeNormalization:
+    """Opt-in dt scaling: update(error, now). Without `now` nothing changes."""
+
+    @staticmethod
+    def _make_pid(kp=0.4, ki=0.1, kd=0.2):
+        from core.inference import PIDController
+        return PIDController(kp, ki, kd)
+
+    @staticmethod
+    def _run(pid, errors, dt, t0=100.0):
+        return [pid.update(e, t0 + i * dt) for i, e in enumerate(errors)]
+
+    def test_without_now_matches_the_original_per_frame_behaviour(self):
+        a, b = self._make_pid(), self._make_pid()
+        errs = [10.0, 8.0, 5.0, 1.0]
+        assert [a.update(e) for e in errs] == [b.update(e, None) for e in errs]
+
+    def test_identical_to_legacy_output_at_the_60hz_reference(self):
+        legacy, timed = self._make_pid(), self._make_pid()
+        errs = [10.0, 8.0, 5.0, 1.0, -3.0]
+        want = [legacy.update(e) for e in errs]
+        got = self._run(timed, errs, 1.0 / 60.0)
+        assert got == pytest.approx(want)
+
+    def test_first_sample_after_reset_is_not_scaled(self):
+        pid = self._make_pid()
+        pid.update(5.0, 100.0)
+        pid.reset()
+        legacy = self._make_pid().update(5.0)
+        assert pid.update(5.0, 500.0) == pytest.approx(legacy)    # huge gap since the previous update ignored
+
+    def test_correction_per_second_is_independent_of_update_rate(self):
+        """Constant error, P only: total correction over one second matches at 30/60/240 Hz."""
+        totals = []
+        for hz in (30, 60, 240):
+            pid = self._make_pid(kp=0.2, ki=0.0, kd=0.0)
+            outs = self._run(pid, [10.0] * hz, 1.0 / hz)
+            totals.append(sum(outs[1:]) + outs[0] * 0)      # first sample is unscaled by design
+        assert totals[0] == pytest.approx(totals[1] * 1.0, rel=0.06)
+        assert totals[2] == pytest.approx(totals[1], rel=0.06)
+
+    def test_scale_is_clamped_after_a_long_stall(self):
+        pid = self._make_pid(kp=0.5, ki=0.0, kd=0.0)
+        pid.update(10.0, 100.0)
+        out = pid.update(10.0, 110.0)           # 10 s gap -> k capped at 4
+        assert out == pytest.approx(0.5 * 10.0 * 4.0)
+
+    def test_derivative_term_stays_per_update(self):
+        pid = self._make_pid(kp=0.0, ki=0.0, kd=0.3)
+        pid.update(0.0, 100.0)
+        assert pid.update(10.0, 100.0 + 1.0 / 240.0) == pytest.approx(0.3 * 10.0)
+
+
 # ============================================================
 # 2. preprocess_image 測試
 # ============================================================

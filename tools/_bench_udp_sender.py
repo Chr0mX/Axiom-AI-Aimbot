@@ -12,9 +12,10 @@ import sys
 import time
 from pathlib import Path
 
-_HERE = Path(__file__).resolve().parent
-if str(_HERE.parent) not in sys.path:
-    sys.path.insert(0, str(_HERE.parent))
+_HERE = Path(__file__).resolve().parent                 # tools/
+_SRC = _HERE.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 from core.udp_receiver import HEADER_FORMAT, HEADER_SIZE  # noqa: E402
 

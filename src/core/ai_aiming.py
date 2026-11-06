@@ -492,8 +492,9 @@ def process_aiming(
                 # stale error (and produce a one-frame Kd kick) the moment
                 # the target exits the deadzone. Outputs discarded — no
                 # movement is intended this frame.
-                pid_x.update(0.0)
-                pid_y.update(0.0)
+                _now = current_time if getattr(config, 'pid_time_normalize', False) else None
+                pid_x.update(0.0, _now)
+                pid_y.update(0.0, _now)
                 return
 
         if state.sticky_last_t > 0:
@@ -519,7 +520,9 @@ def _finish_aim_move(
     errorX, errorY, target_y, box_height,
 ) -> None:
     del box_height
-    dx, dy = pid_x.update(errorX), pid_y.update(errorY)
+    # Opt-in: pass the frame time so the PID's P/I terms are time-normalised.
+    _now = current_time if getattr(config, 'pid_time_normalize', False) else None
+    dx, dy = pid_x.update(errorX, _now), pid_y.update(errorY, _now)
 
     if getattr(config, 'aim_ema_smoothing_enabled', False):
         factor = float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)

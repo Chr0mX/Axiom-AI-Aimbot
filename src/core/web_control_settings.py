@@ -140,6 +140,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "mouse_click_method": {"type": "str"},
         "aim_start_delay_ms": {"type": "int", "min": 0, "max": 1000},
         "pid_unsafe_mode": {"type": "bool"},
+        "pid_time_normalize": {"type": "bool"},
         # Effective safe range is 0.0-0.5 unless pid_unsafe_mode is on (up to
         # 1.0) — the GUI enforces this by capping slider travel and clamping
         # pid_kp_x/y down to 0.5 when Unsafe Mode is turned off. This schema

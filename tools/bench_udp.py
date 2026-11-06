@@ -12,11 +12,11 @@ observed FPS (e.g. "UDP Stream FPS 76" while the sender is configured for
      from UDP packets (parsing + dict ops),
      independent of the network and decode    -> run `loopback-bench`.
 
-Usage (run from repo root, or `python src/core/bench_udp.py <mode>`):
+Usage (run from repo root, or `python tools/bench_udp.py <mode>`):
 
-    python src/core/bench_udp.py decode-bench --width 1280 --height 720 --quality 80
-    python src/core/bench_udp.py loopback-bench --fps 120 --duration 5
-    python src/core/bench_udp.py loopback-bench --fps 120 --duration 5 --width 1280 --height 720
+    python tools/bench_udp.py decode-bench --width 1280 --height 720 --quality 80
+    python tools/bench_udp.py loopback-bench --fps 120 --duration 5
+    python tools/bench_udp.py loopback-bench --fps 120 --duration 5 --width 1280 --height 720
 
 `decode-bench` prints the max frames/sec this CPU can run cv2.imdecode at,
 with no networking involved at all — this is the hard ceiling for the
@@ -57,8 +57,8 @@ import time
 from pathlib import Path
 
 # ── sys.path so `core` is importable when run as a script ────────────────────
-_HERE = Path(__file__).resolve().parent   # src/core/
-_SRC = _HERE.parent                       # src/
+_HERE = Path(__file__).resolve().parent   # tools/
+_SRC = _HERE.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 

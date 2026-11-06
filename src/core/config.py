@@ -138,6 +138,7 @@ _FIELD_MAP = {
     'pid_ki_y':                   'aim.pid.y.ki',
     'pid_kd_y':                   'aim.pid.y.kd',
     'pid_unsafe_mode':            'aim.pid.unsafe_mode',
+    'pid_time_normalize':         'aim.pid.time_normalize',
     'aim_y_reduce_enabled':       'aim.y_reduce.enabled',
     'aim_y_reduce_delay':         'aim.y_reduce.delay',
     'aim_y_reduce_floor':         'aim.y_reduce.floor',
@@ -601,6 +602,10 @@ class Config:
         # default. Enabling this lets the same slider travel span 0.0-1.0
         # instead. Persisted so the unlocked range survives a restart.
         self.pid_unsafe_mode: bool = False
+        # Opt-in (off keeps the original per-frame feel): scale the PID's P and I
+        # terms by elapsed time so the correction per second is the same at any
+        # inference FPS. Identical to off at 60 updates/s.
+        self.pid_time_normalize: bool = False
 
         # Y軸壓槍速度逐漸歸零
         self.aim_y_reduce_enabled: bool = False   # 是否啟用 Y 軸歸零功能

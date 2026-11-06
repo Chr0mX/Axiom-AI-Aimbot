@@ -757,6 +757,18 @@
                 </label>
               </div>
             </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Frame-Rate Independent PID</div>
+                <div class="field-desc">Scales the P and I response by elapsed time so aim speed stays the same when the inference FPS changes. Off keeps the original per-frame feel; identical at 60 FPS.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-pid_time_normalize" data-key="pid_time_normalize" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
             <div class="micro-grid" data-cols="2" data-kind="pid">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Reaction Speed X (P)</div></div>
