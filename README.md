@@ -109,7 +109,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
   - Two looks to choose from on its Other tab: **Studio** (default, uses the full window width) and **Instrument** (dense).
 
 - **Status Panel GPU Monitoring** (optional, NVIDIA)
-  - Temperature, load, VRAM, fan, clocks and power on the in-game status panel, each switchable. Run `Install NVML.bat` once to enable it.
+  - Temperature, load, VRAM, fan, clocks and power on the in-game status panel, each switchable. Needs an NVIDIA GPU and driver; the NVML bindings (`nvidia-ml-py`) are bundled.
 
 - **Model & Config Management**
   - Searchable, filter-as-you-type model dropdown on both the Model and Convert pages.
@@ -340,7 +340,6 @@ Axiom/
 ├── 啟動Launcher.bat              # Quick-start launcher
 ├── Install TensorRT.bat          # One-time TensorRT pip-package installer
 ├── Install PaddleOCR.bat         # One-time PaddleOCR installer (secondary weapon-name OCR)
-├── Install NVML.bat              # One-time nvidia-ml-py installer (status panel GPU monitoring)
 ├── requirements.txt / requirements-directml.txt / requirements-cuda.txt / requirements-tensorrt.txt
 ├── CHANGELOG.md                  # Version history
 ├── docs/

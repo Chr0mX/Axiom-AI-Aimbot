@@ -35,6 +35,7 @@ darkdetect==0.8.0
 fastapi==0.141.1
 h11==0.16.0
 idna==3.19
+nvidia_ml_py==13.615.71
 pydantic==2.13.4
 pydantic_core==2.46.4
 pyqt6_fluent_widgets==1.10.5

@@ -21,7 +21,7 @@ Everything merged since the 6.3 release. `src/version.py` still says 6.3; bump i
 - **Humanization:** per-feature fine-tuning sliders, Reset to Defaults, optional idle Micro-Jitter.
 - **MAKCU:** V4 / MAKXD binary protocol, UDP connection, device hotkeys, physical-move lock, mouse spread, Left/Right/Middle as Always Aim buttons, and a background auto-connect retry.
 - **Capture:** Capture FPS Limit; a HUD UDP Stream for weapon detection on cropped 2-PC streams; frames are only decoded or previewed when something uses them.
-- **Status panel:** optional NVIDIA GPU monitoring (needs `Install NVML.bat`).
+- **Status panel:** optional NVIDIA GPU monitoring. `nvidia-ml-py` is bundled, so `Install NVML.bat` is gone; it needs an NVIDIA GPU and driver.
 - **Models:** searchable model lists, a TensorRT-cached ✓/⬇ badge, automatic redirect to Convert when an engine is missing.
 - **Keys page:** hotkey conflict warning.
 

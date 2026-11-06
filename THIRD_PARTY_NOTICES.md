@@ -25,6 +25,7 @@ redistributing. The exact vendored Python packages are listed in
 | onnxruntime / onnxruntime-directml | MIT |
 | numpy, opencv, pillow, mss, psutil, sympy | BSD / MIT / HPND-style |
 | fastapi, starlette, uvicorn, pydantic | MIT / BSD |
+| nvidia-ml-py (`pynvml`, vendored in `src/python/dependencies`) | BSD 3-clause (NVIDIA Corporation) |
 
 ## Open question for the maintainer
 

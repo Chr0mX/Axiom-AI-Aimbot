@@ -580,7 +580,7 @@ def gpu_monitor_status(config) -> str:
     page: whether NVML is installed and what the status panel's monitor found."""
     from core.gpu_monitor import nvml_installed
     if not nvml_installed():
-        return "NVML not installed: run Install NVML.bat in the Axiom folder, then restart Axiom."
+        return "NVML module not found: the bundled pynvml (src/python/dependencies) is missing, so reinstall or update Axiom."
     support = getattr(config, "gpu_sensor_support", None) or {}
     if not getattr(config, "status_panel_show_gpu", False):
         return "NVML installed."

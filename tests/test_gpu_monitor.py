@@ -209,7 +209,7 @@ def test_web_control_gpu_status_line(monkeypatch):
     from core import web_control_settings as wcs
     monkeypatch.setattr(gm, "nvml_installed", lambda: False)
     c = types.SimpleNamespace(status_panel_show_gpu=True)
-    assert wcs.gpu_monitor_status(c).startswith("NVML not installed")
+    assert wcs.gpu_monitor_status(c).startswith("NVML module not found")
     monkeypatch.setattr(gm, "nvml_installed", lambda: True)
     c.gpu_sensor_support = {"status": "ok", "name": "RTX 3060 Ti"}
     assert wcs.gpu_monitor_status(c) == "Reading RTX 3060 Ti."

@@ -2,8 +2,8 @@
 
 Pure Python, no Qt: status_panel.py's GpuMonitorThread owns one instance and
 calls read() on its own thread. Uses NVML through nvidia-ml-py (module
-``pynvml``), imported lazily so a missing package only disables the GPU
-section ("Install NVML.bat" installs it into the embedded Python).
+``pynvml``, vendored in src/python/dependencies), imported lazily so a
+missing module only disables the GPU section.
 
 Sensor keys (each has a status_panel_gpu_<key> visibility switch):
     temp, hotspot, util, vram, fan, core_clock, mem_clock, power, voltage
@@ -36,7 +36,7 @@ STATUS_OK = "ok"
 
 
 def nvml_installed() -> bool:
-    """True if nvidia-ml-py (module ``pynvml``) can be imported, without importing it."""
+    """True if the vendored nvidia-ml-py (module ``pynvml``) can be imported, without importing it."""
     import importlib.util
     try:
         return importlib.util.find_spec("pynvml") is not None
