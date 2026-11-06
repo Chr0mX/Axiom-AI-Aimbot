@@ -7,11 +7,11 @@ MAKCU is a USB HID interceptor device controlled over UART serial. Two APIs exis
 Two device families speak the ASCII API described below: **legacy MAKCU**
 and **MAKXD** (the identity `km.version()` returns differs — `km.MAKCU` vs.
 `km.MAKXD` — and Axiom's own connect probe (`win_utils/makcu_mouse.py`,
-`_try_open()`) accepts either). This doc is cross-checked against the
-official protocol reference for both, terrafirma2021/mak-suite's
-`protocol/KM_API.md` (ASCII) / `protocol/MAK_API.md` (binary) — see that
-repo for the authoritative, exhaustive command list; this file stays a
-quick reference tuned to what Axiom actually uses.
+`_try_open()`) accepts either). The current official MAKCU documentation
+is https://makcu.com/mcp/documentation — see it for the authoritative, exhaustive command list. This doc
+was cross-checked against terrafirma2021/mak-suite's `protocol/KM_API.md`
+(ASCII) / `protocol/MAK_API.md` (binary), and stays a quick reference
+tuned to what Axiom actually uses.
 
 **Button-stream framing differs between the two families** — see
 `win_utils/makcu_mouse.py`'s `_stream_reader()` docstring for the full
