@@ -6,6 +6,8 @@ Everything merged since the 6.3 release. `src/version.py` still says 6.3; bump i
 
 - MAKCU V4.103+: device-side autorelease (5 s, kept alive by a 2 s heartbeat) releases injected buttons if Axiom crashes. No effect on V3 firmware.
 - MAKCU docs now point to https://makcu.com/mcp/documentation; the old k4tech Rust library docs were removed.
+- Stopping inference now restores the process priority it raised to (HIGH by default); before, Axiom stayed at HIGH until it closed.
+- `performance.latency_stats.enabled` now logs its per-frame timings at INFO, so they appear in the console; they were logged at DEBUG and never shown.
 
 ### New Features
 - **Web Control:** a LAN control panel (token-protected) that mirrors every desktop tab: model/backend switching with confirmed restart, AI start/stop, MAKCU connect, TensorRT conversion with a live log, presets and full configs, Quick Preset slots, live capture preview for UVC/NDI/UDP, settings search. Two interface styles (Studio, the default, and Instrument) chosen on the Other tab; Studio uses the full window width. Presets and configs are shown as a card list with a "Loaded" tag.

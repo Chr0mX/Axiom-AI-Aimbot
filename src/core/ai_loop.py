@@ -8,7 +8,7 @@ import queue
 import threading
 import time
 import traceback
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import logging
 
@@ -358,14 +358,28 @@ def _set_thread_priority(level: str) -> None:
         pass
 
 
-def _set_process_priority(level: str) -> None:
+def _set_process_priority(level: str) -> Optional[int]:
+    """Raise the process priority class. Returns the previous class (so the
+    loop can restore it on exit), or None if nothing was changed."""
     if os.name != 'nt':
+        return None
+    try:
+        k32 = ctypes.windll.kernel32
+        proc = k32.GetCurrentProcess()
+        previous = int(k32.GetPriorityClass(proc)) or None
+        if not k32.SetPriorityClass(proc, _PROCESS_CLASS_MAP.get(level, 0x00000080)):
+            return None
+        return previous
+    except Exception:
+        return None
+
+
+def _restore_process_priority(previous: Optional[int]) -> None:
+    if previous is None or os.name != 'nt':
         return
     try:
-        ctypes.windll.kernel32.SetPriorityClass(
-            ctypes.windll.kernel32.GetCurrentProcess(),
-            _PROCESS_CLASS_MAP.get(level, 0x00000080),
-        )
+        k32 = ctypes.windll.kernel32
+        k32.SetPriorityClass(k32.GetCurrentProcess(), previous)
     except Exception:
         pass
 
@@ -448,7 +462,7 @@ def ai_logic_loop(
     _io_binding[0] = _setup_io_binding(model)
 
     _prio_level = getattr(config, 'thread_priority', 'high')
-    _set_process_priority(_prio_level)
+    _previous_priority_class = _set_process_priority(_prio_level)
     _set_thread_priority(_prio_level)
 
     current_model_path = config.model_path
@@ -1203,7 +1217,9 @@ def ai_logic_loop(
 
                     now = time.perf_counter()
                     if now - last_stats_print >= float(getattr(config, 'latency_stats_interval', 1.0)):
-                        logger.debug(
+                        # INFO, not DEBUG: the user switched this on to see it,
+                        # and the app logs at INFO by default.
+                        logger.info(
                             "[Latency EMA] total=%.1fms loop_overhead=%.1fms "
                             "tensor_wait=%.1fms infer=%.1fms postproc=%.1fms "
                             "interval=%.0fms (capture/preprocess run on their "
@@ -1221,6 +1237,9 @@ def ai_logic_loop(
         # HUD/OCR feeders are module-level singletons shared with whichever loop
         # replaced this one — only the loop that still owns the pipeline stops them.
         if _active_loop_token is loop_token:
+            # Stopping inference (web Stop, conversion pause) shouldn't leave
+            # the whole app at HIGH priority; a replacing loop sets its own.
+            _restore_process_priority(_previous_priority_class)
             _set_makcu_move_lock(config, False)
             _hud_stop()
             _ocr_stop()
