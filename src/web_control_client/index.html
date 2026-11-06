@@ -1255,12 +1255,12 @@
             </div>
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">Lock Decay Frames</div>
-                <div class="field-desc">Frames to hold aim after target is lost before releasing the lock</div>
+                <div class="field-title">Lock Persistence</div>
+                <div class="field-desc">How long aim is held after the target is lost before the lock is released (time-based; replaces Lock Decay Frames)</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-lock_decay_frames" data-key="lock_decay_frames" data-type="number" min="3" max="60" step="1">
-                <span class="field-slider-value">fr</span>
+                <input type="number" id="aim-lock_persistence_ms" data-key="lock_persistence_ms" data-type="number" min="0" max="2000" step="10">
+                <span class="field-slider-value">ms</span>
               </div>
             </div>
             <div class="field-card">

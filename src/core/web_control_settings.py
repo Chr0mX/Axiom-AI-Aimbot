@@ -201,7 +201,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "aim_x_offset_frac": {"type": "float", "min": -1.0, "max": 1.0},
         "aim_y_offset_frac": {"type": "float", "min": -1.0, "max": 1.0},
         "sticky_lock_enabled": {"type": "bool"},
-        "lock_decay_frames": {"type": "int", "min": 3, "max": 60},
+        "lock_persistence_ms": {"type": "int", "min": 0, "max": 2000},
         "lock_iou_threshold": {"type": "float", "min": 0.10, "max": 0.70},
         "kalman_enabled": {"type": "bool"},
         "kalman_process_noise": {"type": "float", "min": 0.01, "max": 1.0},

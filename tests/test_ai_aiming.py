@@ -503,3 +503,112 @@ class TestIdleMicroJitter:
 
         apply_idle_micro_jitter(config, LoopState(), "sendinput")
         assert sent_moves == []
+
+
+class TestStickyTrackingIntegration:
+    """process_aiming() driving the tracker: minimum lock duration, switch
+    threshold, reacquisition after the aim-hold grace period, and the split
+    acquisition/tracking confidence — real function, fake clock."""
+
+    @staticmethod
+    def _setup(sent_moves, **overrides):
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        kw = dict(
+            sticky_lock_enabled=True, min_confidence=0.8, tracking_confidence=0.0,
+            min_lock_duration_ms=150, target_switch_threshold=0.35,
+            reacquire_radius_px=150, lost_target_timeout_ms=1500,
+            fov_size=300, fov_height=300)
+        kw.update(overrides)
+        cfg = _make_config(**kw)
+        state = LoopState()
+        state.aiming_start_time = 0.0
+        return cfg, state, PIDController(1, 0, 0), PIDController(1, 0, 0)
+
+    @staticmethod
+    def _step(cfg, state, px, py, boxes, confs, t):
+        from core.ai_aiming import process_aiming
+        return process_aiming(cfg, boxes, 500, 500, px, py, "sendinput", state,
+                              current_time=t, confidences=confs)
+
+    def test_lifecycle_acquired_then_tracking(self, sent_moves):
+        from core.target_tracking import TrackState
+        cfg, st, px, py = self._setup(sent_moves)
+        a = [480.0, 480.0, 520.0, 520.0]
+        self._step(cfg, st, px, py, [a], [0.9], 1000.0)
+        assert st.tracker.state is TrackState.ACQUIRED
+        self._step(cfg, st, px, py, [a], [0.9], 1000.2)
+        assert st.tracker.state is TrackState.TRACKING
+
+    def test_missing_target_is_held_inside_min_lock_then_free_to_switch(self, sent_moves):
+        cfg, st, px, py = self._setup(sent_moves)
+        a = [480.0, 480.0, 520.0, 520.0]
+        b = [700.0, 700.0, 740.0, 740.0]
+        self._step(cfg, st, px, py, [a], [0.9], 1000.0)
+        assert self._step(cfg, st, px, py, [b], [0.9], 1000.05) is False   # 50 ms into a 150 ms lock
+        assert st.locked_box == a                                         # untouched
+        assert self._step(cfg, st, px, py, [b], [0.9], 1000.4) is not False
+        assert st.locked_box == b
+
+    def test_rival_needs_score_advantage_to_displace_lock(self, sent_moves):
+        cfg, st, px, py = self._setup(sent_moves)
+        a = [560.0, 560.0, 600.0, 600.0]         # locked, 80 px off-centre
+        rival_close = [495.0, 495.0, 505.0, 505.0]
+        self._step(cfg, st, px, py, [a], [0.9], 1000.0)
+        # Lock is old enough, but the rival's advantage is below a 99 % threshold.
+        cfg.target_switch_threshold = 0.99
+        self._step(cfg, st, px, py, [a, rival_close], [0.9, 0.9], 1000.5)
+        assert st.locked_box == a
+        cfg.target_switch_threshold = 0.10
+        self._step(cfg, st, px, py, [a, rival_close], [0.9, 0.9], 1000.6)
+        assert st.locked_box == rival_close
+
+    def test_reacquires_same_target_after_aim_hold_expired(self, sent_moves):
+        from core.target_tracking import TrackState
+        # High switch threshold isolates reacquisition from rival-displacement.
+        cfg, st, px, py = self._setup(sent_moves, target_switch_threshold=0.9)
+        a = [580.0, 480.0, 620.0, 520.0]          # centre (600, 500)
+        self._step(cfg, st, px, py, [a], [0.9], 1000.0)
+        self._step(cfg, st, px, py, [a], [0.9], 1000.2)
+        # What ai_loop does when the aim-hold grace period (persistence) ends:
+        st.tracker.on_miss(1000.3)
+        st.locked_box = None
+        moved = [650.0, 480.0, 690.0, 520.0]       # no overlap with a; centre 70 px from where a was last seen
+        stranger = [405.0, 495.0, 415.0, 505.0]    # 190 px from a (outside the 150 px radius) but nearer the crosshair
+        self._step(cfg, st, px, py, [stranger, moved], [0.9, 0.9], 1000.8)
+        assert st.locked_box == moved             # the prior target wins over the nearer stranger
+        assert st.tracker.state is TrackState.REACQUIRED
+
+    def test_reacquire_picks_nearest_to_last_known_position(self, sent_moves):
+        cfg, st, px, py = self._setup(sent_moves, target_switch_threshold=0.9)
+        a = [480.0, 480.0, 520.0, 520.0]
+        self._step(cfg, st, px, py, [a], [0.9], 1000.0)
+        st.tracker.on_miss(1000.1)
+        st.locked_box = None
+        near_last = [505.0, 505.0, 515.0, 515.0]   # 14 px from where a was last seen
+        farther = [550.0, 480.0, 590.0, 520.0]     # 70 px away
+        self._step(cfg, st, px, py, [farther, near_last], [0.9, 0.9], 1000.5)
+        assert st.locked_box == near_last
+
+    def test_no_reacquisition_after_lost_target_timeout(self, sent_moves):
+        from core.target_tracking import TrackState
+        cfg, st, px, py = self._setup(sent_moves, target_switch_threshold=0.9, lost_target_timeout_ms=300)
+        a = [580.0, 480.0, 620.0, 520.0]
+        self._step(cfg, st, px, py, [a], [0.9], 1000.0)
+        st.tracker.on_miss(1000.1)
+        st.locked_box = None
+        moved = [650.0, 480.0, 690.0, 520.0]
+        stranger = [405.0, 495.0, 415.0, 505.0]
+        self._step(cfg, st, px, py, [stranger, moved], [0.9, 0.9], 1000.6)   # 500 ms unseen > 300 ms timeout
+        assert st.locked_box == stranger          # plain priority pick: nothing is remembered any more
+        assert st.tracker.state is TrackState.ACQUIRED
+
+    def test_confidence_split_keeps_lock_but_rejects_weak_new_targets(self, sent_moves):
+        cfg, st, px, py = self._setup(sent_moves, tracking_confidence=0.5)
+        a = [480.0, 480.0, 520.0, 520.0]
+        self._step(cfg, st, px, py, [a], [0.9], 1000.0)
+        a2 = [482.0, 482.0, 522.0, 522.0]
+        assert self._step(cfg, st, px, py, [a2], [0.55], 1000.1) is not False   # keeps the lock at 55 %
+        assert st.locked_box == a2
+        fresh_st = self._setup(sent_moves, tracking_confidence=0.5)[1]
+        assert self._step(cfg, fresh_st, px, py, [a], [0.55], 2000.0) is False  # but can't acquire at 55 %

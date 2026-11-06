@@ -1056,3 +1056,71 @@ class TestV3Layout:
         assert d['config_version'] == 3 and d['keys']['aim_keys'] == [1, 6, 2]
         assert d['weapon_detection']['hud_model_path'] == "Model_Hud/x.onnx"
 
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# FOV shrink modes + time-based target tracking settings
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestTrackingSettings:
+    NEW_FIELDS = (
+        'fov_shrink_mode', 'fov_expand_delay_ms', 'fov_recovery_duration_ms',
+        'lock_persistence_ms', 'lost_target_timeout_ms', 'min_lock_duration_ms',
+        'target_switch_threshold', 'reacquire_radius_px', 'tracking_confidence',
+    )
+
+    def test_defaults(self):
+        c = _make_config()
+        assert c.fov_shrink_mode == 'adaptive'
+        assert (c.lock_persistence_ms, c.lost_target_timeout_ms) == (250, 1500)
+        assert c.tracking_confidence == 0.0          # = same as min_confidence
+
+    def test_round_trip(self):
+        a = _make_config()
+        a.fov_shrink_mode, a.fov_expand_delay_ms, a.fov_recovery_duration_ms = 'dynamic', 123, 456
+        a.lock_persistence_ms, a.lost_target_timeout_ms, a.min_lock_duration_ms = 321, 2222, 99
+        a.target_switch_threshold, a.reacquire_radius_px, a.tracking_confidence = 0.6, 77, 0.55
+        b = _make_config()
+        b.from_dict(a.to_dict())
+        for f in self.NEW_FIELDS:
+            assert getattr(b, f) == getattr(a, f), f
+
+    def test_old_config_with_fov_reduce_keeps_legacy_ramp(self):
+        c = _make_config()
+        c.from_dict({'aim': {'fov_reduce': {'enabled': True, 'min_size_pct': 40, 'duration': 2}}})
+        assert c.fov_shrink_mode == 'fixed'
+        assert (c.fov_expand_delay_ms, c.fov_recovery_duration_ms) == (0, 0)
+
+    def test_old_config_with_feature_off_gets_new_default(self):
+        c = _make_config()
+        c.from_dict({'aim': {'fov_reduce': {'enabled': False}}})
+        assert c.fov_shrink_mode == 'adaptive'
+
+    def test_explicit_mode_is_not_overridden(self):
+        c = _make_config()
+        c.from_dict({'aim': {'fov_reduce': {'enabled': True, 'mode': 'dynamic'}}})
+        assert c.fov_shrink_mode == 'dynamic'
+
+    def test_decay_frames_migrate_to_milliseconds(self):
+        c = _make_config()
+        c.from_dict({'tracking': {'sticky_lock': {'decay_frames': 30}}})
+        assert c.lock_persistence_ms == 500
+        c = _make_config()
+        c.from_dict({'tracking': {'sticky_lock': {'decay_frames': 30, 'persistence_ms': 120}}})
+        assert c.lock_persistence_ms == 120          # explicit new value wins
+
+    def test_validation_clamps(self):
+        from core.config import validate_config
+        c = _make_config()
+        c.fov_shrink_mode = 'bogus'
+        c.fov_expand_delay_ms, c.fov_recovery_duration_ms = -5, 10 ** 9
+        c.lock_persistence_ms, c.lost_target_timeout_ms = float('nan'), -1
+        c.min_lock_duration_ms, c.target_switch_threshold = 10 ** 9, 7.0
+        c.reacquire_radius_px, c.min_confidence, c.tracking_confidence = -3, 0.6, 0.9
+        validate_config(c)
+        assert c.fov_shrink_mode == 'adaptive'
+        assert c.fov_expand_delay_ms == 0 and c.fov_recovery_duration_ms == 5000
+        assert c.lock_persistence_ms == 250 and c.lost_target_timeout_ms == 0
+        assert c.min_lock_duration_ms == 5000 and c.target_switch_threshold == 1.0
+        assert c.reacquire_radius_px == 0
+        assert c.tracking_confidence == 0.6          # capped at the acquisition bar

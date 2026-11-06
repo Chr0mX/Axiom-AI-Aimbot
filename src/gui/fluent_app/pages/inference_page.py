@@ -4,12 +4,20 @@
 from PyQt6.QtCore import Qt
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
-    FluentIcon, SettingCard, SegmentedWidget,
+    FluentIcon, SettingCard, SegmentedWidget, ComboBox,
 )
 from ..components.slider_spin_card import SliderSpinCard, SliderLabelCard, SliderDoubleSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
+
+
+_FOV_MODES = ("fixed", "adaptive", "dynamic")
+
+
+def _tip(card, text):
+    """Description line plus a hover tooltip carrying the same explanation."""
+    card.setToolTip(text)
 
 
 class InferencePage(BasePage):
@@ -85,12 +93,32 @@ class InferencePage(BasePage):
         # locked, so a random target near the edge of the normally-larger
         # FOV can't steal the lock mid-engagement. The two value cards are
         # only meaningful while this is on — see _updateFovReduceVisibility().
+        self.fovShrinkGroup = SettingCardGroup(t("fov_shrinking", "FOV Shrinking"), self.scrollWidget)
+        self.advFovGroup = SettingCardGroup(t("advanced_fov", "Advanced FOV"), self.scrollWidget)
+        self.acqTrackGroup = SettingCardGroup(t("target_acq_tracking", "Target Acquisition & Tracking"), self.scrollWidget)
+
         self.fovReduceEnableCard = SwitchSettingCard(
             FluentIcon.ZOOM,
             t("fov_reduce_on_target", "Reduce FOV on Active Target"),
             t("fov_reduce_on_target_desc", "Temporarily shrink the FOV while a target is locked, so a random target near the edge of the FOV can't steal the lock mid-engagement."),
-            parent=self.fovGroup
+            parent=self.fovShrinkGroup
         )
+
+        self.fovModeCombo = ComboBox()
+        self.fovModeCombo.addItems([
+            t("fov_mode_fixed", "Fixed"),
+            t("fov_mode_adaptive", "Adaptive"),
+            t("fov_mode_dynamic", "Dynamic"),
+        ])
+        self.fovModeCombo.setMinimumWidth(130)
+        self.fovModeCard = SettingCard(
+            FluentIcon.ZOOM,
+            t("fov_shrink_mode", "Shrink Mode"),
+            self._fovModeDesc(),
+            self.fovShrinkGroup
+        )
+        self.fovModeCard.hBoxLayout.addWidget(self.fovModeCombo, 0)
+        self.fovModeCard.hBoxLayout.addSpacing(16)
 
         self.fovMinSizeCard = SliderSpinCard(
             FluentIcon.ZOOM,
@@ -98,7 +126,7 @@ class InferencePage(BasePage):
             1, 100,
             suffix="%",
             description=t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Size/Height, while a target is locked"),
-            parent=self.fovGroup
+            parent=self.fovShrinkGroup
         )
 
         self.fovMinSizeDurationCard = SliderDoubleSpinCard(
@@ -109,7 +137,68 @@ class InferencePage(BasePage):
             step=0.1,
             suffix="s",
             description=t("fov_min_size_duration_desc", "How long it takes the FOV to gradually shrink down to FOV Min Size after a target is acquired, then holds there for the rest of the engagement (0 = shrinks instantly)"),
-            parent=self.fovGroup
+            parent=self.fovShrinkGroup
+        )
+
+        # --- Advanced FOV ---
+        self.fovExpandDelayCard = SliderSpinCard(
+            FluentIcon.HISTORY,
+            t("fov_expand_delay", "FOV Expansion Delay"),
+            0, 2000, suffix="ms",
+            description=t("fov_expand_delay_desc", "After the lock is released, wait this long before the FOV starts growing back. Controls WHEN recovery begins."),
+            parent=self.advFovGroup
+        )
+        self.fovRecoveryCard = SliderSpinCard(
+            FluentIcon.SPEED_HIGH,
+            t("fov_recovery_duration", "FOV Recovery Duration"),
+            0, 3000, suffix="ms",
+            description=t("fov_recovery_duration_desc", "How long the FOV takes to grow from its minimum back to full size (also the speed limit for Adaptive/Dynamic expansion). Controls HOW FAST it recovers. 0 = instant."),
+            parent=self.advFovGroup
+        )
+        self.minLockCard = SliderSpinCard(
+            FluentIcon.PIN,
+            t("min_lock_duration", "Minimum Target Lock Duration"),
+            0, 2000, suffix="ms",
+            description=t("min_lock_duration_desc", "A lock can't be swapped for another target sooner than this after it was acquired. Needs Sticky Target Lock (Aim page). Never delays releasing a target that is really gone."),
+            parent=self.advFovGroup
+        )
+
+        # --- Target Acquisition & Tracking ---
+        # Acquisition Confidence is the existing "Min Confidence" card below
+        # (General Parameters); it is not duplicated here.
+        self.stickyHintCard = SettingCard(
+            FluentIcon.INFO,
+            t("tracking_needs_sticky", "Needs Sticky Target Lock"),
+            t("tracking_needs_sticky_desc", "Turn on Sticky Target Lock (Aim page → Target Tracking) to use these settings. Lock Persistence is set there too."),
+            self.acqTrackGroup
+        )
+        self.trackConfCard = SliderSpinCard(
+            FluentIcon.CERTIFICATE,
+            t("tracking_confidence", "Tracking Confidence"),
+            0, 100, suffix="%",
+            description=t("tracking_confidence_desc", "Minimum confidence to KEEP an existing lock. A new target still needs Min Confidence (General Parameters), so a lock survives brief confidence dips. 0 = same as Min Confidence."),
+            parent=self.acqTrackGroup
+        )
+        self.switchThresholdCard = SliderSpinCard(
+            FluentIcon.SYNC,
+            t("target_switch_threshold", "Target Switch Threshold"),
+            0, 100, suffix="%",
+            description=t("target_switch_threshold_desc", "How much better (as a % of the priority score) another target must be before it replaces the current one. 100% = never switch while the current target is visible."),
+            parent=self.acqTrackGroup
+        )
+        self.reacquireRadiusCard = SliderSpinCard(
+            FluentIcon.ZOOM_IN,
+            t("reacquire_radius", "Reacquisition Radius"),
+            0, 1000, suffix="px",
+            description=t("reacquire_radius_desc", "A target reappearing within this distance of where the lost one was last seen (extrapolated by its velocity) is treated as the same target."),
+            parent=self.acqTrackGroup
+        )
+        self.lostTimeoutCard = SliderSpinCard(
+            FluentIcon.HISTORY,
+            t("lost_target_timeout", "Lost Target Timeout"),
+            0, 10000, suffix="ms",
+            description=t("lost_target_timeout_desc", "Longest time without a valid detection before the lock is released and the target forgotten. Aim is held only for Lock Persistence; the target stays reacquirable until this elapses."),
+            parent=self.acqTrackGroup
         )
 
         self.detectRangeCard = SliderSpinCard(
@@ -119,6 +208,11 @@ class InferencePage(BasePage):
             description=t("detect_range_note"),
             parent=self.fovGroup
         )
+
+        for _c in (self.fovReduceEnableCard, self.fovModeCard, self.fovMinSizeCard, self.fovMinSizeDurationCard,
+                   self.fovExpandDelayCard, self.fovRecoveryCard, self.minLockCard, self.trackConfCard,
+                   self.switchThresholdCard, self.reacquireRadiusCard, self.lostTimeoutCard, self.stickyHintCard):
+            _tip(_c, _c.contentLabel.text())
 
         # === General Parameters ===
         self.generalGroup = SettingCardGroup(t("general_params"), self.scrollWidget)
@@ -230,11 +324,26 @@ class InferencePage(BasePage):
         self.fovGroup.addSettingCard(self.fovHeightCard)
         self.fovGroup.addSettingCard(self.fovFollowCard)
         self.fovGroup.addSettingCard(self.fovCircleCard)
-        self.fovGroup.addSettingCard(self.fovReduceEnableCard)
-        self.fovGroup.addSettingCard(self.fovMinSizeCard)
-        self.fovGroup.addSettingCard(self.fovMinSizeDurationCard)
         self.fovGroup.addSettingCard(self.detectRangeCard)
         self.addContent(self.fovGroup)
+
+        self.fovShrinkGroup.addSettingCard(self.fovReduceEnableCard)
+        self.fovShrinkGroup.addSettingCard(self.fovModeCard)
+        self.fovShrinkGroup.addSettingCard(self.fovMinSizeCard)
+        self.fovShrinkGroup.addSettingCard(self.fovMinSizeDurationCard)
+        self.addContent(self.fovShrinkGroup)
+
+        self.advFovGroup.addSettingCard(self.fovExpandDelayCard)
+        self.advFovGroup.addSettingCard(self.fovRecoveryCard)
+        self.advFovGroup.addSettingCard(self.minLockCard)
+        self.addContent(self.advFovGroup)
+
+        self.acqTrackGroup.addSettingCard(self.stickyHintCard)
+        self.acqTrackGroup.addSettingCard(self.trackConfCard)
+        self.acqTrackGroup.addSettingCard(self.switchThresholdCard)
+        self.acqTrackGroup.addSettingCard(self.reacquireRadiusCard)
+        self.acqTrackGroup.addSettingCard(self.lostTimeoutCard)
+        self.addContent(self.acqTrackGroup)
 
         self.generalGroup.addSettingCard(self.detectIntervalCard)
         self.generalGroup.addSettingCard(self.confidenceCard)
@@ -265,6 +374,14 @@ class InferencePage(BasePage):
         self.fovReduceEnableCard.checkedChanged.connect(self._onFovReduceEnableChanged)
         self.fovMinSizeCard.valueChanged.connect(self._onFovMinSizeChanged)
         self.fovMinSizeDurationCard.valueChanged.connect(self._onFovMinSizeDurationChanged)
+        self.fovModeCombo.currentIndexChanged.connect(self._onFovModeChanged)
+        self.fovExpandDelayCard.valueChanged.connect(lambda v: self._setCfg('fov_expand_delay_ms', int(v)))
+        self.fovRecoveryCard.valueChanged.connect(lambda v: self._setCfg('fov_recovery_duration_ms', int(v)))
+        self.minLockCard.valueChanged.connect(lambda v: self._setCfg('min_lock_duration_ms', int(v)))
+        self.trackConfCard.valueChanged.connect(lambda v: self._setCfg('tracking_confidence', v / 100.0))
+        self.switchThresholdCard.valueChanged.connect(lambda v: self._setCfg('target_switch_threshold', v / 100.0))
+        self.reacquireRadiusCard.valueChanged.connect(lambda v: self._setCfg('reacquire_radius_px', int(v)))
+        self.lostTimeoutCard.valueChanged.connect(lambda v: self._setCfg('lost_target_timeout_ms', int(v)))
         self.detectRangeCard.valueChanged.connect(self._onDetectRangeChanged)
 
         self.detectIntervalCard.valueChanged.connect(self._onDetectIntervalChanged)
@@ -298,6 +415,15 @@ class InferencePage(BasePage):
             self.fovReduceEnableCard.setChecked(fov_reduce_on)
             self.fovMinSizeCard.setValue(int(getattr(self._config, 'fov_min_size_pct', 50.0)))
             self.fovMinSizeDurationCard.setValue(float(getattr(self._config, 'fov_min_size_duration', 1.0)))
+            mode = str(getattr(self._config, 'fov_shrink_mode', 'adaptive'))
+            self.fovModeCombo.setCurrentIndex(_FOV_MODES.index(mode) if mode in _FOV_MODES else 1)
+            self.fovExpandDelayCard.setValue(int(getattr(self._config, 'fov_expand_delay_ms', 200)))
+            self.fovRecoveryCard.setValue(int(getattr(self._config, 'fov_recovery_duration_ms', 400)))
+            self.minLockCard.setValue(int(getattr(self._config, 'min_lock_duration_ms', 150)))
+            self.trackConfCard.setValue(int(round(float(getattr(self._config, 'tracking_confidence', 0.0)) * 100)))
+            self.switchThresholdCard.setValue(int(round(float(getattr(self._config, 'target_switch_threshold', 0.35)) * 100)))
+            self.reacquireRadiusCard.setValue(int(getattr(self._config, 'reacquire_radius_px', 150)))
+            self.lostTimeoutCard.setValue(int(getattr(self._config, 'lost_target_timeout_ms', 1500)))
             self._updateFovReduceVisibility(fov_reduce_on)
             self.detectRangeCard.setValue(self._config.detect_range_size)
 
@@ -337,8 +463,41 @@ class InferencePage(BasePage):
         """Hide the min-size % / duration cards while the toggle is off —
         per the request, not just greyed out, to keep the FOV group
         uncluttered when the feature isn't in use."""
+        self.fovModeCard.setVisible(enabled)
         self.fovMinSizeCard.setVisible(enabled)
         self.fovMinSizeDurationCard.setVisible(enabled)
+        # Advanced FOV only matters while the shrinking feature is on; the
+        # minimum lock duration and the tracking group depend on Sticky Lock.
+        self.fovExpandDelayCard.setVisible(enabled)
+        self.fovRecoveryCard.setVisible(enabled)
+        self._updateTrackingVisibility()
+
+    def _updateTrackingVisibility(self):
+        sticky = bool(getattr(self._config, 'sticky_lock_enabled', False)) if self._config else False
+        self.minLockCard.setVisible(sticky)
+        fov_on = bool(getattr(self._config, 'fov_reduce_on_target_enabled', False)) if self._config else False
+        self.advFovGroup.setVisible(fov_on or sticky)   # hide the group when none of its cards apply
+        self.stickyHintCard.setVisible(not sticky)
+        for card in (self.trackConfCard, self.switchThresholdCard,
+                     self.reacquireRadiusCard, self.lostTimeoutCard):
+            card.setVisible(sticky)
+
+    @staticmethod
+    def _fovModeDesc():
+        return t(
+            "fov_shrink_mode_desc",
+            "Fixed: always shrink to FOV Min Size. Adaptive: shrink while the target is steady, "
+            "confident and near the centre; grow when it nears the edge or tracking gets shaky. "
+            "Dynamic: shrink while steady; grow on fast movement, sudden direction changes or "
+            "unstable detections.")
+
+    def _setCfg(self, name, value):
+        if self._config and not self._isLoadingConfig:
+            setattr(self._config, name, value)
+
+    def _onFovModeChanged(self, index):
+        if self._config and not self._isLoadingConfig and 0 <= index < len(_FOV_MODES):
+            self._config.fov_shrink_mode = _FOV_MODES[index]
 
     def _applyScreenshotMethodEffect(self, method: str):
         """Called by capture page (and on load) to sync fov_follow visibility."""
@@ -477,6 +636,27 @@ class InferencePage(BasePage):
         self.fovMinSizeDurationCard.contentLabel.setText(t("fov_min_size_duration_desc", "How long it takes the FOV to gradually shrink down to FOV Min Size after a target is acquired, then holds there for the rest of the engagement (0 = shrinks instantly)"))
         self.detectRangeCard.titleLabel.setText(t("detect_range_size"))
         self.detectRangeCard.contentLabel.setText(t("detect_range_note"))
+
+        self.fovShrinkGroup.titleLabel.setText(t("fov_shrinking", "FOV Shrinking"))
+        self.advFovGroup.titleLabel.setText(t("advanced_fov", "Advanced FOV"))
+        self.acqTrackGroup.titleLabel.setText(t("target_acq_tracking", "Target Acquisition & Tracking"))
+        self.fovModeCard.titleLabel.setText(t("fov_shrink_mode", "Shrink Mode"))
+        self.fovModeCard.contentLabel.setText(self._fovModeDesc())
+        for i, (key, default) in enumerate((("fov_mode_fixed", "Fixed"), ("fov_mode_adaptive", "Adaptive"), ("fov_mode_dynamic", "Dynamic"))):
+            self.fovModeCombo.setItemText(i, t(key, default))
+        for card, key, title, desc in (
+            (self.fovExpandDelayCard, "fov_expand_delay", "FOV Expansion Delay", "After the lock is released, wait this long before the FOV starts growing back. Controls WHEN recovery begins."),
+            (self.fovRecoveryCard, "fov_recovery_duration", "FOV Recovery Duration", "How long the FOV takes to grow from its minimum back to full size (also the speed limit for Adaptive/Dynamic expansion). Controls HOW FAST it recovers. 0 = instant."),
+            (self.minLockCard, "min_lock_duration", "Minimum Target Lock Duration", "A lock can't be swapped for another target sooner than this after it was acquired. Needs Sticky Target Lock (Aim page). Never delays releasing a target that is really gone."),
+            (self.stickyHintCard, "tracking_needs_sticky", "Needs Sticky Target Lock", "Turn on Sticky Target Lock (Aim page → Target Tracking) to use these settings. Lock Persistence is set there too."),
+            (self.trackConfCard, "tracking_confidence", "Tracking Confidence", "Minimum confidence to KEEP an existing lock. A new target still needs Min Confidence (General Parameters), so a lock survives brief confidence dips. 0 = same as Min Confidence."),
+            (self.switchThresholdCard, "target_switch_threshold", "Target Switch Threshold", "How much better (as a % of the priority score) another target must be before it replaces the current one. 100% = never switch while the current target is visible."),
+            (self.reacquireRadiusCard, "reacquire_radius", "Reacquisition Radius", "A target reappearing within this distance of where the lost one was last seen (extrapolated by its velocity) is treated as the same target."),
+            (self.lostTimeoutCard, "lost_target_timeout", "Lost Target Timeout", "Longest time without a valid detection before the lock is released and the target forgotten. Aim is held only for Lock Persistence; the target stays reacquirable until this elapses."),
+        ):
+            card.titleLabel.setText(t(key, title))
+            card.contentLabel.setText(t(key + "_desc" if key != "tracking_needs_sticky" else "tracking_needs_sticky_desc", desc))
+            _tip(card, card.contentLabel.text())
 
         self.detectIntervalCard.titleLabel.setText(t("detect_interval"))
         self.confidenceCard.titleLabel.setText(t("min_confidence"))

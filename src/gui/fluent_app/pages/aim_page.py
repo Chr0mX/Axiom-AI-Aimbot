@@ -872,10 +872,10 @@ class AimPage(BasePage):
 
         self.lockDecayCard = SliderLabelCard(
             FluentIcon.HISTORY,
-            t("lock_decay_frames", "Lock Decay Frames"),
-            3, 60,
-            format_func=lambda v: f"{v} fr",
-            description=t("lock_decay_desc", "Frames to hold aim after target is lost before releasing the lock"),
+            t("lock_persistence", "Lock Persistence"),
+            0, 2000,
+            format_func=lambda v: f"{v} ms",
+            description=t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS)"),
             label_width=55,
             parent=self.trackingGroup
         )
@@ -1422,7 +1422,7 @@ class AimPage(BasePage):
             self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
             self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
-            self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
+            self.lockDecayCard.setValue(int(getattr(self._config, 'lock_persistence_ms', 250)))
             self.lockIouCard.setValue(int(round(getattr(self._config, 'lock_iou_threshold', 0.3) * 100)))
 
             kalman_on = bool(getattr(self._config, 'kalman_enabled', False))
@@ -2078,7 +2078,7 @@ class AimPage(BasePage):
 
     def _onLockDecayChanged(self, value):
         if self._config:
-            self._config.lock_decay_frames = int(value)
+            self._config.lock_persistence_ms = int(value)
 
     def _onLockIouChanged(self, value):
         if self._config:
@@ -2273,8 +2273,8 @@ class AimPage(BasePage):
         self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "History Frames"))
         self.stickyLockCard.titleLabel.setText(t("sticky_lock_enabled", "Sticky Target Lock"))
         self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
-        self.lockDecayCard.titleLabel.setText(t("lock_decay_frames", "Lock Decay Frames"))
-        self.lockDecayCard.contentLabel.setText(t("lock_decay_desc", "Frames to hold aim after target is lost before releasing the lock"))
+        self.lockDecayCard.titleLabel.setText(t("lock_persistence", "Lock Persistence"))
+        self.lockDecayCard.contentLabel.setText(t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS)"))
         self.lockIouCard.titleLabel.setText(t("lock_iou_threshold", "IoU Match Threshold"))
         self.lockIouCard.contentLabel.setText(t("lock_iou_desc", "Minimum overlap required to match the same target across frames"))
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))

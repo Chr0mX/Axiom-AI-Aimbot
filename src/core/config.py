@@ -7,6 +7,7 @@ import ctypes
 import dataclasses
 import json
 import logging
+import math
 import os
 import time
 from typing import List, Dict, Any, Optional
@@ -122,6 +123,9 @@ _FIELD_MAP = {
     'fov_reduce_on_target_enabled': 'aim.fov_reduce.enabled',
     'fov_min_size_pct':           'aim.fov_reduce.min_size_pct',
     'fov_min_size_duration':      'aim.fov_reduce.duration',
+    'fov_shrink_mode':            'aim.fov_reduce.mode',
+    'fov_expand_delay_ms':        'aim.fov_reduce.expand_delay_ms',
+    'fov_recovery_duration_ms':   'aim.fov_reduce.recovery_ms',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
     'detect_semantic_filter_enabled': 'inference.semantic_filter.enabled',
     'detect_min_bbox_area_px':    'inference.semantic_filter.min_bbox_area_px',
@@ -189,6 +193,12 @@ _FIELD_MAP = {
     'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
     'lock_decay_frames':          'tracking.sticky_lock.decay_frames',
     'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
+    'lock_persistence_ms':        'tracking.sticky_lock.persistence_ms',
+    'lost_target_timeout_ms':     'tracking.sticky_lock.lost_timeout_ms',
+    'min_lock_duration_ms':       'tracking.sticky_lock.min_lock_ms',
+    'target_switch_threshold':    'tracking.sticky_lock.switch_threshold',
+    'reacquire_radius_px':        'tracking.sticky_lock.reacquire_radius_px',
+    'tracking_confidence':        'inference.tracking_confidence',
     'sticky_adaptive_iou':        'tracking.sticky_lock.adaptive_iou',
     'target_priority_mode':       'tracking.target_priority.mode',
     'target_priority_confidence_weight': 'tracking.target_priority.confidence_weight',
@@ -490,6 +500,14 @@ class Config:
         self.fov_reduce_on_target_enabled: bool = False
         self.fov_min_size_pct: float = 50.0     # % of fov_size/fov_height the ramp shrinks down to
         self.fov_min_size_duration: float = 1.0  # seconds the ramp takes to reach fov_min_size_pct (0 = instant)
+        # Shrink strategy: 'fixed' (always fov_min_size_pct while locked),
+        # 'adaptive' (distance-from-centre + confidence + stability) or
+        # 'dynamic' (target velocity/direction changes + detection consistency).
+        # A config.json saved before modes existed with the feature on is
+        # migrated to 'fixed' in from_dict() so its feel doesn't change.
+        self.fov_shrink_mode: str = 'adaptive'
+        self.fov_expand_delay_ms: int = 200      # after the lock is released, wait this long before the FOV starts recovering
+        self.fov_recovery_duration_ms: int = 400  # time for the FOV to grow from its minimum back to full size
 
         # Runtime state — not serialized (see _FIELD_MAP: neither key appears
         # there). The FOV width/height actually in effect THIS frame
@@ -791,6 +809,14 @@ class Config:
         self.sticky_lock_enabled: bool = False
         self.lock_decay_frames: int = 15
         self.lock_iou_threshold: float = 0.3
+        # Time-based tracking (replaces counting frames; lock_decay_frames is
+        # kept only so old files load, and is converted in from_dict()).
+        self.lock_persistence_ms: int = 250       # grace period: aim state held across missed detections
+        self.lost_target_timeout_ms: int = 1500   # unseen this long -> lock released, target forgotten
+        self.min_lock_duration_ms: int = 150      # a lock can't be switched away from sooner than this
+        self.target_switch_threshold: float = 0.35  # score advantage (0-1) a rival needs to take over
+        self.reacquire_radius_px: int = 150       # how far from the last known position the same target may reappear
+        self.tracking_confidence: float = 0.0     # min confidence to KEEP a lock; 0 = same as min_confidence
         self.sticky_adaptive_iou: bool = True
         self.sticky_gap_extrapolate: bool = False
         self.sticky_gap_frames: int = 3
@@ -950,6 +976,22 @@ class Config:
                                        attr, val, expected.__name__)
                         continue
                 setattr(self, attr, val)
+
+        # Pre-feature files: keep their old behaviour instead of silently
+        # switching to the new defaults.
+        if (_get_path(data, 'aim.fov_reduce.mode') is _MISSING
+                and _get_path(data, 'aim.fov_reduce.enabled') is not _MISSING
+                and self.fov_reduce_on_target_enabled):
+            self.fov_shrink_mode = 'fixed'          # the old linear ramp
+            self.fov_expand_delay_ms = 0            # old behaviour: instant full size on loss
+            self.fov_recovery_duration_ms = 0
+        if _get_path(data, 'tracking.sticky_lock.persistence_ms') is _MISSING:
+            legacy_frames = _get_path(data, 'tracking.sticky_lock.decay_frames')
+            if legacy_frames is not _MISSING:
+                try:  # frames -> time at the 60 FPS the old default assumed
+                    self.lock_persistence_ms = int(round(float(legacy_frames) * 1000.0 / 60.0))
+                except (TypeError, ValueError):
+                    pass
 
         # Crosshair color: nested [r, g, b], else legacy flat r/g/b.
         # Each channel is parsed on its own and clamped to 0-255; a bad value
@@ -1128,6 +1170,7 @@ def validate_config(config_instance: Config) -> None:
     # 向後兼容：修正滑鼠移動方式
     _validate_mouse_method(config_instance)
     _validate_aim_math(config_instance)
+    _validate_tracking(config_instance)
     _validate_box_style(config_instance)
     _validate_gpu_monitor(config_instance)
 
@@ -1328,6 +1371,32 @@ def _validate_aim_math(config: Config) -> None:
         0.0, min(500.0, float(getattr(config, 'prediction_velocity_deadzone_px_s', 0.0) or 0.0)))
     config.prediction_ego_motion_scale = max(
         0.1, min(5.0, float(getattr(config, 'prediction_ego_motion_scale', 1.0) or 1.0)))
+
+
+def _finite(value, default: float) -> float:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
+
+
+def _validate_tracking(config: Config) -> None:
+    """Clamp the FOV-shrink-mode and target-tracking fields."""
+    if getattr(config, 'fov_shrink_mode', 'adaptive') not in ('fixed', 'adaptive', 'dynamic'):
+        config.fov_shrink_mode = 'adaptive'
+    config.fov_expand_delay_ms = int(max(0, min(5000, _finite(getattr(config, 'fov_expand_delay_ms', 200), 200))))
+    config.fov_recovery_duration_ms = int(max(0, min(5000, _finite(getattr(config, 'fov_recovery_duration_ms', 400), 400))))
+    config.lock_persistence_ms = int(max(0, min(5000, _finite(getattr(config, 'lock_persistence_ms', 250), 250))))
+    config.lost_target_timeout_ms = int(max(0, min(10000, _finite(getattr(config, 'lost_target_timeout_ms', 1500), 1500))))
+    config.min_lock_duration_ms = int(max(0, min(5000, _finite(getattr(config, 'min_lock_duration_ms', 150), 150))))
+    config.target_switch_threshold = max(0.0, min(1.0, _finite(getattr(config, 'target_switch_threshold', 0.35), 0.35)))
+    config.reacquire_radius_px = int(max(0, min(1000, _finite(getattr(config, 'reacquire_radius_px', 150), 150))))
+    # 0 = "same as min_confidence"; otherwise it can't exceed it (a lock-keeping
+    # bar higher than the acquisition bar would drop locks you just made).
+    tc = max(0.0, min(1.0, _finite(getattr(config, 'tracking_confidence', 0.0), 0.0)))
+    mc = _finite(getattr(config, 'min_confidence', 0.8), 0.8)
+    config.tracking_confidence = 0.0 if tc <= 0.0 else min(tc, mc)
 
 
 def _validate_mouse_method(config: Config) -> None:

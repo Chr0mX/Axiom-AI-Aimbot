@@ -44,6 +44,11 @@ from .inference import (
     preprocess_image,
 )
 from .session_utils import inference_controller
+from .target_tracking import (
+    detection_confidence_floor,
+    filter_by_acquisition_confidence,
+    hold_lock_on_miss,
+)
 from .screen_capture import (
     _capture_backend_is_stale,
     _cleanup_capture,
@@ -1011,7 +1016,7 @@ def ai_logic_loop(
                         latest_region['width'],
                         latest_region['height'],
                         config.model_input_size,
-                        config.min_confidence,
+                        detection_confidence_floor(config),
                         latest_region['left'],
                         latest_region['top'],
                         letterbox_scale=lb_scale,
@@ -1047,6 +1052,15 @@ def ai_logic_loop(
                     from .detection_semantics import filter_detections_by_semantic_class
                     boxes, confidences, class_ids = filter_detections_by_semantic_class(
                         boxes, confidences, class_ids, config)
+
+                # Separate acquisition vs. tracking confidence: the detector ran
+                # at the lower (tracking) bar so a held lock survives a dip;
+                # anything under the acquisition bar that isn't a continuation
+                # of the current/remembered lock is dropped here. No-op when
+                # the two bars are equal (the default).
+                boxes, confidences, class_ids = filter_by_acquisition_confidence(
+                    boxes, confidences, class_ids, config, state.tracker,
+                    state.locked_box, current_time)
 
                 all_boxes, all_confidences = boxes, confidences
                 # --- Reduce FOV size while actively tracking a locked target ---
@@ -1095,9 +1109,11 @@ def ai_logic_loop(
                 aim_engaged = is_aiming and aim_start_delay_elapsed(
                     config, state.aiming_start_time, current_time)
                 aimed_this_frame = bool(aim_engaged and boxes)
-                _set_makcu_move_lock(config, aimed_this_frame)
                 if aimed_this_frame:
-                    process_aiming(
+                    # False = no target accepted (e.g. the locked target is
+                    # briefly missing inside the minimum lock time): treat the
+                    # frame like a missed detection and let the hold path run.
+                    aimed_this_frame = process_aiming(
                         config,
                         boxes,
                         crosshair_x,
@@ -1108,25 +1124,30 @@ def ai_logic_loop(
                         state,
                         current_time,
                         confidences=confidences,
-                    )
-                else:
+                    ) is not False
+                _set_makcu_move_lock(config, aimed_this_frame)
+                if not aimed_this_frame:
                     # Not aiming this frame — either no detections came back, or
                     # detection did find boxes but the aim key isn't held (e.g.
                     # keep_detecting is on and the user simply isn't aiming right
                     # now). Both cases hit this branch identically: aimed_this_frame
                     # is False either way. If sticky lock is enabled and a target
                     # is currently locked, hold the lock (and all PID / smoothing
-                    # state) for up to lock_decay_frames frames before giving up,
+                    # state) for up to lock_persistence_ms before giving up,
                     # instead of dropping it instantly — this is what makes
                     # releasing/re-pressing the aim key on the same target not
                     # restart tracking from scratch every time.
                     sticky = getattr(config, 'sticky_lock_enabled', False)
-                    holding_lock = False
+                    # Time-based grace period (lock_persistence_ms) and lost
+                    # target timeout (lost_target_timeout_ms), not frame counts,
+                    # so they behave the same at any inference FPS. See
+                    # target_tracking.hold_lock_on_miss(). no_detection_frames
+                    # is kept only as a diagnostic counter.
+                    holding_lock = hold_lock_on_miss(
+                        state.tracker, config, current_time, state.locked_box is not None)
                     if sticky and state.locked_box is not None:
-                        decay = int(getattr(config, 'lock_decay_frames', 15))
                         state.no_detection_frames += 1
                         config.display_locked_box_is_decaying = True
-                        holding_lock = state.no_detection_frames < decay
 
                     if (aim_engaged and not boxes and holding_lock
                             and getattr(config, 'sticky_gap_extrapolate', False)):
