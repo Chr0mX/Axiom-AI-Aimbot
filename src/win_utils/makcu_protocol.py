@@ -3,6 +3,7 @@
 Pure protocol helpers for the MAK_API command interface, implemented from the
 terrafirma2021/mak-suite protocol documents (protocol/MAK_API.md, KM_API.md,
 DEVICE_SETTINGS.md). No serial I/O here except the UDP transport adapter.
+Current official MAKCU documentation: https://makcu.com/mcp/documentation
 
 Frame (both directions):  DE AD | LEN:u16 LE | CMD:u8 | PAYLOAD[LEN]
 Accepted SETs send no reply; a rejected GET/SET replies DE AD 01 00 CMD FF.
