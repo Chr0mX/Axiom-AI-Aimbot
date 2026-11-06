@@ -1398,3 +1398,40 @@ def test_watchdog_active_follows_the_reconnect_thread():
         assert mm.is_makcu_watchdog_active() is False
     finally:
         mm.makcu_mouse._reconnect_thread = original
+
+
+class TestMakcuAutorelease:
+    """km.autorelease (V4.103+): armed only when the firmware answers the query."""
+
+    def _mouse(self, reply):
+        from unittest.mock import MagicMock
+        from win_utils.makcu_mouse import MakcuMouse
+        m = MakcuMouse()
+        m._mak_api = True
+        m._connected = True
+        m._serial = MagicMock(is_open=True)
+        m._mak_request = MagicMock(return_value=reply)
+        m._write_frame = MagicMock(return_value=True)
+        return m
+
+    def test_armed_when_supported(self):
+        import struct
+        from win_utils import makcu_protocol as mp
+        m = self._mouse(struct.pack("<I", 0))
+        m._arm_autorelease()
+        assert m._autorelease_armed is True
+        m._write_frame.assert_called_once_with(mp.autorelease_frame(5000))
+
+    def test_not_armed_when_rejected_or_silent(self):
+        for reply in (b"\xff", None):
+            m = self._mouse(reply)
+            m._arm_autorelease()
+            assert m._autorelease_armed is False
+            m._write_frame.assert_not_called()
+
+    def test_not_armed_on_v3(self):
+        m = self._mouse(b"\x00\x00\x00\x00")
+        m._mak_api = False
+        m._arm_autorelease()
+        assert m._autorelease_armed is False
+        m._mak_request.assert_not_called()

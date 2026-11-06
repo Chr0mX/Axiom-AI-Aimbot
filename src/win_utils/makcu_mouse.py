@@ -4,7 +4,7 @@ Achieve hardware-level mouse movement through the MAKCU KM host device.
 MAKCU acts as a USB HID proxy, injecting mouse/keyboard inputs at the hardware level.
 Uses the ASCII API over a serial connection at 4 Mbaud.
 
-API Reference: https://makcu.k4tech.net/native/
+API Reference: https://makcu.com/mcp/documentation
 """
 
 import os
@@ -34,6 +34,10 @@ logger = logging.getLogger(__name__)
 # never leave the user's own mouse blocked.
 _MOVE_LOCK_REFRESH_S = 0.3
 _HEALTH_CHECK_INTERVAL_S = 4.0
+# km.autorelease (V4.103+): if Axiom dies while holding an injected button,
+# the device releases it after this long without a command. The watchdog
+# sends a heartbeat every 2 s, well inside this window.
+_AUTORELEASE_MS = 5000
 _MAK_REQUEST_TIMEOUT_S = 0.3
 
 # Official 4 Mbaud connection constants
@@ -151,6 +155,7 @@ class MakcuMouse:
         self._reply_waiters: dict = {}   # cmd -> list[[Event, payload|None]]
         self._settings_lock = threading.Lock()
         self._last_health_check = 0.0
+        self._autorelease_armed = False
 
         # Keyboard input stream (HID usages currently held), V4/MAKXD only.
         self._keys_down: set = set()
@@ -305,6 +310,7 @@ class MakcuMouse:
         self._start_stream()
         self._start_write_thread()
         self._start_reconnect_thread()
+        self._arm_autorelease()
         self._spread_applied = None
         if self._spread_desired is not None:
             self._kick_spread_worker()
@@ -678,10 +684,27 @@ class MakcuMouse:
                 except Exception as exc:
                     logger.debug("[MAKCU] Reconnect failed: %s", exc)
                 continue
+            if self._autorelease_armed:
+                self._write_frame(mp.heartbeat_frame())
             now = time.monotonic()
             if self._mak_api and now - self._last_health_check >= _HEALTH_CHECK_INTERVAL_S:
                 self._last_health_check = now
                 self.check_stream_health()
+
+    def _arm_autorelease(self) -> None:
+        """Turn on device-side km.autorelease when the firmware has it
+        (V4.103+; V3 and older V4 builds don't). Probed with a query first,
+        since a set is silent and wouldn't tell us whether it took."""
+        self._autorelease_armed = False
+        if not self._mak_api or not self.is_connected():
+            return
+        reply = self._mak_request(mp.CMD_AUTORELEASE)
+        if reply is None or mp.is_rejection(reply) or len(reply) < 4:
+            logger.debug("[MAKCU] km.autorelease not supported by this firmware")
+            return
+        if self._write_frame(mp.autorelease_frame(_AUTORELEASE_MS)):
+            self._autorelease_armed = True
+            logger.info("[MAKCU] Device autorelease armed (%d ms)", _AUTORELEASE_MS)
 
     def check_stream_health(self) -> dict:
         """Query each subscription (MAK_API BUTTONS / KEY_KEYS GET) and
@@ -1129,6 +1152,9 @@ class MakcuMouse:
         """Stop all threads then close serial port."""
         if self._move_lock_active:
             self._send_move_lock(False)
+        if self._autorelease_armed:
+            self._write_frame(mp.autorelease_frame(0))
+            self._autorelease_armed = False
         self._write_stop.set()
         if self._write_thread:
             self._write_thread.join(timeout=1.0)

@@ -41,6 +41,8 @@ CMD_KEY_REMAP = 0x2A
 CMD_KEY_KEYS = 0x2B
 CMD_CONNECTION = 0x3E
 CMD_INPUT_CHANGE = 0x53
+CMD_AUTORELEASE = 0x6E  # V4.103+: u32 LE ms set (silent), empty = query
+CMD_HEARTBEAT = 0x6F    # V4.103+: restarts the autorelease timer
 
 STREAM_KIND_MOUSE = 1
 STREAM_KIND_KEYBOARD = 2
@@ -68,6 +70,16 @@ TOPOLOGY_NOTICE = 0x12  # async CONNECTION payload prefix — not a settings rep
 
 def frame(cmd: int, payload: bytes = b"") -> bytes:
     return SYNC + struct.pack("<HB", len(payload), cmd) + bytes(payload)
+
+
+def autorelease_frame(ms: int) -> bytes:
+    """Set km.autorelease: release injected buttons after `ms` with no
+    accepted API command (0 = off, max 60000). Volatile on the device."""
+    return frame(CMD_AUTORELEASE, struct.pack("<I", max(0, min(60000, int(ms)))))
+
+
+def heartbeat_frame() -> bytes:
+    return frame(CMD_HEARTBEAT)
 
 
 def is_rejection(payload: bytes) -> bool:
