@@ -140,6 +140,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "mouse_click_method": {"type": "str"},
         "aim_start_delay_ms": {"type": "int", "min": 0, "max": 1000},
         "pid_unsafe_mode": {"type": "bool"},
+        "pid_time_normalize": {"type": "bool"},
         # Effective safe range is 0.0-0.5 unless pid_unsafe_mode is on (up to
         # 1.0) — the GUI enforces this by capping slider travel and clamping
         # pid_kp_x/y down to 0.5 when Unsafe Mode is turned off. This schema
@@ -201,7 +202,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "aim_x_offset_frac": {"type": "float", "min": -1.0, "max": 1.0},
         "aim_y_offset_frac": {"type": "float", "min": -1.0, "max": 1.0},
         "sticky_lock_enabled": {"type": "bool"},
-        "lock_decay_frames": {"type": "int", "min": 3, "max": 60},
+        "lock_persistence_ms": {"type": "int", "min": 0, "max": 2000},
         "lock_iou_threshold": {"type": "float", "min": 0.10, "max": 0.70},
         "kalman_enabled": {"type": "bool"},
         "kalman_process_noise": {"type": "float", "min": 0.01, "max": 1.0},
@@ -579,7 +580,7 @@ def gpu_monitor_status(config) -> str:
     page: whether NVML is installed and what the status panel's monitor found."""
     from core.gpu_monitor import nvml_installed
     if not nvml_installed():
-        return "NVML not installed: run Install NVML.bat in the Axiom folder, then restart Axiom."
+        return "NVML module not found: the bundled pynvml (src/python/dependencies) is missing, so reinstall or update Axiom."
     support = getattr(config, "gpu_sensor_support", None) or {}
     if not getattr(config, "status_panel_show_gpu", False):
         return "NVML installed."

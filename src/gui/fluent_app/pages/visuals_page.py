@@ -215,7 +215,7 @@ class VisualsPage(BasePage):
         self.gpuMonitorCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("gpu_monitoring", "GPU Monitoring"),
-            t("gpu_monitoring_hint", "Show NVIDIA GPU sensors in the status panel (needs Install NVML.bat once)"),
+            t("gpu_monitoring_hint", "Show NVIDIA GPU sensors in the status panel (needs an NVIDIA GPU and driver)"),
             parent=self.statusPanelGroup
         )
         self.gpuSensorsCard = SettingCard(
@@ -662,14 +662,14 @@ class VisualsPage(BasePage):
         from core.gpu_monitor import nvml_installed
         if not nvml_installed():
             return t("gpu_monitoring_no_nvml",
-                     "NVML not installed: run Install NVML.bat in the Axiom folder, then restart Axiom")
+                     "NVML module not found: the bundled pynvml (src/python/dependencies) is missing, so reinstall or update Axiom")
         support = getattr(self._config, 'gpu_sensor_support', None) if self._config else None
         status = (support or {}).get('status') if enabled else None
         if status == 'ok':
             return t("gpu_monitoring_ok", "Reading {name}").format(name=support.get('name') or "NVIDIA GPU")
         if status == 'no_gpu':
             return t("gpu_monitoring_no_gpu", "NVML is installed, but no NVIDIA GPU or driver was found")
-        return t("gpu_monitoring_hint", "Show NVIDIA GPU sensors in the status panel (needs Install NVML.bat once)")
+        return t("gpu_monitoring_hint", "Show NVIDIA GPU sensors in the status panel (needs an NVIDIA GPU and driver)")
 
     def _onShowCrosshairChanged(self, checked):
         if self._config:

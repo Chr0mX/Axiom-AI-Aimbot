@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any
 
 import cv2
 import numpy as np
@@ -32,23 +32,46 @@ class PIDController:
         self.Kd = Kd  # Derivative
         self.reset()
 
+    # Frame time the gains were originally tuned against. With time
+    # normalisation on, the P and I contributions scale by dt / this, so the
+    # correction per SECOND is the same at 30, 60 or 240 updates per second
+    # (and identical to the un-normalised output at exactly 60).
+    REFERENCE_DT: float = 1.0 / 60.0
+    _K_MIN: float = 0.25
+    _K_MAX: float = 4.0
+
     def reset(self) -> None:
         """Reset controller state"""
         self.integral: float = 0.0
         self.previous_error: float = 0.0
+        self._last_update_t: float = 0.0
 
-    def update(self, error: float) -> float:
+    def _time_scale(self, now: Optional[float]) -> float:
+        """dt / REFERENCE_DT, clamped; 1.0 when no time is supplied or this is
+        the first sample since reset() (nothing to measure a dt against)."""
+        if now is None:
+            return 1.0
+        last, self._last_update_t = self._last_update_t, float(now)
+        if last <= 0.0 or now <= last:
+            return 1.0
+        return max(self._K_MIN, min(self._K_MAX, (now - last) / self.REFERENCE_DT))
+
+    def update(self, error: float, now: Optional[float] = None) -> float:
         """
         Calculates control output based on current error
         
         Args:
             error: Current error (e.g., target_x - current_x)
+            now: Optional timestamp (seconds). When given, the P and I terms are
+                time-normalised (see REFERENCE_DT); when None the controller
+                behaves exactly as it always has (per-update, frame-based).
             
         Returns:
             Control amount (e.g., amount mouse should move)
         """
+        k = self._time_scale(now)
         # Integral term (with anti-windup clamping)
-        self.integral += error
+        self.integral += error * k
         self.integral = max(-1000.0, min(1000.0, self.integral))
         
         # Derivative term
@@ -58,7 +81,9 @@ class PIDController:
         adjusted_kp = self._calculate_adjusted_kp(self.Kp)
         
         # Calculate output
-        output = (adjusted_kp * error) + (self.Ki * self.integral) + (self.Kd * derivative)
+        # The derivative of a per-update delta is already a per-update move, so
+        # only P and I are scaled by the elapsed-time factor (k == 1 -> unchanged).
+        output = k * ((adjusted_kp * error) + (self.Ki * self.integral)) + (self.Kd * derivative)
         
         # Update previous error
         self.previous_error = error

@@ -3,6 +3,8 @@ from __future__ import annotations
 import queue
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
+from .target_tracking import clamp01
+
 if TYPE_CHECKING:
     from .config import Config
     from .ai_loop_state import LoopState
@@ -224,56 +226,116 @@ def get_effective_detect_range_size(
     return max(fov_size, fov_height, min(int(capture_height), int(capture_width), detection_size))
 
 
+FOV_SHRINK_MODES = ('fixed', 'adaptive', 'dynamic')
+
+
+def _slew(scale: float, target: float, down_s: float, up_s: float, span: float, dt: float) -> float:
+    """Move ``scale`` toward ``target`` no faster than the configured times.
+
+    ``down_s``/``up_s`` are the seconds a full ``span`` of travel takes when
+    shrinking/growing (<= 0 means instant). Rate-limiting on elapsed time is
+    what keeps the FOV from jumping or oscillating whatever the inference FPS.
+    """
+    if target < scale:
+        if down_s <= 0.0:
+            return target
+        return max(target, scale - span / down_s * dt)
+    if up_s <= 0.0:
+        return target
+    return min(target, scale + span / up_s * dt)
+
+
+def _fov_tightness(mode: str, config: Config, state: LoopState) -> float:
+    """0..1 — how far toward the minimum FOV the current tracking quality
+    justifies (1 = fully shrunk). Reads only smoothed tracker signals."""
+    tr = state.tracker
+    floor = float(getattr(config, 'tracking_confidence', 0.0) or 0.0) or float(
+        getattr(config, 'min_confidence', 0.8))
+    conf_q = clamp01(0.5 + (tr.conf_ema - floor) * 5.0)   # at the keep-bar: 0.5, 0.1 above: 1.0
+    stab_q = clamp01((tr.stab_ema - 0.3) / 0.5)            # frame-to-frame box overlap
+    quality = 0.4 * conf_q + 0.3 * stab_q + 0.3 * tr.hit_ema
+    if mode == 'dynamic':
+        fov_ref = max(1.0, float(getattr(config, 'fov_size', 0) or 1))
+        motion_q = clamp01(1.0 - (tr.speed_ema / fov_ref) / 1.5)  # >1.5 FOV widths/s = rapid
+        turn_q = clamp01(1.0 - tr.turn_ema * 2.0)                 # sudden direction change
+        quality = 0.30 * motion_q + 0.25 * turn_q + 0.15 * conf_q + 0.15 * tr.hit_ema + 0.15 * stab_q
+        return clamp01((quality - 0.5) / 0.4)
+    edge_q = clamp01((0.9 - tr.edge_ratio) / 0.45)      # near the FOV boundary -> expand
+    return min(edge_q, clamp01((quality - 0.5) / 0.4))
+
+
 def compute_effective_fov(config: Config, state: LoopState, current_time: float) -> Tuple[int, int]:
     """FOV width/height actually in effect this frame, applying "Reduce FOV
     on Active Target" (fov_reduce_on_target_enabled) on top of the
     configured fov_size/fov_height.
 
-    This is a gradual ramp, not an instant snap: once a target locks, the
-    FOV starts at the full configured fov_size/fov_height and linearly
-    shrinks down to fov_min_size_pct% of that over fov_min_size_duration
-    seconds, then holds at that minimum for the rest of the current lock
-    (fov_min_size_duration <= 0 means an instant drop straight to the
-    minimum, no ramp).
+    ``fov_shrink_mode`` selects what the shrink target is while a lock is held:
 
-    Mutates state.fov_reduce_since to track the ramp across frames: the
-    None -> non-None edge of state.locked_box arms it exactly once (set to
-    current_time), not every frame the target stays locked — see
-    LoopState.fov_reduce_since for why that distinction matters. Ramp
-    progress is then just (current_time - fov_reduce_since) / duration,
-    clamped to [0, 1], so it naturally reaches 1.0 (full min-size) and
-    simply stays there — no separate "expired" bookkeeping needed. Losing
-    the lock resets fov_reduce_since back to 0.0 so the next acquisition
-    starts its own fresh ramp from full size; the feature being off does
-    the same, so re-enabling it later never inherits a stale ramp from
-    however long ago it was last on.
+    * ``fixed``    — always fov_min_size_pct%.
+    * ``adaptive`` — between full and minimum, from the target's distance to
+      the FOV centre plus smoothed confidence/stability (stable + central
+      contracts; near the edge or shaky expands).
+    * ``dynamic``  — from target speed and direction changes plus smoothed
+      confidence, detection consistency and stability.
+
+    Every mode moves ``state.fov_scale`` toward its target at a rate fixed by
+    elapsed time: shrinking takes ``fov_min_size_duration`` s for the full
+    travel, growing takes ``fov_recovery_duration_ms``. After the lock is
+    released the FOV waits ``fov_expand_delay_ms`` before recovering. A zero
+    duration means instant. The getattr fallbacks below are the original
+    behaviour (fixed mode, instant recovery) so configs/stubs that predate the
+    modes are unchanged.
+
+    ``state.fov_reduce_since`` is still armed exactly once on the None ->
+    non-None edge of ``state.locked_box`` (and zeroed when the lock is lost or
+    the feature is off) — see LoopState.fov_reduce_since.
     """
-    effective_size = int(getattr(config, 'fov_size', 0) or 0)
-    effective_height = int(getattr(config, 'fov_height', effective_size) or effective_size)
+    full_size = int(getattr(config, 'fov_size', 0) or 0)
+    full_height = int(getattr(config, 'fov_height', full_size) or full_size)
 
     if not getattr(config, 'fov_reduce_on_target_enabled', False):
         state.fov_reduce_since = 0.0
-        return effective_size, effective_height
+        state.fov_scale = 1.0
+        state.fov_last_t = 0.0
+        state.fov_lost_since = 0.0
+        return full_size, full_height
 
-    if getattr(state, 'locked_box', None) is None:
-        state.fov_reduce_since = 0.0
-        return effective_size, effective_height
+    dt = max(0.0, current_time - state.fov_last_t) if state.fov_last_t > 0.0 else 0.0
+    state.fov_last_t = current_time
 
-    if state.fov_reduce_since == 0.0:
-        state.fov_reduce_since = current_time
+    min_scale = max(0.01, min(1.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0) / 100.0))
+    span = 1.0 - min_scale
+    shrink_s = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
+    recovery_s = float(getattr(config, 'fov_recovery_duration_ms', 0) or 0) / 1000.0
+    scale = state.fov_scale
 
-    duration = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
-    if duration <= 0.0:
-        progress = 1.0
+    if getattr(state, 'locked_box', None) is not None:
+        if state.fov_reduce_since == 0.0:
+            state.fov_reduce_since = current_time
+        state.fov_lost_since = 0.0
+        mode = str(getattr(config, 'fov_shrink_mode', 'fixed'))
+        if mode in ('adaptive', 'dynamic'):
+            target = 1.0 - span * _fov_tightness(mode, config, state)
+        else:
+            target = min_scale
+        scale = _slew(scale, target, shrink_s, recovery_s, span, dt)
     else:
-        progress = max(0.0, min(1.0, (current_time - state.fov_reduce_since) / duration))
+        state.fov_reduce_since = 0.0
+        if scale < 1.0:
+            if state.fov_lost_since == 0.0:
+                state.fov_lost_since = current_time
+            delay_s = float(getattr(config, 'fov_expand_delay_ms', 0) or 0) / 1000.0
+            # Only the time past the delay counts toward recovery, however
+            # sparsely this is called.
+            past_delay = current_time - state.fov_lost_since - delay_s
+            if past_delay >= 0.0:
+                scale = _slew(scale, 1.0, 0.0, recovery_s, span, min(dt, past_delay))
+        else:
+            state.fov_lost_since = 0.0
 
-    pct = max(1.0, min(100.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0)))
-    current_pct = 100.0 - (100.0 - pct) * progress
-    effective_size = max(1, int(effective_size * current_pct / 100.0))
-    effective_height = max(1, int(effective_height * current_pct / 100.0))
-
-    return effective_size, effective_height
+    state.fov_scale = scale
+    # +1e-6 absorbs float error (0.29 * 100 -> 28.999999999999996) before truncating.
+    return max(1, int(full_size * scale + 1e-6)), max(1, int(full_height * scale + 1e-6))
 
 
 def calculate_detection_region(config: Config, crosshair_x: int, crosshair_y: int) -> Dict[str, int]:

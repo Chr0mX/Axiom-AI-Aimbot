@@ -12,6 +12,7 @@ from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .aim_paths import adaptive_lead_s, ema_step
 from .target_predictor import EmaPredictor, RollingVelocityPredictor, VelocityPredictor
+from .target_tracking import edge_ratio, lost_timeout_s, select_target
 
 if TYPE_CHECKING:
     from .config import Config
@@ -243,8 +244,12 @@ def process_aiming(
     state: LoopState,
     current_time: float,
     confidences: List[float] | None = None,
-) -> None:
-    """Aiming logic: target selection → optional prediction/smoothing → PID → mouse move.
+) -> Optional[bool]:
+    """Returns False when no target was accepted this frame (e.g. the locked
+    target is momentarily missing inside the minimum lock time) so the caller
+    runs its hold/decay path; None/True otherwise.
+
+    Aiming logic: target selection → optional prediction/smoothing → PID → mouse move.
 
     Per-frame pipeline: select a target from `boxes` (sticky lock + priority
     scoring), optionally run it through velocity prediction
@@ -282,21 +287,27 @@ def process_aiming(
         # When enabled, prefer the previously locked target over a new closest one,
         # preventing aim from snapping to a different target mid-track.
         sticky = getattr(config, 'sticky_lock_enabled', False)
-        selected = valid_targets[0]
-        if sticky and state.locked_box is not None:
+        _continued = False
+        if sticky:
+            state.tracker.expire(current_time, lost_timeout_s(config))
             # Replaced fixed lock_iou_threshold with adaptive area-scaled version (Someone_idea).
             _base_iou = float(getattr(config, 'lock_iou_threshold', 0.3))
-            if getattr(config, 'sticky_adaptive_iou', True):
+            if state.locked_box is not None and getattr(config, 'sticky_adaptive_iou', True):
                 iou_thresh = _adaptive_sticky_iou(_base_iou, state.locked_box, float(getattr(config, 'fov_size', 222)))
             else:
                 iou_thresh = _base_iou
-            best_item, best_iou = None, 0.0
-            for item in valid_targets:
-                iou = _box_iou(state.locked_box, item[4])
-                if iou > best_iou:
-                    best_iou, best_item = iou, item
-            if best_iou >= iou_thresh and best_item is not None:
-                selected = best_item
+            _fov_ref = max(float(getattr(config, 'fov_effective_size', 0) or 0),
+                           float(getattr(config, 'fov_effective_height', 0) or 0),
+                           float(getattr(config, 'fov_size', 222)))
+            # Overlap match -> reacquisition radius -> switch-threshold /
+            # minimum-lock-duration gating all live in select_target().
+            selected, _continued = select_target(
+                valid_targets, locked_box=state.locked_box, tracker=state.tracker,
+                config=config, now=current_time, iou_thresh=iou_thresh, norm=_fov_ref * 0.5)
+            if selected is None:
+                return False
+        else:
+            selected = valid_targets[0]
         _prev_locked_box = state.locked_box
         _, _conf, target_x, target_y, selected_box = selected
         # Always record what got selected — independent of sticky_lock_enabled —
@@ -322,6 +333,17 @@ def process_aiming(
             # acquisition-phase guard below (state.lock_acquired_t) exactly
             # once per fresh lock, not every frame the target stays locked.
             state.lock_acquired_t = current_time
+
+        # Lock lifecycle + smoothed signals for the adaptive/dynamic FOV modes.
+        _fw = float(getattr(config, 'fov_effective_size', 0) or getattr(config, 'fov_size', 222))
+        _fh = float(getattr(config, 'fov_effective_height', 0) or getattr(config, 'fov_height', _fw) or _fw)
+        _same = _continued or (_prev_locked_box is not None
+                               and _box_iou(_prev_locked_box, selected_box) >= _iou_thresh)
+        state.tracker.on_match(
+            current_time, selected_box, _conf,
+            edge_ratio=edge_ratio(selected_box, crosshair_x, crosshair_y, _fw, _fh,
+                                  bool(getattr(config, 'fov_circle_filter_enabled', False))),
+            same_target=_same)
 
         if sticky:
             state.no_detection_frames = 0
@@ -470,8 +492,9 @@ def process_aiming(
                 # stale error (and produce a one-frame Kd kick) the moment
                 # the target exits the deadzone. Outputs discarded — no
                 # movement is intended this frame.
-                pid_x.update(0.0)
-                pid_y.update(0.0)
+                _now = current_time if getattr(config, 'pid_time_normalize', False) else None
+                pid_x.update(0.0, _now)
+                pid_y.update(0.0, _now)
                 return
 
         if state.sticky_last_t > 0:
@@ -497,7 +520,9 @@ def _finish_aim_move(
     errorX, errorY, target_y, box_height,
 ) -> None:
     del box_height
-    dx, dy = pid_x.update(errorX), pid_y.update(errorY)
+    # Opt-in: pass the frame time so the PID's P/I terms are time-normalised.
+    _now = current_time if getattr(config, 'pid_time_normalize', False) else None
+    dx, dy = pid_x.update(errorX, _now), pid_y.update(errorY, _now)
 
     if getattr(config, 'aim_ema_smoothing_enabled', False):
         factor = float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)

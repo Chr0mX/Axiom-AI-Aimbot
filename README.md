@@ -109,7 +109,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
   - Two looks to choose from on its Other tab: **Studio** (default, uses the full window width) and **Instrument** (dense).
 
 - **Status Panel GPU Monitoring** (optional, NVIDIA)
-  - Temperature, load, VRAM, fan, clocks and power on the in-game status panel, each switchable. Run `Install NVML.bat` once to enable it.
+  - Temperature, load, VRAM, fan, clocks and power on the in-game status panel, each switchable. Needs an NVIDIA GPU and driver; the NVML bindings (`nvidia-ml-py`) are bundled.
 
 - **Model & Config Management**
   - Searchable, filter-as-you-type model dropdown on both the Model and Convert pages.
@@ -340,7 +340,6 @@ Axiom/
 ├── 啟動Launcher.bat              # Quick-start launcher
 ├── Install TensorRT.bat          # One-time TensorRT pip-package installer
 ├── Install PaddleOCR.bat         # One-time PaddleOCR installer (secondary weapon-name OCR)
-├── Install NVML.bat              # One-time nvidia-ml-py installer (status panel GPU monitoring)
 ├── requirements.txt / requirements-directml.txt / requirements-cuda.txt / requirements-tensorrt.txt
 ├── CHANGELOG.md                  # Version history
 ├── docs/
@@ -389,8 +388,6 @@ Axiom/
 │   │   ├── convert_to_engine.py  # ONNX → TensorRT engine builder
 │   │   ├── logging_config.py     # Logging setup
 │   │   ├── updater.py            # Auto-update checker
-│   │   ├── obs_inspect_filters.py# Dev tool: dump OBS WebSocket filter settings
-│   │   └── bench_udp.py          # Dev tool: UDP capture pipeline benchmark
 │   ├── web_control_client/        # Web Control page (index.html / app.js / styles.css)
 │   ├── web_overlay/               # Web ESP static client (served to the browser)
 │   │   ├── index.html
@@ -430,6 +427,7 @@ Axiom/
 │       ├── xbox_controller.py    # ViGEmBus Xbox 360 emulation
 │       ├── key_utils.py          # Key code helpers
 │       └── vk_codes.py           # Virtual key code table
+├── tools/                        # Standalone dev tools (OBS filter inspector, UDP capture benchmark)
 └── tests/                        # Pytest test suite (see CLAUDE.md for sandbox-testability notes)
     ├── conftest.py               # Adds src/ to sys.path
     ├── test_config.py

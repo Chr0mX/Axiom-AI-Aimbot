@@ -2,6 +2,7 @@
 filter (class-name deny list, min-geometry thresholds, aspect-ratio heuristic).
 """
 
+import pytest
 from core.detection_semantics import (
     _filter_detections_min_geometry,
     _looks_like_environment_box,
@@ -42,6 +43,35 @@ class TestSemanticKeepLabel:
     def test_deny_wins_over_allow_when_both_substrings_present(self):
         # "tree" (deny) checked before allow list — a label matching both
         # should be dropped, not kept.
+        assert _semantic_keep_label("tree_target") is False
+
+
+class TestSemanticKeepLabelWholeWords:
+    """Short deny words match whole words only; long ones still match as substrings."""
+
+    @pytest.mark.parametrize("name", [
+        "entities", "cabin", "start_marker", "scar_enemy", "hitbox_head", "robin",
+        "category", "tiger", "fabric", "bedrock_player",
+    ])
+    def test_short_deny_words_inside_other_words_are_kept(self, name):
+        assert _semantic_keep_label(name) is True
+
+    @pytest.mark.parametrize("name", [
+        "tree", "Tree_01", "trees", "enemy_car", "EnemyCar", "street_light", "StreetLight",
+        "ammo_box", "HUDElement", "HUD_element", "wall-1", "star", "bin",
+    ])
+    def test_short_deny_words_as_words_are_dropped(self, name):
+        assert _semantic_keep_label(name) is False
+
+    @pytest.mark.parametrize("name", ["vegetationpatch", "billboards", "vegetation_patch", "helicopter2"])
+    def test_long_deny_words_still_match_as_substrings(self, name):
+        assert _semantic_keep_label(name) is False
+
+    def test_known_tradeoff_unseparated_short_word_compound_is_kept(self):
+        assert _semantic_keep_label("treetrunk") is True
+
+    def test_deny_still_wins_over_allow(self):
+        assert _semantic_keep_label("enemy_shield") is False
         assert _semantic_keep_label("tree_target") is False
 
 

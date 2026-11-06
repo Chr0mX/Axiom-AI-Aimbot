@@ -757,6 +757,18 @@
                 </label>
               </div>
             </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Frame-Rate Independent PID</div>
+                <div class="field-desc">Scales the P and I response by elapsed time so aim speed stays the same when the inference FPS changes. Off keeps the original per-frame feel; identical at 60 FPS.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="aim-pid_time_normalize" data-key="pid_time_normalize" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
             <div class="micro-grid" data-cols="2" data-kind="pid">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Reaction Speed X (P)</div></div>
@@ -1255,12 +1267,12 @@
             </div>
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">Lock Decay Frames</div>
-                <div class="field-desc">Frames to hold aim after target is lost before releasing the lock</div>
+                <div class="field-title">Lock Persistence</div>
+                <div class="field-desc">How long aim is held after the target is lost before the lock is released (time-based; replaces Lock Decay Frames)</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-lock_decay_frames" data-key="lock_decay_frames" data-type="number" min="3" max="60" step="1">
-                <span class="field-slider-value">fr</span>
+                <input type="number" id="aim-lock_persistence_ms" data-key="lock_persistence_ms" data-type="number" min="0" max="2000" step="10">
+                <span class="field-slider-value">ms</span>
               </div>
             </div>
             <div class="field-card">
@@ -1915,7 +1927,7 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">GPU Monitoring</div>
-                <div class="field-desc">Show NVIDIA GPU sensors in the status panel (needs Install NVML.bat once). Sensors this GPU can't report stay hidden.</div>
+                <div class="field-desc">Show NVIDIA GPU sensors in the status panel (needs an NVIDIA GPU and driver). Sensors this GPU can't report stay hidden.</div>
                 <div class="field-desc" id="vis-gpu-monitor-status"></div>
               </div>
               <div class="field-control">

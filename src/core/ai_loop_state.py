@@ -4,6 +4,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .target_tracking import TargetTracker
+
 
 @dataclass
 class LoopState:
@@ -42,6 +44,20 @@ class LoopState:
     # the lock; only losing the lock resets this back to 0.0 so the next
     # acquisition starts its own fresh ramp from full size.
     fov_reduce_since: float = 0.0
+
+    # Smoothed FOV scale (1.0 = full configured size, fov_min_size_pct/100 =
+    # fully shrunk), slewed toward a per-mode target at a rate derived from
+    # elapsed time — see compute_effective_fov(). fov_last_t is the previous
+    # call's timestamp (0.0 = none yet); fov_lost_since is when the lock was
+    # released, so the expansion delay can be measured (0.0 = not releasing).
+    fov_scale: float = 1.0
+    fov_last_t: float = 0.0
+    fov_lost_since: float = 0.0
+
+    # Lock lifecycle (SEARCHING/ACQUIRED/TRACKING/TEMPORARILY_LOST/REACQUIRED/
+    # RELEASED) and the smoothed confidence/stability/motion signals the
+    # adaptive and dynamic FOV modes read. See core/target_tracking.py.
+    tracker: TargetTracker = field(default_factory=TargetTracker)
 
     # Y-reduce velocity gate — track target Y position across frames to estimate vy.
     aim_y_last_target_y: float = 0.0

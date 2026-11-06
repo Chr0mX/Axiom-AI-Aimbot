@@ -12,9 +12,9 @@ This script is READ-ONLY: it never modifies your OBS configuration, scenes,
 sources, or filters. It only queries and prints what's already there.
 
 Usage:
-    python src/core/obs_inspect_filters.py --source "Your Source Name"
-    python src/core/obs_inspect_filters.py --source "Your Source Name" --password yourpass
-    python src/core/obs_inspect_filters.py --list-sources   # don't know the exact name? list them all
+    python tools/obs_inspect_filters.py --source "Your Source Name"
+    python tools/obs_inspect_filters.py --source "Your Source Name" --password yourpass
+    python tools/obs_inspect_filters.py --list-sources   # don't know the exact name? list them all
 
 If you don't know your OBS WebSocket password: OBS > Tools > WebSocket
 Server Settings > Show Connect Info.

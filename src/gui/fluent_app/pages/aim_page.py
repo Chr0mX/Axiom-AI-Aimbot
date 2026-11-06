@@ -498,6 +498,13 @@ class AimPage(BasePage):
             parent=self.pidGroup
         )
 
+        self.pidTimeNormCard = SwitchSettingCard(
+            FluentIcon.HISTORY,
+            t("pid_time_normalize", "Frame-Rate Independent PID"),
+            t("pid_time_normalize_desc", "Scale the P and I response by elapsed time so aim speed stays the same when the inference FPS changes. Off keeps the original per-frame feel; identical at 60 FPS."),
+            parent=self.pidGroup
+        )
+
         self.pidAxisPivot = SegmentedWidget()
         self.pidAxisPivot.addItem(routeKey='x', text=t("horizontal_x"))
         self.pidAxisPivot.addItem(routeKey='y', text=t("vertical_y"))
@@ -872,10 +879,10 @@ class AimPage(BasePage):
 
         self.lockDecayCard = SliderLabelCard(
             FluentIcon.HISTORY,
-            t("lock_decay_frames", "Lock Decay Frames"),
-            3, 60,
-            format_func=lambda v: f"{v} fr",
-            description=t("lock_decay_desc", "Frames to hold aim after target is lost before releasing the lock"),
+            t("lock_persistence", "Lock Persistence"),
+            0, 2000,
+            format_func=lambda v: f"{v} ms",
+            description=t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS)"),
             label_width=55,
             parent=self.trackingGroup
         )
@@ -1084,6 +1091,7 @@ class AimPage(BasePage):
         self.pidStackedWidget.addWidget(self.pidYPage)
 
         self.pidGroup.addSettingCard(self.pidUnsafeCard)
+        self.pidGroup.addSettingCard(self.pidTimeNormCard)
         self.pidGroup.vBoxLayout.addWidget(pivotWidget)
         self.pidGroup.vBoxLayout.addWidget(self.pidStackedWidget)
         self.pidGroup.addSettingCard(self.maxMovePerFrameCard)
@@ -1266,6 +1274,7 @@ class AimPage(BasePage):
 
         # PID
         self.pidUnsafeCard.checkedChanged.connect(self._onPidUnsafeChanged)
+        self.pidTimeNormCard.checkedChanged.connect(self._onPidTimeNormChanged)
         self.pidPxCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kp_x', v))
         self.pidIxCard.valueChanged.connect(lambda v: self._onPidChanged('pid_ki_x', v))
         self.pidDxCard.valueChanged.connect(lambda v: self._onPidChanged('pid_kd_x', v))
@@ -1391,6 +1400,7 @@ class AimPage(BasePage):
             # 0.0–0.5) or x100 with Unsafe Mode on (→ config 0.0–1.0); clamped
             # to the slider max so a saved value keeps its exact effective gain.
             self.pidUnsafeCard.setChecked(bool(getattr(self._config, 'pid_unsafe_mode', False)))
+            self.pidTimeNormCard.setChecked(bool(getattr(self._config, 'pid_time_normalize', False)))
             self._applyPidKpFormat(self.pidUnsafeCard.isChecked())
             kp_divisor = self._pidKpDivisor()
             self.pidPxCard.setValue(min(100, int(round(self._config.pid_kp_x * kp_divisor))))
@@ -1422,7 +1432,7 @@ class AimPage(BasePage):
             self.predictionMaxVelCard.setValue(int(getattr(self._config, 'prediction_max_velocity', 1200.0)))
             self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
-            self.lockDecayCard.setValue(int(getattr(self._config, 'lock_decay_frames', 15)))
+            self.lockDecayCard.setValue(int(getattr(self._config, 'lock_persistence_ms', 250)))
             self.lockIouCard.setValue(int(round(getattr(self._config, 'lock_iou_threshold', 0.3) * 100)))
 
             kalman_on = bool(getattr(self._config, 'kalman_enabled', False))
@@ -1801,6 +1811,10 @@ class AimPage(BasePage):
         self.pidPxCard.setFormatFunc(lambda v, _d=divisor: f"{v/_d:.2f}")
         self.pidPyCard.setFormatFunc(lambda v, _d=divisor: f"{v/_d:.2f}")
 
+    def _onPidTimeNormChanged(self, checked: bool):
+        if self._config and not self._isLoadingConfig:
+            self._config.pid_time_normalize = bool(checked)
+
     def _onPidUnsafeChanged(self, checked: bool):
         checked = bool(checked)
         if self._config:
@@ -2078,7 +2092,7 @@ class AimPage(BasePage):
 
     def _onLockDecayChanged(self, value):
         if self._config:
-            self._config.lock_decay_frames = int(value)
+            self._config.lock_persistence_ms = int(value)
 
     def _onLockIouChanged(self, value):
         if self._config:
@@ -2196,6 +2210,8 @@ class AimPage(BasePage):
         self._updateXboxConnectionStatus()
 
         self.pidGroup.titleLabel.setText(t("aim_speed_pid"))
+        self.pidTimeNormCard.titleLabel.setText(t("pid_time_normalize", "Frame-Rate Independent PID"))
+        self.pidTimeNormCard.contentLabel.setText(t("pid_time_normalize_desc", "Scale the P and I response by elapsed time so aim speed stays the same when the inference FPS changes. Off keeps the original per-frame feel; identical at 60 FPS."))
         self.pidUnsafeCard.titleLabel.setText(t("pid_unsafe_mode", "Unsafe Mode"))
         self.pidUnsafeCard.contentLabel.setText(t("pid_unsafe_mode_desc", "Let the P (reaction speed) sliders be dragged past the proven-stable 0.50 cap, up to 1.00. Higher values can cause oscillation/overshoot — tune carefully."))
         self.pidAxisPivot.setItemText('x', t("horizontal_x"))
@@ -2273,8 +2289,8 @@ class AimPage(BasePage):
         self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "History Frames"))
         self.stickyLockCard.titleLabel.setText(t("sticky_lock_enabled", "Sticky Target Lock"))
         self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
-        self.lockDecayCard.titleLabel.setText(t("lock_decay_frames", "Lock Decay Frames"))
-        self.lockDecayCard.contentLabel.setText(t("lock_decay_desc", "Frames to hold aim after target is lost before releasing the lock"))
+        self.lockDecayCard.titleLabel.setText(t("lock_persistence", "Lock Persistence"))
+        self.lockDecayCard.contentLabel.setText(t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS)"))
         self.lockIouCard.titleLabel.setText(t("lock_iou_threshold", "IoU Match Threshold"))
         self.lockIouCard.contentLabel.setText(t("lock_iou_desc", "Minimum overlap required to match the same target across frames"))
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
