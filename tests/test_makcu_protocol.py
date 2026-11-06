@@ -84,3 +84,10 @@ def test_udp_adapter_reassembles_datagrams():
     finally:
         adapter.close()
         server.close()
+
+
+def test_autorelease_and_heartbeat_frames():
+    assert mp.autorelease_frame(5000) == b"\xde\xad\x04\x00\x6e" + struct.pack("<I", 5000)
+    assert mp.autorelease_frame(999999)[-4:] == struct.pack("<I", 60000)
+    assert mp.autorelease_frame(-1)[-4:] == struct.pack("<I", 0)
+    assert mp.heartbeat_frame() == b"\xde\xad\x00\x00\x6f"

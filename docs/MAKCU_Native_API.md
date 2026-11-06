@@ -1,4 +1,4 @@
-# MAKCU Native API — Quick Reference (v3.9)
+# MAKCU Native API — Quick Reference (V3.x ASCII + V4 MAK_API; current official firmware V4.108)
 
 MAKCU is a USB HID interceptor device controlled over UART serial. Two APIs exist:
 - **Legacy API (ASCII)** — human-readable text commands
