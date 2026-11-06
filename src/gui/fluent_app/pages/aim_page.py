@@ -945,7 +945,7 @@ class AimPage(BasePage):
         self.camMotionCompSizeCard.hBoxLayout.addSpacing(16)
 
         # === Target Area (shared by aim-point calculation and auto-fire hit zone) ===
-        self.targetAreaGroup = SettingCardGroup(t("target_area_settings"), self.scrollWidget)
+        self.targetAreaGroup = SettingCardGroup(t("target_point_tracking", "Target Point Tracking"), self.scrollWidget)
         self.aimPreview = _AimPointPreview(self.targetAreaGroup)
 
         self.customYCard = SliderLabelCard(
@@ -1539,13 +1539,7 @@ class AimPage(BasePage):
         is_custom = aim_part == "custom"
         is_head_or_body = aim_part in ("head", "body")
         uses_custom_y = is_smart or is_custom
-        if is_smart:
-            suffix = t("aim_smart_mode_note", " — Smart + Custom Y")
-        elif is_custom:
-            suffix = t("aim_custom_mode_note", " — Custom Y mode")
-        else:
-            suffix = t("aim_head_body_mode_note", " — Head/Body mode")
-        self.targetAreaGroup.titleLabel.setText(t("target_area_settings") + suffix)
+        self.targetAreaGroup.titleLabel.setText(t("target_point_tracking", "Target Point Tracking"))
         # head_height_ratio and the adaptive-ratio scale it feeds are only
         # consumed by calculate_aim_target()'s Head/Body branches — Smart and
         # Custom modes use aim_custom_y_pct instead, so these do nothing there.
