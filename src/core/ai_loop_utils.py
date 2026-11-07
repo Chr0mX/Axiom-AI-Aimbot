@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import queue
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
@@ -229,6 +230,12 @@ def get_effective_detect_range_size(
 FOV_SHRINK_MODES = ('fixed', 'adaptive', 'dynamic')
 
 
+# A gap longer than this between calls (idle branch, app pause) means the clock
+# is stale: treat it as "no time passed" instead of letting the FOV jump its
+# whole travel in one call.
+_MAX_FOV_DT_S = 1.0
+
+
 def _slew(scale: float, target: float, down_s: float, up_s: float, span: float, dt: float) -> float:
     """Move ``scale`` toward ``target`` no faster than the configured times.
 
@@ -236,6 +243,8 @@ def _slew(scale: float, target: float, down_s: float, up_s: float, span: float, 
     shrinking/growing (<= 0 means instant). Rate-limiting on elapsed time is
     what keeps the FOV from jumping or oscillating whatever the inference FPS.
     """
+    if not math.isfinite(dt) or dt < 0.0 or dt > _MAX_FOV_DT_S:
+        dt = 0.0
     if target < scale:
         if down_s <= 0.0:
             return target
@@ -301,9 +310,13 @@ def compute_effective_fov(config: Config, state: LoopState, current_time: float)
         return full_size, full_height
 
     dt = max(0.0, current_time - state.fov_last_t) if state.fov_last_t > 0.0 else 0.0
+    if not math.isfinite(dt) or dt > _MAX_FOV_DT_S:
+        dt = 0.0
     state.fov_last_t = current_time
 
-    min_scale = max(0.01, min(1.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0) / 100.0))
+    pct = getattr(config, 'fov_min_size_pct', 100.0)
+    pct = float(pct) if isinstance(pct, (int, float)) and math.isfinite(pct) else 100.0
+    min_scale = max(0.01, min(1.0, pct / 100.0))
     span = 1.0 - min_scale
     shrink_s = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
     recovery_s = float(getattr(config, 'fov_recovery_duration_ms', 0) or 0) / 1000.0

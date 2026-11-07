@@ -394,3 +394,75 @@ class TestHoldLockOnMiss:
         tr.on_match(10.0, [0, 0, 10, 10], 0.9, same_target=False)
         assert hold_lock_on_miss(tr, cfg, 10.1, True)
         assert not hold_lock_on_miss(tr, cfg, 10.4, True)
+
+
+# ── numeric safeguards and identity gate (GPT-6 review follow-up) ───────────
+class TestNumericSafeguards:
+    def test_ema_ignores_bad_dt_and_samples(self):
+        from core.target_tracking import _ema
+        nan, inf = float('nan'), float('inf')
+        assert _ema(0.4, 1.0, nan, 0.3) == 0.4
+        assert _ema(0.4, 1.0, inf, 0.3) == 0.4
+        assert _ema(0.4, nan, 0.01, 0.3) == 0.4
+        assert _ema(0.4, inf, 0.01, 0.3) == 0.4
+        assert _ema(0.4, 1.0, -1.0, 0.3) == 0.4
+        assert _ema(0.4, 1.0, 0.01, 0.0) == 0.4
+
+    def test_ema_is_frame_rate_independent(self):
+        from core.target_tracking import _ema
+        out = []
+        for hz in (20, 60, 180, 240):
+            v = 0.0
+            for _ in range(hz // 4):                # 0.25 s of constant input
+                v = _ema(v, 1.0, 1.0 / hz, 0.25)
+            out.append(v)
+        assert out == pytest.approx([1 - 2.718281828 ** -1] * 4, rel=1e-4)
+
+    def test_fov_slew_ignores_stale_clock_and_bad_dt(self):
+        from core.ai_loop_utils import _slew
+        assert _slew(1.0, 0.5, 1.0, 0.4, 0.5, 10.0) == 1.0        # 10 s stall: no jump
+        assert _slew(1.0, 0.5, 1.0, 0.4, 0.5, float('nan')) == 1.0
+        assert _slew(1.0, 0.5, 1.0, 0.4, 0.5, -1.0) == 1.0
+        assert _slew(1.0, 0.5, 1.0, 0.4, 0.5, 0.5) == pytest.approx(0.75)   # exactly span/T * dt
+        assert _slew(1.0, 0.5, 0.0, 0.4, 0.5, 0.0) == 0.5          # zero duration = instant
+
+    def test_slew_same_travel_time_at_any_rate(self):
+        from core.ai_loop_utils import _slew
+        for hz in (30, 60, 180, 240):
+            s = 1.0
+            for _ in range(hz // 2):
+                s = _slew(s, 0.5, 1.0, 0.4, 0.5, 1.0 / hz)
+            assert s == pytest.approx(0.75, abs=1e-9), hz
+
+
+class TestFovConfigValidation:
+    def test_fov_bounds_repaired(self):
+        pytest.importorskip('numpy')
+        from core import config as cfgmod
+        c = SimpleNamespace(fov_size=0, fov_height=-5, fov_min_size_pct=0.0, fov_min_size_duration=float('nan'))
+        cfgmod._validate_tracking(c)
+        assert c.fov_size >= 1 and c.fov_height >= 1
+        assert c.fov_min_size_pct == 1.0
+        assert c.fov_min_size_duration == 1.0
+
+
+class TestReacquireAmbiguity:
+    def _tr(self):
+        t = TargetTracker()
+        t.on_match(1.0, [100, 100, 120, 120], 0.9, same_target=False)
+        t.on_miss(1.1)
+        return t
+
+    def test_two_equally_close_candidates_are_not_claimed(self):
+        tr = self._tr()
+        a, b = _item([170, 100, 190, 120]), _item([170, 140, 190, 160])   # ~70 px and ~76 px away
+        sel, cont = select_target(sorted([a, b], key=lambda i: i[0]), locked_box=None, tracker=tr,
+                                  config=_cfg(), now=1.3, iou_thresh=0.3, norm=200)
+        assert sel is None and not cont
+
+    def test_clear_winner_still_reacquires(self):
+        tr = self._tr()
+        near, far = _item([170, 100, 190, 120]), _item([170, 220, 190, 240])
+        sel, cont = select_target(sorted([near, far], key=lambda i: i[0]), locked_box=None, tracker=tr,
+                                  config=_cfg(), now=1.3, iou_thresh=0.3, norm=200)
+        assert sel is near and cont

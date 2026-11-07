@@ -1390,6 +1390,12 @@ def _validate_tracking(config: Config) -> None:
     """Clamp the FOV-shrink-mode and target-tracking fields."""
     if getattr(config, 'fov_shrink_mode', 'adaptive') not in ('fixed', 'adaptive', 'dynamic'):
         config.fov_shrink_mode = 'adaptive'
+    # FOV bounds: a zero/negative/NaN extent or a 0% shrink floor would make the
+    # filter reject everything or the shrink controller degenerate.
+    config.fov_size = int(max(1, min(8192, _finite(getattr(config, 'fov_size', 200), 200))))
+    config.fov_height = int(max(1, min(8192, _finite(getattr(config, 'fov_height', config.fov_size), config.fov_size))))
+    config.fov_min_size_pct = float(max(1.0, min(100.0, _finite(getattr(config, 'fov_min_size_pct', 50.0), 50.0))))
+    config.fov_min_size_duration = float(max(0.0, min(30.0, _finite(getattr(config, 'fov_min_size_duration', 1.0), 1.0))))
     config.fov_expand_delay_ms = int(max(0, min(5000, _finite(getattr(config, 'fov_expand_delay_ms', 200), 200))))
     config.fov_recovery_duration_ms = int(max(0, min(5000, _finite(getattr(config, 'fov_recovery_duration_ms', 400), 400))))
     config.lock_persistence_ms = int(max(0, min(5000, _finite(getattr(config, 'lock_persistence_ms', 250), 250))))

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple, Any
 
+import math
 import cv2
 import numpy as np
 import numpy.typing as npt
@@ -52,7 +53,7 @@ class PIDController:
         if now is None:
             return 1.0
         last, self._last_update_t = self._last_update_t, float(now)
-        if last <= 0.0 or now <= last:
+        if not math.isfinite(now) or last <= 0.0 or now <= last:
             return 1.0
         return max(self._K_MIN, min(self._K_MAX, (now - last) / self.REFERENCE_DT))
 
@@ -83,13 +84,27 @@ class PIDController:
         # Calculate output
         # The derivative of a per-update delta is already a per-update move, so
         # only P and I are scaled by the elapsed-time factor (k == 1 -> unchanged).
-        output = k * ((adjusted_kp * error) + (self.Ki * self.integral)) + (self.Kd * derivative)
+        # P: with time normalisation the exact first-order equivalent of "Kp of
+        # the error per 60 Hz update" over k reference updates is
+        # 1-(1-Kp)^k, not k*Kp (which over-corrects at low rates, e.g. Kp=1,
+        # k=2 -> 2.0, and under-corrects at high rates). Identical at k == 1.
+        p_gain = self._p_gain(adjusted_kp, k)
+        output = p_gain * error + k * (self.Ki * self.integral) + (self.Kd * derivative)
         
         # Update previous error
         self.previous_error = error
         
         return output
     
+    @staticmethod
+    def _p_gain(kp: float, k: float) -> float:
+        """Effective P gain over ``k`` reference intervals (k == 1 -> kp)."""
+        if k == 1.0:
+            return kp
+        if 0.0 <= kp <= 1.0:
+            return 1.0 - (1.0 - kp) ** k
+        return k * kp           # outside the fraction model: keep the linear form
+
     def _calculate_adjusted_kp(self, kp: float) -> float:
         """Linear, predictable P response — effective Kp equals the configured Kp.
 

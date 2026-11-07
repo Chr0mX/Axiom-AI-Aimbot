@@ -1,5 +1,7 @@
 # Changelog
 
+- PID time normalisation (opt-in) now uses the exact P gain `1-(1-Kp)^k`; EMA/FOV slew ignore non-finite or stale `dt`; FOV bounds validated; radius reacquisition rejects ambiguous matches.
+
 ## [Unreleased]
 
 Everything merged since the 6.3 release. `src/version.py` still says 6.3; bump it to publish.

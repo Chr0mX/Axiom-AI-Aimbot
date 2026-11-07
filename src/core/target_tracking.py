@@ -58,10 +58,16 @@ _TAU_TURN = 0.30
 _TAU_EDGE = 0.12
 
 
+# Reacquisition by radius needs the best candidate to be closer than the runner-up
+# by this much (fraction of the radius, at least the pixel floor).
+_REACQUIRE_AMBIGUITY_FRAC = 0.2
+_REACQUIRE_MIN_MARGIN_PX = 8.0
+
+
 def _ema(prev: float, sample: float, dt: float, tau: float) -> float:
     """Time-constant EMA: frame-rate independent smoothing."""
-    if dt <= 0.0:
-        return prev
+    if not (dt > 0.0) or not math.isfinite(dt) or not math.isfinite(sample) or tau <= 0.0:
+        return prev        # no time passed / bad input: keep the estimate
     alpha = 1.0 - math.exp(-min(dt, _MAX_EMA_DT_S) / tau)
     return prev + (sample - prev) * alpha
 
@@ -363,11 +369,20 @@ def select_target(valid_targets, *, locked_box, tracker: TargetTracker, config,
             cont = None
     if cont is None and tracker.has_memory(now, lost_timeout_s(config)):
         radius = float(getattr(config, 'reacquire_radius_px', 150))
-        best_d = None
+        dists = []
         for item in valid_targets:
             d = tracker.within_reacquire_radius(item[4], now, radius)
-            if d is not None and (best_d is None or d < best_d):
-                best_d, cont = d, item
+            if d is not None:
+                dists.append((d, id(item), item))
+        if dists:
+            dists.sort(key=lambda t: t[:2])
+            # Two plausible candidates about equally close: the nearest one is
+            # a coin flip, so don't claim identity -- hold until it resolves
+            # (a clear winner appears) or the lost-target timeout releases.
+            margin = max(_REACQUIRE_MIN_MARGIN_PX, _REACQUIRE_AMBIGUITY_FRAC * radius)
+            if len(dists) > 1 and dists[1][0] - dists[0][0] < margin:
+                return None, False
+            cont = dists[0][2]
 
     acq = acquisition_confidence(config)
     split = tracking_confidence(config) < acq
