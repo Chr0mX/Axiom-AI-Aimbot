@@ -29,6 +29,7 @@ from .ai_loop_utils import (
     calculate_detection_region,
     clear_queues,
     compute_effective_fov,
+    AMBIGUOUS_LOCK,
     resolve_retained_lock,
     track_retained,
     filter_boxes_by_fov,
@@ -1125,10 +1126,15 @@ def ai_logic_loop(
                             config, state, boxes, all_boxes, all_confidences,
                             crosshair_x, crosshair_y, current_time,
                             ai_aiming.sticky_iou_threshold(config, state), _class_of)
-                config.lock_track_only = _retained is not None
-                if _retained is not None:
-                    track_retained(config, state, _retained[0], _retained[1],
+                config.lock_track_only = _retained is not None and _retained is not AMBIGUOUS_LOCK
+                _tracked = None if (_retained is None or _retained is AMBIGUOUS_LOCK) else _retained
+                if _tracked is not None:
+                    track_retained(config, state, _tracked[0], _tracked[1],
                                    crosshair_x, crosshair_y, current_time)
+                    aimed_this_frame = False
+                elif _retained is AMBIGUOUS_LOCK:
+                    # The lock can't be told apart from a rival: don't aim and
+                    # don't adopt either; the hold path below keeps/decays it.
                     aimed_this_frame = False
                 elif aimed_this_frame:
                     # False = no target accepted (e.g. the locked target is
@@ -1148,7 +1154,7 @@ def ai_logic_loop(
                         class_of=_class_of,
                     ) is not False
                 _set_makcu_move_lock(config, aimed_this_frame)
-                if not aimed_this_frame and _retained is None:
+                if not aimed_this_frame and _tracked is None:
                     # Not aiming this frame — either no detections came back, or
                     # detection did find boxes but the aim key isn't held (e.g.
                     # keep_detecting is on and the user simply isn't aiming right

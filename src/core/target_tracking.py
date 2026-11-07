@@ -63,6 +63,12 @@ _TAU_EDGE = 0.12
 _REACQUIRE_AMBIGUITY_FRAC = 0.2
 _REACQUIRE_MIN_MARGIN_PX = 8.0
 
+# When several detections overlap the lock, the motion-consistent one beats the
+# highest-IoU one only if it is clearly closer to where the lock should be.
+_MAX_EXPECT_DT_S = 0.1
+_TIEBREAK_MIN_PX = 3.0
+_TIEBREAK_BOX_FRAC = 0.2
+
 
 def _ema(prev: float, sample: float, dt: float, tau: float) -> float:
     """Time-constant EMA: frame-rate independent smoothing."""
@@ -117,6 +123,8 @@ class TargetTracker:
         self.turn_ema: float = 0.0
         self.edge_ratio: float = 0.0
         self.locked_class: Optional[int] = None   # class id of the locked target, when the model reports one
+        self.inst_vx: float = 0.0   # un-smoothed velocity of the last frame-to-frame step (px/s)
+        self.inst_vy: float = 0.0
 
     def _set_state(self, state: TrackState, now: float) -> None:
         if state is not self.state:
@@ -154,6 +162,7 @@ class TargetTracker:
             self.speed_ema = 0.0
             self.turn_ema = 0.0
             self.vx = self.vy = 0.0
+            self.inst_vx = self.inst_vy = 0.0
             self.edge_ratio = float(edge_ratio)
             self.locked_class = None
             self._set_state(TrackState.ACQUIRED, now)
@@ -167,6 +176,7 @@ class TargetTracker:
             if dt > 1e-3 and self.last_center is not None and not was_lost:
                 nvx = (cx - self.last_center[0]) / dt
                 nvy = (cy - self.last_center[1]) / dt
+                self.inst_vx, self.inst_vy = nvx, nvy
                 speed = math.hypot(nvx, nvy)
                 old_speed = math.hypot(self.vx, self.vy)
                 if speed > _MIN_TURN_SPEED and old_speed > _MIN_TURN_SPEED:
@@ -248,6 +258,15 @@ class TargetTracker:
         if self.last_center is None or not self.locked:
             return False
         return self.lost_duration(now) < timeout_s
+
+    def expected_center(self, now: float) -> Optional[Tuple[float, float]]:
+        """Where a continuing target should be this frame: the last centre advanced
+        by its LAST step's velocity (un-smoothed, so a recent reversal counts at once,
+        unlike the EMA velocity) for at most 0.1 s."""
+        if self.last_center is None:
+            return None
+        dt = min(max(0.0, now - self.last_update_t), _MAX_EXPECT_DT_S) if self.last_update_t > 0.0 else 0.0
+        return self.last_center[0] + self.inst_vx * dt, self.last_center[1] + self.inst_vy * dt
 
     def predicted_center(self, now: float) -> Optional[Tuple[float, float]]:
         """Last known position, advanced by the last velocity while lost."""
@@ -348,6 +367,27 @@ def candidate_score(item, mode: str, conf_weight: float, norm: float) -> float:
     return 1.0 - min(1.0, math.sqrt(max(0.0, key)) / max(1.0, norm))
 
 
+def _motion_consistent(boxes, strong, locked_box, tracker: TargetTracker, now: float) -> int:
+    """Among detections that all overlap the lock enough, keep the highest-IoU one
+    unless another is clearly closer to the lock's expected position (a stationary
+    or crossing rival can out-overlap the real target's old box when the target
+    moves more than a box width per frame)."""
+    best_i = strong[0][1]
+    exp = tracker.expected_center(now)
+    if exp is None:
+        return best_i
+    def dist(i):
+        cx, cy = box_center(boxes[i])
+        return math.hypot(cx - exp[0], cy - exp[1])
+    near_i = min((i for _, i in strong), key=dist)
+    if near_i == best_i:
+        return best_i
+    width = max(1.0, locked_box[2] - locked_box[0])
+    if dist(best_i) - dist(near_i) >= max(_TIEBREAK_MIN_PX, _TIEBREAK_BOX_FRAC * width):
+        return near_i
+    return best_i
+
+
 def find_continuation(boxes, *, locked_box, tracker: TargetTracker, config, now: float,
                       iou_thresh: float, class_of=None):
     """Which of ``boxes`` (if any) is the current/remembered lock?
@@ -370,15 +410,20 @@ def find_continuation(boxes, *, locked_box, tracker: TargetTracker, config, now:
 
     idx = None
     if locked_box is not None:
-        best_iou = 0.0
+        cands = []
         for i, box in enumerate(boxes):
             if ok is not None and not ok(box):
                 continue
             iou = box_iou(locked_box, box)
-            if iou > best_iou:
-                best_iou, idx = iou, i
-        if best_iou < iou_thresh:
-            idx = None
+            if iou > 0.0:
+                cands.append((iou, i))
+        if cands:
+            cands.sort(reverse=True)
+            if cands[0][0] >= iou_thresh:
+                idx = cands[0][1]
+                strong = [c for c in cands if c[0] >= iou_thresh]
+                if len(strong) > 1:          # crossing / overlapping detections: use motion too
+                    idx = _motion_consistent(boxes, strong, locked_box, tracker, now)
     if idx is not None or not tracker.has_memory(now, lost_timeout_s(config)):
         return idx, False
 

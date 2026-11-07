@@ -105,11 +105,15 @@ class TestResolveRetainedLock:
 
     def test_bounded_by_lost_target_timeout(self):
         c, s, lock, (cb, cc) = self._setup(CX + 150, lost_target_timeout_ms=1000)
-        assert resolve_retained_lock(c, s, cb, [lock], [0.9], CX, CY, 10.0, 0.3) is not None
-        assert resolve_retained_lock(c, s, cb, [lock], [0.9], CX, CY, 10.9, 0.3) is not None
-        assert resolve_retained_lock(c, s, cb, [lock], [0.9], CX, CY, 11.2, 0.3) is None   # parked too long
+        t = 10.0
+        results = []
+        while t < 11.5:                                           # evaluated every frame, like ai_loop
+            results.append(resolve_retained_lock(c, s, cb, [lock], [0.9], CX, CY, t, 0.3) is not None)
+            t += 0.05
+        assert results[0] and results[10] and results[19]         # inside the first second
+        assert not results[-1]                                    # parked too long -> normal lost path
         # coming back inside the control FOV resets the stretch
-        resolve_retained_lock(c, s, [lock], [lock], [0.9], CX, CY, 11.3, 0.3)
+        resolve_retained_lock(c, s, [lock], [lock], [0.9], CX, CY, 11.6, 0.3)
         assert s.retained_since == 0.0
 
     def test_ellipse_retention_region(self):

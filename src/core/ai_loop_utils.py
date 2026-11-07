@@ -491,6 +491,19 @@ def active_retention_fov(config: Config) -> Optional[Tuple[int, int]]:
     return None
 
 
+class _AmbiguousLock:
+    """Sentinel: the lock cannot be told apart from a rival this frame."""
+    def __repr__(self) -> str:      # pragma: no cover - debugging aid
+        return "AMBIGUOUS_LOCK"
+
+
+AMBIGUOUS_LOCK = _AmbiguousLock()
+
+# A gap longer than this between retention evaluations (aim key released, stall)
+# starts a new track-only stretch instead of continuing the old one's timeout.
+_RETAIN_STALE_S = 0.25
+
+
 def resolve_retained_lock(
     config: Config, state: LoopState, boxes, all_boxes, all_confidences,
     crosshair_x: float, crosshair_y: float, now: float, iou_thresh: float, class_of=None,
@@ -498,13 +511,19 @@ def resolve_retained_lock(
     """Retention step, run BEFORE new-target selection each frame.
 
     ``boxes`` are the detections inside the (possibly shrunk) control FOV;
-    ``all_boxes`` everything that passed the confidence/class filters.  If the
-    current lock is not among ``boxes`` (e.g. the FOV shrank past it) but still
-    is inside the retention FOV, return ``(box, confidence)``: the caller then
-    keeps tracking identity but does not aim and lets no other target take the
-    lock.  Returns None when retention is off, there is no lock, the lock is
-    still inside the control FOV (normal selection handles it), the lock is
-    ambiguous, or it left the retention FOV (normal lost-target handling).
+    ``all_boxes`` everything that passed the confidence/class filters.  The
+    current lock is looked for among ALL detections inside the retention FOV
+    (a superset of ``boxes``), so a rival inside the control FOV competes with
+    the real lock on equal terms instead of being the only candidate seen:
+
+    * lock found OUTSIDE the control FOV -> ``(box, confidence)``: the caller
+      keeps its identity (tracked, not aimed) and no other target can take it;
+    * lock found inside the control FOV   -> None: normal selection handles it;
+    * lock indistinguishable from a rival -> ``AMBIGUOUS_LOCK``: the caller must
+      hold (neither aim nor adopt anyone), exactly like select_target's own
+      ambiguity rule, because the control-only selection would otherwise see
+      just the rival and pick it;
+    * retention off / no lock / lock not in the retention FOV -> None.
     """
     if (not getattr(config, 'fov_retention_enabled', False)
             or not getattr(config, 'sticky_lock_enabled', False)
@@ -512,28 +531,32 @@ def resolve_retained_lock(
             or state.locked_box is None or len(all_boxes) <= len(boxes)):
         state.retained_since = 0.0
         return None
-    kw = dict(locked_box=state.locked_box, tracker=state.tracker, config=config,
-              now=now, iou_thresh=iou_thresh, class_of=class_of)
-    idx, ambiguous = find_continuation(boxes, **kw)
-    if idx is not None or ambiguous:
-        state.retained_since = 0.0
-        return None
     rw, rh = retention_fov_size(config)
     r_boxes, r_conf = filter_boxes_by_fov(
         all_boxes, all_confidences, crosshair_x, crosshair_y, rw, config, fov_height=rh)
-    idx, ambiguous = find_continuation(r_boxes, **kw)
+    idx, ambiguous = find_continuation(
+        r_boxes, locked_box=state.locked_box, tracker=state.tracker, config=config,
+        now=now, iou_thresh=iou_thresh, class_of=class_of)
+    if ambiguous:
+        state.retained_since = 0.0
+        return AMBIGUOUS_LOCK
     if idx is None:
         state.retained_since = 0.0
         return None
-    # Bounded: a target parked outside the control FOV must not pin the lock (and
-    # block every other target) forever. After lost_target_timeout it is handled
-    # like any lost target (hold -> release -> normal acquisition).
-    if state.retained_since <= 0.0:
+    cand = r_boxes[idx]
+    if any(cand is b for b in boxes):          # inside the control FOV: normal path
+        state.retained_since = 0.0
+        return None
+    # Outside the control FOV, inside the retention FOV: track-only, bounded so a
+    # target parked there cannot pin the lock (and block every other target)
+    # forever.  After lost_target_timeout it is handled like any lost target.
+    if state.retained_since <= 0.0 or now - state.retained_last_t > _RETAIN_STALE_S:
         state.retained_since = now
-    elif now - state.retained_since > lost_timeout_s(config):
+    state.retained_last_t = now
+    if now - state.retained_since > lost_timeout_s(config):
         return None
     conf = r_conf[idx] if idx < len(r_conf) else state.locked_confidence
-    return r_boxes[idx], conf
+    return cand, conf
 
 
 def track_retained(config: Config, state: LoopState, box, conf: float,
