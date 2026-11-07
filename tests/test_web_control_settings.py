@@ -1271,3 +1271,48 @@ class TestConvertSchema:
 
         wcs.apply_tab_settings(config, "convert", {"trt_fp16_enabled": True})
         assert config.trt_fp16_enabled is True
+
+
+class TestFovTrackingFields:
+    """Inference-tab FOV shrink / retention / tracking fields (web client parity with the Qt page)."""
+
+    def test_new_fields_are_in_the_schema_and_exist_on_config(self):
+        from core.config import _FIELD_MAP
+        for key in ("fov_shrink_mode", "fov_dynamic_safeguards", "fov_expand_delay_ms",
+                    "fov_recovery_duration_ms", "fov_retention_enabled", "fov_retention_pct",
+                    "min_lock_duration_ms", "tracking_confidence", "target_switch_threshold",
+                    "reacquire_radius_px", "lost_target_timeout_ms"):
+            assert key in wcs._SCHEMA["inference"], key
+            assert key in _FIELD_MAP, key          # a typo would otherwise create an unpersisted attribute
+
+    def test_read_uses_display_units_and_sticky_extra(self):
+        config = _config(tracking_confidence=0.55, target_switch_threshold=0.35,
+                         fov_shrink_mode="dynamic", sticky_lock_enabled=True)
+        r = wcs.get_tab_settings(config, "inference")
+        assert r["tracking_confidence"] == pytest.approx(55.0)
+        assert r["target_switch_threshold"] == pytest.approx(35.0)
+        assert r["fov_shrink_mode"] == "dynamic"
+        assert r["sticky_lock_enabled"] is True
+
+    def test_write_converts_back_and_validates(self):
+        config = _config(tracking_confidence=0.0, fov_shrink_mode="adaptive", fov_retention_pct=100.0,
+                         fov_retention_enabled=False)
+        res = wcs.apply_tab_settings(config, "inference", {
+            "tracking_confidence": 60, "fov_shrink_mode": "Dynamic",
+            "fov_retention_enabled": True, "fov_retention_pct": 150})
+        assert res["ok"] is True
+        assert config.tracking_confidence == pytest.approx(0.6)
+        assert config.fov_shrink_mode == "dynamic"
+        assert config.fov_retention_enabled is True and config.fov_retention_pct == 150
+
+    def test_bad_choice_rejected_without_writing(self):
+        config = _config(fov_shrink_mode="adaptive")
+        res = wcs.apply_tab_settings(config, "inference", {"fov_shrink_mode": "bogus"})
+        assert res["ok"] is False and config.fov_shrink_mode == "adaptive"
+
+    @pytest.mark.parametrize("field,val,want", [("fov_retention_pct", 50, 100), ("fov_retention_pct", 9999, 400),
+                                                ("reacquire_radius_px", -1, 0)])
+    def test_out_of_range_numbers_are_clamped_like_other_fields(self, field, val, want):
+        config = _config(fov_retention_pct=100.0, reacquire_radius_px=150)
+        res = wcs.apply_tab_settings(config, "inference", {field: val})
+        assert res["ok"] is True and getattr(config, field) == want

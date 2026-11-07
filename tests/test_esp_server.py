@@ -295,3 +295,37 @@ def test_start_cleans_up_orphaned_threads_when_http_thread_already_dead(monkeypa
     finally:
         esp_server.stop()
         orphan_stop.set()
+
+
+class TestRetentionSnapshot:
+    """Web ESP exposes the retention FOV boundary and the track-only lock state."""
+
+    @staticmethod
+    def _snap(**kw):
+        cfg = _FakeConfig()
+        for k, v in kw.items():
+            setattr(cfg, k, v)
+        esp_server._config = cfg
+        return json.loads(json.dumps(esp_server._build_snapshot()))
+
+    def test_off_by_default_zero_boundary_and_not_track_only(self):
+        s = self._snap()
+        assert s["settings"]["retention_w"] == 0 and s["settings"]["retention_h"] == 0
+        assert s["locked_track_only"] is False
+
+    def test_boundary_reports_configured_fov_times_pct_not_the_shrunk_fov(self):
+        s = self._snap(fov_retention_enabled=True, sticky_lock_enabled=True,
+                       fov_reduce_on_target_enabled=True, fov_size=300, fov_height=200,
+                       fov_retention_pct=150.0, fov_effective_size=150, fov_effective_height=100)
+        assert (s["settings"]["fov_size"], s["settings"]["fov_height"]) == (150, 100)   # shrunk, as before
+        assert (s["settings"]["retention_w"], s["settings"]["retention_h"]) == (450, 300)
+
+    def test_needs_sticky_and_fov_reduce(self):
+        for kw in (dict(sticky_lock_enabled=False, fov_reduce_on_target_enabled=True),
+                   dict(sticky_lock_enabled=True, fov_reduce_on_target_enabled=False)):
+            s = self._snap(fov_retention_enabled=True, **kw)
+            assert s["settings"]["retention_w"] == 0
+
+    def test_track_only_requires_a_locked_box(self):
+        assert self._snap(lock_track_only=True)["locked_track_only"] is True
+        assert self._snap(lock_track_only=True, display_locked_box=None)["locked_track_only"] is False

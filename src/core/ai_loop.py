@@ -1125,6 +1125,7 @@ def ai_logic_loop(
                             config, state, boxes, all_boxes, all_confidences,
                             crosshair_x, crosshair_y, current_time,
                             ai_aiming.sticky_iou_threshold(config, state), _class_of)
+                config.lock_track_only = _retained is not None
                 if _retained is not None:
                     track_retained(config, state, _retained[0], _retained[1],
                                    crosshair_x, crosshair_y, current_time)
@@ -1197,6 +1198,7 @@ def ai_logic_loop(
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
                         config.aim_prediction_active = False
+                        config.lock_track_only = False
                         # Target lost — clear stale prediction/Kalman state so a
                         # newly-acquired target isn't corrupted by the old one's history.
                         if ai_aiming._predictor is not None:

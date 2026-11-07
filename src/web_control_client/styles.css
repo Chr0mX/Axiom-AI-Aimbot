@@ -21,7 +21,7 @@
 :root {
   /* Sentinel: app.js only builds the custom dropdowns when this exact
      stylesheet version loaded (see enhanceSelects()). */
-  --axiom-css: 11;
+  --axiom-css: 12;
   color-scheme: dark;
 
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;

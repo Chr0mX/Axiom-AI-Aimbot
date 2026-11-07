@@ -312,6 +312,23 @@
         }
       }
 
+      // Retention FOV — where a locked target is still tracked (not aimed) after
+      // the FOV shrinks past it. Only sent while "Keep Lock Outside Shrunk FOV"
+      // is active; drawn dashed so it reads as a boundary, not another FOV.
+      if (st.show_fov && st.retention_w > 0) {
+        const rx = st.retention_w * sx, ry = (st.retention_h || st.retention_w) * sy;
+        ctx.save();
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = state.locked_track_only ? "rgba(0,200,255,0.75)" : "rgba(255,255,255,0.28)";
+        ctx.lineWidth = 1;
+        if (st.fov_circle_filter_enabled) {
+          ctx.beginPath(); ctx.ellipse(cx, cy, rx / 2, ry / 2, 0, 0, Math.PI * 2); ctx.stroke();
+        } else {
+          ctx.strokeRect(cx - rx / 2, cy - ry / 2, rx, ry);
+        }
+        ctx.restore();
+      }
+
       // Boxes
       const boxes = state.boxes || [];
       const confs = state.confidences || [];
@@ -370,11 +387,16 @@
       // Locked-box highlight
       if (state.locked_box) {
         const lb = state.locked_box;
-        ctx.strokeStyle = state.locked_decaying ? "rgba(255,170,0,0.9)" : "rgba(0,255,140,0.95)";
+        // amber = decaying (target missing), cyan dashed = tracked outside the
+        // control FOV (kept, not aimed), green = actively locked.
+        ctx.strokeStyle = state.locked_decaying ? "rgba(255,170,0,0.9)"
+          : state.locked_track_only ? "rgba(0,200,255,0.95)" : "rgba(0,255,140,0.95)";
+        ctx.setLineDash(state.locked_track_only ? [5, 4] : []);
         // Follows the box thickness setting too: this outline sits on top of
         // the locked target's own box, so a fixed 2 px here hid any change.
         ctx.lineWidth = lockedBoxThickness(state.settings || {});
         ctx.strokeRect(X(lb[0]), Y(lb[1]), X(lb[2]) - X(lb[0]), Y(lb[3]) - Y(lb[1]));
+        ctx.setLineDash([]);
       }
 
       // Crosshair — scaled per axis like everything else above; previously

@@ -533,6 +533,8 @@ class Config:
         # value.
         self.fov_effective_size: float = float(self.fov_size)
         self.fov_effective_height: float = float(self.fov_height)
+        # True on frames where the lock is kept outside the control FOV (retention): tracked, not aimed.
+        self.lock_track_only: bool = False
 
         # Runtime-only (unpersisted, same pattern as fov_effective_size):
         # what the inference loop's live session is ACTUALLY running, as

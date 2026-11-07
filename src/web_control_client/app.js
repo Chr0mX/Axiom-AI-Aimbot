@@ -725,7 +725,7 @@
         if (tab === "capture" && (key === "uvc_capture_method" || key === "uvc_dshow_backend" || key === "uvc_ffmpeg_enabled")) {
           updateUvcSubVisibility();
         }
-        if (tab === "inference" && key === "fov_reduce_on_target_enabled") updateFovReduceVisibility(el.checked);
+        if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
@@ -752,9 +752,28 @@
     });
   }
 
+  // Mirrors inference_page.py's _updateFovReduceVisibility()/_updateTrackingVisibility():
+  // shrink settings need "Reduce FOV"; Dynamic Safeguards only in Dynamic mode; the
+  // retention cards need Sticky Target Lock too; the tracking cards need Sticky Lock.
   function updateFovReduceVisibility(enabled) {
-    document.getElementById("inf-fov-min-size-card").classList.toggle("hidden", !enabled);
-    document.getElementById("inf-fov-min-duration-card").classList.toggle("hidden", !enabled);
+    var d = lastSettings.inference || {};
+    var el = function (id) { return document.getElementById(id); };
+    var reduceEl = el("inf-fov_reduce_on_target_enabled");
+    var on = (enabled !== undefined) ? !!enabled : (reduceEl ? reduceEl.checked : !!d.fov_reduce_on_target_enabled);
+    var sticky = !!d.sticky_lock_enabled;
+    var mode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode;
+    var ret = el("inf-fov_retention_enabled") ? el("inf-fov_retention_enabled").checked : !!d.fov_retention_enabled;
+    var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
+    show("inf-fov-min-size-card", on);
+    show("inf-fov-min-duration-card", on);
+    show("inf-fov-mode-card", on);
+    show("inf-fov-dynsafe-card", on && mode === "dynamic");
+    show("inf-fov-delay-card", on);
+    show("inf-fov-recovery-card", on);
+    show("inf-fov-retention-card", on && sticky);
+    show("inf-fov-retention-pct-card", on && sticky && ret);
+    ["inf-minlock-card", "inf-trackconf-card", "inf-switch-card", "inf-radius-card", "inf-losttimeout-card"]
+      .forEach(function (id) { show(id, sticky); });
   }
 
   function updateWeaponDetectVisibility(mode) {
@@ -2675,7 +2694,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "11") return;
+    if (cssVer !== "12") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
