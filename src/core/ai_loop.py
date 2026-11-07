@@ -29,6 +29,8 @@ from .ai_loop_utils import (
     calculate_detection_region,
     clear_queues,
     compute_effective_fov,
+    resolve_retained_lock,
+    track_retained,
     filter_boxes_by_fov,
     get_capture_dimensions,
     put_latest,
@@ -45,6 +47,7 @@ from .inference import (
 )
 from .session_utils import inference_controller
 from .target_tracking import (
+    build_class_lookup,
     detection_confidence_floor,
     filter_by_acquisition_confidence,
     hold_lock_on_miss,
@@ -1109,7 +1112,24 @@ def ai_logic_loop(
                 aim_engaged = is_aiming and aim_start_delay_elapsed(
                     config, state.aiming_start_time, current_time)
                 aimed_this_frame = bool(aim_engaged and boxes)
-                if aimed_this_frame:
+                # Lock retention (opt-in): the lock is associated BEFORE the
+                # shrunk control FOV can discard it. A lock that is outside the
+                # control FOV but inside the retention FOV keeps its identity
+                # (tracker updated, no aiming, no rival can take over).
+                _class_of = None
+                _retained = None
+                if getattr(config, 'sticky_lock_enabled', False) and all_boxes:
+                    _class_of = build_class_lookup(all_boxes, class_ids)
+                    if aim_engaged:
+                        _retained = resolve_retained_lock(
+                            config, state, boxes, all_boxes, all_confidences,
+                            crosshair_x, crosshair_y, current_time,
+                            ai_aiming.sticky_iou_threshold(config, state), _class_of)
+                if _retained is not None:
+                    track_retained(config, state, _retained[0], _retained[1],
+                                   crosshair_x, crosshair_y, current_time)
+                    aimed_this_frame = False
+                elif aimed_this_frame:
                     # False = no target accepted (e.g. the locked target is
                     # briefly missing inside the minimum lock time): treat the
                     # frame like a missed detection and let the hold path run.
@@ -1124,9 +1144,10 @@ def ai_logic_loop(
                         state,
                         current_time,
                         confidences=confidences,
+                        class_of=_class_of,
                     ) is not False
                 _set_makcu_move_lock(config, aimed_this_frame)
-                if not aimed_this_frame:
+                if not aimed_this_frame and _retained is None:
                     # Not aiming this frame — either no detections came back, or
                     # detection did find boxes but the aim key isn't held (e.g.
                     # keep_detecting is on and the user simply isn't aiming right

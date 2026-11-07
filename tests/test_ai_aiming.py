@@ -531,6 +531,34 @@ class TestStickyTrackingIntegration:
         return process_aiming(cfg, boxes, 500, 500, px, py, "sendinput", state,
                               current_time=t, confidences=confs)
 
+    def test_class_of_records_locked_class_and_gates_continuation(self, sent_moves):
+        from core.target_tracking import build_class_lookup
+        cfg, st, px, py = self._setup(sent_moves)
+        from core.ai_aiming import process_aiming
+        a = [480.0, 480.0, 520.0, 520.0]
+        process_aiming(cfg, [a], 500, 500, px, py, "sendinput", st, current_time=1000.0,
+                       confidences=[0.9], class_of=build_class_lookup([a], [1]))
+        assert st.tracker.locked_class == 1
+        # an overlapping box of ANOTHER class (e.g. a teammate) is not the locked target:
+        # inside the minimum lock time the pick is held (False), never adopted
+        b = [484.0, 484.0, 524.0, 524.0]
+        r = process_aiming(cfg, [b], 500, 500, px, py, "sendinput", st, current_time=1000.05,
+                           confidences=[0.9], class_of=build_class_lookup([b], [0]))
+        assert r is False and st.locked_box == a
+        # the same overlap with the matching class continues the lock
+        c = [484.0, 484.0, 524.0, 524.0]
+        r = process_aiming(cfg, [c], 500, 500, px, py, "sendinput", st, current_time=1000.1,
+                           confidences=[0.9], class_of=build_class_lookup([c], [1]))
+        assert r is not False and st.locked_box == c
+
+    def test_class_of_none_keeps_previous_behaviour(self, sent_moves):
+        cfg, st, px, py = self._setup(sent_moves)
+        a = [480.0, 480.0, 520.0, 520.0]
+        self._step(cfg, st, px, py, [a], [0.9], 1000.0)
+        b = [484.0, 484.0, 524.0, 524.0]
+        assert self._step(cfg, st, px, py, [b], [0.9], 1000.05) is not False
+        assert st.tracker.locked_class is None
+
     def test_lifecycle_acquired_then_tracking(self, sent_moves):
         from core.target_tracking import TrackState
         cfg, st, px, py = self._setup(sent_moves)

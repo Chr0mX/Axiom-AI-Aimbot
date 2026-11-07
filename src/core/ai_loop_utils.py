@@ -4,7 +4,7 @@ import math
 import queue
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from .target_tracking import clamp01
+from .target_tracking import clamp01, edge_ratio as _edge_ratio, find_continuation, lost_timeout_s
 
 if TYPE_CHECKING:
     from .config import Config
@@ -467,6 +467,80 @@ def filter_boxes_by_fov(
                 filtered_confidences.append(confidences[i])
 
     return filtered_boxes, filtered_confidences
+
+
+def retention_fov_size(config: Config) -> Tuple[int, int]:
+    """Retention FOV (width, height): the configured FOV scaled by
+    ``fov_retention_pct`` (100 = the full original FOV)."""
+    pct = getattr(config, 'fov_retention_pct', 100)
+    pct = float(pct) if isinstance(pct, (int, float)) and math.isfinite(pct) else 100.0
+    pct = max(100.0, min(400.0, pct))
+    w = int(getattr(config, 'fov_size', 0) or 0)
+    h = int(getattr(config, 'fov_height', w) or w)
+    return max(1, int(w * pct / 100.0 + 1e-6)), max(1, int(h * pct / 100.0 + 1e-6))
+
+
+def resolve_retained_lock(
+    config: Config, state: LoopState, boxes, all_boxes, all_confidences,
+    crosshair_x: float, crosshair_y: float, now: float, iou_thresh: float, class_of=None,
+):
+    """Retention step, run BEFORE new-target selection each frame.
+
+    ``boxes`` are the detections inside the (possibly shrunk) control FOV;
+    ``all_boxes`` everything that passed the confidence/class filters.  If the
+    current lock is not among ``boxes`` (e.g. the FOV shrank past it) but still
+    is inside the retention FOV, return ``(box, confidence)``: the caller then
+    keeps tracking identity but does not aim and lets no other target take the
+    lock.  Returns None when retention is off, there is no lock, the lock is
+    still inside the control FOV (normal selection handles it), the lock is
+    ambiguous, or it left the retention FOV (normal lost-target handling).
+    """
+    if (not getattr(config, 'fov_retention_enabled', False)
+            or not getattr(config, 'sticky_lock_enabled', False)
+            or not getattr(config, 'fov_reduce_on_target_enabled', False)
+            or state.locked_box is None or len(all_boxes) <= len(boxes)):
+        state.retained_since = 0.0
+        return None
+    kw = dict(locked_box=state.locked_box, tracker=state.tracker, config=config,
+              now=now, iou_thresh=iou_thresh, class_of=class_of)
+    idx, ambiguous = find_continuation(boxes, **kw)
+    if idx is not None or ambiguous:
+        state.retained_since = 0.0
+        return None
+    rw, rh = retention_fov_size(config)
+    r_boxes, r_conf = filter_boxes_by_fov(
+        all_boxes, all_confidences, crosshair_x, crosshair_y, rw, config, fov_height=rh)
+    idx, ambiguous = find_continuation(r_boxes, **kw)
+    if idx is None:
+        state.retained_since = 0.0
+        return None
+    # Bounded: a target parked outside the control FOV must not pin the lock (and
+    # block every other target) forever. After lost_target_timeout it is handled
+    # like any lost target (hold -> release -> normal acquisition).
+    if state.retained_since <= 0.0:
+        state.retained_since = now
+    elif now - state.retained_since > lost_timeout_s(config):
+        return None
+    conf = r_conf[idx] if idx < len(r_conf) else state.locked_confidence
+    return r_boxes[idx], conf
+
+
+def track_retained(config: Config, state: LoopState, box, conf: float,
+                   crosshair_x: float, crosshair_y: float, now: float) -> None:
+    """Keep the lock's identity alive for a frame where the target is outside
+    the control FOV: update the tracker and lock bookkeeping, send no input."""
+    fw = float(getattr(config, 'fov_effective_size', 0) or getattr(config, 'fov_size', 222))
+    fh = float(getattr(config, 'fov_effective_height', 0) or getattr(config, 'fov_height', fw) or fw)
+    state.tracker.on_match(
+        now, box, conf,
+        edge_ratio=_edge_ratio(box, crosshair_x, crosshair_y, fw, fh,
+                               bool(getattr(config, 'fov_circle_filter_enabled', False))),
+        same_target=True)
+    state.locked_box = box
+    state.locked_confidence = conf
+    state.no_detection_frames = 0
+    config.display_locked_box = list(box)
+    config.display_locked_box_is_decaying = False
 
 
 def find_closest_target(

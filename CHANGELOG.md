@@ -1,5 +1,7 @@
 # Changelog
 
+- Opt-in lock retention: a locked target that leaves the shrunk FOV stays tracked (not aimed) inside a retention FOV instead of being dropped or stolen; class gate for lock continuation; confidence EMA now decays during misses.
+
 - New opt-in "Dynamic Safeguards" (FOV shrink mode Dynamic): boundary-proximity cap and settle-gated speed/turn terms.
 
 - PID time normalisation (opt-in) now uses the exact P gain `1-(1-Kp)^k`; EMA/FOV slew ignore non-finite or stale `dt`; FOV bounds validated; radius reacquisition rejects ambiguous matches.

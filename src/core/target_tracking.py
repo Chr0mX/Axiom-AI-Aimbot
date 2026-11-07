@@ -116,6 +116,7 @@ class TargetTracker:
         self.speed_ema: float = 0.0
         self.turn_ema: float = 0.0
         self.edge_ratio: float = 0.0
+        self.locked_class: Optional[int] = None   # class id of the locked target, when the model reports one
 
     def _set_state(self, state: TrackState, now: float) -> None:
         if state is not self.state:
@@ -154,6 +155,7 @@ class TargetTracker:
             self.turn_ema = 0.0
             self.vx = self.vy = 0.0
             self.edge_ratio = float(edge_ratio)
+            self.locked_class = None
             self._set_state(TrackState.ACQUIRED, now)
         else:
             prev_box = self.last_box
@@ -199,6 +201,9 @@ class TargetTracker:
         dt = self._dt(now)
         self.hit_ema = _ema(self.hit_ema, 0.0, dt, _TAU_HIT)
         self.stab_ema = _ema(self.stab_ema, 0.0, dt, _TAU_STAB)
+        # Nothing was detected, so the confidence signal must not stay at its last
+        # (possibly high) value through a long miss; it decays like the others.
+        self.conf_ema = _ema(self.conf_ema, 0.0, dt, _TAU_CONF)
         if self.state is not TrackState.TEMPORARILY_LOST:
             self.lost_since = now
             self._set_state(TrackState.TEMPORARILY_LOST, now)
@@ -343,8 +348,68 @@ def candidate_score(item, mode: str, conf_weight: float, norm: float) -> float:
     return 1.0 - min(1.0, math.sqrt(max(0.0, key)) / max(1.0, norm))
 
 
+def find_continuation(boxes, *, locked_box, tracker: TargetTracker, config, now: float,
+                      iou_thresh: float, class_of=None):
+    """Which of ``boxes`` (if any) is the current/remembered lock?
+
+    Returns ``(index | None, ambiguous)``.  Box overlap with ``locked_box``
+    (>= ``iou_thresh``) wins; otherwise, while the tracker still remembers the
+    target, the nearest box inside the reacquisition radius of its last /
+    velocity-extrapolated position -- unless the runner-up is about as close
+    (``ambiguous``: don't guess).  ``class_of(box)`` (optional) gives a box's
+    class id; a box whose class differs from the locked target's is never a
+    continuation.  Pure and allocation-light: runs once or twice per frame.
+    """
+    lc = tracker.locked_class
+    if class_of is not None and lc is not None:
+        def ok(box):
+            c = class_of(box)
+            return c is None or c == lc
+    else:
+        ok = None
+
+    idx = None
+    if locked_box is not None:
+        best_iou = 0.0
+        for i, box in enumerate(boxes):
+            if ok is not None and not ok(box):
+                continue
+            iou = box_iou(locked_box, box)
+            if iou > best_iou:
+                best_iou, idx = iou, i
+        if best_iou < iou_thresh:
+            idx = None
+    if idx is not None or not tracker.has_memory(now, lost_timeout_s(config)):
+        return idx, False
+
+    radius = float(getattr(config, 'reacquire_radius_px', 150))
+    dists = []
+    for i, box in enumerate(boxes):
+        if ok is not None and not ok(box):
+            continue
+        d = tracker.within_reacquire_radius(box, now, radius)
+        if d is not None:
+            dists.append((d, i))
+    if not dists:
+        return None, False
+    dists.sort()
+    margin = max(_REACQUIRE_MIN_MARGIN_PX, _REACQUIRE_AMBIGUITY_FRAC * radius)
+    if len(dists) > 1 and dists[1][0] - dists[0][0] < margin:
+        return None, True
+    return dists[0][1], False
+
+
+def build_class_lookup(boxes, class_ids):
+    """``box -> class id`` (identity based; the box objects survive the FOV
+    filters) or None when the model reports no per-box classes."""
+    if class_ids is None or len(class_ids) != len(boxes) or not boxes:
+        return None
+    table = {id(b): c for b, c in zip(boxes, class_ids)}
+    return lambda box: table.get(id(box))
+
+
 def select_target(valid_targets, *, locked_box, tracker: TargetTracker, config,
-                  now: float, iou_thresh: float, norm: float):
+                  now: float, iou_thresh: float, norm: float, class_of=None):
     """Sticky-lock target choice.  ``valid_targets`` is already sorted by
     priority (best first).  Returns ``(item, continued)``:
 
@@ -358,31 +423,12 @@ def select_target(valid_targets, *, locked_box, tracker: TargetTracker, config,
     A brand-new target needs the acquisition confidence; the lock itself is
     kept down to the tracking confidence.
     """
-    cont = None
-    if locked_box is not None:
-        best_iou = 0.0
-        for item in valid_targets:
-            iou = box_iou(locked_box, item[4])
-            if iou > best_iou:
-                best_iou, cont = iou, item
-        if best_iou < iou_thresh:
-            cont = None
-    if cont is None and tracker.has_memory(now, lost_timeout_s(config)):
-        radius = float(getattr(config, 'reacquire_radius_px', 150))
-        dists = []
-        for item in valid_targets:
-            d = tracker.within_reacquire_radius(item[4], now, radius)
-            if d is not None:
-                dists.append((d, id(item), item))
-        if dists:
-            dists.sort(key=lambda t: t[:2])
-            # Two plausible candidates about equally close: the nearest one is
-            # a coin flip, so don't claim identity -- hold until it resolves
-            # (a clear winner appears) or the lost-target timeout releases.
-            margin = max(_REACQUIRE_MIN_MARGIN_PX, _REACQUIRE_AMBIGUITY_FRAC * radius)
-            if len(dists) > 1 and dists[1][0] - dists[0][0] < margin:
-                return None, False
-            cont = dists[0][2]
+    idx, ambiguous = find_continuation(
+        [it[4] for it in valid_targets], locked_box=locked_box, tracker=tracker,
+        config=config, now=now, iou_thresh=iou_thresh, class_of=class_of)
+    if ambiguous:
+        return None, False
+    cont = valid_targets[idx] if idx is not None else None
 
     acq = acquisition_confidence(config)
     split = tracking_confidence(config) < acq
