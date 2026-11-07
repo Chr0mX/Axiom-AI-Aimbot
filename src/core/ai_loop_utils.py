@@ -254,7 +254,14 @@ def _slew(scale: float, target: float, down_s: float, up_s: float, span: float, 
     return min(target, scale + span / up_s * dt)
 
 
-def _fov_tightness(mode: str, config: Config, state: LoopState) -> float:
+# Dynamic safeguards: speed/turn EMAs start at 0 on a fresh lock, which reads as
+# "perfectly steady". Until the lock is this old their quality terms are blended
+# from a neutral prior (0.5) to the measured value. ~2 speed time-constants.
+_DYN_SETTLE_S = 0.5
+_DYN_PRIOR_Q = 0.5
+
+
+def _fov_tightness(mode: str, config: Config, state: LoopState, now: Optional[float] = None) -> float:
     """0..1 — how far toward the minimum FOV the current tracking quality
     justifies (1 = fully shrunk). Reads only smoothed tracker signals."""
     tr = state.tracker
@@ -267,8 +274,16 @@ def _fov_tightness(mode: str, config: Config, state: LoopState) -> float:
         fov_ref = max(1.0, float(getattr(config, 'fov_size', 0) or 1))
         motion_q = clamp01(1.0 - (tr.speed_ema / fov_ref) / 1.5)  # >1.5 FOV widths/s = rapid
         turn_q = clamp01(1.0 - tr.turn_ema * 2.0)                 # sudden direction change
+        safe = bool(getattr(config, 'fov_dynamic_safeguards', False))
+        if safe and now is not None:
+            w = clamp01(tr.lock_age(now) / _DYN_SETTLE_S)      # 0 = brand new, 1 = settled
+            motion_q = _DYN_PRIOR_Q + w * (motion_q - _DYN_PRIOR_Q)
+            turn_q = _DYN_PRIOR_Q + w * (turn_q - _DYN_PRIOR_Q)
         quality = 0.30 * motion_q + 0.25 * turn_q + 0.15 * conf_q + 0.15 * tr.hit_ema + 0.15 * stab_q
-        return clamp01((quality - 0.5) / 0.4)
+        tight = clamp01((quality - 0.5) / 0.4)
+        if safe:       # boundary safety is a hard limit, not another weighted term
+            tight = min(tight, clamp01((0.9 - tr.edge_ratio) / 0.45))
+        return tight
     edge_q = clamp01((0.9 - tr.edge_ratio) / 0.45)      # near the FOV boundary -> expand
     return min(edge_q, clamp01((quality - 0.5) / 0.4))
 
@@ -328,7 +343,7 @@ def compute_effective_fov(config: Config, state: LoopState, current_time: float)
         state.fov_lost_since = 0.0
         mode = str(getattr(config, 'fov_shrink_mode', 'fixed'))
         if mode in ('adaptive', 'dynamic'):
-            target = 1.0 - span * _fov_tightness(mode, config, state)
+            target = 1.0 - span * _fov_tightness(mode, config, state, current_time)
         else:
             target = min_scale
         scale = _slew(scale, target, shrink_s, recovery_s, span, dt)

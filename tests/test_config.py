@@ -1064,7 +1064,7 @@ class TestV3Layout:
 
 class TestTrackingSettings:
     NEW_FIELDS = (
-        'fov_shrink_mode', 'fov_expand_delay_ms', 'fov_recovery_duration_ms',
+        'fov_shrink_mode', 'fov_expand_delay_ms', 'fov_recovery_duration_ms', 'fov_dynamic_safeguards',
         'lock_persistence_ms', 'lost_target_timeout_ms', 'min_lock_duration_ms',
         'target_switch_threshold', 'reacquire_radius_px', 'tracking_confidence',
     )

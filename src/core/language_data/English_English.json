@@ -318,6 +318,8 @@
   "fov_mode_dynamic": "Dynamic",
   "fov_shrink_mode": "Shrink Mode",
   "fov_shrink_mode_desc": "Fixed: always shrink to FOV Min Size. Adaptive: shrink while the target is steady, ",
+  "fov_dynamic_safeguards": "Dynamic Safeguards",
+  "fov_dynamic_safeguards_desc": "Dynamic mode only. Never shrink past what the target's distance from the FOV edge allows, and don't trust speed/direction until the lock has settled (about 0.5 s).",
   "fov_expand_delay": "FOV Expansion Delay",
   "fov_expand_delay_desc": "After the lock is released, wait this long before the FOV starts growing back. Controls WHEN recovery begins.",
   "fov_recovery_duration": "FOV Recovery Duration",

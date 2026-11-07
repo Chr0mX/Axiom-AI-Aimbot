@@ -126,6 +126,7 @@ _FIELD_MAP = {
     'fov_shrink_mode':            'aim.fov_reduce.mode',
     'fov_expand_delay_ms':        'aim.fov_reduce.expand_delay_ms',
     'fov_recovery_duration_ms':   'aim.fov_reduce.recovery_ms',
+    'fov_dynamic_safeguards':     'aim.fov_reduce.dynamic_safeguards',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
     'detect_semantic_filter_enabled': 'inference.semantic_filter.enabled',
     'detect_min_bbox_area_px':    'inference.semantic_filter.min_bbox_area_px',
@@ -509,6 +510,9 @@ class Config:
         self.fov_shrink_mode: str = 'adaptive'
         self.fov_expand_delay_ms: int = 200      # after the lock is released, wait this long before the FOV starts recovering
         self.fov_recovery_duration_ms: int = 400  # time for the FOV to grow from its minimum back to full size
+        # Dynamic mode only: (1) cap tightness by boundary proximity like Adaptive does,
+        # (2) don't trust speed/direction until the lock has settled. Off = original feel.
+        self.fov_dynamic_safeguards: bool = False
 
         # Runtime state — not serialized (see _FIELD_MAP: neither key appears
         # there). The FOV width/height actually in effect THIS frame
@@ -1396,6 +1400,7 @@ def _validate_tracking(config: Config) -> None:
     config.fov_height = int(max(1, min(8192, _finite(getattr(config, 'fov_height', config.fov_size), config.fov_size))))
     config.fov_min_size_pct = float(max(1.0, min(100.0, _finite(getattr(config, 'fov_min_size_pct', 50.0), 50.0))))
     config.fov_min_size_duration = float(max(0.0, min(30.0, _finite(getattr(config, 'fov_min_size_duration', 1.0), 1.0))))
+    config.fov_dynamic_safeguards = bool(getattr(config, 'fov_dynamic_safeguards', False))
     config.fov_expand_delay_ms = int(max(0, min(5000, _finite(getattr(config, 'fov_expand_delay_ms', 200), 200))))
     config.fov_recovery_duration_ms = int(max(0, min(5000, _finite(getattr(config, 'fov_recovery_duration_ms', 400), 400))))
     config.lock_persistence_ms = int(max(0, min(5000, _finite(getattr(config, 'lock_persistence_ms', 250), 250))))

@@ -1,5 +1,7 @@
 # Changelog
 
+- New opt-in "Dynamic Safeguards" (FOV shrink mode Dynamic): boundary-proximity cap and settle-gated speed/turn terms.
+
 - PID time normalisation (opt-in) now uses the exact P gain `1-(1-Kp)^k`; EMA/FOV slew ignore non-finite or stale `dt`; FOV bounds validated; radius reacquisition rejects ambiguous matches.
 
 ## [Unreleased]

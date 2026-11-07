@@ -120,6 +120,13 @@ class InferencePage(BasePage):
         self.fovModeCard.hBoxLayout.addWidget(self.fovModeCombo, 0)
         self.fovModeCard.hBoxLayout.addSpacing(16)
 
+        self.fovDynSafeCard = SwitchSettingCard(
+            FluentIcon.ZOOM,
+            t("fov_dynamic_safeguards", "Dynamic Safeguards"),
+            t("fov_dynamic_safeguards_desc", "Dynamic mode only. Never shrink past what the target's distance from the FOV edge allows, and don't trust speed/direction until the lock has settled (about 0.5 s)."),
+            parent=self.fovShrinkGroup
+        )
+
         self.fovMinSizeCard = SliderSpinCard(
             FluentIcon.ZOOM,
             t("fov_min_size_pct", "FOV Min Size"),
@@ -209,7 +216,7 @@ class InferencePage(BasePage):
             parent=self.fovGroup
         )
 
-        for _c in (self.fovReduceEnableCard, self.fovModeCard, self.fovMinSizeCard, self.fovMinSizeDurationCard,
+        for _c in (self.fovReduceEnableCard, self.fovModeCard, self.fovDynSafeCard, self.fovMinSizeCard, self.fovMinSizeDurationCard,
                    self.fovExpandDelayCard, self.fovRecoveryCard, self.minLockCard, self.trackConfCard,
                    self.switchThresholdCard, self.reacquireRadiusCard, self.lostTimeoutCard, self.stickyHintCard):
             _tip(_c, _c.contentLabel.text())
@@ -329,6 +336,7 @@ class InferencePage(BasePage):
 
         self.fovShrinkGroup.addSettingCard(self.fovReduceEnableCard)
         self.fovShrinkGroup.addSettingCard(self.fovModeCard)
+        self.fovShrinkGroup.addSettingCard(self.fovDynSafeCard)
         self.fovShrinkGroup.addSettingCard(self.fovMinSizeCard)
         self.fovShrinkGroup.addSettingCard(self.fovMinSizeDurationCard)
         self.addContent(self.fovShrinkGroup)
@@ -375,6 +383,7 @@ class InferencePage(BasePage):
         self.fovMinSizeCard.valueChanged.connect(self._onFovMinSizeChanged)
         self.fovMinSizeDurationCard.valueChanged.connect(self._onFovMinSizeDurationChanged)
         self.fovModeCombo.currentIndexChanged.connect(self._onFovModeChanged)
+        self.fovDynSafeCard.checkedChanged.connect(lambda v: self._setCfg('fov_dynamic_safeguards', bool(v)))
         self.fovExpandDelayCard.valueChanged.connect(lambda v: self._setCfg('fov_expand_delay_ms', int(v)))
         self.fovRecoveryCard.valueChanged.connect(lambda v: self._setCfg('fov_recovery_duration_ms', int(v)))
         self.minLockCard.valueChanged.connect(lambda v: self._setCfg('min_lock_duration_ms', int(v)))
@@ -417,6 +426,7 @@ class InferencePage(BasePage):
             self.fovMinSizeDurationCard.setValue(float(getattr(self._config, 'fov_min_size_duration', 1.0)))
             mode = str(getattr(self._config, 'fov_shrink_mode', 'adaptive'))
             self.fovModeCombo.setCurrentIndex(_FOV_MODES.index(mode) if mode in _FOV_MODES else 1)
+            self.fovDynSafeCard.setChecked(bool(getattr(self._config, 'fov_dynamic_safeguards', False)))
             self.fovExpandDelayCard.setValue(int(getattr(self._config, 'fov_expand_delay_ms', 200)))
             self.fovRecoveryCard.setValue(int(getattr(self._config, 'fov_recovery_duration_ms', 400)))
             self.minLockCard.setValue(int(getattr(self._config, 'min_lock_duration_ms', 150)))
@@ -464,6 +474,7 @@ class InferencePage(BasePage):
         per the request, not just greyed out, to keep the FOV group
         uncluttered when the feature isn't in use."""
         self.fovModeCard.setVisible(enabled)
+        self.fovDynSafeCard.setVisible(enabled and str(getattr(self._config, 'fov_shrink_mode', 'adaptive')) == 'dynamic')
         self.fovMinSizeCard.setVisible(enabled)
         self.fovMinSizeDurationCard.setVisible(enabled)
         # Advanced FOV only matters while the shrinking feature is on; the
@@ -498,6 +509,8 @@ class InferencePage(BasePage):
     def _onFovModeChanged(self, index):
         if self._config and not self._isLoadingConfig and 0 <= index < len(_FOV_MODES):
             self._config.fov_shrink_mode = _FOV_MODES[index]
+            self.fovDynSafeCard.setVisible(bool(getattr(self._config, 'fov_reduce_on_target_enabled', False))
+                                           and _FOV_MODES[index] == 'dynamic')
 
     def _applyScreenshotMethodEffect(self, method: str):
         """Called by capture page (and on load) to sync fov_follow visibility."""
@@ -642,6 +655,8 @@ class InferencePage(BasePage):
         self.acqTrackGroup.titleLabel.setText(t("target_acq_tracking", "Target Acquisition & Tracking"))
         self.fovModeCard.titleLabel.setText(t("fov_shrink_mode", "Shrink Mode"))
         self.fovModeCard.contentLabel.setText(self._fovModeDesc())
+        self.fovDynSafeCard.titleLabel.setText(t("fov_dynamic_safeguards", "Dynamic Safeguards"))
+        self.fovDynSafeCard.contentLabel.setText(t("fov_dynamic_safeguards_desc", "Dynamic mode only. Never shrink past what the target's distance from the FOV edge allows, and don't trust speed/direction until the lock has settled (about 0.5 s)."))
         for i, (key, default) in enumerate((("fov_mode_fixed", "Fixed"), ("fov_mode_adaptive", "Adaptive"), ("fov_mode_dynamic", "Dynamic"))):
             self.fovModeCombo.setItemText(i, t(key, default))
         for card, key, title, desc in (

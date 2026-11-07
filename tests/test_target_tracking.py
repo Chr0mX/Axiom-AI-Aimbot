@@ -600,3 +600,75 @@ class TestSharedSlewController:
         s = _state()
         fov(c, s, 10.0)
         assert fov(c, s, 60.0)[0] == 200                                   # 50 s stall: clock restarts
+
+
+class TestDynamicSafeguards:
+    """fov_dynamic_safeguards: boundary cap + settle-gated motion/turn terms (dynamic only)."""
+
+    @staticmethod
+    def _t(safe, age=None, mode='dynamic', **sig):
+        from core.ai_loop_utils import _fov_tightness
+        c = _fov_cfg(fov_shrink_mode=mode, fov_dynamic_safeguards=safe)
+        s = _state()
+        _settle(s, **sig)
+        now = 100.0
+        if age is not None:
+            s.tracker.state = TrackState.TRACKING
+            s.tracker.acquired_t = now - age
+        return _fov_tightness(mode, c, s, now)
+
+    def test_off_is_bit_identical_to_original(self):
+        sigs = [dict(conf=0.85, hit=0.5, stab=0.5), dict(conf=0.9, hit=1, stab=0.9, speed=250),
+                dict(conf=0.9, hit=1, stab=0.9, speed=20, edge=0.85), dict(turn=0.5)]
+        for sig in sigs:
+            assert self._t(False, age=0.0, **sig) == self._t(False, age=None, **sig)
+            assert self._t(False, age=0.0, **sig) == pytest.approx(_target_tight('dynamic', **sig))
+
+    def test_boundary_caps_tightness(self):
+        sig = dict(conf=0.9, hit=1.0, stab=0.9, speed=20, turn=0.0, edge=0.8)
+        assert self._t(False, age=5.0, **sig) == pytest.approx(1.0)          # original: full contraction at the edge
+        assert self._t(True, age=5.0, **sig) == pytest.approx((0.9 - 0.8) / 0.45)   # = adaptive's edge_q
+        assert self._t(True, age=5.0, **{**sig, 'edge': 0.9}) == 0.0
+        assert self._t(True, age=5.0, **{**sig, 'edge': 0.3}) == pytest.approx(1.0)  # centred: unaffected
+
+    def test_fresh_lock_no_longer_optimistic(self):
+        sig = dict(conf=0.85, hit=0.5, stab=0.5)
+        fresh_off = self._t(False, age=0.0, **sig)
+        fresh_on = self._t(True, age=0.0, **sig)
+        assert fresh_off == pytest.approx(0.744, abs=1e-3)
+        assert fresh_on == pytest.approx(0.056, abs=2e-3)         # neutral prior for motion/turn
+        assert fresh_on < self._t(True, age=0.0, mode='adaptive', **sig) + 0.2
+
+    def test_gate_blends_to_measured_values_as_lock_settles(self):
+        sig = dict(conf=0.9, hit=1.0, stab=0.9)
+        vals = [self._t(True, age=a, **sig) for a in (0.0, 0.25, 0.5, 2.0)]
+        assert vals == sorted(vals)                                # tightness only grows with age
+        assert vals[-1] == pytest.approx(1.0) and vals[2] == pytest.approx(vals[3])
+
+    def test_settled_fast_target_still_widens(self):
+        sig = dict(conf=0.9, hit=1.0, stab=0.9, speed=250)
+        assert self._t(True, age=5.0, **sig) == pytest.approx(0.625)   # same as unguarded once settled
+
+    def test_does_not_touch_adaptive_or_fixed(self, fov):
+        sig = dict(conf=0.85, hit=0.5, stab=0.5)
+        assert self._t(True, age=0.0, mode='adaptive', **sig) == self._t(False, age=0.0, mode='adaptive', **sig)
+        c = _fov_cfg(fov_shrink_mode='fixed', fov_dynamic_safeguards=True, fov_min_size_duration=0.0)
+        assert fov(c, _state(), 10.0)[0] == 100
+
+    def test_end_to_end_through_compute_effective_fov(self, fov):
+        c = _fov_cfg(fov_shrink_mode='dynamic', fov_dynamic_safeguards=True, fov_min_size_duration=1.0)
+        s = _state()
+        s.tracker.on_match(10.0, [0, 0, 10, 10], 0.9, edge_ratio=0.85, same_target=False)
+        t = 10.0
+        for _ in range(300):
+            t += 1 / 60
+            _settle(s, conf=0.9, hit=1.0, stab=0.9, speed=20, edge=0.85)
+            fov(c, s, t)
+        assert s.fov_scale > 0.9                                   # target at the edge: FOV stays wide
+
+
+def _target_tight(mode, **sig):
+    from core.ai_loop_utils import _fov_tightness
+    s = _state()
+    _settle(s, **sig)
+    return _fov_tightness(mode, _fov_cfg(fov_shrink_mode=mode), s)
