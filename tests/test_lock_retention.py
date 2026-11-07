@@ -376,3 +376,12 @@ class TestReplay:
         newt = [(_box(CX - 30, CY), 0.9, 0)]
         t += 1 / 30
         assert _frame(c, s, newt, t) == 'aimed'                  # reacquired via the normal path
+
+
+class TestActiveRetentionFov:
+    def test_only_while_all_three_prerequisites_hold(self):
+        from core.ai_loop_utils import active_retention_fov
+        assert active_retention_fov(_cfg(fov_retention_pct=150.0)) == (600, 600)
+        for kw in (dict(fov_retention_enabled=False), dict(sticky_lock_enabled=False),
+                   dict(fov_reduce_on_target_enabled=False)):
+            assert active_retention_fov(_cfg(**kw)) is None

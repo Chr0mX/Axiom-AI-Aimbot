@@ -480,6 +480,17 @@ def retention_fov_size(config: Config) -> Tuple[int, int]:
     return max(1, int(w * pct / 100.0 + 1e-6)), max(1, int(h * pct / 100.0 + 1e-6))
 
 
+def active_retention_fov(config: Config) -> Optional[Tuple[int, int]]:
+    """Retention FOV (w, h) while lock retention is actually in effect, else
+    None -- the same gate resolve_retained_lock() applies. Used by the
+    overlays so they only draw the boundary when it can matter."""
+    if (getattr(config, 'fov_retention_enabled', False)
+            and getattr(config, 'sticky_lock_enabled', False)
+            and getattr(config, 'fov_reduce_on_target_enabled', False)):
+        return retention_fov_size(config)
+    return None
+
+
 def resolve_retained_lock(
     config: Config, state: LoopState, boxes, all_boxes, all_confidences,
     crosshair_x: float, crosshair_y: float, now: float, iou_thresh: float, class_of=None,

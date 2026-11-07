@@ -475,6 +475,22 @@ def _draw_detection_overlay(
             cv2.line(frame, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
             cv2.line(frame, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
 
+    if bool(getattr(cfg, 'show_fov', True)):
+        # Lock-retention boundary (only while retention is in effect): where a
+        # locked target is still tracked, not aimed at, after the FOV shrinks.
+        try:
+            from .ai_loop_utils import active_retention_fov
+            _ret = active_retention_fov(cfg)
+        except Exception:
+            _ret = None
+        if _ret is not None:
+            rhx, rhy = max(1, _ret[0] // 2), max(1, _ret[1] // 2)
+            rcol = _c(255, 200, 0) if bool(getattr(cfg, 'lock_track_only', False)) else _c(150, 150, 150)
+            if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
+                cv2.ellipse(frame, (cx, cy), (rhx, rhy), 0, 0, 360, rcol, 1, cv2.LINE_AA)
+            else:
+                cv2.rectangle(frame, (cx - rhx, cy - rhy), (cx + rhx, cy + rhy), rcol, 1, cv2.LINE_AA)
+
     if bool(getattr(cfg, 'show_boxes', True)):
         boxes       = list(getattr(cfg, 'latest_boxes',       []) or [])
         confidences = list(getattr(cfg, 'latest_confidences', []) or [])
@@ -563,6 +579,18 @@ def _draw_detection_overlay(
             x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
             x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
             cv2.rectangle(frame, (x1, y1), (x2, y2), _c(0, 140, 255),
+                          highlight_thickness(cfg, 1), cv2.LINE_AA)
+        except Exception:
+            pass
+
+    if (decay_box is not None and bool(getattr(cfg, 'lock_track_only', False))
+            and not bool(getattr(cfg, 'display_locked_box_is_decaying', False))):
+        # Lock kept outside the control FOV (tracked, not aimed at).
+        try:
+            x1, y1, x2, y2 = [int(v) for v in decay_box]
+            x1 = max(0, min(w - 1, x1)); y1 = max(0, min(h - 1, y1))
+            x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
+            cv2.rectangle(frame, (x1, y1), (x2, y2), _c(255, 200, 0),
                           highlight_thickness(cfg, 1), cv2.LINE_AA)
         except Exception:
             pass

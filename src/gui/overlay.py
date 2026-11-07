@@ -103,6 +103,23 @@ class OverlayColors:
         return QColor(255, 80, 80, 220)
 
     @staticmethod
+    def get_retention_fov_color() -> QColor:
+        """Lock-retention boundary (dashed)"""
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_RETENTION_FOV.qcolor()
+        return QColor(255, 255, 255, 90)
+
+    @staticmethod
+    def get_lock_color(decaying: bool, track_only: bool) -> QColor:
+        """Locked-box highlight: amber = decaying, cyan = tracked outside the
+        control FOV (not aimed), green = actively locked."""
+        if decaying:
+            return ThemeColors.OVERLAY_LOCK_DECAYING.qcolor() if HAS_THEME_COLORS else QColor(255, 170, 0, 240)
+        if track_only:
+            return ThemeColors.OVERLAY_LOCK_TRACK_ONLY.qcolor() if HAS_THEME_COLORS else QColor(0, 200, 255, 240)
+        return ThemeColors.OVERLAY_LOCK_AIMING.qcolor() if HAS_THEME_COLORS else QColor(0, 255, 140, 240)
+
+    @staticmethod
     def get_predicted_aim_marker_color() -> QColor:
         """Locked target's post-prediction/Kalman marker color — distinct
         from get_aim_marker_color() (always the raw, pre-prediction point)."""
@@ -339,6 +356,25 @@ class PyQtOverlay(QWidget):
             else:
                 self.draw_fov_corners(painter, cx, cy, fov_w, fov_h)
 
+        # Lock-retention boundary: where a locked target is still tracked (not
+        # aimed at) after the FOV shrinks past it. Only while retention is in
+        # effect; dashed so it reads as a boundary, cyan-tinted track-only.
+        if show_fov:
+            from core.ai_loop_utils import active_retention_fov
+            _ret = active_retention_fov(self.config)
+            if _ret is not None:
+                rw, rh = _ret
+                cx, cy = self.config.crosshairX, self.config.crosshairY
+                _track_only = bool(getattr(self.config, 'lock_track_only', False))
+                pen_ret = QPen(OverlayColors.get_lock_color(False, True) if _track_only
+                               else OverlayColors.get_retention_fov_color(), 1, Qt.PenStyle.DashLine)
+                painter.setPen(pen_ret)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                if getattr(self.config, 'fov_circle_filter_enabled', False):
+                    painter.drawEllipse(int(cx - rw // 2), int(cy - rh // 2), int(rw), int(rh))
+                else:
+                    painter.drawRect(int(cx - rw // 2), int(cy - rh // 2), int(rw), int(rh))
+
         # 繪製檢測框和置信度 - 使用主題顏色
         if show_boxes and self.boxes:
             theme_key = str(getattr(self.config, 'box_color_theme', 'default')).lower()
@@ -412,6 +448,24 @@ class PyQtOverlay(QWidget):
                 painter.setPen(pen_aim_x)
                 painter.drawLine(tx - r, ty - r, tx + r, ty + r)
                 painter.drawLine(tx + r, ty - r, tx - r, ty + r)
+
+        # Locked-box highlight (same states as the Web ESP overlay).
+        _lb = getattr(self.config, 'display_locked_box', None)
+        if show_boxes and _lb:
+            try:
+                lx1, ly1, lx2, ly2 = (int(v) for v in _lb[:4])
+            except (TypeError, ValueError):
+                lx1 = None
+            if lx1 is not None:
+                _decaying = bool(getattr(self.config, 'display_locked_box_is_decaying', False))
+                _track_only = bool(getattr(self.config, 'lock_track_only', False))
+                from core.box_style import box_thickness
+                lock_pen = QPen(OverlayColors.get_lock_color(_decaying, _track_only),
+                                max(2, box_thickness(self.config, float(getattr(self.config, 'min_confidence', 0.5)))),
+                                Qt.PenStyle.DashLine if (_track_only and not _decaying) else Qt.PenStyle.SolidLine)
+                painter.setPen(lock_pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(lx1, ly1, lx2 - lx1, ly2 - ly1)
 
         # Predicted aim-point marker — the locked target's point AFTER
         # cam-drift compensation and prediction_enabled/kalman_enabled

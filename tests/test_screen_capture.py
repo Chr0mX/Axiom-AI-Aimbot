@@ -871,3 +871,41 @@ def test_draw_detection_overlay_tracer_line_respects_ellipse_height(monkeypatch)
     sc._draw_detection_overlay(frame, None, config, has_alpha=True)
 
     assert len(lines) == 1, "the tracer line must reach a box within the ellipse's height, not just its width"
+
+
+def test_draw_detection_overlay_draws_retention_boundary_only_while_active(monkeypatch):
+    from core import screen_capture as sc
+
+    rects = []
+    monkeypatch.setattr(sc.cv2, 'rectangle', lambda f, p1, p2, *a, **k: rects.append((p1, p2)))
+    monkeypatch.setattr(sc.cv2, 'line', lambda *a, **k: None)
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+
+    off = _make_overlay_config(fov_effective_size=100, fov_effective_height=100)
+    sc._draw_detection_overlay(frame, None, off, has_alpha=True)
+    assert rects == []                                   # retention off -> no boundary
+
+    on = _make_overlay_config(
+        fov_effective_size=100, fov_effective_height=100, fov_retention_enabled=True,
+        fov_retention_pct=150.0, sticky_lock_enabled=True, fov_reduce_on_target_enabled=True)
+    sc._draw_detection_overlay(frame, None, on, has_alpha=True)
+    assert ((350, 350), (650, 650)) in rects             # fov 200 x 150% = 300 around (500, 500), not the shrunk 100
+
+
+def test_draw_detection_overlay_track_only_lock_box(monkeypatch):
+    from core import screen_capture as sc
+
+    rects = []
+    monkeypatch.setattr(sc.cv2, 'rectangle', lambda f, p1, p2, color, *a, **k: rects.append((p1, p2, tuple(color))))
+    monkeypatch.setattr(sc.cv2, 'line', lambda *a, **k: None)
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+
+    cfg = _make_overlay_config(display_locked_box=[700, 480, 740, 560], lock_track_only=True,
+                               display_locked_box_is_decaying=False)
+    sc._draw_detection_overlay(frame, None, cfg, has_alpha=True)
+    assert any(r[0] == (700, 480) and r[1] == (740, 560) for r in rects)
+
+    rects.clear()
+    cfg.lock_track_only = False                          # aiming normally: unchanged, nothing extra drawn
+    sc._draw_detection_overlay(frame, None, cfg, has_alpha=True)
+    assert rects == []

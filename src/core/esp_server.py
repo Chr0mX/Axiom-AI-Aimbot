@@ -105,15 +105,11 @@ def is_running() -> bool:
 def _retention_fov(c) -> dict:
     """{"retention_w", "retention_h"} while lock retention is active, else zeros."""
     try:
-        if not (getattr(c, "fov_retention_enabled", False)
-                and getattr(c, "sticky_lock_enabled", False)
-                and getattr(c, "fov_reduce_on_target_enabled", False)):
-            return {"retention_w": 0, "retention_h": 0}
-        from .ai_loop_utils import retention_fov_size
-        w, h = retention_fov_size(c)
-        return {"retention_w": int(w), "retention_h": int(h)}
+        from .ai_loop_utils import active_retention_fov
+        wh = active_retention_fov(c)
     except Exception:
-        return {"retention_w": 0, "retention_h": 0}
+        wh = None
+    return {"retention_w": int(wh[0]) if wh else 0, "retention_h": int(wh[1]) if wh else 0}
 
 
 def _build_snapshot() -> dict:

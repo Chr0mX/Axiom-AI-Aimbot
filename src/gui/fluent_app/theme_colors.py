@@ -337,6 +337,33 @@ class ThemeColors:
         default_dark=(0, 140, 255, 90)
     )
 
+    # Lock-retention boundary and locked-box highlight (green = aiming,
+    # amber = lock held while the target is briefly missing, cyan = target
+    # tracked outside the control FOV: kept, not aimed at).
+    OVERLAY_RETENTION_FOV = ColorPairWithAlpha.from_config(
+        "overlay_colors", "retention_fov",
+        default_light=(80, 80, 80, 150),
+        default_dark=(255, 255, 255, 90)
+    )
+
+    OVERLAY_LOCK_AIMING = ColorPairWithAlpha.from_config(
+        "overlay_colors", "lock_aiming",
+        default_light=(0, 170, 90, 240),
+        default_dark=(0, 255, 140, 240)
+    )
+
+    OVERLAY_LOCK_DECAYING = ColorPairWithAlpha.from_config(
+        "overlay_colors", "lock_decaying",
+        default_light=(220, 130, 0, 240),
+        default_dark=(255, 170, 0, 240)
+    )
+
+    OVERLAY_LOCK_TRACK_ONLY = ColorPairWithAlpha.from_config(
+        "overlay_colors", "lock_track_only",
+        default_light=(0, 140, 200, 240),
+        default_dark=(0, 200, 255, 240)
+    )
+
     OVERLAY_TRACER = ColorPairWithAlpha.from_config(
         "overlay_colors", "tracer",
         default_light=(255, 255, 255, 200),
