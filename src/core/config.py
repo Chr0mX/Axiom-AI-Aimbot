@@ -940,6 +940,8 @@ class Config:
         self.source_nominal_fps: float = 0.0
         self.udp_recv_fps: float = 0.0        # raw assembled-frame rate from UDP sender
         self.udp_dropped_fps: float = 0.0     # incomplete frames evicted/sec (packet loss)
+        self.udp_stats: dict = {}             # runtime: UdpJpegReceiver.snapshot_stats() (Speed Test UDP block)
+        self.udp_stats_t: float = 0.0         # runtime: perf_counter() when udp_stats was published
 
         # Secondary inference (V1 = PaddleOCR, V2 = ONNX HUD detector)
         self.second_inference_mode: str = "off"          # "off" | "v1_ocr" | "v2_onnx"

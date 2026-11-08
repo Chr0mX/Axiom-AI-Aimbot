@@ -1,5 +1,7 @@
 # Changelog
 
+- Web Control: LAN Speed Test / Test Connection ping no longer inflated by Axiom's own threading (async ping route, 1 ms timer resolution); the result shows how long Axiom itself spent per request. New "UDP stream" line: frame interval, jitter, packet spread, lost and reordered frames of the live UDP capture stream.
+
 - Web Control: live NVIDIA GPU tiles in the sidebar (same sensors and switches as the status panel). Model Info now shows the precision actually running (FP16/FP32 · provider · RUNNING) and what is selected but still pending.
 
 - Web ESP overlay: HUD wording matches Web Control; the top-right badge lists the enabled Visuals (Crosshair, FOV, Boxes, Confidence, Detection Range, Tracer Line, Predicted Aim Point); draws the Predicted Aim Point; sharp on high-DPI screens; less delay (event-driven sending on new detections, 1 ms timer, per-client latest-frame sending, newest-packet-only parsing). New "Web ESP Update Rate" setting (15–240 Hz, default 60) in Visuals and Web Control; the HUD shows draw FPS and data Hz separately.

@@ -2754,7 +2754,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "14") return;
+    if (cssVer !== "15") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
@@ -3015,13 +3015,36 @@
     });
   }
 
+  // UDP "ping": the browser cannot send UDP, so this reports the quality of the real UDP video
+  // stream Axiom is receiving (relative timings measured on the host; no one-way delay).
+  function speedUdpStats(signal) {
+    return speedFetch("/api/status", { signal: signal }).then(function (r) { return r.json(); }).then(function (s) {
+      if (s.screenshot_method !== "udp") return null;
+      return s.udp_stats || { active: false };
+    }).catch(function (err) { if (err && err.name === "AbortError") throw err; return null; });
+  }
+
+  function speedUdpLine(u) {
+    if (u === null) return "UDP stream: set Capture Method to UDP to measure the video stream";
+    if (!u.active) return "UDP stream: no frames arriving";
+    return "UDP stream: frames every " + u.interval_ms.toFixed(1) + " ms (jitter " + u.jitter_ms.toFixed(1) +
+      " ms, min " + u.interval_min_ms.toFixed(1) + ", max " + u.interval_max_ms.toFixed(1) + ")\n" +
+      "  packets of one frame arrive within " + u.assembly_ms.toFixed(1) + " ms (worst " + u.assembly_max_ms.toFixed(1) +
+      " ms); lost " + u.lost_frames + " of " + (u.lost_frames + u.frames) + " frames (" + u.loss_pct.toFixed(1) +
+      " %), reordered " + u.reordered;
+  }
+
   function speedPing(count, signal) {
     var samples = [];
+    samples.proc = [];                  // server-side handling time per sample (ms), for "host vs network"
     function one(i) {
       if (i >= count) return Promise.resolve(samples);
       var t0 = performance.now();
-      return speedFetch("/api/speedtest/ping", { signal: signal }).then(function (r) { return r.json(); }).then(function () {
-        if (i > 0) samples.push(performance.now() - t0);   // sample 0 = connection warm-up
+      return speedFetch("/api/speedtest/ping", { signal: signal }).then(function (r) { return r.json(); }).then(function (body) {
+        if (i > 0) {                    // sample 0 = connection warm-up
+          samples.push(performance.now() - t0);
+          if (body && isFinite(body.proc_ms)) samples.proc.push(body.proc_ms);
+        }
         return one(i + 1);
       });
     }
@@ -3103,23 +3126,27 @@
       if (controller) return;
       controller = (typeof AbortController !== "undefined") ? new AbortController() : { signal: undefined, abort: function () {} };
       var signal = controller.signal;
-      var out = { ping: null, down: null, up: null };
+      var out = { ping: null, proc: null, down: null, up: null, udp: undefined };
       resultEl.hidden = true;
       setRunning(true);
 
       function render() {
         var lines = [];
         if (out.ping) lines.push("Ping: " + out.ping.median.toFixed(1) + " ms median (min " + out.ping.min.toFixed(1) +
-          ", max " + out.ping.max.toFixed(1) + ", jitter " + out.ping.jitter.toFixed(1) + " ms)");
+          ", max " + out.ping.max.toFixed(1) + ", jitter " + out.ping.jitter.toFixed(1) + " ms)" +
+          (out.proc ? "\n  Axiom handled each request in " + out.proc.median.toFixed(2) + " ms; the rest is browser, network and host scheduling" : ""));
         if (out.down !== null) lines.push("Download: " + speedFmt(out.down));
         if (out.up !== null) lines.push("Upload: " + speedFmt(out.up));
+        if (out.udp !== undefined) lines.push(speedUdpLine(out.udp));
         resultEl.textContent = lines.join("\n");
         resultEl.hidden = !lines.length;
       }
 
       stageEl.textContent = "Testing ping…";
       speedPing(12, signal).then(function (samples) {
-        out.ping = speedSummarize(samples); render();
+        out.ping = speedSummarize(samples);
+        out.proc = samples.proc.length ? speedSummarize(samples.proc) : null;
+        render();
         stageEl.textContent = "Testing download…";
         return speedRamp(speedDownloadPass, signal, function (m, mb) { out.down = m; render(); });
       }).then(function (down) {
@@ -3128,6 +3155,9 @@
         return speedRamp(speedUploadPass, signal, function (m) { out.up = m; render(); });
       }).then(function (up) {
         out.up = up; render();
+        return speedUdpStats(signal);
+      }).then(function (udp) {
+        out.udp = udp; render();
         stageEl.textContent = "Done — browser to Axiom host over one HTTP stream. Wi-Fi/router load or this browser can cap the result.";
       }).catch(function (err) {
         stageEl.textContent = (err && err.name === "AbortError") ? "Stopped." : "Failed: " + (err && err.message || err);
@@ -3312,10 +3342,13 @@
     var latencyEl = document.getElementById("other-latency");
     if (testBtn) {
       testBtn.addEventListener("click", function () {
-        var t0 = performance.now();
         latencyEl.textContent = "Testing…";
-        api("GET", "/api/status").then(function () {
-          latencyEl.textContent = "Connected — round trip " + Math.round(performance.now() - t0) + " ms";
+        // The light ping route (not /api/status, which builds the whole status dict), so the
+        // number is the connection, not Axiom's own work. First sample is the connection warm-up.
+        speedPing(6, undefined).then(function (samples) {
+          var m = speedSummarize(samples);
+          latencyEl.textContent = "Connected — round trip " + m.median.toFixed(1) + " ms median (min " +
+            m.min.toFixed(1) + ", max " + m.max.toFixed(1) + ")";
         }).catch(function (err) {
           latencyEl.textContent = "Failed: " + err.message;
         });

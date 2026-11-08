@@ -2615,6 +2615,8 @@ class UdpCapture:
                 self.config.source_nominal_fps = _fps_count / _elapsed
                 self.config.udp_recv_fps = self._receiver.recv_fps
                 self.config.udp_dropped_fps = self._receiver.dropped_fps
+                self.config.udp_stats = self._receiver.snapshot_stats()
+                self.config.udp_stats_t = _now
                 if self._receiver.dropped_fps > 0:
                     logger.warning(
                         "[UDP] %.1f incomplete frames/sec dropped (packet loss) — recv %.1f fps",

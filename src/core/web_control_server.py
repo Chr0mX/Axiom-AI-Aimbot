@@ -227,12 +227,36 @@ def _build_status(config) -> dict:
             status["gpu"] = get_sampler().snapshot(config)
         except Exception:
             logger.debug("[WebControl] GPU sampler unavailable", exc_info=True)
+    if status.get("screenshot_method") == "udp":
+        # UDP stream quality for the Speed Test panel; stale (receiver stopped publishing) = inactive.
+        stats = getattr(config, "udp_stats", None) or {}
+        fresh = (time.perf_counter() - float(getattr(config, "udp_stats_t", 0.0) or 0.0)) <= 3.0
+        status["udp_stats"] = stats if (stats and fresh) else {"active": False}
     return status
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+_timer_held = False
+
+
+def _set_timer_resolution(enable: bool) -> None:
+    """Hold Windows' 1 ms timer resolution while the server runs (balanced Begin/End).
+
+    Without it the event loop's waits quantise to the 15.6 ms scheduler tick, which showed up
+    as a ~45 ms "ping" on a fast LAN. Reuses esp_server's helper (a no-op off Windows)."""
+    global _timer_held
+    if enable == _timer_held:
+        return
+    try:
+        from .esp_server import _timer_resolution
+        _timer_resolution(enable)
+        _timer_held = enable
+    except Exception:
+        pass
+
 
 def start(
     config,
@@ -295,6 +319,13 @@ def start(
         if not _tokens_match(x_axiom_token, token):
             raise HTTPException(status_code=401, detail="invalid or missing X-Axiom-Token")
 
+    async def _check_token_async(x_axiom_token: str = Header(default="")) -> None:
+        # Same check as _check_token, but a coroutine: FastAPI runs a plain `def` dependency in
+        # the anyio threadpool, and each hop needs the GIL, which the AI loop keeps busy. The
+        # latency probes use this one so they are answered on the event loop with no hand-off.
+        if not _tokens_match(x_axiom_token, token):
+            raise HTTPException(status_code=401, detail="invalid or missing X-Axiom-Token")
+
     class AlwaysAimBody(BaseModel):
         enabled: bool
 
@@ -348,15 +379,20 @@ def start(
     )
 
     @app.get("/api/ping")
-    def ping():
+    async def ping():
         # Unauthenticated on purpose — mirrors esp_server.py's own /ping —
         # just reachability, no state, nothing to protect.
         return {"ok": True}
 
     # ── LAN speed test (browser <-> this host; see core/speedtest.py) ───────
-    @app.get("/api/speedtest/ping", dependencies=[Depends(_check_token)])
-    def speedtest_ping():
-        return {"t": int(time.monotonic() * 1000)}
+    @app.get("/api/speedtest/ping", dependencies=[Depends(_check_token_async)])
+    async def speedtest_ping():
+        # `proc_ms` is the time spent inside this handler (not in the network or the browser);
+        # the client shows it so a slow ping can be told apart as host-side or transport.
+        t0 = time.perf_counter()
+        body = {"t": int(time.monotonic() * 1000)}
+        body["proc_ms"] = round((time.perf_counter() - t0) * 1000.0, 3)
+        return body
 
     @app.get("/api/speedtest/download", dependencies=[Depends(_check_token)])
     def speedtest_download(mb: int = _speedtest.DEFAULT_DOWNLOAD_MB):
@@ -815,6 +851,7 @@ def start(
 
     _thread = threading.Thread(target=_server.run, name="webcontrol-http", daemon=True)
     _thread.start()
+    _set_timer_resolution(True)
 
     # Give uvicorn a brief window to actually bind before declaring success —
     # if the port is taken, its own startup raises inside the thread and the
@@ -826,6 +863,7 @@ def start(
 
     if not _thread.is_alive():
         logger.error("[WebControl] server thread exited immediately — port %d may be in use", port)
+        _set_timer_resolution(False)
         _server = None
         _thread = None
         _actual_port = 0
@@ -848,6 +886,7 @@ def stop() -> None:
     if _thread is not None:
         _thread.join(timeout=3.0)
 
+    _set_timer_resolution(False)
     _server = None
     _thread = None
     _actual_port = 0

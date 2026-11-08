@@ -14,6 +14,7 @@ decorator runs — not inside any handler's body, so a test that only
 called the (fully mocked) handler functions directly would never see it.
 """
 
+import asyncio
 import inspect
 import sys
 import time
@@ -46,6 +47,7 @@ class _RecordingFastAPI:
 
     def __init__(self, *args, **kwargs):
         self.routes = []
+        self.route_deps = {}          # (method, path) -> the dependencies= list (fake Depends = the callable)
         _RecordingFastAPI.instances.append(self)
 
     def add_middleware(self, *args, **kwargs):
@@ -54,6 +56,7 @@ class _RecordingFastAPI:
     def _register(self, method, path, **kwargs):
         def decorator(func):
             self.routes.append((method, path, func))
+            self.route_deps[(method, path)] = kwargs.get("dependencies")
             return func
         return decorator
 
@@ -516,6 +519,70 @@ class TestSpeedtestRoutes:
     def test_ping_returns_a_monotonic_timestamp(self, started_server):
         _, app = started_server
         func = _routes_by_path(app)["/api/speedtest/ping"]
-        a = func()["t"]
+        a = asyncio.run(func())["t"]
         time.sleep(0.01)
-        assert func()["t"] >= a
+        assert asyncio.run(func())["t"] >= a
+
+
+class TestLatencyProbeIsCheap:
+    """The ping must not hop through the anyio threadpool (two GIL hand-offs against the AI loop
+    inflated a LAN ping to ~47 ms): coroutine handler + coroutine auth dependency."""
+
+    def test_speedtest_ping_is_a_coroutine_with_proc_ms(self, started_server):
+        import asyncio
+        _wcserver, app = started_server
+        handler = _route_by_method_and_path(app, "GET", "/api/speedtest/ping")
+        assert inspect.iscoroutinefunction(handler)
+        body = asyncio.run(handler())
+        assert isinstance(body["t"], int) and body["proc_ms"] >= 0.0
+
+    def test_unauthenticated_ping_is_a_coroutine(self, started_server):
+        _wcserver, app = started_server
+        assert inspect.iscoroutinefunction(_route_by_method_and_path(app, "GET", "/api/ping"))
+
+    def test_ping_auth_dependency_is_async_and_checks_the_token(self, started_server):
+        import asyncio
+        _wcserver, app = started_server
+        (dep,) = app.route_deps[("GET", "/api/speedtest/ping")]
+        assert inspect.iscoroutinefunction(dep)
+        asyncio.run(dep("test-token"))                      # ok: no exception
+        for bad in ("", "nope"):
+            with pytest.raises(Exception) as exc:
+                asyncio.run(dep(bad))
+            assert getattr(exc.value, "status_code", None) == 401
+
+    def test_other_routes_keep_the_sync_dependency(self, started_server):
+        _wcserver, app = started_server
+        (dep,) = app.route_deps[("GET", "/api/status")]
+        assert not inspect.iscoroutinefunction(dep)
+
+    def test_timer_resolution_is_balanced(self, monkeypatch):
+        import core.web_control_server as wcserver
+        import core.esp_server as esp
+        calls = []
+        monkeypatch.setattr(esp, "_timer_resolution", lambda e: calls.append(e))
+        wcserver._timer_held = False
+        wcserver._set_timer_resolution(True)
+        wcserver._set_timer_resolution(True)      # idempotent: no second Begin
+        wcserver._set_timer_resolution(False)
+        wcserver._set_timer_resolution(False)     # no stray End
+        assert calls == [True, False]
+
+
+class TestUdpStatsInStatus:
+    def _cfg(self, **kw):
+        base = dict(screenshot_method="udp", udp_stats={"active": True, "jitter_ms": 1.0}, udp_stats_t=None)
+        base.update(kw)
+        return types.SimpleNamespace(**base)
+
+    def test_fresh_stats_are_reported_only_for_udp(self):
+        import core.web_control_server as wcserver
+        cfg = self._cfg(udp_stats_t=time.perf_counter())
+        assert wcserver._build_status(cfg)["udp_stats"]["jitter_ms"] == 1.0
+        cfg.screenshot_method = "mss"
+        assert "udp_stats" not in wcserver._build_status(cfg)
+
+    def test_stale_stats_read_as_inactive(self):
+        import core.web_control_server as wcserver
+        cfg = self._cfg(udp_stats_t=time.perf_counter() - 10.0)
+        assert wcserver._build_status(cfg)["udp_stats"] == {"active": False}
