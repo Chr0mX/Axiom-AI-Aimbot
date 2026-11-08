@@ -64,6 +64,8 @@ import threading
 import time
 from typing import Literal, Optional
 
+from . import speedtest as _speedtest
+
 # Fixed short log name ("core.web_control: [WebControl] ..."), not the module name.
 logger = logging.getLogger("core.web_control")
 
@@ -248,7 +250,7 @@ def start(
 
     try:
         import uvicorn
-        from fastapi import Depends, FastAPI, Header, HTTPException
+        from fastapi import Depends, FastAPI, Header, HTTPException, Request
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel
@@ -336,6 +338,31 @@ def start(
         # Unauthenticated on purpose — mirrors esp_server.py's own /ping —
         # just reachability, no state, nothing to protect.
         return {"ok": True}
+
+    # ── LAN speed test (browser <-> this host; see core/speedtest.py) ───────
+    @app.get("/api/speedtest/ping", dependencies=[Depends(_check_token)])
+    def speedtest_ping():
+        return {"t": int(time.monotonic() * 1000)}
+
+    @app.get("/api/speedtest/download", dependencies=[Depends(_check_token)])
+    def speedtest_download(mb: int = _speedtest.DEFAULT_DOWNLOAD_MB):
+        from fastapi.responses import StreamingResponse
+        total = _speedtest.clamp_mb(mb) * _speedtest.MIB
+        return StreamingResponse(
+            _speedtest.iter_payload(total),
+            media_type="application/octet-stream",
+            headers={"Content-Length": str(total), "Cache-Control": "no-store"},
+        )
+
+    @app.post("/api/speedtest/upload", dependencies=[Depends(_check_token)])
+    async def speedtest_upload(request: Request):
+        t0 = time.monotonic()
+        received = 0
+        async for chunk in request.stream():
+            received += len(chunk)
+            if received > _speedtest.UPLOAD_CAP_BYTES:
+                raise HTTPException(status_code=413, detail="upload too large for the speed test")
+        return {"bytes": received, "server_ms": round((time.monotonic() - t0) * 1000.0, 1)}
 
     @app.get("/api/status", dependencies=[Depends(_check_token)])
     def get_status():

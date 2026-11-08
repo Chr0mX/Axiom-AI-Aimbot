@@ -233,6 +233,14 @@ def _apply_per_frame_cap(move_x: float, move_y: float, config) -> tuple:
     return move_x, move_y
 
 
+def sticky_iou_threshold(config: Config, state: LoopState) -> float:
+    """Overlap needed to treat a box as the locked target (adaptive to its size)."""
+    base = float(getattr(config, 'lock_iou_threshold', 0.3))
+    if state.locked_box is not None and getattr(config, 'sticky_adaptive_iou', True):
+        return _adaptive_sticky_iou(base, state.locked_box, float(getattr(config, 'fov_size', 222)))
+    return base
+
+
 def process_aiming(
     config: Config,
     boxes: List[List[float]],
@@ -244,6 +252,7 @@ def process_aiming(
     state: LoopState,
     current_time: float,
     confidences: List[float] | None = None,
+    class_of=None,
 ) -> Optional[bool]:
     """Returns False when no target was accepted this frame (e.g. the locked
     target is momentarily missing inside the minimum lock time) so the caller
@@ -291,11 +300,7 @@ def process_aiming(
         if sticky:
             state.tracker.expire(current_time, lost_timeout_s(config))
             # Replaced fixed lock_iou_threshold with adaptive area-scaled version (Someone_idea).
-            _base_iou = float(getattr(config, 'lock_iou_threshold', 0.3))
-            if state.locked_box is not None and getattr(config, 'sticky_adaptive_iou', True):
-                iou_thresh = _adaptive_sticky_iou(_base_iou, state.locked_box, float(getattr(config, 'fov_size', 222)))
-            else:
-                iou_thresh = _base_iou
+            iou_thresh = sticky_iou_threshold(config, state)
             _fov_ref = max(float(getattr(config, 'fov_effective_size', 0) or 0),
                            float(getattr(config, 'fov_effective_height', 0) or 0),
                            float(getattr(config, 'fov_size', 222)))
@@ -303,7 +308,8 @@ def process_aiming(
             # minimum-lock-duration gating all live in select_target().
             selected, _continued = select_target(
                 valid_targets, locked_box=state.locked_box, tracker=state.tracker,
-                config=config, now=current_time, iou_thresh=iou_thresh, norm=_fov_ref * 0.5)
+                config=config, now=current_time, iou_thresh=iou_thresh, norm=_fov_ref * 0.5,
+                class_of=class_of)
             if selected is None:
                 return False
         else:
@@ -344,6 +350,10 @@ def process_aiming(
             edge_ratio=edge_ratio(selected_box, crosshair_x, crosshair_y, _fw, _fh,
                                   bool(getattr(config, 'fov_circle_filter_enabled', False))),
             same_target=_same)
+        if class_of is not None:
+            _cid = class_of(selected_box)
+            if _cid is not None or not _same:
+                state.tracker.locked_class = _cid
 
         if sticky:
             state.no_detection_frames = 0

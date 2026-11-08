@@ -102,6 +102,16 @@ def is_running() -> bool:
 # State snapshot — built entirely from existing Config fields
 # ---------------------------------------------------------------------------
 
+def _retention_fov(c) -> dict:
+    """{"retention_w", "retention_h"} while lock retention is active, else zeros."""
+    try:
+        from .ai_loop_utils import active_retention_fov
+        wh = active_retention_fov(c)
+    except Exception:
+        wh = None
+    return {"retention_w": int(wh[0]) if wh else 0, "retention_h": int(wh[1]) if wh else 0}
+
+
 def _build_snapshot() -> dict:
     c = _config
 
@@ -181,6 +191,10 @@ def _build_snapshot() -> dict:
             # outline. See get_effective_detect_range_size()'s docstring.
             "detect_range_size": get_effective_detect_range_size(c, (cap_w, cap_h)),
             "fov_circle_filter_enabled": bool(getattr(c, "fov_circle_filter_enabled", False)),
+            # Lock retention: the outer boundary within which a locked target is
+            # still tracked (not aimed) after the FOV shrinks past it. 0/0 = off,
+            # so the page draws nothing and older pages ignore the keys.
+            **_retention_fov(c),
             "show_fov": bool(getattr(c, "show_fov", True)),
             "show_boxes": bool(getattr(c, "show_boxes", True)),
             "box_full_rect": bool(getattr(c, "box_full_rect", False)),
@@ -210,6 +224,8 @@ def _build_snapshot() -> dict:
         "confidences": [float(x) for x in (getattr(c, "latest_all_confidences", []) or [])],
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
+        # Lock is held outside the control FOV: tracked, but no aiming this frame.
+        "locked_track_only": bool(getattr(c, "lock_track_only", False)) and locked is not None,
         "active": bool(getattr(c, "AimToggle", False)),
         "aim_firing": bool(getattr(c, "makcu_aim_active", False)),
         "model": os.path.basename(getattr(c, "model_path", "") or ""),

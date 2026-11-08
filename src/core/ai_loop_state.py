@@ -53,6 +53,8 @@ class LoopState:
     fov_scale: float = 1.0
     fov_last_t: float = 0.0
     fov_lost_since: float = 0.0
+    retained_last_t: float = 0.0  # last time that stretch was evaluated (stale-gap detection)
+    retained_since: float = 0.0   # start of the current track-only (outside control FOV) stretch; 0 = not retained
 
     # Lock lifecycle (SEARCHING/ACQUIRED/TRACKING/TEMPORARILY_LOST/REACQUIRED/
     # RELEASED) and the smoothed confidence/stability/motion signals the

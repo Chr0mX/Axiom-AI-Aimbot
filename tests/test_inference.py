@@ -151,21 +151,37 @@ class TestPIDTimeNormalization:
         legacy = self._make_pid().update(5.0)
         assert pid.update(5.0, 500.0) == pytest.approx(legacy)    # huge gap since the previous update ignored
 
-    def test_correction_per_second_is_independent_of_update_rate(self):
-        """Constant error, P only: total correction over one second matches at 30/60/240 Hz."""
-        totals = []
-        for hz in (30, 60, 240):
-            pid = self._make_pid(kp=0.2, ki=0.0, kd=0.0)
-            outs = self._run(pid, [10.0] * hz, 1.0 / hz)
-            totals.append(sum(outs[1:]) + outs[0] * 0)      # first sample is unscaled by design
-        assert totals[0] == pytest.approx(totals[1] * 1.0, rel=0.06)
-        assert totals[2] == pytest.approx(totals[1], rel=0.06)
+    def test_closed_loop_decay_per_second_is_independent_of_update_rate(self):
+        """P only, error shrinks by the move each update (Kp = fraction of the
+        remaining error per 60 Hz update): the residual after 1 s must match at
+        30/60/120/180/240 Hz. This holds only for the exact 1-(1-Kp)^k gain."""
+        residuals = {}
+        for hz in (30, 60, 120, 180, 240):
+            pid = self._make_pid(kp=0.4, ki=0.0, kd=0.0)
+            e, t = 10.0, 100.0
+            pid.update(e, t)                        # first sample unscaled; discard
+            for _ in range(hz):
+                t += 1.0 / hz
+                e -= pid.update(e, t)
+            residuals[hz] = e
+        for hz, r in residuals.items():
+            assert r == pytest.approx(residuals[60], rel=0.02), hz
+
+    def test_exact_gain_values(self):
+        from core.inference import PIDController
+        g = PIDController._p_gain
+        assert g(0.5, 1.0) == 0.5
+        assert g(0.5, 1 / 3) == pytest.approx(1 - 0.5 ** (1 / 3))
+        assert g(1.0, 0.25) == 1.0                  # Kp = 1 is a full correction at any k
+        assert g(0.0, 4.0) == 0.0
+        assert g(0.5, 4.0) < 1.0                    # linear k*Kp would be 2.0 (diverges)
+        assert g(1.5, 2.0) == 3.0                   # outside [0,1]: linear fallback
 
     def test_scale_is_clamped_after_a_long_stall(self):
         pid = self._make_pid(kp=0.5, ki=0.0, kd=0.0)
         pid.update(10.0, 100.0)
-        out = pid.update(10.0, 110.0)           # 10 s gap -> k capped at 4
-        assert out == pytest.approx(0.5 * 10.0 * 4.0)
+        out = pid.update(10.0, 110.0)           # 10 s gap -> k capped at 4 (exact gain 1-(1-Kp)^4)
+        assert out == pytest.approx((1 - 0.5 ** 4.0) * 10.0)
 
     def test_derivative_term_stays_per_update(self):
         pid = self._make_pid(kp=0.0, ki=0.0, kd=0.3)

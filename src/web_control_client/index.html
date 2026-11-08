@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
   <div class="app">
@@ -544,6 +544,123 @@
               <div class="field-control">
                 <input type="number" id="inf-fov_min_size_duration" data-key="fov_min_size_duration" data-type="number" min="0" max="10" step="0.1">
                 <span class="field-slider-value">s</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-mode-card">
+              <div class="field-info">
+                <div class="field-title">Shrink Mode</div>
+                <div class="field-desc">Fixed: always shrink to FOV Min Size. Adaptive: shrink while the target is steady, confident and near the centre; grow when it nears the edge or tracking gets shaky. Dynamic: shrink while steady; grow on fast movement, sudden direction changes or unstable detections.</div>
+              </div>
+              <div class="field-control">
+                <select id="inf-fov_shrink_mode" data-key="fov_shrink_mode" data-type="choice">
+                  <option value="fixed">Fixed</option>
+                  <option value="adaptive">Adaptive</option>
+                  <option value="dynamic">Dynamic</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-dynsafe-card">
+              <div class="field-info">
+                <div class="field-title">Dynamic Safeguards</div>
+                <div class="field-desc">Dynamic mode only. Never shrink past what the target's distance from the FOV edge allows, and don't trust speed/direction until the lock has settled (about 0.5 s).</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-fov_dynamic_safeguards" data-key="fov_dynamic_safeguards" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-delay-card">
+              <div class="field-info">
+                <div class="field-title">FOV Expansion Delay</div>
+                <div class="field-desc">After the lock is released, wait this long before the FOV starts growing back.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_expand_delay_ms" data-key="fov_expand_delay_ms" data-type="number" min="0" max="2000" step="10">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-recovery-card">
+              <div class="field-info">
+                <div class="field-title">FOV Recovery Duration</div>
+                <div class="field-desc">How long the FOV takes to grow from its minimum back to full size (0 = instant).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_recovery_duration_ms" data-key="fov_recovery_duration_ms" data-type="number" min="0" max="3000" step="10">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-retention-card">
+              <div class="field-info">
+                <div class="field-title">Keep Lock Outside Shrunk FOV</div>
+                <div class="field-desc">Keep tracking a locked target that drifts outside the shrunk FOV (no aiming there) instead of dropping it. Needs Sticky Target Lock. Rivals can't take the lock meanwhile.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-fov_retention_enabled" data-key="fov_retention_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card" id="inf-fov-retention-pct-card">
+              <div class="field-info">
+                <div class="field-title">Retention FOV Size</div>
+                <div class="field-desc">How far outside the shrunk FOV a lock is kept, as % of FOV Size/Height. 100% = the full original FOV.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-fov_retention_pct" data-key="fov_retention_pct" data-type="number" min="100" max="400" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-minlock-card">
+              <div class="field-info">
+                <div class="field-title">Minimum Target Lock Duration</div>
+                <div class="field-desc">A lock can't be swapped for another target sooner than this after it was acquired. Needs Sticky Target Lock. Never delays releasing a target that is really gone.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-min_lock_duration_ms" data-key="min_lock_duration_ms" data-type="number" min="0" max="2000" step="10">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-trackconf-card">
+              <div class="field-info">
+                <div class="field-title">Tracking Confidence</div>
+                <div class="field-desc">Lower bar for KEEPING a lock (0 = same as Min Confidence). Needs Sticky Target Lock.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-tracking_confidence" data-key="tracking_confidence" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-switch-card">
+              <div class="field-info">
+                <div class="field-title">Target Switch Threshold</div>
+                <div class="field-desc">How much better a rival must score before it replaces the current lock. Needs Sticky Target Lock.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-target_switch_threshold" data-key="target_switch_threshold" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-radius-card">
+              <div class="field-info">
+                <div class="field-title">Reacquisition Radius</div>
+                <div class="field-desc">A lost target is recognised again within this distance of where it was last seen. Needs Sticky Target Lock.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-reacquire_radius_px" data-key="reacquire_radius_px" data-type="number" min="0" max="1000" step="5">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-losttimeout-card">
+              <div class="field-info">
+                <div class="field-title">Lost Target Timeout</div>
+                <div class="field-desc">How long a lost target is remembered for reacquisition. Needs Sticky Target Lock.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-lost_target_timeout_ms" data-key="lost_target_timeout_ms" data-type="number" min="0" max="10000" step="50">
+                <span class="field-slider-value">ms</span>
               </div>
             </div>
             <div class="field-card">
@@ -1342,7 +1459,7 @@
           </section>
 
           <section class="module">
-          <div class="field-group-title">Target Area Settings</div>
+          <div class="field-group-title">Target Point Tracking</div>
           <div class="field-group">
             <div class="field-card">
               <div class="field-info">
@@ -2254,6 +2371,17 @@
               </div>
               <div class="field-control"><button id="other-test-btn" type="button">Test</button></div>
             </div>
+            <div class="field-card" id="other-speed-card">
+              <div class="field-info">
+                <div class="field-title">LAN Speed Test</div>
+                <div class="field-desc" id="other-speed-stage">Measures ping, download and upload between this browser and the Axiom host. Uses up to ~50 MB of LAN traffic, so don't run it mid-game.</div>
+                <div class="field-desc speed-result" id="other-speed-result" hidden></div>
+              </div>
+              <div class="field-control">
+                <button id="other-speed-btn" type="button">Start</button>
+                <button id="other-speed-stop" type="button" hidden>Stop</button>
+              </div>
+            </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Clear Saved Token</div>
@@ -2279,6 +2407,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=11"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

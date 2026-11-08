@@ -126,6 +126,9 @@ _FIELD_MAP = {
     'fov_shrink_mode':            'aim.fov_reduce.mode',
     'fov_expand_delay_ms':        'aim.fov_reduce.expand_delay_ms',
     'fov_recovery_duration_ms':   'aim.fov_reduce.recovery_ms',
+    'fov_dynamic_safeguards':     'aim.fov_reduce.dynamic_safeguards',
+    'fov_retention_enabled':      'aim.fov_reduce.retention_enabled',
+    'fov_retention_pct':          'aim.fov_reduce.retention_pct',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
     'detect_semantic_filter_enabled': 'inference.semantic_filter.enabled',
     'detect_min_bbox_area_px':    'inference.semantic_filter.min_bbox_area_px',
@@ -509,6 +512,14 @@ class Config:
         self.fov_shrink_mode: str = 'adaptive'
         self.fov_expand_delay_ms: int = 200      # after the lock is released, wait this long before the FOV starts recovering
         self.fov_recovery_duration_ms: int = 400  # time for the FOV to grow from its minimum back to full size
+        # Dynamic mode only: (1) cap tightness by boundary proximity like Adaptive does,
+        # (2) don't trust speed/direction until the lock has settled. Off = original feel.
+        self.fov_dynamic_safeguards: bool = False
+        # Lock retention: a locked target that falls outside the shrunk FOV keeps its identity
+        # (tracked, not aimed at) while inside the retention FOV = configured FOV * pct. Needs
+        # Sticky Target Lock + Reduce FOV. Off = the lock is dropped as soon as the FOV excludes it.
+        self.fov_retention_enabled: bool = False
+        self.fov_retention_pct: float = 100.0
 
         # Runtime state — not serialized (see _FIELD_MAP: neither key appears
         # there). The FOV width/height actually in effect THIS frame
@@ -522,6 +533,8 @@ class Config:
         # value.
         self.fov_effective_size: float = float(self.fov_size)
         self.fov_effective_height: float = float(self.fov_height)
+        # True on frames where the lock is kept outside the control FOV (retention): tracked, not aimed.
+        self.lock_track_only: bool = False
 
         # Runtime-only (unpersisted, same pattern as fov_effective_size):
         # what the inference loop's live session is ACTUALLY running, as
@@ -1390,6 +1403,15 @@ def _validate_tracking(config: Config) -> None:
     """Clamp the FOV-shrink-mode and target-tracking fields."""
     if getattr(config, 'fov_shrink_mode', 'adaptive') not in ('fixed', 'adaptive', 'dynamic'):
         config.fov_shrink_mode = 'adaptive'
+    # FOV bounds: a zero/negative/NaN extent or a 0% shrink floor would make the
+    # filter reject everything or the shrink controller degenerate.
+    config.fov_size = int(max(1, min(8192, _finite(getattr(config, 'fov_size', 200), 200))))
+    config.fov_height = int(max(1, min(8192, _finite(getattr(config, 'fov_height', config.fov_size), config.fov_size))))
+    config.fov_min_size_pct = float(max(1.0, min(100.0, _finite(getattr(config, 'fov_min_size_pct', 50.0), 50.0))))
+    config.fov_min_size_duration = float(max(0.0, min(30.0, _finite(getattr(config, 'fov_min_size_duration', 1.0), 1.0))))
+    config.fov_dynamic_safeguards = bool(getattr(config, 'fov_dynamic_safeguards', False))
+    config.fov_retention_enabled = bool(getattr(config, 'fov_retention_enabled', False))
+    config.fov_retention_pct = float(max(100.0, min(400.0, _finite(getattr(config, 'fov_retention_pct', 100.0), 100.0))))
     config.fov_expand_delay_ms = int(max(0, min(5000, _finite(getattr(config, 'fov_expand_delay_ms', 200), 200))))
     config.fov_recovery_duration_ms = int(max(0, min(5000, _finite(getattr(config, 'fov_recovery_duration_ms', 400), 400))))
     config.lock_persistence_ms = int(max(0, min(5000, _finite(getattr(config, 'lock_persistence_ms', 250), 250))))

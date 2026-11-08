@@ -725,7 +725,7 @@
         if (tab === "capture" && (key === "uvc_capture_method" || key === "uvc_dshow_backend" || key === "uvc_ffmpeg_enabled")) {
           updateUvcSubVisibility();
         }
-        if (tab === "inference" && key === "fov_reduce_on_target_enabled") updateFovReduceVisibility(el.checked);
+        if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
@@ -752,9 +752,28 @@
     });
   }
 
+  // Mirrors inference_page.py's _updateFovReduceVisibility()/_updateTrackingVisibility():
+  // shrink settings need "Reduce FOV"; Dynamic Safeguards only in Dynamic mode; the
+  // retention cards need Sticky Target Lock too; the tracking cards need Sticky Lock.
   function updateFovReduceVisibility(enabled) {
-    document.getElementById("inf-fov-min-size-card").classList.toggle("hidden", !enabled);
-    document.getElementById("inf-fov-min-duration-card").classList.toggle("hidden", !enabled);
+    var d = lastSettings.inference || {};
+    var el = function (id) { return document.getElementById(id); };
+    var reduceEl = el("inf-fov_reduce_on_target_enabled");
+    var on = (enabled !== undefined) ? !!enabled : (reduceEl ? reduceEl.checked : !!d.fov_reduce_on_target_enabled);
+    var sticky = !!d.sticky_lock_enabled;
+    var mode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode;
+    var ret = el("inf-fov_retention_enabled") ? el("inf-fov_retention_enabled").checked : !!d.fov_retention_enabled;
+    var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
+    show("inf-fov-min-size-card", on);
+    show("inf-fov-min-duration-card", on);
+    show("inf-fov-mode-card", on);
+    show("inf-fov-dynsafe-card", on && mode === "dynamic");
+    show("inf-fov-delay-card", on);
+    show("inf-fov-recovery-card", on);
+    show("inf-fov-retention-card", on && sticky);
+    show("inf-fov-retention-pct-card", on && sticky && ret);
+    ["inf-minlock-card", "inf-trackconf-card", "inf-switch-card", "inf-radius-card", "inf-losttimeout-card"]
+      .forEach(function (id) { show(id, sticky); });
   }
 
   function updateWeaponDetectVisibility(mode) {
@@ -2675,7 +2694,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "11") return;
+    if (cssVer !== "13") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
@@ -2889,6 +2908,180 @@
 
   var COLLAPSED_KEY = "axiom_collapsed_groups";
 
+  // ---------------------------------------------------------------------
+  // LAN speed test (Other tab) — browser <-> Axiom host over the same HTTP
+  // server/token as everything else. Ping x12 (first is warm-up), then a
+  // download and an upload ramp (2 -> 8 -> 16 MiB, stopping the ramp once a
+  // pass takes over 2 s). Bounded: <= ~26 MiB each way. Server side:
+  // core/speedtest.py + /api/speedtest/*.
+  // ---------------------------------------------------------------------
+  var SPEED_RAMP_MB = [2, 8, 16];
+  var SPEED_PASS_BUDGET_MS = 2000;
+
+  function speedMbps(bytes, ms) {
+    return ms > 0 ? (bytes * 8) / (ms / 1000) / 1e6 : 0;
+  }
+
+  function speedFmt(mbit) {
+    return mbit.toFixed(mbit >= 100 ? 0 : 1) + " Mbit/s (" + (mbit / 8).toFixed(mbit >= 800 ? 0 : 1) + " MB/s)";
+  }
+
+  function speedSummarize(samples) {
+    var clean = samples.filter(function (v) { return isFinite(v) && v >= 0; });
+    if (!clean.length) return { count: 0, min: 0, median: 0, max: 0, jitter: 0 };
+    var sorted = clean.slice().sort(function (a, b) { return a - b; });
+    var mid = sorted.length >> 1;
+    var median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    var diffs = [];
+    for (var i = 1; i < clean.length; i++) diffs.push(Math.abs(clean[i] - clean[i - 1]));
+    var jitter = diffs.length ? diffs.reduce(function (a, b) { return a + b; }, 0) / diffs.length : 0;
+    return { count: clean.length, min: sorted[0], median: median, max: sorted[sorted.length - 1], jitter: jitter };
+  }
+
+  function speedFetch(path, opts) {
+    opts = opts || {};
+    var headers = authHeaders();
+    if (opts.rawBody) delete headers["Content-Type"];     // octet-stream upload, not JSON
+    opts.headers = headers;
+    opts.cache = "no-store";
+    delete opts.rawBody;
+    return fetch(path, opts).then(function (res) {
+      if (res.status === 401) throw new Error("Unauthorized — check the access token");
+      if (!res.ok) throw new Error("Server error (HTTP " + res.status + ")");
+      return res;
+    }, function (err) {
+      if (err && err.name === "AbortError") throw err;
+      throw new Error("Cannot reach the Axiom host");
+    });
+  }
+
+  function speedPing(count, signal) {
+    var samples = [];
+    function one(i) {
+      if (i >= count) return Promise.resolve(samples);
+      var t0 = performance.now();
+      return speedFetch("/api/speedtest/ping", { signal: signal }).then(function (r) { return r.json(); }).then(function () {
+        if (i > 0) samples.push(performance.now() - t0);   // sample 0 = connection warm-up
+        return one(i + 1);
+      });
+    }
+    return one(0);
+  }
+
+  // One download pass -> {bytes, ms}. Timing starts at the first received chunk so
+  // request latency doesn't count against throughput. If the whole body shows up
+  // as (nearly) one chunk -- a fast link or a buffering browser -- there is nothing
+  // to time after the first chunk, so fall back to the full request time instead
+  // of reporting 0.
+  function speedDownloadPass(mb, signal) {
+    var tReq = performance.now();
+    return speedFetch("/api/speedtest/download?mb=" + mb, { signal: signal }).then(function (res) {
+      if (!res.body || !res.body.getReader) {           // very old browser: whole-body fallback
+        return res.arrayBuffer().then(function (buf) { return { bytes: buf.byteLength, ms: performance.now() - tReq }; });
+      }
+      var reader = res.body.getReader();
+      var total = 0, first = 0, tStart = null;
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) {
+            var now = performance.now();
+            var rest = total - first;
+            if (tStart === null || rest < total * 0.1 || now - tStart < 2) return { bytes: total, ms: now - tReq };
+            return { bytes: rest, ms: now - tStart };
+          }
+          if (tStart === null) { tStart = performance.now(); first = r.value.length; }
+          total += r.value.length;
+          return pump();
+        });
+      }
+      return pump();
+    });
+  }
+
+  function speedUploadPass(mb, signal) {
+    var size = mb * 1024 * 1024;
+    var block = new Uint8Array(65536);
+    if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(block);
+    var data = new Uint8Array(size);
+    for (var o = 0; o < size; o += block.length) data.set(block.subarray(0, Math.min(block.length, size - o)), o);
+    var t0 = performance.now();
+    return speedFetch("/api/speedtest/upload", { method: "POST", body: new Blob([data]), signal: signal, rawBody: true })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { return { bytes: j.bytes || size, ms: performance.now() - t0 }; });
+  }
+
+  // Runs the ramp and resolves the best (fastest) pass in Mbit/s.
+  function speedRamp(passFn, signal, onPass) {
+    var best = 0;
+    function next(i) {
+      if (i >= SPEED_RAMP_MB.length) return Promise.resolve(best);
+      return passFn(SPEED_RAMP_MB[i], signal).then(function (res) {
+        var m = speedMbps(res.bytes, res.ms);
+        if (m > best) best = m;
+        if (onPass) onPass(m, SPEED_RAMP_MB[i]);
+        return res.ms > SPEED_PASS_BUDGET_MS ? best : next(i + 1);   // slow link: stop ramping
+      });
+    }
+    return next(0);
+  }
+
+  function initSpeedTest() {
+    var btn = document.getElementById("other-speed-btn");
+    var stopBtn = document.getElementById("other-speed-stop");
+    var stageEl = document.getElementById("other-speed-stage");
+    var resultEl = document.getElementById("other-speed-result");
+    if (!btn || !stageEl || !resultEl) return;
+    var idle = stageEl.textContent;
+    var controller = null;
+
+    function setRunning(on) {
+      btn.hidden = on;
+      if (stopBtn) stopBtn.hidden = !on;
+    }
+
+    btn.addEventListener("click", function () {
+      if (controller) return;
+      controller = (typeof AbortController !== "undefined") ? new AbortController() : { signal: undefined, abort: function () {} };
+      var signal = controller.signal;
+      var out = { ping: null, down: null, up: null };
+      resultEl.hidden = true;
+      setRunning(true);
+
+      function render() {
+        var lines = [];
+        if (out.ping) lines.push("Ping: " + out.ping.median.toFixed(1) + " ms median (min " + out.ping.min.toFixed(1) +
+          ", max " + out.ping.max.toFixed(1) + ", jitter " + out.ping.jitter.toFixed(1) + " ms)");
+        if (out.down !== null) lines.push("Download: " + speedFmt(out.down));
+        if (out.up !== null) lines.push("Upload: " + speedFmt(out.up));
+        resultEl.textContent = lines.join("\n");
+        resultEl.hidden = !lines.length;
+      }
+
+      stageEl.textContent = "Testing ping…";
+      speedPing(12, signal).then(function (samples) {
+        out.ping = speedSummarize(samples); render();
+        stageEl.textContent = "Testing download…";
+        return speedRamp(speedDownloadPass, signal, function (m, mb) { out.down = m; render(); });
+      }).then(function (down) {
+        out.down = down; render();
+        stageEl.textContent = "Testing upload…";
+        return speedRamp(speedUploadPass, signal, function (m) { out.up = m; render(); });
+      }).then(function (up) {
+        out.up = up; render();
+        stageEl.textContent = "Done — browser to Axiom host over one HTTP stream. Wi-Fi/router load or this browser can cap the result.";
+      }).catch(function (err) {
+        stageEl.textContent = (err && err.name === "AbortError") ? "Stopped." : "Failed: " + (err && err.message || err);
+        render();
+      }).then(function () {
+        controller = null;
+        setRunning(false);
+      });
+    });
+
+    if (stopBtn) stopBtn.addEventListener("click", function () { if (controller) controller.abort(); });
+    stageEl.setAttribute("data-idle", idle);
+  }
+
   function initUiEnhancements() {
     var i;
 
@@ -3068,6 +3261,7 @@
         });
       });
     }
+    initSpeedTest();
     var clearBtn = document.getElementById("other-clear-token-btn");
     if (clearBtn) {
       clearBtn.addEventListener("click", function () {

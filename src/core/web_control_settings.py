@@ -106,6 +106,18 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "fov_reduce_on_target_enabled": {"type": "bool"},
         "fov_min_size_pct": {"type": "float", "min": 1, "max": 100},
         "fov_min_size_duration": {"type": "float", "min": 0.0, "max": 10.0},
+        # FOV Shrinking / Advanced FOV / Target Acquisition & Tracking (inference_page.py)
+        "fov_shrink_mode": {"type": "choice", "choices": ["fixed", "adaptive", "dynamic"]},
+        "fov_dynamic_safeguards": {"type": "bool"},
+        "fov_expand_delay_ms": {"type": "int", "min": 0, "max": 2000},
+        "fov_recovery_duration_ms": {"type": "int", "min": 0, "max": 3000},
+        "fov_retention_enabled": {"type": "bool"},
+        "fov_retention_pct": {"type": "float", "min": 100, "max": 400},
+        "min_lock_duration_ms": {"type": "int", "min": 0, "max": 2000},
+        "tracking_confidence": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "target_switch_threshold": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "reacquire_radius_px": {"type": "int", "min": 0, "max": 1000},
+        "lost_target_timeout_ms": {"type": "int", "min": 0, "max": 10000},
         "detect_range_size": {"type": "int", "min": 100, "max": 1080},
         "detect_interval": {"type": "float", "scale": 1000.0, "min": 1, "max": 100},
         "min_confidence": {"type": "float", "scale": 100.0, "min": 1, "max": 100},
@@ -441,6 +453,12 @@ def get_tab_settings(config, tab: str) -> dict:
         result["ndi_width"] = int(getattr(config, "ndi_width", 0) or 0)
         result["ndi_height"] = int(getattr(config, "ndi_height", 0) or 0)
         result["ndi_source_nominal_fps"] = float(getattr(config, "source_nominal_fps", 0.0) or 0.0)
+
+    if tab == "inference":
+        # Read-only extra: Sticky Target Lock is owned by the "aim" tab but the
+        # retention / tracking cards here only apply while it is on (same
+        # visibility rule as inference_page.py's _updateTrackingVisibility()).
+        result["sticky_lock_enabled"] = bool(getattr(config, "sticky_lock_enabled", False))
 
     if tab == "keys":
         # Read-only extras — these three drive the Keys & HW panel's own

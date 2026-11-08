@@ -99,6 +99,7 @@ def _install_fake_fastapi_stack(monkeypatch):
             self.detail = detail
 
     fastapi_mod.HTTPException = _HTTPException
+    fastapi_mod.Request = type("Request", (), {})
 
     middleware_mod = types.ModuleType("fastapi.middleware")
     cors_mod = types.ModuleType("fastapi.middleware.cors")
@@ -459,3 +460,62 @@ class TestTokenComparison:
         from core import web_control_server
         src = inspect.getsource(web_control_server._tokens_match)
         assert "hmac.compare_digest" in src
+
+
+class TestSpeedtestRoutes:
+    """/api/speedtest/* are registered, token-gated and annotated with real classes."""
+
+    PATHS = [("GET", "/api/speedtest/ping"), ("GET", "/api/speedtest/download"), ("POST", "/api/speedtest/upload")]
+
+    def test_routes_registered_with_expected_methods(self, started_server):
+        _, app = started_server
+        have = {(m, p) for (m, p, _) in app.routes}
+        for entry in self.PATHS:
+            assert entry in have, entry
+
+    def test_upload_takes_a_real_request_class_not_a_string(self, started_server):
+        _, app = started_server
+        func = _routes_by_path(app)["/api/speedtest/upload"]
+        ann = inspect.signature(func).parameters["request"].annotation
+        assert isinstance(ann, type), "annotation must be a class (see the module docstring)"
+        assert inspect.iscoroutinefunction(func)
+
+    def test_download_size_is_a_plain_int_query_param(self, started_server):
+        _, app = started_server
+        func = _routes_by_path(app)["/api/speedtest/download"]
+        param = inspect.signature(func).parameters["mb"]
+        assert param.annotation is int
+
+    def test_download_streams_exactly_the_clamped_size(self, started_server):
+        _, app = started_server
+        func = _routes_by_path(app)["/api/speedtest/download"]
+        for asked, mib in ((2, 2), (0, 1), (9999, 64)):
+            resp = func(mb=asked)
+            assert sum(len(c) for c in resp.content) == mib * 1024 * 1024
+
+    def test_upload_counts_bytes_and_enforces_the_cap(self, started_server):
+        import asyncio
+        from core import speedtest as st
+        wcserver, app = started_server
+        func = _routes_by_path(app)["/api/speedtest/upload"]
+
+        class _Req:
+            def __init__(self, sizes):
+                self.sizes = sizes
+
+            async def stream(self):
+                for n in self.sizes:
+                    yield b"x" * n
+
+        out = asyncio.run(func(_Req([1000, 2000, 3])))
+        assert out["bytes"] == 3003 and out["server_ms"] >= 0
+        with pytest.raises(Exception) as exc:
+            asyncio.run(func(_Req([st.UPLOAD_CAP_BYTES, 1])))
+        assert getattr(exc.value, "status_code", None) == 413
+
+    def test_ping_returns_a_monotonic_timestamp(self, started_server):
+        _, app = started_server
+        func = _routes_by_path(app)["/api/speedtest/ping"]
+        a = func()["t"]
+        time.sleep(0.01)
+        assert func()["t"] >= a

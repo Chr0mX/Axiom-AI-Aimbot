@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 import queue
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from .target_tracking import clamp01
+from .target_tracking import clamp01, edge_ratio as _edge_ratio, find_continuation, lost_timeout_s
 
 if TYPE_CHECKING:
     from .config import Config
@@ -229,6 +230,12 @@ def get_effective_detect_range_size(
 FOV_SHRINK_MODES = ('fixed', 'adaptive', 'dynamic')
 
 
+# A gap longer than this between calls (idle branch, app pause) means the clock
+# is stale: treat it as "no time passed" instead of letting the FOV jump its
+# whole travel in one call.
+_MAX_FOV_DT_S = 1.0
+
+
 def _slew(scale: float, target: float, down_s: float, up_s: float, span: float, dt: float) -> float:
     """Move ``scale`` toward ``target`` no faster than the configured times.
 
@@ -236,6 +243,8 @@ def _slew(scale: float, target: float, down_s: float, up_s: float, span: float, 
     shrinking/growing (<= 0 means instant). Rate-limiting on elapsed time is
     what keeps the FOV from jumping or oscillating whatever the inference FPS.
     """
+    if not math.isfinite(dt) or dt < 0.0 or dt > _MAX_FOV_DT_S:
+        dt = 0.0
     if target < scale:
         if down_s <= 0.0:
             return target
@@ -245,7 +254,14 @@ def _slew(scale: float, target: float, down_s: float, up_s: float, span: float, 
     return min(target, scale + span / up_s * dt)
 
 
-def _fov_tightness(mode: str, config: Config, state: LoopState) -> float:
+# Dynamic safeguards: speed/turn EMAs start at 0 on a fresh lock, which reads as
+# "perfectly steady". Until the lock is this old their quality terms are blended
+# from a neutral prior (0.5) to the measured value. ~2 speed time-constants.
+_DYN_SETTLE_S = 0.5
+_DYN_PRIOR_Q = 0.5
+
+
+def _fov_tightness(mode: str, config: Config, state: LoopState, now: Optional[float] = None) -> float:
     """0..1 — how far toward the minimum FOV the current tracking quality
     justifies (1 = fully shrunk). Reads only smoothed tracker signals."""
     tr = state.tracker
@@ -258,8 +274,16 @@ def _fov_tightness(mode: str, config: Config, state: LoopState) -> float:
         fov_ref = max(1.0, float(getattr(config, 'fov_size', 0) or 1))
         motion_q = clamp01(1.0 - (tr.speed_ema / fov_ref) / 1.5)  # >1.5 FOV widths/s = rapid
         turn_q = clamp01(1.0 - tr.turn_ema * 2.0)                 # sudden direction change
+        safe = bool(getattr(config, 'fov_dynamic_safeguards', False))
+        if safe and now is not None:
+            w = clamp01(tr.lock_age(now) / _DYN_SETTLE_S)      # 0 = brand new, 1 = settled
+            motion_q = _DYN_PRIOR_Q + w * (motion_q - _DYN_PRIOR_Q)
+            turn_q = _DYN_PRIOR_Q + w * (turn_q - _DYN_PRIOR_Q)
         quality = 0.30 * motion_q + 0.25 * turn_q + 0.15 * conf_q + 0.15 * tr.hit_ema + 0.15 * stab_q
-        return clamp01((quality - 0.5) / 0.4)
+        tight = clamp01((quality - 0.5) / 0.4)
+        if safe:       # boundary safety is a hard limit, not another weighted term
+            tight = min(tight, clamp01((0.9 - tr.edge_ratio) / 0.45))
+        return tight
     edge_q = clamp01((0.9 - tr.edge_ratio) / 0.45)      # near the FOV boundary -> expand
     return min(edge_q, clamp01((quality - 0.5) / 0.4))
 
@@ -301,9 +325,13 @@ def compute_effective_fov(config: Config, state: LoopState, current_time: float)
         return full_size, full_height
 
     dt = max(0.0, current_time - state.fov_last_t) if state.fov_last_t > 0.0 else 0.0
+    if not math.isfinite(dt) or dt > _MAX_FOV_DT_S:
+        dt = 0.0
     state.fov_last_t = current_time
 
-    min_scale = max(0.01, min(1.0, float(getattr(config, 'fov_min_size_pct', 100.0) or 100.0) / 100.0))
+    pct = getattr(config, 'fov_min_size_pct', 100.0)
+    pct = float(pct) if isinstance(pct, (int, float)) and math.isfinite(pct) else 100.0
+    min_scale = max(0.01, min(1.0, pct / 100.0))
     span = 1.0 - min_scale
     shrink_s = float(getattr(config, 'fov_min_size_duration', 0.0) or 0.0)
     recovery_s = float(getattr(config, 'fov_recovery_duration_ms', 0) or 0) / 1000.0
@@ -315,7 +343,7 @@ def compute_effective_fov(config: Config, state: LoopState, current_time: float)
         state.fov_lost_since = 0.0
         mode = str(getattr(config, 'fov_shrink_mode', 'fixed'))
         if mode in ('adaptive', 'dynamic'):
-            target = 1.0 - span * _fov_tightness(mode, config, state)
+            target = 1.0 - span * _fov_tightness(mode, config, state, current_time)
         else:
             target = min_scale
         scale = _slew(scale, target, shrink_s, recovery_s, span, dt)
@@ -439,6 +467,114 @@ def filter_boxes_by_fov(
                 filtered_confidences.append(confidences[i])
 
     return filtered_boxes, filtered_confidences
+
+
+def retention_fov_size(config: Config) -> Tuple[int, int]:
+    """Retention FOV (width, height): the configured FOV scaled by
+    ``fov_retention_pct`` (100 = the full original FOV)."""
+    pct = getattr(config, 'fov_retention_pct', 100)
+    pct = float(pct) if isinstance(pct, (int, float)) and math.isfinite(pct) else 100.0
+    pct = max(100.0, min(400.0, pct))
+    w = int(getattr(config, 'fov_size', 0) or 0)
+    h = int(getattr(config, 'fov_height', w) or w)
+    return max(1, int(w * pct / 100.0 + 1e-6)), max(1, int(h * pct / 100.0 + 1e-6))
+
+
+def active_retention_fov(config: Config) -> Optional[Tuple[int, int]]:
+    """Retention FOV (w, h) while lock retention is actually in effect, else
+    None -- the same gate resolve_retained_lock() applies. Used by the
+    overlays so they only draw the boundary when it can matter."""
+    if (getattr(config, 'fov_retention_enabled', False)
+            and getattr(config, 'sticky_lock_enabled', False)
+            and getattr(config, 'fov_reduce_on_target_enabled', False)):
+        return retention_fov_size(config)
+    return None
+
+
+class _AmbiguousLock:
+    """Sentinel: the lock cannot be told apart from a rival this frame."""
+    def __repr__(self) -> str:      # pragma: no cover - debugging aid
+        return "AMBIGUOUS_LOCK"
+
+
+AMBIGUOUS_LOCK = _AmbiguousLock()
+
+# A gap longer than this between retention evaluations (aim key released, stall)
+# starts a new track-only stretch instead of continuing the old one's timeout.
+_RETAIN_STALE_S = 0.25
+
+
+def resolve_retained_lock(
+    config: Config, state: LoopState, boxes, all_boxes, all_confidences,
+    crosshair_x: float, crosshair_y: float, now: float, iou_thresh: float, class_of=None,
+):
+    """Retention step, run BEFORE new-target selection each frame.
+
+    ``boxes`` are the detections inside the (possibly shrunk) control FOV;
+    ``all_boxes`` everything that passed the confidence/class filters.  The
+    current lock is looked for among ALL detections inside the retention FOV
+    (a superset of ``boxes``), so a rival inside the control FOV competes with
+    the real lock on equal terms instead of being the only candidate seen:
+
+    * lock found OUTSIDE the control FOV -> ``(box, confidence)``: the caller
+      keeps its identity (tracked, not aimed) and no other target can take it;
+    * lock found inside the control FOV   -> None: normal selection handles it;
+    * lock indistinguishable from a rival -> ``AMBIGUOUS_LOCK``: the caller must
+      hold (neither aim nor adopt anyone), exactly like select_target's own
+      ambiguity rule, because the control-only selection would otherwise see
+      just the rival and pick it;
+    * retention off / no lock / lock not in the retention FOV -> None.
+    """
+    if (not getattr(config, 'fov_retention_enabled', False)
+            or not getattr(config, 'sticky_lock_enabled', False)
+            or not getattr(config, 'fov_reduce_on_target_enabled', False)
+            or state.locked_box is None or len(all_boxes) <= len(boxes)):
+        state.retained_since = 0.0
+        return None
+    rw, rh = retention_fov_size(config)
+    r_boxes, r_conf = filter_boxes_by_fov(
+        all_boxes, all_confidences, crosshair_x, crosshair_y, rw, config, fov_height=rh)
+    idx, ambiguous = find_continuation(
+        r_boxes, locked_box=state.locked_box, tracker=state.tracker, config=config,
+        now=now, iou_thresh=iou_thresh, class_of=class_of)
+    if ambiguous:
+        state.retained_since = 0.0
+        return AMBIGUOUS_LOCK
+    if idx is None:
+        state.retained_since = 0.0
+        return None
+    cand = r_boxes[idx]
+    if any(cand is b for b in boxes):          # inside the control FOV: normal path
+        state.retained_since = 0.0
+        return None
+    # Outside the control FOV, inside the retention FOV: track-only, bounded so a
+    # target parked there cannot pin the lock (and block every other target)
+    # forever.  After lost_target_timeout it is handled like any lost target.
+    if state.retained_since <= 0.0 or now - state.retained_last_t > _RETAIN_STALE_S:
+        state.retained_since = now
+    state.retained_last_t = now
+    if now - state.retained_since > lost_timeout_s(config):
+        return None
+    conf = r_conf[idx] if idx < len(r_conf) else state.locked_confidence
+    return cand, conf
+
+
+def track_retained(config: Config, state: LoopState, box, conf: float,
+                   crosshair_x: float, crosshair_y: float, now: float) -> None:
+    """Keep the lock's identity alive for a frame where the target is outside
+    the control FOV: update the tracker and lock bookkeeping, send no input."""
+    fw = float(getattr(config, 'fov_effective_size', 0) or getattr(config, 'fov_size', 222))
+    fh = float(getattr(config, 'fov_effective_height', 0) or getattr(config, 'fov_height', fw) or fw)
+    state.tracker.on_match(
+        now, box, conf,
+        edge_ratio=_edge_ratio(box, crosshair_x, crosshair_y, fw, fh,
+                               bool(getattr(config, 'fov_circle_filter_enabled', False))),
+        same_target=True)
+    state.locked_box = box
+    state.locked_confidence = conf
+    state.no_detection_frames = 0
+    config.display_locked_box = list(box)
+    config.display_locked_box_is_decaying = False
 
 
 def find_closest_target(
