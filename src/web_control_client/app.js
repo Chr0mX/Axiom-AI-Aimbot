@@ -2164,9 +2164,35 @@
     else if (wasShowing) setModelListHint("", false);
   }
 
+  // GPU tiles — same sensors/labels/units as the Qt Status Panel's GPU section; the server
+  // sends preformatted text (core/gpu_monitor.format_reading) so no unit logic lives here.
+  var GPU_TILE_KEYS = ["temp", "util", "vram", "fan", "core_clock", "mem_clock", "power"];
+  var GPU_STATUS_TEXT = { checking: "Checking\u2026", no_nvml: "NVML not installed", no_gpu: "No NVIDIA GPU", not_started: "Checking\u2026" };
+  function applyGpu(g) {
+    var section = document.getElementById("s-gpu-section");
+    if (!section) return;
+    if (!g) { section.classList.add("hidden"); return; }
+    section.classList.remove("hidden");
+    var title = document.getElementById("s-gpu-title");
+    title.textContent = g.short_name ? "GPU \u00b7 " + g.short_name : "GPU";
+    title.title = g.name || "";
+    var ok = g.status === "ok";
+    var msgStat = document.getElementById("s-gpu-msg-stat");
+    msgStat.classList.toggle("hidden", ok);
+    if (!ok) document.getElementById("s-gpu-msg").textContent = GPU_STATUS_TEXT[g.status] || "\u2014";
+    var supported = g.supported || [];
+    GPU_TILE_KEYS.forEach(function (key) {
+      var stat = document.getElementById("s-gpu-" + key + "-stat");
+      var shown = ok && supported.indexOf(key) !== -1 && g.text && (key in g.text);
+      stat.classList.toggle("hidden", !shown);
+      if (shown) document.getElementById("s-gpu-" + key).textContent = g.text[key];
+    });
+  }
+
   function applyStatus(s) {
     applyModelLoadError(s.model_load_error);
     noteModelRuntime(s);
+    applyGpu(s.gpu);
     document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
     document.getElementById("s-firing").textContent = s.aim_firing ? "Aiming" : "Idle";

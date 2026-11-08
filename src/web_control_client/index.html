@@ -70,6 +70,23 @@
           </div>
         </div>
 
+        <!-- GPU stats — mirrors the Status Panel's NVIDIA section. Hidden unless the Visuals tab's
+             "GPU Monitoring" switch is on (the server then adds status.gpu); each tile follows its own
+             per-sensor switch and is hidden if the GPU doesn't support that sensor. Filled by applyGpu(). -->
+        <div class="sidebar-section hidden" id="s-gpu-section">
+          <div class="card-title" id="s-gpu-title">GPU</div>
+          <div class="grid">
+            <div class="stat hidden" id="s-gpu-msg-stat"><div class="label">Status</div><div class="value" id="s-gpu-msg">—</div></div>
+            <div class="stat hidden" id="s-gpu-temp-stat"><div class="label">Temp</div><div class="value" id="s-gpu-temp">—</div></div>
+            <div class="stat hidden" id="s-gpu-util-stat"><div class="label">Usage</div><div class="value" id="s-gpu-util">—</div></div>
+            <div class="stat hidden" id="s-gpu-vram-stat"><div class="label">VRAM</div><div class="value" id="s-gpu-vram">—</div></div>
+            <div class="stat hidden" id="s-gpu-fan-stat"><div class="label">Fan</div><div class="value" id="s-gpu-fan">—</div></div>
+            <div class="stat hidden" id="s-gpu-core_clock-stat"><div class="label">Core Clock</div><div class="value" id="s-gpu-core_clock">—</div></div>
+            <div class="stat hidden" id="s-gpu-mem_clock-stat"><div class="label">Mem Clock</div><div class="value" id="s-gpu-mem_clock">—</div></div>
+            <div class="stat hidden" id="s-gpu-power-stat"><div class="label">Power</div><div class="value" id="s-gpu-power">—</div></div>
+          </div>
+        </div>
+
         <!-- Quick one-click preset shortcuts — each slot independently
              assignable to a saved aim preset via its own <select>; Load
              fires immediately (no confirmation prompt, unlike the Configs

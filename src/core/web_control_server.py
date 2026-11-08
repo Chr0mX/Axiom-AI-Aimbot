@@ -173,7 +173,7 @@ def _build_status(config) -> dict:
     except Exception:
         makcu_connected = False
 
-    return {
+    status = {
         "active": bool(getattr(config, "AimToggle", False)),
         "always_aim": bool(getattr(config, "always_aim", False)),
         "aim_firing": bool(getattr(config, "makcu_aim_active", False)),
@@ -218,6 +218,16 @@ def _build_status(config) -> dict:
         "udp_recv_fps": round(float(getattr(config, "udp_recv_fps", 0.0)), 1),
         "udp_dropped_fps": round(float(getattr(config, "udp_dropped_fps", 0.0)), 1),
     }
+
+    # Live GPU stats only when the user turned the GPU section on (zero cost otherwise). The
+    # sampler thread is started lazily and stops itself when nobody polls (see GpuSampler).
+    if getattr(config, "status_panel_show_gpu", False):
+        try:
+            from .gpu_monitor import get_sampler
+            status["gpu"] = get_sampler().snapshot(config)
+        except Exception:
+            logger.debug("[WebControl] GPU sampler unavailable", exc_info=True)
+    return status
 
 
 # ---------------------------------------------------------------------------
