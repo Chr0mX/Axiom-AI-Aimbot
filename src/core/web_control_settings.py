@@ -319,6 +319,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # same reasoning as always_aim.
         "web_esp_http_port": {"type": "int", "min": 1024, "max": 65535},
         "web_esp_ws_port": {"type": "int", "min": 1024, "max": 65535},
+        "web_esp_fps": {"type": "int", "min": 15, "max": 240},
     },
     "trigger": {
         "auto_fire_target_part": {"type": "choice", "choices": ["head", "body", "both"]},

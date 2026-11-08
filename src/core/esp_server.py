@@ -21,10 +21,11 @@ import json
 import logging
 import os
 import socket
+import sys
 import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from typing import List, Optional, Set
+from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from .ai_loop_utils import get_capture_dimensions, get_effective_detect_range_size
@@ -50,7 +51,9 @@ _ws_listener: Optional[socket.socket] = None
 _ws_accept_thread: Optional[threading.Thread] = None
 _broadcast_thread: Optional[threading.Thread] = None
 
-_clients: Set[socket.socket] = set()
+# conn -> its latest-only sender (see _ClientSender). Kept as a dict so the accept loop, the
+# broadcaster and stop() all share one registry.
+_clients: Dict[socket.socket, "_ClientSender"] = {}
 _clients_lock = threading.Lock()
 
 # Per-client send deadline for the shared broadcast thread. Generous relative
@@ -182,6 +185,9 @@ def _build_snapshot() -> dict:
 
     return {
         "t": int(time.monotonic() * 1000),
+        # Detection counter (ai_loop bumps it per inference result); lets the page tell new data
+        # from a heartbeat. None for a config that predates it.
+        "seq": getattr(c, "detection_seq", None),
         "screen": {"w": screen_w, "h": screen_h},
         "center": {
             "x": int(getattr(c, "crosshairX", 0)) + offset_x,
@@ -413,8 +419,9 @@ def _accept_loop(port: int):
             pass
         try:
             if _ws_handshake(conn):
+                sender = _ClientSender(conn, _drop_client)
                 with _clients_lock:
-                    _clients.add(conn)
+                    _clients[conn] = sender
                 logger.info("[WebESP] client connected (%d total)", len(_clients))
             else:
                 conn.close()
@@ -425,62 +432,173 @@ def _accept_loop(port: int):
                 pass
 
 
-def _broadcast_loop():
-    while not _stop.is_set():
-        # Re-read every tick rather than once at thread start: web_esp_fps is
-        # a live GUI setting like every other, and caching it here meant
-        # changing it silently did nothing until the server was restarted.
-        fps = max(1, int(getattr(_config, "web_esp_fps", 60)))
-        interval = 1.0 / fps
-        start = time.monotonic()
-        with _clients_lock:
-            targets = list(_clients)
-        if targets:
-            try:
-                frame = _ws_encode_text(json.dumps(_build_snapshot(), separators=(",", ":")))
-            except Exception:
-                frame = None
-            if frame is not None:
-                dead = []
-                for conn in targets:
-                    try:
-                        conn.sendall(frame)
-                    except socket.timeout:
-                        # Client isn't draining its TCP window (backgrounded
-                        # tab, wedged connection). Drop it rather than let it
-                        # throttle the broadcast for everyone else — the
-                        # client can simply reconnect.
-                        logger.info("[WebESP] dropping client that stalled for >%.0fs", _BROADCAST_SEND_TIMEOUT)
-                        dead.append(conn)
-                    except Exception:
-                        dead.append(conn)
-                if dead:
-                    with _clients_lock:
-                        for conn in dead:
-                            _clients.discard(conn)
-                            try:
-                                conn.close()
-                            except Exception:
-                                pass
-        elapsed = time.monotonic() - start
-        _stop.wait(max(0.0, interval - elapsed))
+# ---------------------------------------------------------------------------
+# Broadcast: event-driven, drift-free, one latest-only sender per client
+# ---------------------------------------------------------------------------
 
-        # FPS computation (~1 Hz, mirrors StatusPanel logic)
-        global _capture_fps, _inference_fps, _prev_capture_count, _prev_inference_count, _fps_last_t
-        now_t = time.monotonic()
-        if _fps_last_t == 0.0:
-            _fps_last_t = now_t
-            _prev_capture_count = int(getattr(_config, "screenshot_frame_count", 0))
-            _prev_inference_count = int(getattr(_config, "detection_frame_count", 0))
-        elif now_t - _fps_last_t >= 1.0:
-            cap_c = int(getattr(_config, "screenshot_frame_count", 0))
-            inf_c = int(getattr(_config, "detection_frame_count", 0))
-            dt = now_t - _fps_last_t
-            _capture_fps = max(0.0, (cap_c - _prev_capture_count) / dt)
-            _inference_fps = max(0.0, (inf_c - _prev_inference_count) / dt)
-            _prev_capture_count = cap_c
-            _prev_inference_count = inf_c
-            _fps_last_t = now_t
+WEB_ESP_FPS_MIN = 15
+WEB_ESP_FPS_MAX = 240
+WEB_ESP_FPS_DEFAULT = 60
+# Max rate of "nothing new" updates (HUD text, FPS counters, FOV state): fast enough that the HUD
+# never feels stale, slow enough to cost nothing.
+_HEARTBEAT_S = 0.1
+# How often the loop looks for a new detection while idle. Needs 1 ms timer resolution on Windows.
+_POLL_S = 0.002
+
+
+def clamp_web_esp_fps(value) -> int:
+    """web_esp_fps bounded to [WEB_ESP_FPS_MIN, WEB_ESP_FPS_MAX]; junk -> the default."""
+    try:
+        return max(WEB_ESP_FPS_MIN, min(WEB_ESP_FPS_MAX, int(value)))
+    except (TypeError, ValueError, OverflowError):
+        return WEB_ESP_FPS_DEFAULT
+
+
+def _timer_resolution(enable: bool) -> None:
+    """Ask Windows for 1 ms timer resolution while the broadcaster runs.
+
+    Without it ``Event.wait(0.0167)`` rounds up to the 15.6 ms scheduler tick, so a nominal 60 Hz
+    feed can become ~32 Hz with jitter -- a big part of why the overlay looked delayed.  ai_loop
+    only enables 1 ms when capture/detect intervals are below 15 ms, so this cannot rely on it.
+    Calls are reference counted by Windows: every Begin must be matched by an End.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        winmm = ctypes.windll.winmm
+        (winmm.timeBeginPeriod if enable else winmm.timeEndPeriod)(1)
+    except Exception:
+        pass
+
+
+class _ClientSender:
+    """One WebSocket client's outbound path: a latest-only slot and its own thread.
+
+    The broadcaster used to ``sendall`` to every client in turn, so one slow Wi-Fi phone delayed
+    everybody and its TCP backlog became ever-growing lag for itself.  Now the broadcaster only
+    ``offer()``s a frame -- replacing any frame that has not been sent yet -- and this thread does
+    the blocking send, so a slow client skips stale frames instead of queueing them.
+    """
+
+    def __init__(self, conn: socket.socket, on_dead) -> None:
+        self.conn = conn
+        self._on_dead = on_dead
+        self._cv = threading.Condition()
+        self._pending: Optional[bytes] = None
+        self._alive = True
+        self.dropped = 0          # frames replaced before they could be sent
+        self._thread = threading.Thread(target=self._run, name="webesp-send", daemon=True)
+        self._thread.start()
+
+    def offer(self, frame: bytes) -> None:
+        with self._cv:
+            if self._pending is not None:
+                self.dropped += 1
+            self._pending = frame
+            self._cv.notify()
+
+    def close(self) -> None:
+        with self._cv:
+            self._alive = False
+            self._cv.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._cv:
+                while self._alive and self._pending is None:
+                    self._cv.wait()
+                if not self._alive:
+                    return
+                frame, self._pending = self._pending, None
+            try:
+                self.conn.sendall(frame)
+            except socket.timeout:
+                logger.info("[WebESP] dropping client that stalled for >%.0fs", _BROADCAST_SEND_TIMEOUT)
+                break
+            except Exception:
+                break
+        self._alive = False
+        self._on_dead(self.conn)
+
+
+def _drop_client(conn: socket.socket) -> None:
+    with _clients_lock:
+        sender = _clients.pop(conn, None)
+    if sender is not None:
+        sender.close()
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def _broadcast_due(now: float, last_sent: float, seq, last_seq, min_interval: float) -> bool:
+    """Should a snapshot go out now?
+
+    With a ``detection_seq`` (bumped by ai_loop for every inference result) frames go out as soon as
+    there is new data, at most every ``min_interval``, plus a slow heartbeat so HUD-only changes
+    still flow.  A config without it falls back to the old fixed tick.
+    """
+    if seq is None:
+        return now - last_sent >= min_interval
+    if seq != last_seq and now - last_sent >= min_interval:
+        return True
+    return now - last_sent >= _HEARTBEAT_S
+
+
+def _update_fps_counters() -> None:
+    """Capture / inference FPS shown in the HUD (~1 Hz, mirrors StatusPanel logic)."""
+    global _capture_fps, _inference_fps, _prev_capture_count, _prev_inference_count, _fps_last_t
+    now_t = time.monotonic()
+    if _fps_last_t == 0.0:
+        _fps_last_t = now_t
+        _prev_capture_count = int(getattr(_config, "screenshot_frame_count", 0))
+        _prev_inference_count = int(getattr(_config, "detection_frame_count", 0))
+    elif now_t - _fps_last_t >= 1.0:
+        cap_c = int(getattr(_config, "screenshot_frame_count", 0))
+        inf_c = int(getattr(_config, "detection_frame_count", 0))
+        dt = now_t - _fps_last_t
+        _capture_fps = max(0.0, (cap_c - _prev_capture_count) / dt)
+        _inference_fps = max(0.0, (inf_c - _prev_inference_count) / dt)
+        _prev_capture_count = cap_c
+        _prev_inference_count = inf_c
+        _fps_last_t = now_t
+
+
+def _broadcast_loop():
+    _timer_resolution(True)
+    try:
+        last_seq = object()          # never equal to a real seq: the first tick always sends
+        last_sent = 0.0
+        while not _stop.is_set():
+            # Re-read every tick rather than once at thread start: web_esp_fps is a live setting,
+            # and caching it here meant changing it did nothing until the server was restarted.
+            min_interval = 1.0 / clamp_web_esp_fps(getattr(_config, "web_esp_fps", WEB_ESP_FPS_DEFAULT))
+            now = time.perf_counter()
+            seq = getattr(_config, "detection_seq", None)
+            if _broadcast_due(now, last_sent, seq, last_seq, min_interval):
+                with _clients_lock:
+                    senders = list(_clients.values())
+                if senders:
+                    try:
+                        frame = _ws_encode_text(json.dumps(_build_snapshot(), separators=(",", ":")))
+                    except Exception:
+                        frame = None
+                    if frame is not None:
+                        for sender in senders:
+                            sender.offer(frame)
+                last_seq, last_sent = seq, now
+
+            _update_fps_counters()
+
+            # Sleep only until something can happen: the earliest next allowed send when fresh
+            # data is already waiting, else a short poll for the next detection.
+            wait = (last_sent + min_interval) - time.perf_counter()
+            fresh = seq is not None and getattr(_config, "detection_seq", None) != last_seq
+            _stop.wait(max(0.0, wait) if fresh else max(0.0, min(_POLL_S, wait)))
+    finally:
+        _timer_resolution(False)
 
 
 # ---------------------------------------------------------------------------
@@ -539,7 +657,8 @@ def stop():
             pass
         _ws_listener = None
     with _clients_lock:
-        for conn in _clients:
+        for conn, sender in list(_clients.items()):
+            sender.close()
             try:
                 conn.close()
             except Exception:

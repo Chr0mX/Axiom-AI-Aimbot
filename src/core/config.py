@@ -539,6 +539,8 @@ class Config:
         self.fov_effective_height: float = float(self.fov_height)
         # True on frames where the lock is kept outside the control FOV (retention): tracked, not aimed.
         self.lock_track_only: bool = False
+        # Bumped once per inference result (ai_loop); the Web ESP broadcaster sends on change.
+        self.detection_seq: int = 0
 
         # Runtime-only (unpersisted, same pattern as fov_effective_size):
         # what the inference loop's live session is ACTUALLY running, as
@@ -1200,6 +1202,7 @@ def validate_config(config_instance: Config) -> None:
     _validate_aim_math(config_instance)
     _validate_tracking(config_instance)
     _validate_box_style(config_instance)
+    _validate_web_esp(config_instance)
     _validate_gpu_monitor(config_instance)
 
     # 向後兼容：修正推理後端選擇
@@ -1379,6 +1382,11 @@ def _validate_box_style(config: Config) -> None:
         _v = _int(_name)
         setattr(config, _name, _default if _v <= 0 else min(10, _v))
     config.box_corner_length_pct = max(0, min(50, _int('box_corner_length_pct')))
+
+
+def _validate_web_esp(config: Config) -> None:
+    """web_esp_fps: the Web ESP broadcast rate cap, 15-240 Hz (the server clamps the same range)."""
+    config.web_esp_fps = int(max(15, min(240, _finite(getattr(config, 'web_esp_fps', 60), 60))))
 
 
 def _validate_gpu_monitor(config: Config) -> None:

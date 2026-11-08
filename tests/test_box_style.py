@@ -130,3 +130,17 @@ def test_old_config_without_the_fields_loads_with_the_old_look():
     for attr, (_, default) in LINE_FIELDS.items():
         assert getattr(c2, attr) == default
     assert c2.to_dict() == before
+
+
+def test_web_esp_fps_is_persisted_validated_and_exposed():
+    from core.config import Config, _FIELD_MAP, _validate_web_esp
+    from core import web_control_settings as wcs
+    assert _FIELD_MAP["web_esp_fps"] == "web_esp.fps"
+    spec = wcs._SCHEMA["visuals"]["web_esp_fps"]
+    assert (spec["min"], spec["max"]) == (15, 240)
+    for raw, want in ((1, 15), (60, 60), (10_000, 240), ("junk", 60), (None, 60), (float("nan"), 60)):
+        c = Config()
+        c.web_esp_fps = raw
+        _validate_web_esp(c)
+        assert c.web_esp_fps == want, raw
+    assert Config().web_esp_fps == 60

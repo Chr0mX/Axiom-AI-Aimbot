@@ -377,6 +377,17 @@ class VisualsPage(BasePage):
         self.webEspWsPortCard.hBoxLayout.addWidget(self.webEspWsPortSpin, 0, Qt.AlignmentFlag.AlignRight)
         self.webEspWsPortCard.hBoxLayout.addSpacing(16)
 
+        # Broadcast rate cap. The server sends on every new detection up to this rate, so it
+        # only helps up to the inference rate; read live (no restart needed).
+        self.webEspFpsCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("web_esp_fps", "Web ESP Update Rate"),
+            15, 240,
+            format_func=lambda v: f"{v} Hz",
+            description=t("web_esp_fps_desc", "Most updates per second sent to the browser overlay. Real data only arrives as fast as detection runs."),
+            parent=self.webEspGroup
+        )
+
         # Connect card — URL text, QR code, and an "open in browser" button
         self.webEspConnectCard = SettingCard(
             FluentIcon.QRCODE,
@@ -447,6 +458,7 @@ class VisualsPage(BasePage):
         self.webEspGroup.addSettingCard(self.webEspEnableCard)
         self.webEspGroup.addSettingCard(self.webEspHttpPortCard)
         self.webEspGroup.addSettingCard(self.webEspWsPortCard)
+        self.webEspGroup.addSettingCard(self.webEspFpsCard)
         self.webEspGroup.addSettingCard(self.webEspConnectCard)
         self.addContent(self.webEspGroup)
 
@@ -501,6 +513,7 @@ class VisualsPage(BasePage):
         self.webEspEnableCard.checkedChanged.connect(self._onWebEspEnableChanged)
         self.webEspHttpPortSpin.valueChanged.connect(self._onWebEspHttpPortChanged)
         self.webEspWsPortSpin.valueChanged.connect(self._onWebEspWsPortChanged)
+        self.webEspFpsCard.valueChanged.connect(self._onWebEspFpsChanged)
         self.webEspOpenBtn.clicked.connect(self._onWebEspOpen)
 
 
@@ -569,6 +582,8 @@ class VisualsPage(BasePage):
         self.webEspWsPortSpin.setValue(int(getattr(self._config, 'web_esp_ws_port', 8765)))
         self.webEspHttpPortCard.setEnabled(web_on)
         self.webEspWsPortCard.setEnabled(web_on)
+        self.webEspFpsCard.setValue(int(getattr(self._config, 'web_esp_fps', 60) or 60))
+        self.webEspFpsCard.setEnabled(web_on)
         self.webEspConnectCard.setEnabled(web_on)
         self._refreshWebEspConnect()
 
@@ -764,6 +779,7 @@ class VisualsPage(BasePage):
             self._config.web_esp_enabled = checked
         self.webEspHttpPortCard.setEnabled(checked)
         self.webEspWsPortCard.setEnabled(checked)
+        self.webEspFpsCard.setEnabled(checked)
         self.webEspConnectCard.setEnabled(checked)
         # Start/stop the server live so the URL+QR appear immediately.
         try:
@@ -785,6 +801,10 @@ class VisualsPage(BasePage):
         if self._config:
             self._config.web_esp_http_port = int(value)
         self._webEspRestartTimer.start()
+
+    def _onWebEspFpsChanged(self, value):
+        if self._config:
+            self._config.web_esp_fps = max(15, min(240, int(value)))   # read live by the broadcaster
 
     def _onWebEspWsPortChanged(self, value):
         if self._config:
@@ -959,6 +979,8 @@ class VisualsPage(BasePage):
         self.webEspHttpPortCard.contentLabel.setText(t("web_esp_http_port_desc", "Port for the overlay web page."))
         self.webEspWsPortCard.titleLabel.setText(t("web_esp_ws_port", "WebSocket Port"))
         self.webEspWsPortCard.contentLabel.setText(t("web_esp_ws_port_desc", "Port for the live state stream."))
+        self.webEspFpsCard.titleLabel.setText(t("web_esp_fps", "Web ESP Update Rate"))
+        self.webEspFpsCard.contentLabel.setText(t("web_esp_fps_desc", "Most updates per second sent to the browser overlay. Real data only arrives as fast as detection runs."))
         self.webEspConnectCard.titleLabel.setText(t("web_esp_connect", "Connect"))
         self.webEspConnectCard.contentLabel.setText(t("web_esp_connect_desc", "Open this URL on the same PC, or scan the QR from a phone on the same Wi-Fi."))
         self.webEspOpenBtn.setText(t("web_esp_open", "Open in browser"))

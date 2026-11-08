@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
   <div class="app">
@@ -2270,6 +2270,16 @@
                 <input type="number" id="vis-web_esp_ws_port" data-key="web_esp_ws_port" data-type="number" min="1024" max="65535" step="1">
               </div>
             </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Web ESP Update Rate</div>
+                <div class="field-desc">Most updates per second sent to the browser overlay. Real data only arrives as fast as detection runs.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-web_esp_fps" data-key="web_esp_fps" data-type="number" min="15" max="240" step="1">
+                <span class="field-slider-value">Hz</span>
+              </div>
+            </div>
             <div class="field-card stacked">
               <div class="row" style="justify-content: space-between;">
                 <div class="field-title">Connect</div>
@@ -2464,6 +2474,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=14"></script>
 </body>
 </html>

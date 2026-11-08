@@ -10,13 +10,17 @@
   const WS_PORT = params.get("ws") || "8765";
 
   const canvas = document.getElementById("esp");
-  const ctx = canvas.getContext("2d");
+  // desynchronized: ask the browser to present the canvas without waiting for the compositor
+  // (lower latency on Chromium; ignored elsewhere). alpha stays on: the page is transparent.
+  const ctx = canvas.getContext("2d", { desynchronized: true });
   const statusEl = document.getElementById("status");
 
   // Latest decoded state (null until first packet).
   let state = null;
   // Render-side FPS + packet-rate tracking for the HUD.
-  let lastPacketT = 0, packetHz = 0;
+  // Newest undecoded packet (JSON text). Decoding happens once per drawn frame in render(), so
+  // a burst of packets between two frames costs one JSON.parse, not one each.
+  let pendingRaw = null, packets = 0, packetsT = performance.now(), dataHz = 0;
   let frames = 0, fpsT = performance.now(), drawFps = 0;
   // 2PC latency (browser → HTTP server round-trip)
   let latencyMs = null;
@@ -87,8 +91,8 @@
   });
   window.addEventListener("mousemove", (e) => {
     if (!dragging) return;
-    hudX = Math.max(0, Math.min(canvas.width  - hudRect.w, e.clientX - dragOffX));
-    hudY = Math.max(0, Math.min(canvas.height - hudRect.h, e.clientY - dragOffY));
+    hudX = Math.max(0, Math.min(view.w - hudRect.w, e.clientX - dragOffX));
+    hudY = Math.max(0, Math.min(view.h - hudRect.h, e.clientY - dragOffY));
   });
   window.addEventListener("mouseup", () => {
     if (!dragging) return;
@@ -98,9 +102,16 @@
   });
 
   // ── Canvas sizing ──────────────────────────────────────────────
+  // `view` is the drawable size in CSS px; the backing store is dpr times larger (capped at 2) so
+  // lines stay sharp on HiDPI screens without an expensive 3x canvas. Everything draws in CSS px.
+  let view = { w: window.innerWidth, h: window.innerHeight, dpr: 1 };
   function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    view = { w: window.innerWidth, h: window.innerHeight, dpr };
+    canvas.width = Math.round(view.w * dpr);
+    canvas.height = Math.round(view.h * dpr);
+    canvas.style.width = view.w + "px";
+    canvas.style.height = view.h + "px";
   }
   window.addEventListener("resize", resize);
   resize();
@@ -119,11 +130,11 @@
   // ratio intact; offX/offY letterbox (center) the result within the
   // canvas instead of stretching it to fill.
   function scaler(s) {
-    const screenW = s.screen.w || canvas.width;
-    const screenH = s.screen.h || canvas.height;
-    const scale = Math.min(canvas.width / screenW, canvas.height / screenH) || 1;
-    const offX = (canvas.width  - screenW * scale) / 2;
-    const offY = (canvas.height - screenH * scale) / 2;
+    const screenW = s.screen.w || view.w;
+    const screenH = s.screen.h || view.h;
+    const scale = Math.min(view.w / screenW, view.h / screenH) || 1;
+    const offX = (view.w - screenW * scale) / 2;
+    const offY = (view.h - screenH * scale) / 2;
     return { sx: scale, sy: scale, offX, offY };
   }
 
@@ -148,23 +159,37 @@
   function connect() {
     const url = `ws://${location.hostname}:${WS_PORT}/`;
     ws = new WebSocket(url);
-    ws.onopen  = () => setStatus(true);
-    ws.onclose = () => { setStatus(false); setTimeout(connect, 1000); };
+    ws.onopen  = () => { connected = true; badgeKey = null; };
+    ws.onclose = () => { connected = false; setStatus(false); setTimeout(connect, 1000); };
     ws.onerror = () => { try { ws.close(); } catch (e) {} };
     ws.onmessage = (ev) => {
-      try {
-        state = JSON.parse(ev.data);
-        const now = performance.now();
-        const dt = now - lastPacketT;
-        if (lastPacketT && dt > 0) packetHz = Math.round(1000 / dt);
-        lastPacketT = now;
-      } catch (e) { /* ignore malformed */ }
+      pendingRaw = ev.data;      // keep only the newest; decoded in render()
+      packets++;
     };
   }
 
-  function setStatus(ok) {
+  // Top-right badge: connection dot + the Visuals overlays that are switched on, in the same
+  // order as the Visuals page. Wording matches the Web Control client (connecting… / disconnected).
+  let connected = false, badgeKey = null;
+  const BADGE_ITEMS = [
+    ["show_crosshair", "Crosshair"],
+    ["show_fov", "FOV"],
+    ["show_boxes", "Boxes"],
+    ["show_confidence", "Confidence"],
+    ["show_detect_range", "Detection Range"],
+    ["show_tracer_line", "Tracer Line"],
+    ["show_aim_prediction_marker", "Predicted Aim Point"],
+  ];
+  function enabledOverlays(st) {
+    return BADGE_ITEMS.filter(([key]) => !!(st && st[key])).map(([, label]) => label);
+  }
+  function setStatus(ok, st) {
+    const text = ok ? "\u25cf " + (enabledOverlays(st).join(" \u00b7 ") || "connected") : "disconnected";
+    const key = (ok ? "1" : "0") + text;
+    if (key === badgeKey) return;             // don't touch the DOM every packet
+    badgeKey = key;
     statusEl.className  = ok ? "connected" : "disconnected";
-    statusEl.textContent = ok ? "● HUD" : "reconnecting…";
+    statusEl.textContent = text;
   }
 
   // ── Drawing primitives ─────────────────────────────────────────
@@ -275,7 +300,13 @@
 
   // ── Render loop ────────────────────────────────────────────────
   function render() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (pendingRaw !== null) {
+      try { state = JSON.parse(pendingRaw); } catch (e) { /* ignore malformed */ }
+      pendingRaw = null;
+    }
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    ctx.clearRect(0, 0, view.w, view.h);
+    if (connected) setStatus(true, state && state.settings);
 
     if (state) {
       const st = state.settings;
@@ -431,12 +462,16 @@
       }
 
       drawHud(state, boxes.length);
+    } else {
+      drawHud(null, 0);          // placeholder rows ("—") until the first packet, like Web Control
     }
 
-    // FPS counter
+    // Draw FPS (requestAnimationFrame rate: capped by the display's refresh rate) and the rate
+    // data packets actually arrive at -- two different numbers.
     frames++;
     const now = performance.now();
     if (now - fpsT >= 500) { drawFps = Math.round((frames * 1000) / (now - fpsT)); frames = 0; fpsT = now; }
+    if (now - packetsT >= 500) { dataHz = Math.round((packets * 1000) / (now - packetsT)); packets = 0; packetsT = now; }
 
     requestAnimationFrame(render);
   }
@@ -453,25 +488,27 @@
     const RED   = "rgba(255,60,60,0.9)";
     const NEUTRAL = "rgba(200,200,214,0.82)";
 
-    const aim = s.active;
-    const firing = s.aim_firing;
-    const model = (s.model || "").replace(/\.onnx$/i, "") || "none";
-    const capMethod = (s.screenshot_method || "dxcam").toUpperCase();
-    const capFps = s.capture_fps   != null ? `${s.capture_fps.toFixed(1)} fps`   : "—";
-    const infFps = s.inference_fps != null ? `${s.inference_fps.toFixed(1)} fps` : "—";
-    const latStr = latencyMs != null ? `${latencyMs}ms` : "—";
+    // Wording matches the Web Control sidebar: no bullets, no unit suffixes, "\u2014" when empty.
+    const has = !!s;
+    const aim = has && s.active;
+    const firing = has && s.aim_firing;
+    const dash = "\u2014";
+    const model = has && s.model ? s.model.replace(/\.onnx$/i, "") : dash;
+    const capMethod = has && s.screenshot_method ? s.screenshot_method.toUpperCase() : dash;
+    const num = (v) => (v != null && isFinite(v) ? Number(v).toFixed(1) : dash);
+    const latStr = latencyMs != null ? `${latencyMs}ms` : dash;
 
     const lines = [
-      { text: `Aim Toggle  ${aim ? "● ON" : "● OFF"}`,
-        color: aim ? GREEN : RED },
-      { text: `Aim Status  ${firing ? "● Aiming" : "● Idle"}`,
-        color: firing ? GREEN : RED },
-      { text: `Model: ${model}`,                    color: NEUTRAL },
-      { text: `Capture Method: ${capMethod}`,        color: NEUTRAL },
-      { text: `Capture FPS: ${capFps}`,              color: NEUTRAL },
-      { text: `Inference FPS: ${infFps}`,            color: NEUTRAL },
-      { text: `Target: ${count}`,                    color: "rgba(0,224,160,0.88)" },
-      { text: `Net Latency: ${latStr}  |  Draw FPS: ${drawFps}`,
+      { text: `Aim Toggle: ${has ? (aim ? "ON" : "OFF") : dash}`,
+        color: !has ? NEUTRAL : aim ? GREEN : RED },
+      { text: `Aim Status: ${has ? (firing ? "Aiming" : "Idle") : dash}`,
+        color: !has ? NEUTRAL : firing ? GREEN : RED },
+      { text: `Model: ${model}`,                              color: NEUTRAL },
+      { text: `Capture Method: ${capMethod}`,                 color: NEUTRAL },
+      { text: `Capture FPS: ${has ? num(s.capture_fps) : dash}`,     color: NEUTRAL },
+      { text: `Inference FPS: ${has ? num(s.inference_fps) : dash}`, color: NEUTRAL },
+      { text: `Target: ${has ? count : dash}`,                color: "rgba(0,224,160,0.88)" },
+      { text: `Net Latency: ${latStr}  |  Draw FPS: ${drawFps}  |  Data: ${has ? dataHz + " Hz" : dash}`,
         color: "rgba(110,110,130,0.7)" },
     ];
 
@@ -483,8 +520,8 @@
     const boxH = lines.length * lh + pad * 2 - (lh - fs);
 
     // Clamp to viewport
-    hudX = Math.max(0, Math.min(canvas.width  - boxW, hudX));
-    hudY = Math.max(0, Math.min(canvas.height - boxH, hudY));
+    hudX = Math.max(0, Math.min(view.w - boxW, hudX));
+    hudY = Math.max(0, Math.min(view.h - boxH, hudY));
 
     // Update hit-test rect
     hudRect = { x: hudX, y: hudY, w: boxW, h: boxH };

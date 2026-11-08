@@ -1,5 +1,11 @@
 # Changelog
 
+- Web Control: live NVIDIA GPU tiles in the sidebar (same sensors and switches as the status panel). Model Info now shows the precision actually running (FP16/FP32 · provider · RUNNING) and what is selected but still pending.
+
+- Web ESP overlay: HUD wording matches Web Control; the top-right badge lists the enabled Visuals (Crosshair, FOV, Boxes, Confidence, Detection Range, Tracer Line, Predicted Aim Point); draws the Predicted Aim Point; sharp on high-DPI screens; less delay (event-driven sending on new detections, 1 ms timer, per-client latest-frame sending, newest-packet-only parsing). New "Web ESP Update Rate" setting (15–240 Hz, default 60) in Visuals and Web Control; the HUD shows draw FPS and data Hz separately.
+
+- New Line Thickness sliders (1–10 px) for FOV, Detection Range, Tracer Line and Predicted Aim Point on the in-game overlay, capture preview, Web ESP and Web Control. The Web ESP tracer is now 2 px by default (was 1 px) to match the desktop overlay.
+
 - Web Control: LAN Speed Test on the Other tab (ping/jitter, download, upload between the browser and the Axiom host).
 
 - Web Control client: FOV shrink mode, advanced FOV, retention and tracking settings on the Inference tab. Web ESP: retention FOV boundary and track-only lock highlight.

@@ -364,3 +364,201 @@ class TestLineWidthsAndPredictedPoint:
                        screenshot_method="udp")
         off = s["boxes"][0][0] - 100                       # boxes are shifted by offset_x
         assert s["aim_predicted"]["x"] == 10 + off
+
+
+# ---------------------------------------------------------------------------
+# Broadcaster: event-driven scheduling, latest-only senders, web_esp_fps
+# ---------------------------------------------------------------------------
+
+class TestWebEspFpsClamp:
+    def test_bounds(self):
+        assert esp_server.clamp_web_esp_fps(1) == esp_server.WEB_ESP_FPS_MIN
+        assert esp_server.clamp_web_esp_fps(10_000) == esp_server.WEB_ESP_FPS_MAX
+        assert esp_server.clamp_web_esp_fps(90) == 90
+
+    def test_junk_falls_back_to_default(self):
+        for junk in (None, "abc", float("nan"), float("inf")):
+            assert esp_server.clamp_web_esp_fps(junk) == esp_server.WEB_ESP_FPS_DEFAULT
+
+
+class TestBroadcastDue:
+    IV = 1 / 60
+
+    def test_new_seq_sends_once_interval_elapsed(self):
+        assert esp_server._broadcast_due(1.0, 0.0, 5, 4, self.IV)
+
+    def test_new_seq_waits_for_min_interval(self):
+        assert not esp_server._broadcast_due(0.005, 0.0, 5, 4, self.IV)
+
+    def test_same_seq_is_not_resent_before_heartbeat(self):
+        assert not esp_server._broadcast_due(0.05, 0.0, 5, 5, self.IV)
+
+    def test_heartbeat_resends_unchanged_data(self):
+        assert esp_server._broadcast_due(esp_server._HEARTBEAT_S + 0.001, 0.0, 5, 5, self.IV)
+
+    def test_first_tick_always_sends(self):
+        # the loop starts with last_sent=0.0 and a perf_counter far past one interval
+        assert esp_server._broadcast_due(1234.5, 0.0, 1, object(), 1 / 15)
+
+    def test_no_seq_falls_back_to_fixed_tick(self):
+        assert not esp_server._broadcast_due(0.005, 0.0, None, None, self.IV)
+        assert esp_server._broadcast_due(0.02, 0.0, None, None, self.IV)
+
+
+class _FakeSock:
+    def __init__(self, delay=0.0):
+        self.delay = delay
+        self.sent = []
+
+    def sendall(self, data):
+        if self.delay:
+            time.sleep(self.delay)
+        self.sent.append(data)
+
+    def close(self):
+        pass
+
+
+class TestClientSender:
+    def _wait(self, cond, timeout=2.0):
+        end = time.time() + timeout
+        while time.time() < end:
+            if cond():
+                return True
+            time.sleep(0.005)
+        return False
+
+    def test_sends_offered_frame(self):
+        sock = _FakeSock()
+        s = esp_server._ClientSender(sock, lambda c: None)
+        try:
+            s.offer(b"a")
+            assert self._wait(lambda: sock.sent == [b"a"])
+        finally:
+            s.close()
+
+    def test_slow_client_gets_latest_frame_only(self):
+        sock = _FakeSock(delay=0.15)
+        s = esp_server._ClientSender(sock, lambda c: None)
+        try:
+            s.offer(b"1")
+            time.sleep(0.03)             # frame 1 is now in flight
+            for i in range(2, 8):
+                s.offer(str(i).encode())
+            assert self._wait(lambda: len(sock.sent) >= 2, 3.0)
+            assert sock.sent[0] == b"1"
+            assert sock.sent[-1] == b"7"          # stale 2..6 were replaced, not queued
+            assert s.dropped >= 4
+        finally:
+            s.close()
+
+    def test_slow_client_does_not_block_fast_client(self):
+        slow, fast = _FakeSock(delay=0.5), _FakeSock()
+        s_slow = esp_server._ClientSender(slow, lambda c: None)
+        s_fast = esp_server._ClientSender(fast, lambda c: None)
+        try:
+            s_slow.offer(b"x")
+            t0 = time.perf_counter()
+            for i in range(10):
+                s_slow.offer(b"y")
+                s_fast.offer(str(i).encode())
+                time.sleep(0.01)
+            assert self._wait(lambda: fast.sent and fast.sent[-1] == b"9", 1.0)
+            assert time.perf_counter() - t0 < 0.5
+        finally:
+            s_slow.close()
+            s_fast.close()
+
+    def test_failed_send_reports_dead(self):
+        dead = []
+
+        class Broken(_FakeSock):
+            def sendall(self, data):
+                raise OSError("gone")
+
+        sock = Broken()
+        s = esp_server._ClientSender(sock, dead.append)
+        s.offer(b"z")
+        assert self._wait(lambda: dead == [sock])
+
+
+class TestBroadcastLoopIntegration:
+    """Run the real loop against a fake config and capture what it offers."""
+
+    def _run(self, monkeypatch, cfg, duration, bump=None):
+        offered = []
+
+        class Rec:
+            def offer(self, frame):
+                offered.append((time.perf_counter(), frame))
+
+            def close(self):
+                pass
+
+        monkeypatch.setattr(esp_server, "_config", cfg)
+        monkeypatch.setattr(esp_server, "_build_snapshot", lambda: {"ok": 1})
+        monkeypatch.setattr(esp_server, "_timer_resolution", lambda e: None)
+        with esp_server._clients_lock:
+            esp_server._clients.clear()
+            esp_server._clients[object()] = Rec()
+        esp_server._stop.clear()
+        import threading
+        th = threading.Thread(target=esp_server._broadcast_loop, daemon=True)
+        th.start()
+        end = time.perf_counter() + duration
+        while time.perf_counter() < end:
+            if bump:
+                bump(cfg)
+            time.sleep(0.002)
+        esp_server._stop.set()
+        th.join(2.0)
+        with esp_server._clients_lock:
+            esp_server._clients.clear()
+        esp_server._stop.clear()
+        return offered
+
+    def test_idle_data_only_heartbeats(self, monkeypatch):
+        cfg = _FakeConfig()
+        cfg.web_esp_fps = 60
+        cfg.detection_seq = 7
+        offered = self._run(monkeypatch, cfg, 0.5)
+        # first frame + ~10 Hz heartbeat, nowhere near 60 Hz of duplicates
+        assert 3 <= len(offered) <= 9
+
+    def test_new_data_is_sent_at_up_to_web_esp_fps(self, monkeypatch):
+        cfg = _FakeConfig()
+        cfg.web_esp_fps = 30
+        cfg.detection_seq = 0
+
+        def bump(c):
+            c.detection_seq += 1
+
+        offered = self._run(monkeypatch, cfg, 0.6, bump)
+        rate = len(offered) / 0.6
+        assert 15 <= rate <= 40          # capped near 30 Hz, never the raw 500 Hz bump rate
+
+    def test_fps_change_applies_live(self, monkeypatch):
+        cfg = _FakeConfig()
+        cfg.web_esp_fps = 15
+        cfg.detection_seq = 0
+
+        def bump(c):
+            c.detection_seq += 1
+
+        slow = len(self._run(monkeypatch, cfg, 0.5, bump))
+        cfg.web_esp_fps = 120
+        fast = len(self._run(monkeypatch, cfg, 0.5, bump))
+        assert fast > slow * 2
+
+
+def test_snapshot_carries_detection_seq():
+    cfg = _FakeConfig()
+    cfg.detection_seq = 42
+    esp_server._config = cfg
+    assert esp_server._build_snapshot()["seq"] == 42
+
+
+def test_timer_resolution_is_noop_off_windows(monkeypatch):
+    monkeypatch.setattr(esp_server.sys, "platform", "linux")
+    esp_server._timer_resolution(True)
+    esp_server._timer_resolution(False)
