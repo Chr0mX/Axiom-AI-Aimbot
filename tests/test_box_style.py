@@ -62,3 +62,71 @@ def test_highlight_outline_follows_a_fixed_thickness_only():
     assert highlight_thickness(cfg(box_line_thickness=0), 1) == 1
     assert highlight_thickness(cfg(box_line_thickness=7), 1) == 7
     assert highlight_thickness(cfg(box_line_thickness=50), 2) == 10
+
+
+# ── FOV / Detection Range / Tracer / Predicted Aim Point line widths ───────
+import pytest
+
+from core import box_style as bs
+
+LINE_FIELDS = {
+    "fov_line_thickness": (bs.fov_thickness, 2),
+    "detect_range_line_thickness": (bs.detect_range_thickness, 1),
+    "tracer_line_thickness": (bs.tracer_thickness, 2),
+    "aim_marker_line_thickness": (bs.aim_marker_thickness, 2),
+}
+
+
+@pytest.mark.parametrize("attr", LINE_FIELDS)
+def test_defaults_are_the_widths_the_overlays_always_drew(attr):
+    fn, default = LINE_FIELDS[attr]
+    assert fn(SimpleNamespace()) == default            # config predating the field
+    assert fn(cfg(**{attr: default})) == default
+
+
+@pytest.mark.parametrize("attr", LINE_FIELDS)
+@pytest.mark.parametrize("raw,want", [(1, 1), (5, 5), (10, 10), (99, 10)])
+def test_line_widths_are_clamped_to_10(attr, raw, want):
+    fn, _ = LINE_FIELDS[attr]
+    assert fn(cfg(**{attr: raw})) == want
+
+
+@pytest.mark.parametrize("attr", LINE_FIELDS)
+@pytest.mark.parametrize("raw", [0, -3, None, "junk", float("nan")])
+def test_unusable_values_fall_back_to_the_default(attr, raw):
+    fn, default = LINE_FIELDS[attr]
+    assert fn(cfg(**{attr: raw})) == default
+
+
+def test_line_width_fields_are_persisted_validated_and_exposed():
+    from core.config import _FIELD_MAP, _validate_box_style
+    from core.web_control_settings import _SCHEMA
+    for attr, (_, default) in LINE_FIELDS.items():
+        assert _FIELD_MAP[attr] == f"display.{attr}"
+        assert _SCHEMA["visuals"][attr] == {"type": "int", "min": 1, "max": 10}
+        c = cfg(**{attr: 99})
+        _validate_box_style(c)
+        assert getattr(c, attr) == 10
+        c = cfg(**{attr: "junk"})
+        _validate_box_style(c)
+        assert getattr(c, attr) == default
+        c = cfg(**{attr: 0})
+        _validate_box_style(c)
+        assert getattr(c, attr) == default             # no "Auto" mode: 0 means unset -> default
+
+
+def test_old_config_without_the_fields_loads_with_the_old_look():
+    from unittest.mock import patch
+    with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+        from core.config import Config
+        c = Config()
+    before = c.to_dict()
+    data = c.to_dict()
+    for attr in LINE_FIELDS:
+        data["display"].pop(attr, None)
+    with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+        c2 = Config()
+    c2.from_dict(data)
+    for attr, (_, default) in LINE_FIELDS.items():
+        assert getattr(c2, attr) == default
+    assert c2.to_dict() == before

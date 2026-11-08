@@ -28,6 +28,7 @@ from typing import List, Optional, Set
 from urllib.parse import urlparse
 
 from .ai_loop_utils import get_capture_dimensions, get_effective_detect_range_size
+from .box_style import aim_marker_thickness, detect_range_thickness, fov_thickness, tracer_thickness
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,18 @@ def _build_snapshot() -> dict:
     except (TypeError, ValueError, IndexError):
         locked = None
 
+    # Predicted aim point (post prediction/Kalman): only while a lock exists and prediction or
+    # Kalman is on (the Qt overlay's same gate), shifted like the boxes for a UDP crop.
+    aim_predicted = None
+    if getattr(c, "aim_prediction_active", False):
+        try:
+            aim_predicted = {
+                "x": int(getattr(c, "aim_predicted_x", 0.0)) + offset_x,
+                "y": int(getattr(c, "aim_predicted_y", 0.0)) + offset_y,
+            }
+        except (TypeError, ValueError):
+            aim_predicted = None
+
     return {
         "t": int(time.monotonic() * 1000),
         "screen": {"w": screen_w, "h": screen_h},
@@ -201,6 +214,12 @@ def _build_snapshot() -> dict:
             "box_line_thickness": int(getattr(c, "box_line_thickness", 0) or 0),
             "box_corner_length_pct": int(getattr(c, "box_corner_length_pct", 0) or 0),
             "show_detect_range": bool(getattr(c, "show_detect_range", True)),
+            "show_aim_prediction_marker": bool(getattr(c, "show_aim_prediction_marker", True)),
+            # Line widths (px) of the FOV / Detection Range / Tracer / Predicted Aim Point.
+            "fov_line_thickness": fov_thickness(c),
+            "detect_range_line_thickness": detect_range_thickness(c),
+            "tracer_line_thickness": tracer_thickness(c),
+            "aim_marker_line_thickness": aim_marker_thickness(c),
             "show_confidence": bool(getattr(c, "show_confidence", True)),
             "show_tracer_line": bool(getattr(c, "show_tracer_line", True)),
             "show_crosshair": bool(getattr(c, "show_crosshair", False)),
@@ -222,6 +241,7 @@ def _build_snapshot() -> dict:
         # so Web ESP always shows every detection regardless of aiming mode.
         "boxes": _boxes(getattr(c, "latest_all_boxes", [])),
         "confidences": [float(x) for x in (getattr(c, "latest_all_confidences", []) or [])],
+        "aim_predicted": aim_predicted,
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
         # Lock is held outside the control FOV: tracked, but no aiming this frame.

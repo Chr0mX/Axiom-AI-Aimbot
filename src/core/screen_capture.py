@@ -16,7 +16,10 @@ import cv2
 import mss
 import numpy as np
 
-from .box_style import box_thickness, corner_length, highlight_thickness
+from .box_style import (
+    aim_marker_thickness, box_thickness, corner_length, detect_range_thickness, fov_thickness,
+    highlight_thickness, tracer_thickness,
+)
 
 if TYPE_CHECKING:
     from mss.base import MSSBase
@@ -446,7 +449,7 @@ def _draw_detection_overlay(
         y1 = max(0, region_top)
         x2 = min(w - 1, region_left + region_width)
         y2 = min(h - 1, region_top + region_height)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), _c(255, 140, 0), 1, cv2.LINE_AA)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), _c(255, 140, 0), detect_range_thickness(cfg), cv2.LINE_AA)
 
     if bool(getattr(cfg, 'show_fov', True)):
         # fov_effective_size/_height — reflects any live shrink from "Reduce
@@ -460,20 +463,21 @@ def _draw_detection_overlay(
         x1, y1 = cx - half_x, cy - half_y
         x2, y2 = cx + half_x, cy + half_y
         color = _c(0, 0, 255)
+        fov_w_px = fov_thickness(cfg)
         if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
             # cv2.ellipse's axes are already independent per axis, so this
             # draws a plain circle for free when half_x == half_y.
-            cv2.ellipse(frame, (cx, cy), (half_x, half_y), 0, 0, 360, color, 2, cv2.LINE_AA)
+            cv2.ellipse(frame, (cx, cy), (half_x, half_y), 0, 0, 360, color, fov_w_px, cv2.LINE_AA)
         else:
             corner = max(8, min(20, min(fov_w, fov_h) // 6))
-            cv2.line(frame, (x1, y1), (x1 + corner, y1), color, 2, cv2.LINE_AA)
-            cv2.line(frame, (x1, y1), (x1, y1 + corner), color, 2, cv2.LINE_AA)
-            cv2.line(frame, (x2, y1), (x2 - corner, y1), color, 2, cv2.LINE_AA)
-            cv2.line(frame, (x2, y1), (x2, y1 + corner), color, 2, cv2.LINE_AA)
-            cv2.line(frame, (x1, y2), (x1 + corner, y2), color, 2, cv2.LINE_AA)
-            cv2.line(frame, (x1, y2), (x1, y2 - corner), color, 2, cv2.LINE_AA)
-            cv2.line(frame, (x2, y2), (x2 - corner, y2), color, 2, cv2.LINE_AA)
-            cv2.line(frame, (x2, y2), (x2, y2 - corner), color, 2, cv2.LINE_AA)
+            cv2.line(frame, (x1, y1), (x1 + corner, y1), color, fov_w_px, cv2.LINE_AA)
+            cv2.line(frame, (x1, y1), (x1, y1 + corner), color, fov_w_px, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2 - corner, y1), color, fov_w_px, cv2.LINE_AA)
+            cv2.line(frame, (x2, y1), (x2, y1 + corner), color, fov_w_px, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1 + corner, y2), color, fov_w_px, cv2.LINE_AA)
+            cv2.line(frame, (x1, y2), (x1, y2 - corner), color, fov_w_px, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2 - corner, y2), color, fov_w_px, cv2.LINE_AA)
+            cv2.line(frame, (x2, y2), (x2, y2 - corner), color, fov_w_px, cv2.LINE_AA)
 
     if bool(getattr(cfg, 'show_fov', True)):
         # Lock-retention boundary (only while retention is in effect): where a
@@ -570,7 +574,7 @@ def _draw_detection_overlay(
             else:
                 in_reach = abs(bx - cx) <= tracer_half_x and abs(by - cy) <= tracer_half_y
             if in_reach:
-                cv2.line(frame, (cx, cy), (bx, by), _c(255, 255, 255), 2, cv2.LINE_AA)
+                cv2.line(frame, (cx, cy), (bx, by), _c(255, 255, 255), tracer_thickness(cfg), cv2.LINE_AA)
 
     decay_box = getattr(cfg, 'display_locked_box', None)
     if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):
@@ -592,6 +596,16 @@ def _draw_detection_overlay(
             x2 = max(0, min(w - 1, x2)); y2 = max(0, min(h - 1, y2))
             cv2.rectangle(frame, (x1, y1), (x2, y2), _c(255, 200, 0),
                           highlight_thickness(cfg, 1), cv2.LINE_AA)
+        except Exception:
+            pass
+
+    if (bool(getattr(cfg, 'show_aim_prediction_marker', True))
+            and bool(getattr(cfg, 'aim_prediction_active', False))):
+        # Predicted aim point (post prediction/Kalman) as a hollow circle, like overlay.py.
+        try:
+            px = int(getattr(cfg, 'aim_predicted_x', 0.0))
+            py = int(getattr(cfg, 'aim_predicted_y', 0.0))
+            cv2.circle(frame, (px, py), 7, _c(255, 210, 80), aim_marker_thickness(cfg), cv2.LINE_AA)
         except Exception:
             pass
 

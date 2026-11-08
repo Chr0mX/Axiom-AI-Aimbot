@@ -445,6 +445,36 @@
   // per-model notes card. Refreshed whenever the model selection settles
   // (user pick, or the status-driven one-shot prefill above).
   // ---------------------------------------------------------------------
+  // Just the info card (not the notes): re-run whenever the live session changes -- model
+  // swap, FP32/FP16 switch, provider change -- so "Precision in use" never goes stale.
+  function refreshModelInfo() {
+    var name = modelSelect.value;
+    var infoEl = document.getElementById("model-info-text");
+    if (!name) { infoEl.textContent = "\u2014"; return; }
+    // /api/model_info resolves via resolve_model_path(), which joins a
+    // relative path directly against project_root, not project_root/Model
+    // — same "Model/" prefix the Switch button already adds, needed here
+    // too since modelSelect's options are bare basenames.
+    fetch("/api/model_info?model=" + encodeURIComponent("Model/" + name), { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) { infoEl.textContent = "\u2014"; return; }
+        if (data.ok === false) {
+          infoEl.textContent = "Unavailable (" + (data.reason || "error") + ")";
+          return;
+        }
+        infoEl.textContent = data.text || "\u2014";
+      })
+      .catch(function () { infoEl.textContent = "\u2014"; });
+  }
+
+  var lastModelRuntimeSig = null;
+  function noteModelRuntime(s) {
+    var sig = [s.loaded_model, s.loaded_model_fp16, s.loaded_provider, s.trt_fp16_enabled, s.model].join("|");
+    if (lastModelRuntimeSig !== null && sig !== lastModelRuntimeSig) refreshModelInfo();
+    lastModelRuntimeSig = sig;
+  }
+
   function refreshModelInfoAndNotes() {
     var name = modelSelect.value;
     var infoEl = document.getElementById("model-info-text");
@@ -454,21 +484,7 @@
       notesEl.value = "";
       return;
     }
-    // /api/model_info resolves via resolve_model_path(), which joins a
-    // relative path directly against project_root, not project_root/Model
-    // — same "Model/" prefix the Switch button already adds, needed here
-    // too since modelSelect's options are bare basenames.
-    fetch("/api/model_info?model=" + encodeURIComponent("Model/" + name), { headers: authHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (!data) { infoEl.textContent = "—"; return; }
-        if (data.ok === false) {
-          infoEl.textContent = "Unavailable (" + (data.reason || "error") + ")";
-          return;
-        }
-        infoEl.textContent = data.text || "—";
-      })
-      .catch(function () { infoEl.textContent = "—"; });
+    refreshModelInfo();
 
     fetch("/api/model_notes?model=" + encodeURIComponent(name), { headers: authHeaders() })
       .then(function (res) { return res.ok ? res.json() : null; })
@@ -678,7 +694,7 @@
           if (typeof data.pid_unsafe_mode === "boolean") applyPidUnsafeSliderLimits(!!data.pid_unsafe_mode);
         }
         if (tab === "keys") updateKeysVisibility(data);
-        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); updateGpuMonitorVisibility(); }
+        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); updateLineThicknessVisibility(); updateGpuMonitorVisibility(); }
         if (tab === "convert" && typeof convertPrecisionSelect !== "undefined" && convertPrecisionSelect
             && document.activeElement !== convertPrecisionSelect && typeof data.trt_fp16_enabled === "boolean") {
           convertPrecisionSelect.value = data.trt_fp16_enabled ? "fp16" : "fp32";
@@ -730,6 +746,7 @@
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
         if (tab === "visuals" && key === "box_full_rect") updateBoxStyleVisibility();
+        if (tab === "visuals" && LINE_THICKNESS_TOGGLE_KEYS.indexOf(key) !== -1) updateLineThicknessVisibility();
         if (tab === "visuals" && key === "status_panel_show_gpu") updateGpuMonitorVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
@@ -1373,6 +1390,22 @@
   var webEspRestartTimer = null;
 
   // Corner Bracket Length only applies while boxes are drawn as brackets.
+  // Each line-thickness card is shown only while its Show toggle is on (mirrors visuals_page.py).
+  var LINE_THICKNESS_CARDS = [
+    ["vis-show_fov", "vis-fov-thickness-card"],
+    ["vis-show_detect_range", "vis-range-thickness-card"],
+    ["vis-show_tracer_line", "vis-tracer-thickness-card"],
+    ["vis-show_aim_prediction_marker", "vis-marker-thickness-card"],
+  ];
+  var LINE_THICKNESS_TOGGLE_KEYS = ["show_fov", "show_detect_range", "show_tracer_line", "show_aim_prediction_marker"];
+  function updateLineThicknessVisibility() {
+    LINE_THICKNESS_CARDS.forEach(function (pair) {
+      var toggle = document.getElementById(pair[0]);
+      var card = document.getElementById(pair[1]);
+      if (card) card.classList.toggle("hidden", !(toggle && toggle.checked));
+    });
+  }
+
   function updateBoxStyleVisibility() {
     var full = document.getElementById("vis-box_full_rect");
     var card = document.getElementById("vis-box-corner-card");
@@ -2133,6 +2166,7 @@
 
   function applyStatus(s) {
     applyModelLoadError(s.model_load_error);
+    noteModelRuntime(s);
     document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
     document.getElementById("s-firing").textContent = s.aim_firing ? "Aiming" : "Idle";

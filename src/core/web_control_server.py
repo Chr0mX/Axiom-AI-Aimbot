@@ -189,6 +189,10 @@ def _build_status(config) -> dict:
         # was leaving the dropdown stuck on its default "Auto".
         "selected_backend": str(getattr(config, "inference_backend", "auto")),
         "trt_fp16_enabled": bool(getattr(config, "trt_fp16_enabled", False)),
+        # What is actually loaded (vs. the selection above): the Model Info card keys off these.
+        "loaded_model": os.path.basename(str(getattr(config, "loaded_model_path", "") or "")),
+        "loaded_model_fp16": getattr(config, "loaded_model_fp16", None),
+        "loaded_provider": str(getattr(config, "current_provider", "") or ""),
         # Last hot-swap load failure ("" when none) — the Model panel shows it.
         "model_load_error": str(getattr(config, "model_load_error", "") or ""),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),

@@ -45,7 +45,6 @@ it in app_controller.py.
 """
 from __future__ import annotations
 
-import glob
 import json
 import math
 import os
@@ -273,6 +272,11 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "box_full_rect": {"type": "bool"},
         "box_line_thickness": {"type": "int", "min": 0, "max": 10},
         "box_corner_length_pct": {"type": "int", "min": 0, "max": 50},
+        # Line widths (px) of the FOV / Detection Range / Tracer Line / Predicted Aim Point.
+        "fov_line_thickness": {"type": "int", "min": 1, "max": 10},
+        "detect_range_line_thickness": {"type": "int", "min": 1, "max": 10},
+        "tracer_line_thickness": {"type": "int", "min": 1, "max": 10},
+        "aim_marker_line_thickness": {"type": "int", "min": 1, "max": 10},
         "show_confidence": {"type": "bool"},
         "show_detect_range": {"type": "bool"},
         "show_tracer_line": {"type": "bool"},
@@ -629,15 +633,12 @@ def get_model_info(config, model_path: str) -> dict:
     if resolved is None:
         return {"ok": False, "reason": reason}
 
-    inspect_path = resolved
-    provider = getattr(config, "current_provider", "")
-    if provider == "TensorrtExecutionProvider":
-        trt_cache = os.path.join(project_root, "trt_cache")
-        if os.path.isdir(trt_cache):
-            stem = os.path.splitext(os.path.basename(resolved))[0]
-            engine_files = glob.glob(os.path.join(trt_cache, f"{stem}*.engine"))
-            if engine_files:
-                inspect_path = sorted(engine_files)[-1]
+    from .model_runtime import compose_info_text, describe_runtime, resolve_engine_path
+
+    # Inspect the cached TensorRT engine for the precision actually in use (the running one
+    # when this model is loaded, else the selection) -- not "last in sort order".
+    runtime = describe_runtime(config, resolved)
+    inspect_path = resolve_engine_path(config, resolved, runtime) or resolved
 
     try:
         from model_detect import inspect_model
@@ -650,19 +651,9 @@ def get_model_info(config, model_path: str) -> dict:
         # Mirrors the GUI worker's own broad except — inspection failures
         # (corrupt file, unsupported opset, missing TRT bindings) are
         # displayed as the info text itself, not treated as a request error.
-        return {"ok": True, "text": str(exc)[:120]}
+        return {"ok": True, "text": str(exc)[:120], "runtime": runtime}
 
-    parts = []
-    if info.get("format"):
-        parts.append(info["format"])
-    parts.append(f"Input: {info['input_size']}")
-    if info.get("num_classes"):
-        parts.append(f"Classes: {info['num_classes']}")
-    if info.get("precision"):
-        parts.append(f"Precision: {info['precision']}")
-    if info.get("file_size"):
-        parts.append(info["file_size"])
-    return {"ok": True, "text": "  •  ".join(parts)}
+    return {"ok": True, "text": compose_info_text(info, runtime), "runtime": runtime}
 
 
 # ---------------------------------------------------------------------------

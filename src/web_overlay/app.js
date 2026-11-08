@@ -202,12 +202,12 @@
     ctx.stroke();
   }
 
-  function fovCorners(cx, cy, fovX, fovY, color) {
+  function fovCorners(cx, cy, fovX, fovY, color, width) {
     const halfX = fovX / 2, halfY = fovY / 2;
     const len = Math.max(8, Math.min(halfX, halfY) * 0.3);
     const x1 = cx - halfX, y1 = cy - halfY, x2 = cx + halfX, y2 = cy + halfY;
     ctx.strokeStyle = rgba(color);
-    ctx.lineWidth = 2;
+    ctx.lineWidth = width || 2;
     ctx.beginPath();
     ctx.moveTo(x1, y1 + len); ctx.lineTo(x1, y1); ctx.lineTo(x1 + len, y1);
     ctx.moveTo(x2 - len, y1); ctx.lineTo(x2, y1); ctx.lineTo(x2, y1 + len);
@@ -288,7 +288,7 @@
       if (st.show_detect_range) {
         const rsx = st.detect_range_size * sx, rsy = st.detect_range_size * sy;
         ctx.strokeStyle = "rgba(120,120,120,0.7)";
-        ctx.lineWidth = 1;
+        ctx.lineWidth = st.detect_range_line_thickness || 1;
         if (st.fov_circle_filter_enabled) {
           ctx.beginPath(); ctx.ellipse(cx, cy, rsx / 2, rsy / 2, 0, 0, Math.PI * 2); ctx.stroke();
         } else {
@@ -305,10 +305,10 @@
         const fovx = st.fov_size * sx, fovy = fovHeight * sy;
         const fovColor = [255, 255, 255, 180];
         if (st.fov_circle_filter_enabled) {
-          ctx.strokeStyle = rgba(fovColor); ctx.lineWidth = 2;
+          ctx.strokeStyle = rgba(fovColor); ctx.lineWidth = st.fov_line_thickness || 2;
           ctx.beginPath(); ctx.ellipse(cx, cy, fovx / 2, fovy / 2, 0, 0, Math.PI * 2); ctx.stroke();
         } else {
-          fovCorners(cx, cy, fovx, fovy, fovColor);
+          fovCorners(cx, cy, fovx, fovy, fovColor, st.fov_line_thickness || 2);
         }
       }
 
@@ -378,7 +378,7 @@
 
           if (st.show_tracer_line && inFov) {
             const [tx, ty] = aimPoint(x1, y1, x2, y2, st);
-            ctx.strokeStyle = "rgba(0,220,255,0.5)"; ctx.lineWidth = 1;
+            ctx.strokeStyle = "rgba(0,220,255,0.5)"; ctx.lineWidth = st.tracer_line_thickness || 2;
             ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
           }
         }
@@ -397,6 +397,17 @@
         ctx.lineWidth = lockedBoxThickness(state.settings || {});
         ctx.strokeRect(X(lb[0]), Y(lb[1]), X(lb[2]) - X(lb[0]), Y(lb[3]) - Y(lb[1]));
         ctx.setLineDash([]);
+      }
+
+      // Predicted aim point — hollow circle at the locked target's post-prediction/Kalman point
+      // (the in-game overlay's marker). Sent only while a lock exists and prediction is on.
+      if (st.show_aim_prediction_marker && state.aim_predicted) {
+        const pr = Math.max(4, 7 * sx);
+        ctx.strokeStyle = "rgba(80,210,255,0.92)";
+        ctx.lineWidth = st.aim_marker_line_thickness || 2;
+        ctx.beginPath();
+        ctx.ellipse(X(state.aim_predicted.x), Y(state.aim_predicted.y), pr, pr, 0, 0, Math.PI * 2);
+        ctx.stroke();
       }
 
       // Crosshair — scaled per axis like everything else above; previously

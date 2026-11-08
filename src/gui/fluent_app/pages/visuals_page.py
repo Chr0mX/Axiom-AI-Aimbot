@@ -84,6 +84,22 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Line widths of the FOV / Detection Range / Tracer Line / Predicted Aim Point. Each sits
+        # under its Show toggle and is only visible while that toggle is on.
+        def _lineCard(title_key, title, hint_key, hint):
+            return SliderLabelCard(
+                FluentIcon.PENCIL_INK, t(title_key, title), 1, 10,
+                format_func=lambda v: f"{v} px",
+                description=t(hint_key, hint), parent=self.displayGroup)
+        self.fovThicknessCard = _lineCard("fov_line_thickness", "FOV Line Thickness",
+                                          "fov_line_thickness_hint", "Width of the FOV box or ellipse.")
+        self.detectRangeThicknessCard = _lineCard("detect_range_line_thickness", "Detection Range Line Thickness",
+                                                  "detect_range_line_thickness_hint", "Width of the detection range outline.")
+        self.tracerThicknessCard = _lineCard("tracer_line_thickness", "Tracer Line Thickness",
+                                             "tracer_line_thickness_hint", "Width of the line from screen center to each target.")
+        self.aimMarkerThicknessCard = _lineCard("aim_marker_line_thickness", "Predicted Aim Point Thickness",
+                                                "aim_marker_line_thickness_hint", "Width of the predicted aim point circle.")
+
         # Box line thickness (both styles) and corner-bracket arm length
         self.boxThicknessCard = SliderLabelCard(
             FluentIcon.PENCIL_INK,
@@ -388,14 +404,18 @@ class VisualsPage(BasePage):
         """Lays out all controls"""
         # Display settings
         self.displayGroup.addSettingCard(self.showFovCard)
+        self.displayGroup.addSettingCard(self.fovThicknessCard)
         self.displayGroup.addSettingCard(self.showBoxesCard)
         self.displayGroup.addSettingCard(self.boxFullRectCard)
         self.displayGroup.addSettingCard(self.boxThicknessCard)
         self.displayGroup.addSettingCard(self.boxCornerLengthCard)
         self.displayGroup.addSettingCard(self.showConfidenceCard)
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
+        self.displayGroup.addSettingCard(self.detectRangeThicknessCard)
         self.displayGroup.addSettingCard(self.showTracerLineCard)
+        self.displayGroup.addSettingCard(self.tracerThicknessCard)
         self.displayGroup.addSettingCard(self.showAimPredictionCard)
+        self.displayGroup.addSettingCard(self.aimMarkerThicknessCard)
         self.displayGroup.addSettingCard(self.boxThemeCard)
         self.displayGroup.addSettingCard(self.chromaSpeedCard)
         self.addContent(self.displayGroup)
@@ -446,6 +466,11 @@ class VisualsPage(BasePage):
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
         self.boxThicknessCard.valueChanged.connect(self._onBoxThicknessChanged)
+        for _card, _attr in ((self.fovThicknessCard, 'fov_line_thickness'),
+                             (self.detectRangeThicknessCard, 'detect_range_line_thickness'),
+                             (self.tracerThicknessCard, 'tracer_line_thickness'),
+                             (self.aimMarkerThicknessCard, 'aim_marker_line_thickness')):
+            _card.valueChanged.connect(lambda v, a=_attr: self._onLineThicknessChanged(a, v))
         self.boxCornerLengthCard.valueChanged.connect(self._onBoxCornerLengthChanged)
         self.spAutoAimCheck.stateChanged.connect(self._onStatusPanelAutoAimChanged)
         self.spAimToggleCheck.stateChanged.connect(self._onStatusPanelAimToggleChanged)
@@ -496,6 +521,11 @@ class VisualsPage(BasePage):
         self.showDetectRangeCard.setChecked(self._config.show_detect_range)
         self.showTracerLineCard.setChecked(bool(getattr(self._config, 'show_tracer_line', False)))
         self.showAimPredictionCard.setChecked(bool(getattr(self._config, 'show_aim_prediction_marker', True)))
+        self.fovThicknessCard.setValue(int(getattr(self._config, 'fov_line_thickness', 2) or 2))
+        self.detectRangeThicknessCard.setValue(int(getattr(self._config, 'detect_range_line_thickness', 1) or 1))
+        self.tracerThicknessCard.setValue(int(getattr(self._config, 'tracer_line_thickness', 2) or 2))
+        self.aimMarkerThicknessCard.setValue(int(getattr(self._config, 'aim_marker_line_thickness', 2) or 2))
+        self._updateLineThicknessVisibility()
         theme_text = str(getattr(self._config, 'box_color_theme', 'default')).capitalize()
         _valid_themes = ("Default", "Cyan", "Red", "Yellow", "White", "Purple")
         self.boxThemeCombo.setCurrentText(theme_text if theme_text in _valid_themes else "Default")
@@ -546,6 +576,7 @@ class VisualsPage(BasePage):
     def _onShowFovChanged(self, checked):
         if self._config:
             self._config.show_fov = checked
+        self._updateLineThicknessVisibility()
 
     def _onShowBoxesChanged(self, checked):
         if self._config:
@@ -576,14 +607,31 @@ class VisualsPage(BasePage):
     def _onShowDetectRangeChanged(self, checked):
         if self._config:
             self._config.show_detect_range = checked
+        self._updateLineThicknessVisibility()
 
     def _onShowTracerLineChanged(self, checked):
         if self._config:
             self._config.show_tracer_line = checked
+        self._updateLineThicknessVisibility()
 
     def _onShowAimPredictionChanged(self, checked):
         if self._config:
             self._config.show_aim_prediction_marker = checked
+        self._updateLineThicknessVisibility()
+
+    def _onLineThicknessChanged(self, attr, value):
+        if self._config:
+            setattr(self._config, attr, max(1, min(10, int(value))))
+
+    def _updateLineThicknessVisibility(self):
+        """Each thickness card is hidden (not greyed out) while its Show toggle is off."""
+        c = self._config
+        if not c:
+            return
+        self.fovThicknessCard.setVisible(bool(getattr(c, 'show_fov', True)))
+        self.detectRangeThicknessCard.setVisible(bool(getattr(c, 'show_detect_range', True)))
+        self.tracerThicknessCard.setVisible(bool(getattr(c, 'show_tracer_line', False)))
+        self.aimMarkerThicknessCard.setVisible(bool(getattr(c, 'show_aim_prediction_marker', True)))
 
     def _onBoxThemeChanged(self, text):
         if self._config:
@@ -851,6 +899,14 @@ class VisualsPage(BasePage):
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
         self.showTracerLineCard.titleLabel.setText(t("show_tracer_line", "Tracer Line"))
         self.showTracerLineCard.contentLabel.setText(t("show_tracer_line_hint", "Draw a line from screen center to each detected target"))
+        for _card, _key, _title, _hkey, _hint in (
+            (self.fovThicknessCard, "fov_line_thickness", "FOV Line Thickness", "fov_line_thickness_hint", "Width of the FOV box or ellipse."),
+            (self.detectRangeThicknessCard, "detect_range_line_thickness", "Detection Range Line Thickness", "detect_range_line_thickness_hint", "Width of the detection range outline."),
+            (self.tracerThicknessCard, "tracer_line_thickness", "Tracer Line Thickness", "tracer_line_thickness_hint", "Width of the line from screen center to each target."),
+            (self.aimMarkerThicknessCard, "aim_marker_line_thickness", "Predicted Aim Point Thickness", "aim_marker_line_thickness_hint", "Width of the predicted aim point circle."),
+        ):
+            _card.titleLabel.setText(t(_key, _title))
+            _card.contentLabel.setText(t(_hkey, _hint))
         self.showAimPredictionCard.titleLabel.setText(t("show_aim_prediction_marker", "Predicted Aim Point"))
         self.showAimPredictionCard.contentLabel.setText(t("show_aim_prediction_marker_hint",
             "Draw a second marker at the locked target's post-prediction point (only while Target Tracking's prediction or Kalman is on)"))

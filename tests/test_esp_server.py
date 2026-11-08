@@ -329,3 +329,38 @@ class TestRetentionSnapshot:
     def test_track_only_requires_a_locked_box(self):
         assert self._snap(lock_track_only=True)["locked_track_only"] is True
         assert self._snap(lock_track_only=True, display_locked_box=None)["locked_track_only"] is False
+
+
+class TestLineWidthsAndPredictedPoint:
+    @staticmethod
+    def _snap(**kw):
+        cfg = _FakeConfig()
+        for k, v in kw.items():
+            setattr(cfg, k, v)
+        esp_server._config = cfg
+        return json.loads(json.dumps(esp_server._build_snapshot()))
+
+    def test_default_widths_match_the_other_surfaces(self):
+        st = self._snap()["settings"]
+        assert (st["fov_line_thickness"], st["detect_range_line_thickness"],
+                st["tracer_line_thickness"], st["aim_marker_line_thickness"]) == (2, 1, 2, 2)
+
+    def test_custom_widths_clamped(self):
+        st = self._snap(fov_line_thickness=7, detect_range_line_thickness=99,
+                        tracer_line_thickness=0, aim_marker_line_thickness="x")["settings"]
+        assert (st["fov_line_thickness"], st["detect_range_line_thickness"],
+                st["tracer_line_thickness"], st["aim_marker_line_thickness"]) == (7, 10, 2, 2)
+
+    def test_predicted_point_only_while_active(self):
+        s = self._snap(aim_prediction_active=False, aim_predicted_x=300.0, aim_predicted_y=200.0)
+        assert s["aim_predicted"] is None
+        s = self._snap(aim_prediction_active=True, aim_predicted_x=300.7, aim_predicted_y=200.2,
+                       show_aim_prediction_marker=False)
+        assert s["aim_predicted"] == {"x": 300, "y": 200}
+        assert s["settings"]["show_aim_prediction_marker"] is False
+
+    def test_predicted_point_is_shifted_like_the_boxes_for_a_udp_crop(self):
+        s = self._snap(aim_prediction_active=True, aim_predicted_x=10.0, aim_predicted_y=20.0,
+                       screenshot_method="udp")
+        off = s["boxes"][0][0] - 100                       # boxes are shifted by offset_x
+        assert s["aim_predicted"]["x"] == 10 + off

@@ -909,3 +909,36 @@ def test_draw_detection_overlay_track_only_lock_box(monkeypatch):
     cfg.lock_track_only = False                          # aiming normally: unchanged, nothing extra drawn
     sc._draw_detection_overlay(frame, None, cfg, has_alpha=True)
     assert rects == []
+
+
+def test_draw_detection_overlay_uses_the_configured_line_widths(monkeypatch):
+    from core import screen_capture as sc
+
+    seen = {"line": [], "rect": [], "circle": []}
+    monkeypatch.setattr(sc.cv2, 'line', lambda f, p1, p2, c, w, *a, **k: seen["line"].append(w))
+    monkeypatch.setattr(sc.cv2, 'rectangle', lambda f, p1, p2, c, w, *a, **k: seen["rect"].append(w))
+    monkeypatch.setattr(sc.cv2, 'circle', lambda f, ctr, r, c, w, *a, **k: seen["circle"].append((r, w)))
+    frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+
+    cfg = _make_overlay_config(show_detect_range=True, fov_line_thickness=6, detect_range_line_thickness=4,
+                               aim_marker_line_thickness=5, aim_prediction_active=True,
+                               aim_predicted_x=400.0, aim_predicted_y=300.0)
+    sc._draw_detection_overlay(frame, None, cfg, has_alpha=True)
+    assert 4 in seen["rect"]                              # detection range
+    assert seen["line"] and set(seen["line"]) == {6}      # FOV corners
+    assert seen["circle"] == [(7, 5)]                     # predicted aim point
+
+    seen["circle"].clear()
+    cfg.show_aim_prediction_marker = False
+    sc._draw_detection_overlay(frame, None, cfg, has_alpha=True)
+    assert seen["circle"] == []
+
+
+def test_draw_detection_overlay_defaults_keep_the_original_widths(monkeypatch):
+    from core import screen_capture as sc
+
+    widths = []
+    monkeypatch.setattr(sc.cv2, 'line', lambda f, p1, p2, c, w, *a, **k: widths.append(w))
+    monkeypatch.setattr(sc.cv2, 'rectangle', lambda *a, **k: None)
+    sc._draw_detection_overlay(np.zeros((1000, 1000, 4), dtype=np.uint8), None, _make_overlay_config(), has_alpha=True)
+    assert set(widths) == {2}
