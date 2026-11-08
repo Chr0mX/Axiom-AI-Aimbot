@@ -1,5 +1,7 @@
 # Changelog
 
+- Web Control: LAN Speed Test on the Other tab (ping/jitter, download, upload between the browser and the Axiom host).
+
 - Web Control client: FOV shrink mode, advanced FOV, retention and tracking settings on the Inference tab. Web ESP: retention FOV boundary and track-only lock highlight.
 
 - Opt-in lock retention: a locked target that leaves the shrunk FOV stays tracked (not aimed) inside a retention FOV instead of being dropped or stolen; class gate for lock continuation; confidence EMA now decays during misses.

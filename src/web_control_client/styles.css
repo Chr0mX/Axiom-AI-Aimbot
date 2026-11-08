@@ -21,7 +21,7 @@
 :root {
   /* Sentinel: app.js only builds the custom dropdowns when this exact
      stylesheet version loaded (see enhanceSelects()). */
-  --axiom-css: 12;
+  --axiom-css: 13;
   color-scheme: dark;
 
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
@@ -889,3 +889,8 @@ body.searching .field-group.collapsed { display: flex; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation-duration: 0.01ms !important; }
 }
+
+
+/* LAN speed test result block (Other tab) */
+.speed-result { white-space: pre-line; font-variant-numeric: tabular-nums; color: var(--ink); }
+.speed-result[hidden] { display: none; }

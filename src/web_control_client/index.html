@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=12">
+  <link rel="stylesheet" href="styles.css?v=13">
 </head>
 <body>
   <div class="app">
@@ -2371,6 +2371,17 @@
               </div>
               <div class="field-control"><button id="other-test-btn" type="button">Test</button></div>
             </div>
+            <div class="field-card" id="other-speed-card">
+              <div class="field-info">
+                <div class="field-title">LAN Speed Test</div>
+                <div class="field-desc" id="other-speed-stage">Measures ping, download and upload between this browser and the Axiom host. Uses up to ~50 MB of LAN traffic, so don't run it mid-game.</div>
+                <div class="field-desc speed-result" id="other-speed-result" hidden></div>
+              </div>
+              <div class="field-control">
+                <button id="other-speed-btn" type="button">Start</button>
+                <button id="other-speed-stop" type="button" hidden>Stop</button>
+              </div>
+            </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Clear Saved Token</div>
@@ -2396,6 +2407,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>
