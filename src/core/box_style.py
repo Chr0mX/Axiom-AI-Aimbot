@@ -48,3 +48,41 @@ def corner_length(config, width: float, height: float) -> int:
         pct = min(MAX_CORNER_PCT, pct)
         return int(max(2, min(side / 2.0, side * pct / 100.0)))
     return max(6, min(24, int(side * 0.15)))
+
+
+# ── Overlay element line widths (FOV / Detection Range / Tracer / Predicted point) ──
+# Unlike box_line_thickness these have no "Auto": 1-10 px, defaulting to the width each
+# surface always drew, so an existing config looks exactly as before.
+FOV_LINE_DEFAULT = 2
+DETECT_RANGE_LINE_DEFAULT = 1
+TRACER_LINE_DEFAULT = 2
+AIM_MARKER_LINE_DEFAULT = 2
+
+
+def line_thickness(config, attr: str, default: int) -> int:
+    """Width in px of an overlay line: ``config.<attr>`` clamped to 1..MAX_THICKNESS,
+    ``default`` when unset or not a usable number."""
+    raw = getattr(config, attr, default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if value <= 0:
+        return default
+    return min(MAX_THICKNESS, value)
+
+
+def fov_thickness(config) -> int:
+    return line_thickness(config, 'fov_line_thickness', FOV_LINE_DEFAULT)
+
+
+def detect_range_thickness(config) -> int:
+    return line_thickness(config, 'detect_range_line_thickness', DETECT_RANGE_LINE_DEFAULT)
+
+
+def tracer_thickness(config) -> int:
+    return line_thickness(config, 'tracer_line_thickness', TRACER_LINE_DEFAULT)
+
+
+def aim_marker_thickness(config) -> int:
+    return line_thickness(config, 'aim_marker_line_thickness', AIM_MARKER_LINE_DEFAULT)

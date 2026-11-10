@@ -133,25 +133,30 @@ class _ModelInspectWorker(QThread):
 
     resultReady = pyqtSignal(str)
 
-    def __init__(self, inspect_path: str, parent=None):
+    def __init__(self, inspect_path: str, runtime: dict | None = None, parent=None):
         super().__init__(parent)
         self._inspect_path = inspect_path
+        self._runtime = runtime
 
     def run(self) -> None:
         try:
             from model_detect import inspect_model
             info = inspect_model(self._inspect_path)
-            parts = []
-            if info.get("format"):
-                parts.append(info["format"])
-            parts.append(f"Input: {info['input_size']}")
-            if info.get("num_classes"):
-                parts.append(f"Classes: {info['num_classes']}")
-            if info.get("precision"):
-                parts.append(f"Precision: {info['precision']}")
-            if info.get("file_size"):
-                parts.append(info["file_size"])
-            text = "  •  ".join(parts)
+            if self._runtime is not None:
+                # File facts + a clear "precision in use / selected / pending" block taken
+                # from the live session -- not the filename-derived precision.
+                from core.model_runtime import compose_info_text
+                text = compose_info_text(info, self._runtime)
+            else:
+                parts = []
+                if info.get("format"):
+                    parts.append(info["format"])
+                parts.append(f"Input: {info['input_size']}")
+                if info.get("num_classes"):
+                    parts.append(f"Classes: {info['num_classes']}")
+                if info.get("file_size"):
+                    parts.append(info["file_size"])
+                text = "  •  ".join(parts)
         except BaseException as exc:
             text = str(exc)[:120]
         self.resultReady.emit(text)
@@ -478,25 +483,24 @@ class ModelPage(BasePage):
             _root  = os.path.dirname(_src)
             full_onnx = model_path
 
-        # When TRT is active, prefer the matching cached engine file
+        # Prefer the cached TensorRT engine for the precision actually in use (the running
+        # one when this model is loaded, else the selection) -- never "last in sort order".
+        from core.model_runtime import describe_runtime, resolve_engine_path, runtime_signature
+        runtime = describe_runtime(self._config, full_onnx) if self._config else None
         inspect_path = full_onnx
-        provider = getattr(self._config, 'current_provider', '') if self._config else ''
-        if provider == 'TensorrtExecutionProvider':
-            trt_cache = os.path.join(_root, "trt_cache")
-            if os.path.isdir(trt_cache):
-                model_stem = os.path.splitext(os.path.basename(full_onnx))[0]
-                engine_files = glob.glob(os.path.join(trt_cache, f"{model_stem}*.engine"))
-                if engine_files:
-                    inspect_path = sorted(engine_files)[-1]
+        if runtime is not None:
+            engine = resolve_engine_path(self._config, full_onnx, runtime)
+            if engine:
+                inspect_path = engine
 
-        # Skip re-inspecting a file we already have the answer for — keyed on
-        # mtime too (not just the path) so a fresh TensorRT build that
-        # overwrites the same .engine filename still gets picked up.
+        # Skip re-inspecting a file we already have the answer for -- keyed on mtime too (a
+        # fresh TensorRT build that overwrites the same .engine filename must be picked up)
+        # and on the runtime state (switching FP32/FP16 or a model swap changes the text).
         try:
             inspect_mtime = os.path.getmtime(inspect_path)
         except OSError:
             inspect_mtime = None
-        inspect_key = (inspect_path, inspect_mtime)
+        inspect_key = (inspect_path, inspect_mtime, runtime_signature(runtime) if runtime else None)
         if inspect_key == self._last_inspected_key:
             return
         self._last_inspected_key = inspect_key
@@ -518,7 +522,7 @@ class ModelPage(BasePage):
             self._stale_inspect_workers.append(old)
             old.finished.connect(lambda w=old: self._dropStaleInspectWorker(w))
 
-        worker = _ModelInspectWorker(inspect_path)
+        worker = _ModelInspectWorker(inspect_path, runtime)
         worker.resultReady.connect(self.modelInfoCard.contentLabel.setText)
         worker.finished.connect(lambda w=worker: self._onInspectWorkerDone(w))
         self._inspect_worker = worker
@@ -765,6 +769,7 @@ class ModelPage(BasePage):
         self._applyModelBadges()
         self._updateModelCardLegend()
         if self._config.model_path:
+            self._updateModelInfo(self._config.model_path)   # selection changed -> refresh the card
             self._redirectToConvertIfNeeded(self._config.model_path)
 
     def _onModelChanged(self, text):

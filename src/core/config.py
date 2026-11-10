@@ -225,10 +225,15 @@ _FIELD_MAP = {
     'show_boxes':                 'display.show_boxes',
     'box_full_rect':              'display.box_full_rect',
     'box_line_thickness':         'display.box_line_thickness',
+    'fov_line_thickness':         'display.fov_line_thickness',
+    'detect_range_line_thickness': 'display.detect_range_line_thickness',
+    'tracer_line_thickness':      'display.tracer_line_thickness',
+    'aim_marker_line_thickness':  'display.aim_marker_line_thickness',
     'box_corner_length_pct':      'display.box_corner_length_pct',
     'show_detect_range':          'display.show_detect_range',
     'show_confidence':            'display.show_confidence',
     'show_tracer_line':           'display.show_tracer_line',
+    'tracer_from_bottom':         'display.tracer_from_bottom',
     'show_aim_prediction_marker': 'display.show_aim_prediction_marker',
     'box_color_theme':            'display.box_color_theme',
     'chroma_box_speed':           'display.chroma_box_speed',
@@ -535,6 +540,8 @@ class Config:
         self.fov_effective_height: float = float(self.fov_height)
         # True on frames where the lock is kept outside the control FOV (retention): tracked, not aimed.
         self.lock_track_only: bool = False
+        # Bumped once per inference result (ai_loop); the Web ESP broadcaster sends on change.
+        self.detection_seq: int = 0
 
         # Runtime-only (unpersisted, same pattern as fov_effective_size):
         # what the inference loop's live session is ACTUALLY running, as
@@ -638,6 +645,7 @@ class Config:
 
         # Tracer line from screen center to detected targets
         self.show_tracer_line: bool = True
+        self.tracer_from_bottom: bool = False   # tracer starts at the bottom-center of the screen, not the crosshair
 
         # Raw-vs-predicted aim point marker — see aim_predicted_x/y below.
         # Diagnostic only: draws a second marker at the locked target's
@@ -732,6 +740,12 @@ class Config:
         self.show_boxes: bool = True
         self.box_full_rect: bool = False
         self.box_line_thickness: int = 0       # px; 0 = auto (1-3 px by confidence)
+        # Line widths (px, 1-10) of the FOV, Detection Range, Tracer Line and Predicted Aim
+        # Point; the defaults are the widths the overlays always drew.
+        self.fov_line_thickness: int = 2
+        self.detect_range_line_thickness: int = 1
+        self.tracer_line_thickness: int = 2
+        self.aim_marker_line_thickness: int = 2
         self.box_corner_length_pct: int = 0    # % of shorter side; 0 = auto (15%, 6-24 px)
         self.show_detect_range: bool = True
         self.show_status_panel: bool = True
@@ -928,6 +942,8 @@ class Config:
         self.source_nominal_fps: float = 0.0
         self.udp_recv_fps: float = 0.0        # raw assembled-frame rate from UDP sender
         self.udp_dropped_fps: float = 0.0     # incomplete frames evicted/sec (packet loss)
+        self.udp_stats: dict = {}             # runtime: UdpJpegReceiver.snapshot_stats() (Speed Test UDP block)
+        self.udp_stats_t: float = 0.0         # runtime: perf_counter() when udp_stats was published
 
         # Secondary inference (V1 = PaddleOCR, V2 = ONNX HUD detector)
         self.second_inference_mode: str = "off"          # "off" | "v1_ocr" | "v2_onnx"
@@ -1190,6 +1206,7 @@ def validate_config(config_instance: Config) -> None:
     _validate_aim_math(config_instance)
     _validate_tracking(config_instance)
     _validate_box_style(config_instance)
+    _validate_web_esp(config_instance)
     _validate_gpu_monitor(config_instance)
 
     # 向後兼容：修正推理後端選擇
@@ -1364,7 +1381,16 @@ def _validate_box_style(config: Config) -> None:
         except (TypeError, ValueError):
             return 0
     config.box_line_thickness = max(0, min(10, _int('box_line_thickness')))
+    for _name, _default in (('fov_line_thickness', 2), ('detect_range_line_thickness', 1),
+                            ('tracer_line_thickness', 2), ('aim_marker_line_thickness', 2)):
+        _v = _int(_name)
+        setattr(config, _name, _default if _v <= 0 else min(10, _v))
     config.box_corner_length_pct = max(0, min(50, _int('box_corner_length_pct')))
+
+
+def _validate_web_esp(config: Config) -> None:
+    """web_esp_fps: the Web ESP broadcast rate cap, 15-240 Hz (the server clamps the same range)."""
+    config.web_esp_fps = int(max(15, min(240, _finite(getattr(config, 'web_esp_fps', 60), 60))))
 
 
 def _validate_gpu_monitor(config: Config) -> None:

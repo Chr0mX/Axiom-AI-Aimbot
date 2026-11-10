@@ -1106,6 +1106,8 @@ def ai_logic_loop(
                 # Unreduced set — same list the in-game overlay draws from, used
                 # by Web ESP so it isn't narrowed down by single_target_mode.
                 config.latest_all_boxes = all_boxes
+                # New inference result: lets the Web ESP broadcaster send immediately instead of polling.
+                config.detection_seq = (int(getattr(config, 'detection_seq', 0)) + 1) & 0x7FFFFFFF
                 config.latest_all_confidences = all_confidences
 
                 # aim_start_delay_ms: detection keeps running, but no mouse

@@ -293,16 +293,31 @@ class TestGetModelInfo:
         config = _config(current_provider="")
         result = wcs.get_model_info(config, str(model_file))
         assert result["ok"] is True
-        assert result["text"] == "ONNX  •  Input: 640×640  •  Classes: 2  •  10.0 MB"
+        lines = result["text"].splitlines()
+        assert lines[0] == "ONNX  •  Input: 640×640  •  Classes: 2  •  10.0 MB"
+        assert "not loaded yet" in lines[1]                 # nothing loaded: the selection is stated, not a fake "running"
+        assert result["runtime"]["state"] == "idle"
 
     def test_prefers_cached_trt_engine_when_tensorrt_active(self, tmp_path, monkeypatch):
         model_file = tmp_path / "real.onnx"
         model_file.write_bytes(b"")
         trt_cache = tmp_path / "trt_cache"
         trt_cache.mkdir()
-        engine_file = trt_cache / "real_fp16.engine"
-        engine_file.write_bytes(b"")
+        fp16_engine = trt_cache / "real_sm86_fp16.engine"
+        fp16_engine.write_bytes(b"")
+        (trt_cache / "real_sm86_fp32.engine").write_bytes(b"")   # sorts AFTER fp16: used to win
         monkeypatch.setattr(wcs, "project_root", str(tmp_path))
+
+        # session_utils imports onnxruntime at module level; stand one in for this test only.
+        import importlib
+        import core
+        fake_ort = types.ModuleType("onnxruntime")
+        fake_ort.get_available_providers = lambda: []
+        monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+        monkeypatch.delitem(sys.modules, "core.session_utils", raising=False)
+        monkeypatch.delattr(core, "session_utils", raising=False)
+        su = importlib.import_module("core.session_utils")
+        monkeypatch.setattr(su, "_TRT_CACHE_DIR", str(trt_cache))
 
         seen_paths = []
         fake_module = types.ModuleType("model_detect")
@@ -310,15 +325,21 @@ class TestGetModelInfo:
         def _fake_inspect(path):
             seen_paths.append(path)
             return {"format": "TensorRT Engine", "input_size": "640×640",
-                    "num_classes": None, "precision": "FP16", "file_size": "5.0 MB"}
+                    "num_classes": None, "precision": "FP32", "file_size": "5.0 MB"}
 
         fake_module.inspect_model = _fake_inspect
         monkeypatch.setitem(sys.modules, "model_detect", fake_module)
 
-        config = _config(current_provider="TensorrtExecutionProvider")
+        config = _config(current_provider="TensorrtExecutionProvider", trt_fp16_enabled=True,
+                         loaded_model_path=str(model_file), loaded_model_fp16=True)
         result = wcs.get_model_info(config, str(model_file))
         assert result["ok"] is True
-        assert seen_paths == [str(engine_file)]
+        assert seen_paths == [str(fp16_engine)]
+        assert "Precision in use: FP16" in result["text"]    # from the live session, not the filename's "FP32"
+        assert "Precision: FP32" not in result["text"]
+        sys.modules.pop("core.session_utils", None)
+        if hasattr(core, "session_utils"):
+            delattr(core, "session_utils")
 
     def test_model_detect_unavailable(self, tmp_path, monkeypatch):
         model_file = tmp_path / "real.onnx"
@@ -346,7 +367,7 @@ class TestGetModelInfo:
 
         config = _config(current_provider="")
         result = wcs.get_model_info(config, str(model_file))
-        assert result == {"ok": True, "text": "corrupt model file"}
+        assert result["ok"] is True and result["text"] == "corrupt model file"
 
 
 class TestProbeUvc:

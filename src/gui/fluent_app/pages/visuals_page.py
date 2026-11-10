@@ -84,6 +84,22 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Line widths of the FOV / Detection Range / Tracer Line / Predicted Aim Point. Each sits
+        # under its Show toggle and is only visible while that toggle is on.
+        def _lineCard(title_key, title, hint_key, hint):
+            return SliderLabelCard(
+                FluentIcon.PENCIL_INK, t(title_key, title), 1, 10,
+                format_func=lambda v: f"{v} px",
+                description=t(hint_key, hint), parent=self.displayGroup)
+        self.fovThicknessCard = _lineCard("fov_line_thickness", "FOV Line Thickness",
+                                          "fov_line_thickness_hint", "Width of the FOV box or ellipse.")
+        self.detectRangeThicknessCard = _lineCard("detect_range_line_thickness", "Detection Range Line Thickness",
+                                                  "detect_range_line_thickness_hint", "Width of the detection range outline.")
+        self.tracerThicknessCard = _lineCard("tracer_line_thickness", "Tracer Line Thickness",
+                                             "tracer_line_thickness_hint", "Width of the line from screen center to each target.")
+        self.aimMarkerThicknessCard = _lineCard("aim_marker_line_thickness", "Predicted Aim Point Thickness",
+                                                "aim_marker_line_thickness_hint", "Width of the predicted aim point circle.")
+
         # Box line thickness (both styles) and corner-bracket arm length
         self.boxThicknessCard = SliderLabelCard(
             FluentIcon.PENCIL_INK,
@@ -131,6 +147,14 @@ class VisualsPage(BasePage):
             FluentIcon.SHARE,
             t("show_tracer_line", "Tracer Line"),
             t("show_tracer_line_hint", "Draw a line from screen center to each detected target"),
+            parent=self.displayGroup
+        )
+
+        # Tracer origin: bottom-center of the screen instead of the crosshair
+        self.tracerFromBottomCard = SwitchSettingCard(
+            FluentIcon.DOWN,
+            t("tracer_from_bottom", "Tracer From Bottom Center"),
+            t("tracer_from_bottom_hint", "Start each tracer line at the bottom-center of the screen instead of the crosshair"),
             parent=self.displayGroup
         )
 
@@ -361,6 +385,17 @@ class VisualsPage(BasePage):
         self.webEspWsPortCard.hBoxLayout.addWidget(self.webEspWsPortSpin, 0, Qt.AlignmentFlag.AlignRight)
         self.webEspWsPortCard.hBoxLayout.addSpacing(16)
 
+        # Broadcast rate cap. The server sends on every new detection up to this rate, so it
+        # only helps up to the inference rate; read live (no restart needed).
+        self.webEspFpsCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH,
+            t("web_esp_fps", "Web ESP Update Rate"),
+            15, 240,
+            format_func=lambda v: f"{v} Hz",
+            description=t("web_esp_fps_desc", "Most updates per second sent to the browser overlay. Real data only arrives as fast as detection runs."),
+            parent=self.webEspGroup
+        )
+
         # Connect card — URL text, QR code, and an "open in browser" button
         self.webEspConnectCard = SettingCard(
             FluentIcon.QRCODE,
@@ -388,14 +423,19 @@ class VisualsPage(BasePage):
         """Lays out all controls"""
         # Display settings
         self.displayGroup.addSettingCard(self.showFovCard)
+        self.displayGroup.addSettingCard(self.fovThicknessCard)
         self.displayGroup.addSettingCard(self.showBoxesCard)
         self.displayGroup.addSettingCard(self.boxFullRectCard)
         self.displayGroup.addSettingCard(self.boxThicknessCard)
         self.displayGroup.addSettingCard(self.boxCornerLengthCard)
         self.displayGroup.addSettingCard(self.showConfidenceCard)
         self.displayGroup.addSettingCard(self.showDetectRangeCard)
+        self.displayGroup.addSettingCard(self.detectRangeThicknessCard)
         self.displayGroup.addSettingCard(self.showTracerLineCard)
+        self.displayGroup.addSettingCard(self.tracerThicknessCard)
+        self.displayGroup.addSettingCard(self.tracerFromBottomCard)
         self.displayGroup.addSettingCard(self.showAimPredictionCard)
+        self.displayGroup.addSettingCard(self.aimMarkerThicknessCard)
         self.displayGroup.addSettingCard(self.boxThemeCard)
         self.displayGroup.addSettingCard(self.chromaSpeedCard)
         self.addContent(self.displayGroup)
@@ -427,6 +467,7 @@ class VisualsPage(BasePage):
         self.webEspGroup.addSettingCard(self.webEspEnableCard)
         self.webEspGroup.addSettingCard(self.webEspHttpPortCard)
         self.webEspGroup.addSettingCard(self.webEspWsPortCard)
+        self.webEspGroup.addSettingCard(self.webEspFpsCard)
         self.webEspGroup.addSettingCard(self.webEspConnectCard)
         self.addContent(self.webEspGroup)
 
@@ -442,10 +483,16 @@ class VisualsPage(BasePage):
         self.showStatusCard.checkedChanged.connect(self._onShowStatusChanged)
         self.showDetectRangeCard.checkedChanged.connect(self._onShowDetectRangeChanged)
         self.showTracerLineCard.checkedChanged.connect(self._onShowTracerLineChanged)
+        self.tracerFromBottomCard.checkedChanged.connect(self._onTracerFromBottomChanged)
         self.showAimPredictionCard.checkedChanged.connect(self._onShowAimPredictionChanged)
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
         self.boxThicknessCard.valueChanged.connect(self._onBoxThicknessChanged)
+        for _card, _attr in ((self.fovThicknessCard, 'fov_line_thickness'),
+                             (self.detectRangeThicknessCard, 'detect_range_line_thickness'),
+                             (self.tracerThicknessCard, 'tracer_line_thickness'),
+                             (self.aimMarkerThicknessCard, 'aim_marker_line_thickness')):
+            _card.valueChanged.connect(lambda v, a=_attr: self._onLineThicknessChanged(a, v))
         self.boxCornerLengthCard.valueChanged.connect(self._onBoxCornerLengthChanged)
         self.spAutoAimCheck.stateChanged.connect(self._onStatusPanelAutoAimChanged)
         self.spAimToggleCheck.stateChanged.connect(self._onStatusPanelAimToggleChanged)
@@ -476,6 +523,7 @@ class VisualsPage(BasePage):
         self.webEspEnableCard.checkedChanged.connect(self._onWebEspEnableChanged)
         self.webEspHttpPortSpin.valueChanged.connect(self._onWebEspHttpPortChanged)
         self.webEspWsPortSpin.valueChanged.connect(self._onWebEspWsPortChanged)
+        self.webEspFpsCard.valueChanged.connect(self._onWebEspFpsChanged)
         self.webEspOpenBtn.clicked.connect(self._onWebEspOpen)
 
 
@@ -495,7 +543,13 @@ class VisualsPage(BasePage):
         self.showStatusCard.setChecked(self._config.show_status_panel)
         self.showDetectRangeCard.setChecked(self._config.show_detect_range)
         self.showTracerLineCard.setChecked(bool(getattr(self._config, 'show_tracer_line', False)))
+        self.tracerFromBottomCard.setChecked(bool(getattr(self._config, 'tracer_from_bottom', False)))
         self.showAimPredictionCard.setChecked(bool(getattr(self._config, 'show_aim_prediction_marker', True)))
+        self.fovThicknessCard.setValue(int(getattr(self._config, 'fov_line_thickness', 2) or 2))
+        self.detectRangeThicknessCard.setValue(int(getattr(self._config, 'detect_range_line_thickness', 1) or 1))
+        self.tracerThicknessCard.setValue(int(getattr(self._config, 'tracer_line_thickness', 2) or 2))
+        self.aimMarkerThicknessCard.setValue(int(getattr(self._config, 'aim_marker_line_thickness', 2) or 2))
+        self._updateLineThicknessVisibility()
         theme_text = str(getattr(self._config, 'box_color_theme', 'default')).capitalize()
         _valid_themes = ("Default", "Cyan", "Red", "Yellow", "White", "Purple")
         self.boxThemeCombo.setCurrentText(theme_text if theme_text in _valid_themes else "Default")
@@ -539,6 +593,8 @@ class VisualsPage(BasePage):
         self.webEspWsPortSpin.setValue(int(getattr(self._config, 'web_esp_ws_port', 8765)))
         self.webEspHttpPortCard.setEnabled(web_on)
         self.webEspWsPortCard.setEnabled(web_on)
+        self.webEspFpsCard.setValue(int(getattr(self._config, 'web_esp_fps', 60) or 60))
+        self.webEspFpsCard.setEnabled(web_on)
         self.webEspConnectCard.setEnabled(web_on)
         self._refreshWebEspConnect()
 
@@ -546,6 +602,7 @@ class VisualsPage(BasePage):
     def _onShowFovChanged(self, checked):
         if self._config:
             self._config.show_fov = checked
+        self._updateLineThicknessVisibility()
 
     def _onShowBoxesChanged(self, checked):
         if self._config:
@@ -576,14 +633,36 @@ class VisualsPage(BasePage):
     def _onShowDetectRangeChanged(self, checked):
         if self._config:
             self._config.show_detect_range = checked
+        self._updateLineThicknessVisibility()
 
     def _onShowTracerLineChanged(self, checked):
         if self._config:
             self._config.show_tracer_line = checked
+        self._updateLineThicknessVisibility()
+
+    def _onTracerFromBottomChanged(self, checked):
+        if self._config:
+            self._config.tracer_from_bottom = checked
 
     def _onShowAimPredictionChanged(self, checked):
         if self._config:
             self._config.show_aim_prediction_marker = checked
+        self._updateLineThicknessVisibility()
+
+    def _onLineThicknessChanged(self, attr, value):
+        if self._config:
+            setattr(self._config, attr, max(1, min(10, int(value))))
+
+    def _updateLineThicknessVisibility(self):
+        """Each thickness card is hidden (not greyed out) while its Show toggle is off."""
+        c = self._config
+        if not c:
+            return
+        self.fovThicknessCard.setVisible(bool(getattr(c, 'show_fov', True)))
+        self.detectRangeThicknessCard.setVisible(bool(getattr(c, 'show_detect_range', True)))
+        self.tracerThicknessCard.setVisible(bool(getattr(c, 'show_tracer_line', False)))
+        self.tracerFromBottomCard.setVisible(bool(getattr(c, 'show_tracer_line', False)))
+        self.aimMarkerThicknessCard.setVisible(bool(getattr(c, 'show_aim_prediction_marker', True)))
 
     def _onBoxThemeChanged(self, text):
         if self._config:
@@ -716,6 +795,7 @@ class VisualsPage(BasePage):
             self._config.web_esp_enabled = checked
         self.webEspHttpPortCard.setEnabled(checked)
         self.webEspWsPortCard.setEnabled(checked)
+        self.webEspFpsCard.setEnabled(checked)
         self.webEspConnectCard.setEnabled(checked)
         # Start/stop the server live so the URL+QR appear immediately.
         try:
@@ -737,6 +817,10 @@ class VisualsPage(BasePage):
         if self._config:
             self._config.web_esp_http_port = int(value)
         self._webEspRestartTimer.start()
+
+    def _onWebEspFpsChanged(self, value):
+        if self._config:
+            self._config.web_esp_fps = max(15, min(240, int(value)))   # read live by the broadcaster
 
     def _onWebEspWsPortChanged(self, value):
         if self._config:
@@ -851,6 +935,16 @@ class VisualsPage(BasePage):
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
         self.showTracerLineCard.titleLabel.setText(t("show_tracer_line", "Tracer Line"))
         self.showTracerLineCard.contentLabel.setText(t("show_tracer_line_hint", "Draw a line from screen center to each detected target"))
+        self.tracerFromBottomCard.titleLabel.setText(t("tracer_from_bottom", "Tracer From Bottom Center"))
+        self.tracerFromBottomCard.contentLabel.setText(t("tracer_from_bottom_hint", "Start each tracer line at the bottom-center of the screen instead of the crosshair"))
+        for _card, _key, _title, _hkey, _hint in (
+            (self.fovThicknessCard, "fov_line_thickness", "FOV Line Thickness", "fov_line_thickness_hint", "Width of the FOV box or ellipse."),
+            (self.detectRangeThicknessCard, "detect_range_line_thickness", "Detection Range Line Thickness", "detect_range_line_thickness_hint", "Width of the detection range outline."),
+            (self.tracerThicknessCard, "tracer_line_thickness", "Tracer Line Thickness", "tracer_line_thickness_hint", "Width of the line from screen center to each target."),
+            (self.aimMarkerThicknessCard, "aim_marker_line_thickness", "Predicted Aim Point Thickness", "aim_marker_line_thickness_hint", "Width of the predicted aim point circle."),
+        ):
+            _card.titleLabel.setText(t(_key, _title))
+            _card.contentLabel.setText(t(_hkey, _hint))
         self.showAimPredictionCard.titleLabel.setText(t("show_aim_prediction_marker", "Predicted Aim Point"))
         self.showAimPredictionCard.contentLabel.setText(t("show_aim_prediction_marker_hint",
             "Draw a second marker at the locked target's post-prediction point (only while Target Tracking's prediction or Kalman is on)"))
@@ -903,6 +997,8 @@ class VisualsPage(BasePage):
         self.webEspHttpPortCard.contentLabel.setText(t("web_esp_http_port_desc", "Port for the overlay web page."))
         self.webEspWsPortCard.titleLabel.setText(t("web_esp_ws_port", "WebSocket Port"))
         self.webEspWsPortCard.contentLabel.setText(t("web_esp_ws_port_desc", "Port for the live state stream."))
+        self.webEspFpsCard.titleLabel.setText(t("web_esp_fps", "Web ESP Update Rate"))
+        self.webEspFpsCard.contentLabel.setText(t("web_esp_fps_desc", "Most updates per second sent to the browser overlay. Real data only arrives as fast as detection runs."))
         self.webEspConnectCard.titleLabel.setText(t("web_esp_connect", "Connect"))
         self.webEspConnectCard.contentLabel.setText(t("web_esp_connect_desc", "Open this URL on the same PC, or scan the QR from a phone on the same Wi-Fi."))
         self.webEspOpenBtn.setText(t("web_esp_open", "Open in browser"))

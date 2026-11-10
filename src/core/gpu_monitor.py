@@ -20,7 +20,9 @@ switches exist so the panel lays out the same for every sensor.
 from __future__ import annotations
 
 import logging
-from typing import Any
+import threading
+import time
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ STATUS_NOT_STARTED = "not_started"
 STATUS_NO_NVML = "no_nvml"
 STATUS_NO_GPU = "no_gpu"
 STATUS_OK = "ok"
+STATUS_CHECKING = "checking"      # GpuSampler only: started, no reading yet
 
 
 def nvml_installed() -> bool:
@@ -205,3 +208,119 @@ def format_reading(key: str, value: Any) -> str:
     if key == "voltage":
         return f"{value:.3f} V"
     return str(value)
+
+
+# -- Web Control sampler ------------------------------------------------------
+
+class GpuSampler:
+    """Lazy, demand-gated GPU sampler for the Web Control status (no Qt).
+
+    The Qt panel's ``GpuMonitorThread`` only runs while that panel is visible, so Web Control
+    cannot rely on its values.  This owns its *own* ``GpuMonitor`` on a daemon thread that
+
+    * starts on the first ``snapshot()`` call (never inside a request handler: NVML init
+      happens on the sampler thread),
+    * reads only the sensors whose ``status_panel_gpu_<key>`` switch is on and that are
+      supported, every ``status_panel_gpu_interval_ms`` (clamped 250-5000 ms),
+    * stops itself (releasing NVML) after ``idle_stop_s`` without a ``snapshot()`` call, and
+    * stays stopped for terminal states (no NVML / no GPU) -- nothing to poll.
+
+    NVML ref-counts ``nvmlInit``, so this coexists with the Qt panel's own monitor.
+    """
+
+    def __init__(self, monitor_factory: Callable[[], GpuMonitor] = GpuMonitor,
+                 clock: Callable[[], float] = time.monotonic,
+                 idle_stop_s: float = 10.0, min_interval_s: float = 0.25) -> None:
+        self._factory = monitor_factory
+        self._clock = clock
+        self._idle_stop_s = idle_stop_s
+        self._min_interval_s = min_interval_s
+        self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._last_demand = 0.0
+        self._config: Any = None
+        self._terminal = False
+        self._state: dict[str, Any] = self._empty(STATUS_NOT_STARTED)
+
+    @staticmethod
+    def _empty(status: str, name: str = "") -> dict[str, Any]:
+        return {"status": status, "name": name, "short_name": short_gpu_name(name) if name else "",
+                "supported": [], "readings": {}, "text": {}}
+
+    def snapshot(self, config: Any) -> dict[str, Any]:
+        """Latest state; marks demand and starts the sampler thread if it is not running."""
+        with self._lock:
+            self._config = config
+            self._last_demand = self._clock()
+            if not self._terminal and (self._thread is None or not self._thread.is_alive()):
+                if self._state["status"] in (STATUS_NOT_STARTED, STATUS_CHECKING) or not self._state["supported"]:
+                    self._state = self._empty(STATUS_CHECKING)
+                self._wake.clear()
+                self._thread = threading.Thread(target=self._run, name="gpu-sampler", daemon=True)
+                self._thread.start()
+            return dict(self._state)
+
+    def stop(self) -> None:
+        self._wake.set()
+        t = self._thread
+        if t is not None and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=2.0)
+
+    def _publish(self, state: dict[str, Any]) -> None:
+        with self._lock:
+            self._state = state
+            config = self._config
+        if config is not None:
+            try:   # lets the Visuals hint stop saying "waiting for the status panel"
+                config.gpu_sensor_support = {"status": state["status"], "name": state["name"],
+                                             "supported": list(state["supported"])}
+            except Exception:
+                pass
+
+    def _run(self) -> None:
+        monitor = self._factory()
+        try:
+            status = monitor.start()
+            while True:
+                config = self._config
+                if status != STATUS_OK:
+                    self._terminal = True
+                    self._publish(self._empty(status))
+                    return
+                keys = [k for k in SENSOR_KEYS
+                        if k not in monitor.unsupported
+                        and getattr(config, f"status_panel_gpu_{k}", True)]
+                readings = monitor.read(keys)
+                text = {k: format_reading(k, v) for k, v in readings.items()}
+                self._publish({
+                    "status": STATUS_OK, "name": monitor.gpu_name,
+                    "short_name": short_gpu_name(monitor.gpu_name),
+                    "supported": sorted(monitor.supported),
+                    "readings": {k: v for k, v in readings.items() if v is not None},
+                    "text": text,
+                })
+                interval = getattr(config, "status_panel_gpu_interval_ms", 1000)
+                try:
+                    wait = max(self._min_interval_s, min(5000, int(interval)) / 1000.0)
+                except (TypeError, ValueError):
+                    wait = 1.0
+                if self._wake.wait(wait):
+                    return
+                if self._clock() - self._last_demand > self._idle_stop_s:
+                    return                      # nobody is polling: release NVML
+        finally:
+            monitor.stop()
+
+
+_sampler: Optional[GpuSampler] = None
+_sampler_lock = threading.Lock()
+
+
+def get_sampler() -> GpuSampler:
+    """Process-wide sampler used by web_control_server._build_status()."""
+    global _sampler
+    with _sampler_lock:
+        if _sampler is None:
+            _sampler = GpuSampler()
+        return _sampler

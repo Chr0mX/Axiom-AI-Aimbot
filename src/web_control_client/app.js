@@ -445,6 +445,36 @@
   // per-model notes card. Refreshed whenever the model selection settles
   // (user pick, or the status-driven one-shot prefill above).
   // ---------------------------------------------------------------------
+  // Just the info card (not the notes): re-run whenever the live session changes -- model
+  // swap, FP32/FP16 switch, provider change -- so "Precision in use" never goes stale.
+  function refreshModelInfo() {
+    var name = modelSelect.value;
+    var infoEl = document.getElementById("model-info-text");
+    if (!name) { infoEl.textContent = "\u2014"; return; }
+    // /api/model_info resolves via resolve_model_path(), which joins a
+    // relative path directly against project_root, not project_root/Model
+    // — same "Model/" prefix the Switch button already adds, needed here
+    // too since modelSelect's options are bare basenames.
+    fetch("/api/model_info?model=" + encodeURIComponent("Model/" + name), { headers: authHeaders() })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (data) {
+        if (!data) { infoEl.textContent = "\u2014"; return; }
+        if (data.ok === false) {
+          infoEl.textContent = "Unavailable (" + (data.reason || "error") + ")";
+          return;
+        }
+        infoEl.textContent = data.text || "\u2014";
+      })
+      .catch(function () { infoEl.textContent = "\u2014"; });
+  }
+
+  var lastModelRuntimeSig = null;
+  function noteModelRuntime(s) {
+    var sig = [s.loaded_model, s.loaded_model_fp16, s.loaded_provider, s.trt_fp16_enabled, s.model].join("|");
+    if (lastModelRuntimeSig !== null && sig !== lastModelRuntimeSig) refreshModelInfo();
+    lastModelRuntimeSig = sig;
+  }
+
   function refreshModelInfoAndNotes() {
     var name = modelSelect.value;
     var infoEl = document.getElementById("model-info-text");
@@ -454,21 +484,7 @@
       notesEl.value = "";
       return;
     }
-    // /api/model_info resolves via resolve_model_path(), which joins a
-    // relative path directly against project_root, not project_root/Model
-    // — same "Model/" prefix the Switch button already adds, needed here
-    // too since modelSelect's options are bare basenames.
-    fetch("/api/model_info?model=" + encodeURIComponent("Model/" + name), { headers: authHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (!data) { infoEl.textContent = "—"; return; }
-        if (data.ok === false) {
-          infoEl.textContent = "Unavailable (" + (data.reason || "error") + ")";
-          return;
-        }
-        infoEl.textContent = data.text || "—";
-      })
-      .catch(function () { infoEl.textContent = "—"; });
+    refreshModelInfo();
 
     fetch("/api/model_notes?model=" + encodeURIComponent(name), { headers: authHeaders() })
       .then(function (res) { return res.ok ? res.json() : null; })
@@ -678,7 +694,7 @@
           if (typeof data.pid_unsafe_mode === "boolean") applyPidUnsafeSliderLimits(!!data.pid_unsafe_mode);
         }
         if (tab === "keys") updateKeysVisibility(data);
-        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); updateGpuMonitorVisibility(); }
+        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); updateLineThicknessVisibility(); updateGpuMonitorVisibility(); }
         if (tab === "convert" && typeof convertPrecisionSelect !== "undefined" && convertPrecisionSelect
             && document.activeElement !== convertPrecisionSelect && typeof data.trt_fp16_enabled === "boolean") {
           convertPrecisionSelect.value = data.trt_fp16_enabled ? "fp16" : "fp32";
@@ -730,6 +746,7 @@
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
         if (tab === "visuals" && key === "box_full_rect") updateBoxStyleVisibility();
+        if (tab === "visuals" && LINE_THICKNESS_TOGGLE_KEYS.indexOf(key) !== -1) updateLineThicknessVisibility();
         if (tab === "visuals" && key === "status_panel_show_gpu") updateGpuMonitorVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
@@ -1373,6 +1390,23 @@
   var webEspRestartTimer = null;
 
   // Corner Bracket Length only applies while boxes are drawn as brackets.
+  // Each line-thickness card is shown only while its Show toggle is on (mirrors visuals_page.py).
+  var LINE_THICKNESS_CARDS = [
+    ["vis-show_fov", "vis-fov-thickness-card"],
+    ["vis-show_detect_range", "vis-range-thickness-card"],
+    ["vis-show_tracer_line", "vis-tracer-thickness-card"],
+    ["vis-show_tracer_line", "vis-tracer-origin-card"],
+    ["vis-show_aim_prediction_marker", "vis-marker-thickness-card"],
+  ];
+  var LINE_THICKNESS_TOGGLE_KEYS = ["show_fov", "show_detect_range", "show_tracer_line", "show_aim_prediction_marker"];
+  function updateLineThicknessVisibility() {
+    LINE_THICKNESS_CARDS.forEach(function (pair) {
+      var toggle = document.getElementById(pair[0]);
+      var card = document.getElementById(pair[1]);
+      if (card) card.classList.toggle("hidden", !(toggle && toggle.checked));
+    });
+  }
+
   function updateBoxStyleVisibility() {
     var full = document.getElementById("vis-box_full_rect");
     var card = document.getElementById("vis-box-corner-card");
@@ -2131,8 +2165,35 @@
     else if (wasShowing) setModelListHint("", false);
   }
 
+  // GPU tiles — same sensors/labels/units as the Qt Status Panel's GPU section; the server
+  // sends preformatted text (core/gpu_monitor.format_reading) so no unit logic lives here.
+  var GPU_TILE_KEYS = ["temp", "util", "vram", "fan", "core_clock", "mem_clock", "power"];
+  var GPU_STATUS_TEXT = { checking: "Checking\u2026", no_nvml: "NVML not installed", no_gpu: "No NVIDIA GPU", not_started: "Checking\u2026" };
+  function applyGpu(g) {
+    var section = document.getElementById("s-gpu-section");
+    if (!section) return;
+    if (!g) { section.classList.add("hidden"); return; }
+    section.classList.remove("hidden");
+    var title = document.getElementById("s-gpu-title");
+    title.textContent = g.short_name ? "GPU \u00b7 " + g.short_name : "GPU";
+    title.title = g.name || "";
+    var ok = g.status === "ok";
+    var msgStat = document.getElementById("s-gpu-msg-stat");
+    msgStat.classList.toggle("hidden", ok);
+    if (!ok) document.getElementById("s-gpu-msg").textContent = GPU_STATUS_TEXT[g.status] || "\u2014";
+    var supported = g.supported || [];
+    GPU_TILE_KEYS.forEach(function (key) {
+      var stat = document.getElementById("s-gpu-" + key + "-stat");
+      var shown = ok && supported.indexOf(key) !== -1 && g.text && (key in g.text);
+      stat.classList.toggle("hidden", !shown);
+      if (shown) document.getElementById("s-gpu-" + key).textContent = g.text[key];
+    });
+  }
+
   function applyStatus(s) {
     applyModelLoadError(s.model_load_error);
+    noteModelRuntime(s);
+    applyGpu(s.gpu);
     document.getElementById("s-running").textContent = s.running ? "RUNNING" : "stopped";
     document.getElementById("s-active").textContent = s.active ? "ON" : "OFF";
     document.getElementById("s-firing").textContent = s.aim_firing ? "Aiming" : "Idle";
@@ -2694,7 +2755,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "13") return;
+    if (cssVer !== "16") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
@@ -2955,13 +3016,36 @@
     });
   }
 
+  // UDP "ping": the browser cannot send UDP, so this reports the quality of the real UDP video
+  // stream Axiom is receiving (relative timings measured on the host; no one-way delay).
+  function speedUdpStats(signal) {
+    return speedFetch("/api/status", { signal: signal }).then(function (r) { return r.json(); }).then(function (s) {
+      if (s.screenshot_method !== "udp") return null;
+      return s.udp_stats || { active: false };
+    }).catch(function (err) { if (err && err.name === "AbortError") throw err; return null; });
+  }
+
+  function speedUdpLine(u) {
+    if (u === null) return "UDP stream: set Capture Method to UDP to measure the video stream";
+    if (!u.active) return "UDP stream: no frames arriving";
+    return "UDP stream: frames every " + u.interval_ms.toFixed(1) + " ms (jitter " + u.jitter_ms.toFixed(1) +
+      " ms, min " + u.interval_min_ms.toFixed(1) + ", max " + u.interval_max_ms.toFixed(1) + ")\n" +
+      "  packets of one frame arrive within " + u.assembly_ms.toFixed(1) + " ms (worst " + u.assembly_max_ms.toFixed(1) +
+      " ms); lost " + u.lost_frames + " of " + (u.lost_frames + u.frames) + " frames (" + u.loss_pct.toFixed(1) +
+      " %), reordered " + u.reordered;
+  }
+
   function speedPing(count, signal) {
     var samples = [];
+    samples.proc = [];                  // server-side handling time per sample (ms), for "host vs network"
     function one(i) {
       if (i >= count) return Promise.resolve(samples);
       var t0 = performance.now();
-      return speedFetch("/api/speedtest/ping", { signal: signal }).then(function (r) { return r.json(); }).then(function () {
-        if (i > 0) samples.push(performance.now() - t0);   // sample 0 = connection warm-up
+      return speedFetch("/api/speedtest/ping", { signal: signal }).then(function (r) { return r.json(); }).then(function (body) {
+        if (i > 0) {                    // sample 0 = connection warm-up
+          samples.push(performance.now() - t0);
+          if (body && isFinite(body.proc_ms)) samples.proc.push(body.proc_ms);
+        }
         return one(i + 1);
       });
     }
@@ -3043,23 +3127,27 @@
       if (controller) return;
       controller = (typeof AbortController !== "undefined") ? new AbortController() : { signal: undefined, abort: function () {} };
       var signal = controller.signal;
-      var out = { ping: null, down: null, up: null };
+      var out = { ping: null, proc: null, down: null, up: null, udp: undefined };
       resultEl.hidden = true;
       setRunning(true);
 
       function render() {
         var lines = [];
         if (out.ping) lines.push("Ping: " + out.ping.median.toFixed(1) + " ms median (min " + out.ping.min.toFixed(1) +
-          ", max " + out.ping.max.toFixed(1) + ", jitter " + out.ping.jitter.toFixed(1) + " ms)");
+          ", max " + out.ping.max.toFixed(1) + ", jitter " + out.ping.jitter.toFixed(1) + " ms)" +
+          (out.proc ? "\n  Axiom handled each request in " + out.proc.median.toFixed(2) + " ms; the rest is browser, network and host scheduling" : ""));
         if (out.down !== null) lines.push("Download: " + speedFmt(out.down));
         if (out.up !== null) lines.push("Upload: " + speedFmt(out.up));
+        if (out.udp !== undefined) lines.push(speedUdpLine(out.udp));
         resultEl.textContent = lines.join("\n");
         resultEl.hidden = !lines.length;
       }
 
       stageEl.textContent = "Testing ping…";
       speedPing(12, signal).then(function (samples) {
-        out.ping = speedSummarize(samples); render();
+        out.ping = speedSummarize(samples);
+        out.proc = samples.proc.length ? speedSummarize(samples.proc) : null;
+        render();
         stageEl.textContent = "Testing download…";
         return speedRamp(speedDownloadPass, signal, function (m, mb) { out.down = m; render(); });
       }).then(function (down) {
@@ -3068,6 +3156,9 @@
         return speedRamp(speedUploadPass, signal, function (m) { out.up = m; render(); });
       }).then(function (up) {
         out.up = up; render();
+        return speedUdpStats(signal);
+      }).then(function (udp) {
+        out.udp = udp; render();
         stageEl.textContent = "Done — browser to Axiom host over one HTTP stream. Wi-Fi/router load or this browser can cap the result.";
       }).catch(function (err) {
         stageEl.textContent = (err && err.name === "AbortError") ? "Stopped." : "Failed: " + (err && err.message || err);
@@ -3252,10 +3343,13 @@
     var latencyEl = document.getElementById("other-latency");
     if (testBtn) {
       testBtn.addEventListener("click", function () {
-        var t0 = performance.now();
         latencyEl.textContent = "Testing…";
-        api("GET", "/api/status").then(function () {
-          latencyEl.textContent = "Connected — round trip " + Math.round(performance.now() - t0) + " ms";
+        // The light ping route (not /api/status, which builds the whole status dict), so the
+        // number is the connection, not Axiom's own work. First sample is the connection warm-up.
+        speedPing(6, undefined).then(function (samples) {
+          var m = speedSummarize(samples);
+          latencyEl.textContent = "Connected — round trip " + m.median.toFixed(1) + " ms median (min " +
+            m.min.toFixed(1) + ", max " + m.max.toFixed(1) + ")";
         }).catch(function (err) {
           latencyEl.textContent = "Failed: " + err.message;
         });

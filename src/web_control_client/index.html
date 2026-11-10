@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <div class="app">
@@ -67,6 +67,23 @@
                  (matching status_panel.py's own source_fps_row condition);
                  label/value are filled in by applyStatus() in app.js. -->
             <div class="stat hidden" id="s-stream-fps-stat"><div class="label" id="s-stream-fps-label">Stream FPS</div><div class="value" id="s-stream-fps">—</div></div>
+          </div>
+        </div>
+
+        <!-- GPU stats — mirrors the Status Panel's NVIDIA section. Hidden unless the Visuals tab's
+             "GPU Monitoring" switch is on (the server then adds status.gpu); each tile follows its own
+             per-sensor switch and is hidden if the GPU doesn't support that sensor. Filled by applyGpu(). -->
+        <div class="sidebar-section hidden" id="s-gpu-section">
+          <div class="card-title" id="s-gpu-title">GPU</div>
+          <div class="grid">
+            <div class="stat hidden" id="s-gpu-msg-stat"><div class="label">Status</div><div class="value" id="s-gpu-msg">—</div></div>
+            <div class="stat hidden" id="s-gpu-temp-stat"><div class="label">Temp</div><div class="value" id="s-gpu-temp">—</div></div>
+            <div class="stat hidden" id="s-gpu-util-stat"><div class="label">Usage</div><div class="value" id="s-gpu-util">—</div></div>
+            <div class="stat hidden" id="s-gpu-vram-stat"><div class="label">VRAM</div><div class="value" id="s-gpu-vram">—</div></div>
+            <div class="stat hidden" id="s-gpu-fan-stat"><div class="label">Fan</div><div class="value" id="s-gpu-fan">—</div></div>
+            <div class="stat hidden" id="s-gpu-core_clock-stat"><div class="label">Core Clock</div><div class="value" id="s-gpu-core_clock">—</div></div>
+            <div class="stat hidden" id="s-gpu-mem_clock-stat"><div class="label">Mem Clock</div><div class="value" id="s-gpu-mem_clock">—</div></div>
+            <div class="stat hidden" id="s-gpu-power-stat"><div class="label">Power</div><div class="value" id="s-gpu-power">—</div></div>
           </div>
         </div>
 
@@ -1917,6 +1934,55 @@
                 <span class="field-slider-value">%</span>
               </div>
             </div>
+            <div class="field-card" id="vis-fov-thickness-card">
+              <div class="field-info">
+                <div class="field-title">FOV Line Thickness</div>
+                <div class="field-desc">Width of the FOV box or ellipse.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-fov_line_thickness" data-key="fov_line_thickness" data-type="number" min="1" max="10" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card" id="vis-range-thickness-card">
+              <div class="field-info">
+                <div class="field-title">Detection Range Line Thickness</div>
+                <div class="field-desc">Width of the detection range outline.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-detect_range_line_thickness" data-key="detect_range_line_thickness" data-type="number" min="1" max="10" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card" id="vis-tracer-thickness-card">
+              <div class="field-info">
+                <div class="field-title">Tracer Line Thickness</div>
+                <div class="field-desc">Width of the line from screen center to each target.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-tracer_line_thickness" data-key="tracer_line_thickness" data-type="number" min="1" max="10" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card" id="vis-tracer-origin-card">
+              <div class="field-info">
+                <div class="field-title">Tracer From Bottom Center</div>
+                <div class="field-desc">Start each tracer line at the bottom-center of the screen instead of the crosshair.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-tracer_from_bottom" data-key="tracer_from_bottom" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card" id="vis-marker-thickness-card">
+              <div class="field-info">
+                <div class="field-title">Predicted Aim Point Thickness</div>
+                <div class="field-desc">Width of the predicted aim point circle.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-aim_marker_line_thickness" data-key="aim_marker_line_thickness" data-type="number" min="1" max="10" step="1">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
             <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Show Confidence</div></div>
@@ -2213,6 +2279,16 @@
                 <input type="number" id="vis-web_esp_ws_port" data-key="web_esp_ws_port" data-type="number" min="1024" max="65535" step="1">
               </div>
             </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Web ESP Update Rate</div>
+                <div class="field-desc">Most updates per second sent to the browser overlay. Real data only arrives as fast as detection runs.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="vis-web_esp_fps" data-key="web_esp_fps" data-type="number" min="15" max="240" step="1">
+                <span class="field-slider-value">Hz</span>
+              </div>
+            </div>
             <div class="field-card stacked">
               <div class="row" style="justify-content: space-between;">
                 <div class="field-title">Connect</div>
@@ -2407,6 +2483,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

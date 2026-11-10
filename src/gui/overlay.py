@@ -278,8 +278,15 @@ class PyQtOverlay(QWidget):
             return
         cx = int(self.config.crosshairX)
         cy = int(self.config.crosshairY)
+        # Line start: the crosshair, or the bottom-center of the screen. The in-FOV test below
+        # always uses the crosshair, so the origin only changes where the line is drawn from.
+        if getattr(self.config, 'tracer_from_bottom', False):
+            ox, oy = self.width() // 2, self.height() - 1
+        else:
+            ox, oy = cx, cy
         tracer_color = OverlayColors.get_tracer_color()
-        pen = QPen(tracer_color, 2, Qt.PenStyle.SolidLine)
+        from core.box_style import tracer_thickness
+        pen = QPen(tracer_color, tracer_thickness(self.config), Qt.PenStyle.SolidLine)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         # fov_effective_size/_height (not fov_size/fov_height) — reflect any
@@ -305,7 +312,7 @@ class PyQtOverlay(QWidget):
             if not in_fov:
                 continue
             bx, by = calc_target(list(box), aim_part, head_h_ratio, self.config)
-            painter.drawLine(cx, cy, int(bx), int(by))
+            painter.drawLine(ox, oy, int(bx), int(by))
 
     def paintEvent(self, event):
         if getattr(self.config, 'screenshot_method', 'mss') in ('uvc', 'ndi', 'udp'):
@@ -331,7 +338,8 @@ class PyQtOverlay(QWidget):
             x1 = int(cx - half)
             y1 = int(cy - half)
             detect_range_color = OverlayColors.get_detect_range_color()
-            pen_range = QPen(detect_range_color, 1)
+            from core.box_style import detect_range_thickness
+            pen_range = QPen(detect_range_color, detect_range_thickness(self.config))
             painter.setPen(pen_range)
             if getattr(self.config, 'fov_circle_filter_enabled', False):
                 painter.drawEllipse(x1, y1, int(range_size), int(range_size))
@@ -347,7 +355,8 @@ class PyQtOverlay(QWidget):
             fov_h = int(getattr(self.config, 'fov_effective_height', getattr(self.config, 'fov_height', fov_w)))
             cx, cy = self.config.crosshairX, self.config.crosshairY
             fov_color = OverlayColors.get_fov_color()
-            pen = QPen(fov_color, 2)
+            from core.box_style import fov_thickness
+            pen = QPen(fov_color, fov_thickness(self.config))
             painter.setPen(pen)
             if getattr(self.config, 'fov_circle_filter_enabled', False):
                 # QPainter.drawEllipse(x, y, w, h) already draws a circle when
@@ -482,7 +491,8 @@ class PyQtOverlay(QWidget):
             px = int(getattr(self.config, 'aim_predicted_x', 0.0))
             py = int(getattr(self.config, 'aim_predicted_y', 0.0))
             pred_color = OverlayColors.get_predicted_aim_marker_color()
-            painter.setPen(QPen(pred_color, 2))
+            from core.box_style import aim_marker_thickness
+            painter.setPen(QPen(pred_color, aim_marker_thickness(self.config)))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(px - 7, py - 7, 14, 14)
 

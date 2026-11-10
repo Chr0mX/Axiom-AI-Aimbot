@@ -246,3 +246,72 @@ class TestFrameOrdering:
             assert receiver.stale_frames_dropped == 1
         finally:
             client.close()
+
+
+class TestStreamStats:
+    """snapshot_stats(): the Speed Test's UDP 'ping' (interval jitter, assembly, loss, reorder)."""
+
+    @staticmethod
+    def _feed(rx, frames):
+        """frames: (frame_id, arrival time on the perf_counter clock, assembly ms)."""
+        import time as _t
+        for fid, at, asm_ms in frames:
+            is_newer = _is_newer_frame_id(fid, rx._latest_frame_id)
+            rx._record_frame(fid, _t.time() - asm_ms / 1000.0, is_newer, now=at)
+            if is_newer:
+                rx._latest_frame_id = fid
+
+    def test_steady_stream_has_zero_jitter_and_loss(self, receiver):
+        self._feed(receiver, [(i, 100.0 + i * 0.01, 1.0) for i in range(10)])
+        s = receiver.snapshot_stats(now=100.0 + 9 * 0.01 + 0.1)
+        assert s["active"] and s["frames"] == 10
+        assert s["interval_ms"] == pytest.approx(10.0, abs=0.05)
+        assert s["jitter_ms"] == pytest.approx(0.0, abs=0.05)
+        assert s["loss_pct"] == 0.0 and s["lost_frames"] == 0 and s["reordered"] == 0
+        assert s["assembly_ms"] == pytest.approx(1.0, abs=0.5)
+
+    def test_uneven_arrivals_show_jitter(self, receiver):
+        t, frames = 50.0, []
+        for i, gap in enumerate([0, 10, 30, 10, 30, 10]):
+            t += gap / 1000.0
+            frames.append((i, t, 1.0))
+        self._feed(receiver, frames)
+        s = receiver.snapshot_stats(now=t + 0.05)
+        assert s["jitter_ms"] > 15.0
+        assert s["interval_max_ms"] == pytest.approx(30.0, abs=0.5)
+
+    def test_missing_frame_ids_count_as_loss(self, receiver):
+        # ids 0,1,2,(3,4 lost),5,6 -> 2 lost of 7
+        self._feed(receiver, [(i, 10.0 + n * 0.01, 1.0) for n, i in enumerate([0, 1, 2, 5, 6])])
+        s = receiver.snapshot_stats(now=10.0 + 0.05)
+        assert s["lost_frames"] == 2
+        assert s["loss_pct"] == pytest.approx(100 * 2 / 7, abs=0.1)
+
+    def test_id_wrap_is_not_loss_and_restart_is_not_loss(self, receiver):
+        self._feed(receiver, [(0xFFFFFFFE, 1.0, 1.0), (0xFFFFFFFF, 1.01, 1.0), (0, 1.02, 1.0), (1, 1.03, 1.0)])
+        assert receiver.snapshot_stats(now=1.04)["lost_frames"] == 0
+        self._feed(receiver, [(7_000_000, 1.05, 1.0)])      # sender restarted far away: not 7M lost frames
+        assert receiver.snapshot_stats(now=1.06)["lost_frames"] == 0
+
+    def test_late_frame_is_reordered_not_an_interval(self, receiver):
+        self._feed(receiver, [(0, 1.00, 1), (1, 1.01, 1), (3, 1.02, 1), (2, 1.03, 1), (4, 1.04, 1)])
+        s = receiver.snapshot_stats(now=1.05)
+        assert s["reordered"] == 1 and s["lost_frames"] == 1
+
+    def test_inactive_when_few_frames_or_stream_stopped(self, receiver):
+        assert receiver.snapshot_stats() == {"active": False}
+        self._feed(receiver, [(i, 5.0 + i * 0.01, 1.0) for i in range(5)])
+        assert receiver.snapshot_stats(now=5.04 + 10.0) == {"active": False}
+
+    def test_real_packets_populate_the_log(self, receiver):
+        import time as _t
+        addr = ("127.0.0.1", receiver.sock.getsockname()[1])
+        sock = _client_socket()
+        for fid in range(5):
+            _send_frame(sock, addr, fid, [b"ab", b"cd"])
+            _t.sleep(0.01)
+        end = _t.time() + 2
+        while _t.time() < end and len(receiver._frame_log) < 5:
+            _t.sleep(0.01)
+        assert len(receiver._frame_log) == 5
+        assert receiver.snapshot_stats()["frames"] == 5
