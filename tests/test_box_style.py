@@ -144,3 +144,11 @@ def test_web_esp_fps_is_persisted_validated_and_exposed():
         _validate_web_esp(c)
         assert c.web_esp_fps == want, raw
     assert Config().web_esp_fps == 60
+
+
+def test_tracer_from_bottom_is_persisted_defaults_off_and_exposed():
+    from core.config import Config, _FIELD_MAP
+    from core import web_control_settings as wcs
+    assert _FIELD_MAP["tracer_from_bottom"] == "display.tracer_from_bottom"
+    assert Config().tracer_from_bottom is False
+    assert wcs._SCHEMA["visuals"]["tracer_from_bottom"]["type"] == "bool"

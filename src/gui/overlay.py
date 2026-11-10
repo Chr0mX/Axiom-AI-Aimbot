@@ -278,6 +278,12 @@ class PyQtOverlay(QWidget):
             return
         cx = int(self.config.crosshairX)
         cy = int(self.config.crosshairY)
+        # Line start: the crosshair, or the bottom-center of the screen. The in-FOV test below
+        # always uses the crosshair, so the origin only changes where the line is drawn from.
+        if getattr(self.config, 'tracer_from_bottom', False):
+            ox, oy = self.width() // 2, self.height() - 1
+        else:
+            ox, oy = cx, cy
         tracer_color = OverlayColors.get_tracer_color()
         from core.box_style import tracer_thickness
         pen = QPen(tracer_color, tracer_thickness(self.config), Qt.PenStyle.SolidLine)
@@ -306,7 +312,7 @@ class PyQtOverlay(QWidget):
             if not in_fov:
                 continue
             bx, by = calc_target(list(box), aim_part, head_h_ratio, self.config)
-            painter.drawLine(cx, cy, int(bx), int(by))
+            painter.drawLine(ox, oy, int(bx), int(by))
 
     def paintEvent(self, event):
         if getattr(self.config, 'screenshot_method', 'mss') in ('uvc', 'ndi', 'udp'):

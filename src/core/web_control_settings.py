@@ -280,6 +280,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "show_confidence": {"type": "bool"},
         "show_detect_range": {"type": "bool"},
         "show_tracer_line": {"type": "bool"},
+        "tracer_from_bottom": {"type": "bool"},
         "box_color_theme": {"type": "choice", "choices": ["default", "cyan", "red", "yellow", "white", "purple"]},
         "chroma_box_speed": {"type": "int", "min": 0, "max": 20},
         "show_status_panel": {"type": "bool"},

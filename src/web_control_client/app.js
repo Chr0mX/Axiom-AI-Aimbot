@@ -1395,6 +1395,7 @@
     ["vis-show_fov", "vis-fov-thickness-card"],
     ["vis-show_detect_range", "vis-range-thickness-card"],
     ["vis-show_tracer_line", "vis-tracer-thickness-card"],
+    ["vis-show_tracer_line", "vis-tracer-origin-card"],
     ["vis-show_aim_prediction_marker", "vis-marker-thickness-card"],
   ];
   var LINE_THICKNESS_TOGGLE_KEYS = ["show_fov", "show_detect_range", "show_tracer_line", "show_aim_prediction_marker"];
@@ -2754,7 +2755,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "15") return;
+    if (cssVer !== "16") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

@@ -942,3 +942,20 @@ def test_draw_detection_overlay_defaults_keep_the_original_widths(monkeypatch):
     monkeypatch.setattr(sc.cv2, 'rectangle', lambda *a, **k: None)
     sc._draw_detection_overlay(np.zeros((1000, 1000, 4), dtype=np.uint8), None, _make_overlay_config(), has_alpha=True)
     assert set(widths) == {2}
+
+
+def test_draw_detection_overlay_tracer_origin_follows_tracer_from_bottom(monkeypatch):
+    from core import screen_capture as sc
+
+    lines = []
+    monkeypatch.setattr(sc.cv2, 'line', lambda *a, **k: lines.append(a))
+    box = [495, 595, 505, 605]
+    for from_bottom, want in ((False, (500, 500)), (True, (500, 999))):
+        lines.clear()
+        config = _make_overlay_config(
+            crosshairX=500, crosshairY=500, fov_size=250, fov_height=250,
+            show_fov=False, show_tracer_line=True, tracer_from_bottom=from_bottom, latest_boxes=[box],
+        )
+        frame = np.zeros((1000, 1000, 4), dtype=np.uint8)
+        sc._draw_detection_overlay(frame, None, config, has_alpha=True)
+        assert len(lines) == 1 and lines[0][1] == want

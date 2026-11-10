@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=15">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <div class="app">
@@ -1964,6 +1964,15 @@
                 <span class="field-slider-value">px</span>
               </div>
             </div>
+            <div class="field-card" id="vis-tracer-origin-card">
+              <div class="field-info">
+                <div class="field-title">Tracer From Bottom Center</div>
+                <div class="field-desc">Start each tracer line at the bottom-center of the screen instead of the crosshair.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-tracer_from_bottom" data-key="tracer_from_bottom" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
             <div class="field-card" id="vis-marker-thickness-card">
               <div class="field-info">
                 <div class="field-title">Predicted Aim Point Thickness</div>
@@ -2474,6 +2483,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=15"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

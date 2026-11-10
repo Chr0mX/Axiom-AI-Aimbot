@@ -228,6 +228,7 @@ def _build_snapshot() -> dict:
             "aim_marker_line_thickness": aim_marker_thickness(c),
             "show_confidence": bool(getattr(c, "show_confidence", True)),
             "show_tracer_line": bool(getattr(c, "show_tracer_line", True)),
+            "tracer_from_bottom": bool(getattr(c, "tracer_from_bottom", False)),
             "show_crosshair": bool(getattr(c, "show_crosshair", False)),
             "crosshair_style": str(getattr(c, "crosshair_style", "dot")),
             "crosshair_size": int(getattr(c, "crosshair_size", 4)),

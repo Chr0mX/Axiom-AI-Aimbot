@@ -233,6 +233,7 @@ _FIELD_MAP = {
     'show_detect_range':          'display.show_detect_range',
     'show_confidence':            'display.show_confidence',
     'show_tracer_line':           'display.show_tracer_line',
+    'tracer_from_bottom':         'display.tracer_from_bottom',
     'show_aim_prediction_marker': 'display.show_aim_prediction_marker',
     'box_color_theme':            'display.box_color_theme',
     'chroma_box_speed':           'display.chroma_box_speed',
@@ -644,6 +645,7 @@ class Config:
 
         # Tracer line from screen center to detected targets
         self.show_tracer_line: bool = True
+        self.tracer_from_bottom: bool = False   # tracer starts at the bottom-center of the screen, not the crosshair
 
         # Raw-vs-predicted aim point marker — see aim_predicted_x/y below.
         # Diagnostic only: draws a second marker at the locked target's

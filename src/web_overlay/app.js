@@ -410,7 +410,10 @@
           if (st.show_tracer_line && inFov) {
             const [tx, ty] = aimPoint(x1, y1, x2, y2, st);
             ctx.strokeStyle = "rgba(0,220,255,0.5)"; ctx.lineWidth = st.tracer_line_thickness || 2;
-            ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(tx, ty); ctx.stroke();
+            ctx.beginPath();
+            if (st.tracer_from_bottom) ctx.moveTo(X(state.screen.w / 2), Y(state.screen.h));   // bottom-center of the screen
+            else ctx.moveTo(cx, cy);
+            ctx.lineTo(tx, ty); ctx.stroke();
           }
         }
       }

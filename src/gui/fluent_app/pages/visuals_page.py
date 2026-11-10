@@ -150,6 +150,14 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # Tracer origin: bottom-center of the screen instead of the crosshair
+        self.tracerFromBottomCard = SwitchSettingCard(
+            FluentIcon.DOWN,
+            t("tracer_from_bottom", "Tracer From Bottom Center"),
+            t("tracer_from_bottom_hint", "Start each tracer line at the bottom-center of the screen instead of the crosshair"),
+            parent=self.displayGroup
+        )
+
         # Show Predicted Aim-Point Marker
         self.showAimPredictionCard = SwitchSettingCard(
             FluentIcon.CERTIFICATE,
@@ -425,6 +433,7 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.detectRangeThicknessCard)
         self.displayGroup.addSettingCard(self.showTracerLineCard)
         self.displayGroup.addSettingCard(self.tracerThicknessCard)
+        self.displayGroup.addSettingCard(self.tracerFromBottomCard)
         self.displayGroup.addSettingCard(self.showAimPredictionCard)
         self.displayGroup.addSettingCard(self.aimMarkerThicknessCard)
         self.displayGroup.addSettingCard(self.boxThemeCard)
@@ -474,6 +483,7 @@ class VisualsPage(BasePage):
         self.showStatusCard.checkedChanged.connect(self._onShowStatusChanged)
         self.showDetectRangeCard.checkedChanged.connect(self._onShowDetectRangeChanged)
         self.showTracerLineCard.checkedChanged.connect(self._onShowTracerLineChanged)
+        self.tracerFromBottomCard.checkedChanged.connect(self._onTracerFromBottomChanged)
         self.showAimPredictionCard.checkedChanged.connect(self._onShowAimPredictionChanged)
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
@@ -533,6 +543,7 @@ class VisualsPage(BasePage):
         self.showStatusCard.setChecked(self._config.show_status_panel)
         self.showDetectRangeCard.setChecked(self._config.show_detect_range)
         self.showTracerLineCard.setChecked(bool(getattr(self._config, 'show_tracer_line', False)))
+        self.tracerFromBottomCard.setChecked(bool(getattr(self._config, 'tracer_from_bottom', False)))
         self.showAimPredictionCard.setChecked(bool(getattr(self._config, 'show_aim_prediction_marker', True)))
         self.fovThicknessCard.setValue(int(getattr(self._config, 'fov_line_thickness', 2) or 2))
         self.detectRangeThicknessCard.setValue(int(getattr(self._config, 'detect_range_line_thickness', 1) or 1))
@@ -629,6 +640,10 @@ class VisualsPage(BasePage):
             self._config.show_tracer_line = checked
         self._updateLineThicknessVisibility()
 
+    def _onTracerFromBottomChanged(self, checked):
+        if self._config:
+            self._config.tracer_from_bottom = checked
+
     def _onShowAimPredictionChanged(self, checked):
         if self._config:
             self._config.show_aim_prediction_marker = checked
@@ -646,6 +661,7 @@ class VisualsPage(BasePage):
         self.fovThicknessCard.setVisible(bool(getattr(c, 'show_fov', True)))
         self.detectRangeThicknessCard.setVisible(bool(getattr(c, 'show_detect_range', True)))
         self.tracerThicknessCard.setVisible(bool(getattr(c, 'show_tracer_line', False)))
+        self.tracerFromBottomCard.setVisible(bool(getattr(c, 'show_tracer_line', False)))
         self.aimMarkerThicknessCard.setVisible(bool(getattr(c, 'show_aim_prediction_marker', True)))
 
     def _onBoxThemeChanged(self, text):
@@ -919,6 +935,8 @@ class VisualsPage(BasePage):
         self.showDetectRangeCard.titleLabel.setText(t("show_detect_range"))
         self.showTracerLineCard.titleLabel.setText(t("show_tracer_line", "Tracer Line"))
         self.showTracerLineCard.contentLabel.setText(t("show_tracer_line_hint", "Draw a line from screen center to each detected target"))
+        self.tracerFromBottomCard.titleLabel.setText(t("tracer_from_bottom", "Tracer From Bottom Center"))
+        self.tracerFromBottomCard.contentLabel.setText(t("tracer_from_bottom_hint", "Start each tracer line at the bottom-center of the screen instead of the crosshair"))
         for _card, _key, _title, _hkey, _hint in (
             (self.fovThicknessCard, "fov_line_thickness", "FOV Line Thickness", "fov_line_thickness_hint", "Width of the FOV box or ellipse."),
             (self.detectRangeThicknessCard, "detect_range_line_thickness", "Detection Range Line Thickness", "detect_range_line_thickness_hint", "Width of the detection range outline."),

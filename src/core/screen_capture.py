@@ -574,7 +574,8 @@ def _draw_detection_overlay(
             else:
                 in_reach = abs(bx - cx) <= tracer_half_x and abs(by - cy) <= tracer_half_y
             if in_reach:
-                cv2.line(frame, (cx, cy), (bx, by), _c(255, 255, 255), tracer_thickness(cfg), cv2.LINE_AA)
+                origin = (w // 2, h - 1) if bool(getattr(cfg, 'tracer_from_bottom', False)) else (cx, cy)
+                cv2.line(frame, origin, (bx, by), _c(255, 255, 255), tracer_thickness(cfg), cv2.LINE_AA)
 
     decay_box = getattr(cfg, 'display_locked_box', None)
     if decay_box is not None and bool(getattr(cfg, 'display_locked_box_is_decaying', False)):

@@ -1,5 +1,7 @@
 # Changelog
 
+- New "Tracer From Bottom Center" toggle (Visuals, Web Control): tracer lines start at the bottom-center of the screen instead of the crosshair, on the in-game overlay, capture preview and Web ESP.
+
 - Web Control: LAN Speed Test / Test Connection ping no longer inflated by Axiom's own threading (async ping route, 1 ms timer resolution); the result shows how long Axiom itself spent per request. New "UDP stream" line: frame interval, jitter, packet spread, lost and reordered frames of the live UDP capture stream.
 
 - Web Control: live NVIDIA GPU tiles in the sidebar (same sensors and switches as the status panel). Model Info now shows the precision actually running (FP16/FP32 · provider · RUNNING) and what is selected but still pending.

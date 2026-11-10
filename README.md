@@ -103,6 +103,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
   - HUD wording matches Web Control: Aim Toggle, Aim Status, model, capture method, capture FPS, inference FPS, target count, and network latency with draw FPS and data rate (Hz) shown separately — draggable and stylable from the in-page settings panel.
   - The top-right badge lists which overlays are on (Crosshair, FOV, Boxes, Confidence, Detection Range, Tracer Line, Predicted Aim Point).
   - Low delay: frames are sent as soon as a new detection exists, up to **Web ESP Update Rate** (15–240 Hz, default 60, in Visuals and Web Control), and a slow client skips stale frames instead of lagging everyone. The data rate can't exceed your inference FPS.
+  - Tracer Line can start at the crosshair or, with **Tracer From Bottom Center**, at the bottom-center of the screen.
   - Line Thickness sliders (1–10 px) for FOV, Detection Range, Tracer Line and Predicted Aim Point, on the in-game overlay, the capture preview, Web ESP and Web Control.
 
 - **Web Control (remote settings from any browser on your network)**

@@ -562,3 +562,11 @@ def test_timer_resolution_is_noop_off_windows(monkeypatch):
     monkeypatch.setattr(esp_server.sys, "platform", "linux")
     esp_server._timer_resolution(True)
     esp_server._timer_resolution(False)
+
+
+def test_snapshot_carries_tracer_from_bottom():
+    cfg = _FakeConfig()
+    esp_server._config = cfg
+    assert esp_server._build_snapshot()["settings"]["tracer_from_bottom"] is False
+    cfg.tracer_from_bottom = True
+    assert esp_server._build_snapshot()["settings"]["tracer_from_bottom"] is True
