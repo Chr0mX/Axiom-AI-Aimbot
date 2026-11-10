@@ -100,12 +100,17 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 - **Web ESP Overlay**
   - Streams live detection boxes/state to a lightweight web page over WebSocket.
   - Point an OBS Browser Source (or any browser, on any machine on the network) at it to render ESP without capturing the main game overlay.
-  - HUD shows aim on/off, aim active/idle, model, capture method, capture FPS, inference FPS, target count, and network latency — draggable and stylable from the in-page settings panel.
+  - HUD wording matches Web Control: Aim Toggle, Aim Status, model, capture method, capture FPS, inference FPS, target count, and network latency with draw FPS and data rate (Hz) shown separately — draggable and stylable from the in-page settings panel.
+  - The top-right badge lists which overlays are on (Crosshair, FOV, Boxes, Confidence, Detection Range, Tracer Line, Predicted Aim Point).
+  - Low delay: frames are sent as soon as a new detection exists, up to **Web ESP Update Rate** (15–240 Hz, default 60, in Visuals and Web Control), and a slow client skips stale frames instead of lagging everyone. The data rate can't exceed your inference FPS.
+  - Line Thickness sliders (1–10 px) for FOV, Detection Range, Tracer Line and Predicted Aim Point, on the in-game overlay, the capture preview, Web ESP and Web Control.
 
 - **Web Control (remote settings from any browser on your network)**
   - Turn on in **Other → Remote Control**; open the shown address and paste the access token.
   - Every desktop tab is mirrored: switch model/backend (with a confirmed restart when needed), start/stop AI, connect MAKCU, run a TensorRT conversion with a live log, change any setting, and watch a live capture preview for UVC/NDI/UDP.
   - Presets and configs as a card list (the loaded one is marked), plus five Quick Preset shortcut slots in the sidebar.
+  - Sidebar GPU tiles (temperature, load, VRAM, fan, clocks, power) when GPU Monitoring is on; Model Info shows the precision actually running (e.g. FP16 · TensorRT) and any selected-but-pending change.
+  - **LAN Speed Test** and Test Connection on the Other tab: ping/jitter (with how long Axiom itself spent per request), download, upload, and — when capture is UDP — frame interval, jitter, loss and reordering of the live UDP stream.
   - Two looks to choose from on its Other tab: **Studio** (default, uses the full window width) and **Instrument** (dense).
 
 - **Status Panel GPU Monitoring** (optional, NVIDIA)
