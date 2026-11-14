@@ -570,3 +570,46 @@ def test_snapshot_carries_tracer_from_bottom():
     assert esp_server._build_snapshot()["settings"]["tracer_from_bottom"] is False
     cfg.tracer_from_bottom = True
     assert esp_server._build_snapshot()["settings"]["tracer_from_bottom"] is True
+
+
+class TestUvcFixedCropUsesRealFrame:
+    """Fixed UVC crop (e.g. 640x640 of a 1920x1080 device frame): the page must show the real
+    frame with the crop placed inside it, not stretch the crop over the whole window."""
+
+    @staticmethod
+    def _snap(**kw):
+        cfg = _FakeConfig()
+        cfg.screenshot_method = "uvc"
+        cfg.uvc_crop_mode = "fixed"
+        cfg.detect_range_size = 640
+        cfg.uvc_width, cfg.uvc_height = 1920, 1080
+        cfg.uvc_actual_width, cfg.uvc_actual_height = 1920, 1080
+        cfg.crosshairX, cfg.crosshairY = 320, 320
+        cfg.latest_all_boxes = [[100, 200, 150, 320]]
+        cfg.latest_all_confidences = [0.9]
+        cfg.display_locked_box = None
+        for k, v in kw.items():
+            setattr(cfg, k, v)
+        esp_server._config = cfg
+        return json.loads(json.dumps(esp_server._build_snapshot()))
+
+    def test_screen_is_the_device_frame_and_boxes_are_offset(self):
+        s = self._snap()
+        assert s["screen"] == {"w": 1920, "h": 1080}
+        assert s["center"] == {"x": 320 + 640, "y": 320 + 220}         # centre of the 1920x1080 frame
+        assert s["boxes"][0] == [100 + 640, 200 + 220, 150 + 640, 320 + 220]
+        assert s["settings"]["detect_range_size"] == 640               # still drawn at 640, not stretched
+
+    def test_negotiated_size_wins_over_requested(self):
+        s = self._snap(uvc_actual_width=1280, uvc_actual_height=720)
+        assert s["screen"] == {"w": 1280, "h": 720}
+        assert s["center"] == {"x": 320 + 320, "y": 320 + 40}
+
+    def test_dynamic_mode_is_unchanged(self):
+        s = self._snap(uvc_crop_mode="dynamic")
+        assert s["screen"] == {"w": 1920, "h": 1080}
+        assert s["boxes"][0] == [100, 200, 150, 320]
+
+    def test_crop_larger_than_frame_falls_back_to_the_crop(self):
+        s = self._snap(uvc_actual_width=500, uvc_actual_height=500)
+        assert s["boxes"][0][0] == 100

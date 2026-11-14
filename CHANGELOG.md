@@ -1,5 +1,7 @@
 # Changelog
 
+- Web ESP with UVC fixed crop (e.g. 640x640 of a 1920x1080 device): the overlay now shows the real UVC frame and places the crop at its centre instead of stretching the crop over the whole page.
+
 - New "Tracer From Bottom Center" toggle (Visuals, Web Control): tracer lines start at the bottom-center of the screen instead of the crosshair, on the in-game overlay, capture preview and Web ESP.
 
 - Web Control: LAN Speed Test / Test Connection ping no longer inflated by Axiom's own threading (async ping route, 1 ms timer resolution); the result shows how long Axiom itself spent per request. New "UDP stream" line: frame interval, jitter, packet spread, lost and reordered frames of the live UDP capture stream.

@@ -147,6 +147,21 @@ def _build_snapshot() -> dict:
         if cap_w > 0 and cap_h > 0:
             offset_x = (screen_w - cap_w) // 2
             offset_y = (screen_h - cap_h) // 2
+    elif screenshot_method == "uvc" and str(getattr(c, "uvc_crop_mode", "dynamic")).lower() == "fixed":
+        # Fixed crop mode: get_capture_dimensions() reports the cropped square (e.g. 640x640),
+        # but that square is a window onto the device's real frame (e.g. 1920x1080). Using the
+        # crop as the "screen" made the page stretch the 640x640 region over the whole browser
+        # window (zoomed in). Report the real UVC frame as the screen and shift boxes by the
+        # crop's origin -- centered, with the same even-rounding as _compute_fixed_uvc_crop_region()
+        # -- so everything lands where it is in the device's picture.
+        full_w = int(getattr(c, "uvc_actual_width", 0) or 0) or int(getattr(c, "uvc_width", 0) or 0)
+        full_h = int(getattr(c, "uvc_actual_height", 0) or 0) or int(getattr(c, "uvc_height", 0) or 0)
+        if cap_w > 0 and cap_h > 0 and full_w >= cap_w and full_h >= cap_h:
+            screen_w, screen_h = full_w, full_h
+            offset_x = ((full_w - cap_w) // 2) & ~1
+            offset_y = ((full_h - cap_h) // 2) & ~1
+        else:
+            screen_w, screen_h = cap_w, cap_h
     else:
         screen_w, screen_h = cap_w, cap_h
 
