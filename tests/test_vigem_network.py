@@ -26,6 +26,7 @@ _MAX_STICK = _mod._MAX_STICK
 _MIN_STICK = _mod._MIN_STICK
 _MAX_TRIGGER = _mod._MAX_TRIGGER
 BASE_PIXELS = _mod.BASE_PIXELS
+map_pixels_to_stick = _mod.map_pixels_to_stick
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +345,85 @@ class TestSendMoveUsesConfigRef:
             rx = self._first_rx(srv, None, 10.0)
             assert rx == int(10.0 / BASE_PIXELS * _MAX_STICK)
         finally:
+            srv.stop()
+
+
+class TestDeadZones:
+    def test_input_deadzone_zeroes_small(self):
+        assert map_pixels_to_stick(0.5, 0.5, 1.0, 0.05, 0.0) == (0, 0)  # 0.01 < 0.05
+
+    def test_input_deadzone_per_axis(self):
+        rx, ry = map_pixels_to_stick(25.0, 0.5, 1.0, 0.05, 0.0)
+        assert rx > 0 and ry == 0
+
+    def test_game_deadzone_pushes_past(self):
+        rx, _ = map_pixels_to_stick(1.0, 0.0, 1.0, 0.0, 0.2)  # v=0.02
+        assert rx >= int(0.2 * _MAX_STICK)
+
+    def test_game_deadzone_sign_and_clamp(self):
+        rx, ry = map_pixels_to_stick(-9999.0, 9999.0, 1.0, 0.0, 0.3)
+        assert rx == -_MAX_STICK and ry == _MAX_STICK
+
+    def test_zero_stays_zero(self):
+        assert map_pixels_to_stick(0.0, 0.0, 1.0, 0.0, 0.3) == (0, 0)
+
+    def test_off_matches_plain_mapping(self):
+        assert map_pixels_to_stick(25.0, -10.0, 1.0, 0.0, 0.0) == (
+            int(0.5 * _MAX_STICK), int(-0.2 * _MAX_STICK))
+
+
+class TestRecenter:
+    class _Cfg:
+        vigem_net_sensitivity = 1.0
+        vigem_net_input_deadzone = 0.0
+        vigem_net_game_deadzone = 0.0
+        vigem_net_release_ms = 40
+        vigem_stick_x = 0.0
+        vigem_stick_y = 0.0
+
+    def _zeros(self, srv, axis_id):
+        return [l for l in srv.received_lines if l == f"km.controller({axis_id},0)"]
+
+    def test_stick_recenters_once_after_last_move(self):
+        srv = _MockServer()
+        cfg = self._Cfg()
+        try:
+            assert _mod.connect_vigem_network("127.0.0.1", srv.port, "test_token", cfg)
+            _mod.send_mouse_move_vigem_network(25.0, 0.0)
+            time.sleep(0.03)
+            assert cfg.vigem_stick_x > 0
+            time.sleep(0.4)
+            assert cfg.vigem_stick_x == 0.0
+            assert len(self._zeros(srv, 14)) == 1  # sent once, no spam
+        finally:
+            _mod.disconnect_vigem_network()
+            srv.stop()
+
+    def test_continuous_moves_do_not_recenter(self):
+        srv = _MockServer()
+        cfg = self._Cfg()
+        try:
+            assert _mod.connect_vigem_network("127.0.0.1", srv.port, "test_token", cfg)
+            for _ in range(15):
+                _mod.send_mouse_move_vigem_network(25.0, 0.0)
+                time.sleep(0.01)
+            assert not self._zeros(srv, 14)
+        finally:
+            _mod.disconnect_vigem_network()
+            srv.stop()
+
+    def test_move_after_recenter_is_sent(self):
+        srv = _MockServer()
+        cfg = self._Cfg()
+        try:
+            assert _mod.connect_vigem_network("127.0.0.1", srv.port, "test_token", cfg)
+            _mod.send_mouse_move_vigem_network(25.0, 0.0)
+            time.sleep(0.3)
+            _mod.send_mouse_move_vigem_network(25.0, 0.0)
+            time.sleep(0.015)
+            assert cfg.vigem_stick_x > 0
+        finally:
+            _mod.disconnect_vigem_network()
             srv.stop()
 
 

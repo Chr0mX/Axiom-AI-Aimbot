@@ -179,6 +179,7 @@
     ["show_detect_range", "Detection Range"],
     ["show_tracer_line", "Tracer Line"],
     ["show_aim_prediction_marker", "Predicted Aim Point"],
+    ["show_stick_gauge", "Stick Gauge"],
   ];
   function enabledOverlays(st) {
     return BADGE_ITEMS.filter(([key]) => !!(st && st[key])).map(([, label]) => label);
@@ -442,6 +443,30 @@
         ctx.beginPath();
         ctx.ellipse(X(state.aim_predicted.x), Y(state.aim_predicted.y), pr, pr, 0, 0, Math.PI * 2);
         ctx.stroke();
+      }
+
+      // vigem_network virtual stick gauge (bottom-right of the screen area).
+      if (st.show_stick_gauge && state.stick) {
+        const sk = state.stick, gr = 70 * Math.min(sx, sy);
+        const gcx = X(state.screen.w) - 24 * sx - gr, gcy = Y(state.screen.h) - 24 * sy - gr;
+        let kx = +sk.x || 0, ky = +sk.y || 0;
+        const km = Math.hypot(kx, ky);
+        if (km > 1) { kx /= km; ky /= km; }
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.beginPath(); ctx.arc(gcx, gcy, gr, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 1;
+        if (sk.dz > 0) {
+          ctx.strokeStyle = "rgba(255,200,0,0.67)"; ctx.setLineDash([4, 3]);
+          ctx.beginPath(); ctx.arc(gcx, gcy, sk.dz * gr, 0, Math.PI * 2); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        if (sk.game_dz > 0) {
+          ctx.strokeStyle = "rgba(255,200,0,0.3)";
+          ctx.beginPath(); ctx.arc(gcx, gcy, sk.game_dz * gr, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.fillStyle = km > 0 ? "rgba(0,230,140,0.95)" : "rgba(0,230,140,0.35)";
+        ctx.beginPath(); ctx.arc(gcx + kx * gr, gcy + ky * gr, 5, 0, Math.PI * 2); ctx.fill();
       }
 
       // Crosshair — scaled per axis like everything else above; previously

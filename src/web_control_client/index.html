@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=17">
+  <link rel="stylesheet" href="styles.css?v=18">
 </head>
 <body>
   <div class="app">
@@ -1931,6 +1931,33 @@
                 <input type="number" id="keys-vigem_net_sensitivity" data-key="vigem_net_sensitivity" data-type="number" min="0.1" max="10" step="0.1">
               </div>
             </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Input Dead Zone</div>
+                <div class="field-desc">Stick values below this fraction of full travel are ignored (jitter filter)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_input_deadzone" data-key="vigem_net_input_deadzone" data-type="number" min="0" max="0.5" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Game Dead Zone</div>
+                <div class="field-desc">The game's own inner stick dead zone; small corrections are pushed past it (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_game_deadzone" data-key="vigem_net_game_deadzone" data-type="number" min="0" max="0.5" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Stick Release Time (ms)</div>
+                <div class="field-desc">Recenter the stick this long after the last aim move</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_release_ms" data-key="vigem_net_release_ms" data-type="number" min="10" max="500" step="10">
+              </div>
+            </div>
           </div>
           </section>
 
@@ -2121,6 +2148,15 @@
               </div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="vis-show_aim_prediction_marker" data-key="show_aim_prediction_marker" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Stick Gauge</div>
+                <div class="field-desc">Draw a circle showing the virtual stick position and dead zones (vigem_network mouse method only).</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_stick_gauge" data-key="show_stick_gauge" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             </div>
@@ -2592,6 +2628,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

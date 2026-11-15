@@ -236,6 +236,8 @@ def _build_snapshot() -> dict:
             "box_corner_length_pct": int(getattr(c, "box_corner_length_pct", 0) or 0),
             "show_detect_range": bool(getattr(c, "show_detect_range", True)),
             "show_aim_prediction_marker": bool(getattr(c, "show_aim_prediction_marker", True)),
+            "show_stick_gauge": bool(getattr(c, "show_stick_gauge", True))
+                                and getattr(c, "mouse_move_method", "") == "vigem_network",
             # Line widths (px) of the FOV / Detection Range / Tracer / Predicted Aim Point.
             "fov_line_thickness": fov_thickness(c),
             "detect_range_line_thickness": detect_range_thickness(c),
@@ -264,6 +266,12 @@ def _build_snapshot() -> dict:
         "boxes": _boxes(getattr(c, "latest_all_boxes", [])),
         "confidences": [float(x) for x in (getattr(c, "latest_all_confidences", []) or [])],
         "aim_predicted": aim_predicted,
+        "stick": {
+            "x": float(getattr(c, "vigem_stick_x", 0.0) or 0.0),
+            "y": float(getattr(c, "vigem_stick_y", 0.0) or 0.0),
+            "dz": float(getattr(c, "vigem_net_input_deadzone", 0.0) or 0.0),
+            "game_dz": float(getattr(c, "vigem_net_game_deadzone", 0.0) or 0.0),
+        },
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
         # Lock is held outside the control FOV: tracked, but no aiming this frame.

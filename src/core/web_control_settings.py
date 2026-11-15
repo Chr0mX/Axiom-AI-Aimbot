@@ -270,6 +270,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "vigem_net_port": {"type": "int", "min": 1, "max": 65535},
         "vigem_net_token": {"type": "str"},
         "vigem_net_sensitivity": {"type": "float", "min": 0.1, "max": 10.0},
+        "vigem_net_input_deadzone": {"type": "float", "min": 0.0, "max": 0.5},
+        "vigem_net_game_deadzone": {"type": "float", "min": 0.0, "max": 0.5},
+        "vigem_net_release_ms": {"type": "int", "min": 10, "max": 500},
         # Remote mouse buttons (UDP from vigem-for-a-game)
         "remote_btn_enabled": {"type": "bool"},
         "remote_btn_bind_ip": {"type": "str"},
@@ -316,6 +319,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "status_panel_gpu_voltage": {"type": "bool"},
         "status_panel_gpu_interval_ms": {"type": "int", "min": 250, "max": 5000},
         "show_aim_prediction_marker": {"type": "bool"},
+        "show_stick_gauge": {"type": "bool"},
         "show_crosshair": {"type": "bool"},
         "crosshair_style": {"type": "choice", "choices": ["dot", "cross"]},
         "crosshair_size": {"type": "int", "min": 1, "max": 20},

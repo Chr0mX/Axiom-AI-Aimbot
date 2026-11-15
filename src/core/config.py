@@ -235,6 +235,7 @@ _FIELD_MAP = {
     'show_tracer_line':           'display.show_tracer_line',
     'tracer_from_bottom':         'display.tracer_from_bottom',
     'show_aim_prediction_marker': 'display.show_aim_prediction_marker',
+    'show_stick_gauge':           'display.show_stick_gauge',
     'box_color_theme':            'display.box_color_theme',
     'chroma_box_speed':           'display.chroma_box_speed',
     'show_status_panel':          'display.status_panel.show',
@@ -295,6 +296,9 @@ _FIELD_MAP = {
     'vigem_net_port':             'hardware.vigem_network.port',
     'vigem_net_token':            'hardware.vigem_network.token',
     'vigem_net_sensitivity':      'hardware.vigem_network.sensitivity',
+    'vigem_net_input_deadzone':   'hardware.vigem_network.input_deadzone',
+    'vigem_net_game_deadzone':    'hardware.vigem_network.game_deadzone',
+    'vigem_net_release_ms':       'hardware.vigem_network.release_ms',
     'remote_btn_enabled':         'hardware.remote_buttons.enabled',
     'remote_btn_bind_ip':         'hardware.remote_buttons.bind_ip',
     'remote_btn_bind_port':       'hardware.remote_buttons.bind_port',
@@ -664,6 +668,7 @@ class Config:
         # kalman_enabled is visible, distinct from the existing per-box aim
         # marker (which is always the raw, pre-prediction point).
         self.show_aim_prediction_marker: bool = True
+        self.show_stick_gauge: bool = True  # vigem_network stick gauge on the overlays
 
         # Crosshair overlay
         self.show_crosshair: bool = False
@@ -690,6 +695,12 @@ class Config:
         self.vigem_net_port: int = 5555
         self.vigem_net_token: str = ""
         self.vigem_net_sensitivity: float = 1.0
+        self.vigem_net_input_deadzone: float = 0.02  # fraction of full stick treated as 0
+        self.vigem_net_game_deadzone: float = 0.0    # game's own inner dead zone to skip past (0 = off)
+        self.vigem_net_release_ms: int = 50          # recenter the stick this long after the last move
+        # Runtime only (not in _FIELD_MAP): stick value last sent, -1..1
+        self.vigem_stick_x: float = 0.0
+        self.vigem_stick_y: float = 0.0
         # Mouse buttons streamed over UDP from vigem-for-a-game (core/remote_buttons.py)
         self.remote_btn_enabled: bool = False
         self.remote_btn_bind_ip: str = "0.0.0.0"
@@ -1491,6 +1502,17 @@ def _validate_mouse_method(config: Config) -> None:
         config.makcu_aim_button = 'lmb'
     if getattr(config, 'makcu_always_aim_button', 'off') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
         config.makcu_always_aim_button = 'off'
+    for _attr, _default in (('vigem_net_input_deadzone', 0.02), ('vigem_net_game_deadzone', 0.0)):
+        try:
+            _v = float(getattr(config, _attr, _default))
+        except (TypeError, ValueError):
+            _v = _default
+        setattr(config, _attr, max(0.0, min(0.5, _v)) if _v == _v else _default)
+    try:
+        _rel = int(getattr(config, 'vigem_net_release_ms', 50))
+    except (TypeError, ValueError):
+        _rel = 50
+    config.vigem_net_release_ms = max(10, min(500, _rel))
     if getattr(config, 'remote_aim_button', 'rmb') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
         config.remote_aim_button = 'rmb'
     try:

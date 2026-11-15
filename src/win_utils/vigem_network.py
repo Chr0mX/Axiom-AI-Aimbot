@@ -45,6 +45,26 @@ def _clamp(v: int, lo: int, hi: int) -> int:
     return v
 
 
+def map_pixels_to_stick(dx: float, dy: float, sensitivity: float = 1.0,
+                        input_dz: float = 0.0, game_dz: float = 0.0) -> tuple:
+    """Pixel delta -> (rx, ry) stick values.
+
+    input_dz: |v| below this fraction of full stick is dropped (jitter filter).
+    game_dz:  the game's own inner dead zone; non-zero values are remapped to
+              start just past it so small corrections still register.
+    """
+    def axis(d: float) -> int:
+        v = max(-1.0, min(1.0, d * sensitivity / BASE_PIXELS))
+        if abs(v) < input_dz or v == 0.0:
+            return 0
+        if game_dz > 0.0:
+            mag = min(1.0, game_dz + abs(v) * (1.0 - game_dz))
+            v = mag if v > 0 else -mag
+        return _clamp(int(v * _MAX_STICK), _MIN_STICK, _MAX_STICK)
+
+    return axis(dx), axis(dy)
+
+
 class VigemNetworkClient:
 
     def __init__(self) -> None:
@@ -56,6 +76,7 @@ class VigemNetworkClient:
         self._pending_ry: Optional[int] = None
         self._pending_rt: Optional[int] = None
         self._pending_lock = threading.Lock()
+        self._last_move_t = 0.0
 
         self._last_sent_rx: Optional[int] = None
         self._last_sent_ry: Optional[int] = None
@@ -113,6 +134,7 @@ class VigemNetworkClient:
             self._reconnect_thread.join(timeout=2.0)
         self._write_thread = None
         self._reconnect_thread = None
+        _publish_stick(0, 0)
         logger.info("[VigemNet] disconnected")
 
     def is_connected(self) -> bool:
@@ -122,6 +144,7 @@ class VigemNetworkClient:
         with self._pending_lock:
             self._pending_rx = rx
             self._pending_ry = ry
+            self._last_move_t = time.monotonic()
 
     def enqueue_click(self, value: int) -> None:
         with self._pending_lock:
@@ -161,6 +184,14 @@ class VigemNetworkClient:
                 self._pending_ry = None
                 self._pending_rt = None
 
+            # A stick is held state, not a one-shot delta: with no fresh move
+            # for a moment (aim released, target lost, move too small to be
+            # sent at all) recenter it instead of leaving it deflected.
+            if (rx is None and ry is None
+                    and (self._last_sent_rx or self._last_sent_ry)
+                    and time.monotonic() - self._last_move_t > _release_seconds()):
+                rx = ry = 0
+
             resend = self._resend_all
             if resend:
                 self._resend_all = False
@@ -175,6 +206,8 @@ class VigemNetworkClient:
             if rt is not None and (resend or rt != self._last_sent_rt):
                 buf.append(f"km.controller({_ID_RIGHT_TRIGGER},{rt})\n")
                 self._last_sent_rt = rt
+
+            _publish_stick(self._last_sent_rx, self._last_sent_ry)
 
             now = time.monotonic()
             if not buf:
@@ -260,14 +293,37 @@ def is_vigem_network_connected() -> bool:
     return vigem_net_client is not None and vigem_net_client.is_connected()
 
 
+def _cfg_float(name: str, default: float) -> float:
+    try:
+        return float(getattr(_config_ref, name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _release_seconds() -> float:
+    return max(10.0, min(500.0, _cfg_float('vigem_net_release_ms', 50.0))) / 1000.0
+
+
+def _publish_stick(rx, ry) -> None:
+    """Expose the stick value actually sent (-1..1) for the overlay gauge."""
+    if _config_ref is None:
+        return
+    try:
+        _config_ref.vigem_stick_x = max(-1.0, min(1.0, (rx or 0) / _MAX_STICK))
+        _config_ref.vigem_stick_y = max(-1.0, min(1.0, (ry or 0) / _MAX_STICK))
+    except Exception:
+        pass
+
+
 def send_mouse_move_vigem_network(dx: float, dy: float) -> None:
     if vigem_net_client is None or not vigem_net_client.is_connected():
         return
-    sensitivity = getattr(_config_ref, 'vigem_net_sensitivity', 1.0)
-    fx = dx * sensitivity / BASE_PIXELS
-    fy = dy * sensitivity / BASE_PIXELS
-    rx = _clamp(int(fx * _MAX_STICK), _MIN_STICK, _MAX_STICK)
-    ry = _clamp(int(fy * _MAX_STICK), _MIN_STICK, _MAX_STICK)
+    rx, ry = map_pixels_to_stick(
+        dx, dy,
+        _cfg_float('vigem_net_sensitivity', 1.0),
+        max(0.0, min(0.5, _cfg_float('vigem_net_input_deadzone', 0.0))),
+        max(0.0, min(0.5, _cfg_float('vigem_net_game_deadzone', 0.0))),
+    )
     vigem_net_client.enqueue_move(rx, ry)
 
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, QPointF
 import ctypes
 
 if TYPE_CHECKING:
@@ -126,6 +126,24 @@ class OverlayColors:
         if HAS_THEME_COLORS:
             return ThemeColors.OVERLAY_PREDICTED_AIM_MARKER.qcolor()
         return QColor(80, 210, 255, 230)
+
+    @staticmethod
+    def get_stick_ring_color() -> QColor:
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_STICK_RING.qcolor()
+        return QColor(255, 255, 255, 140)
+
+    @staticmethod
+    def get_stick_deadzone_color() -> QColor:
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_STICK_DEADZONE.qcolor()
+        return QColor(255, 200, 0, 170)
+
+    @staticmethod
+    def get_stick_dot_color() -> QColor:
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_STICK_DOT.qcolor()
+        return QColor(0, 230, 140, 240)
 
 
 # Predefined box color themes (name → RGBA tuple)
@@ -502,6 +520,40 @@ class PyQtOverlay(QWidget):
 
         # 繪製自訂準心
         self._draw_crosshair(painter)
+
+        self._draw_stick_gauge(painter)
+
+    def _draw_stick_gauge(self, painter: QPainter) -> None:
+        """vigem_network virtual right-stick gauge (bottom-right)."""
+        c = self.config
+        if (getattr(c, 'mouse_move_method', '') != 'vigem_network'
+                or not getattr(c, 'show_stick_gauge', True)):
+            return
+        from core.stick_gauge import gauge_center, stick_gauge_geometry
+        g = stick_gauge_geometry(
+            getattr(c, 'vigem_stick_x', 0.0), getattr(c, 'vigem_stick_y', 0.0),
+            getattr(c, 'vigem_net_input_deadzone', 0.0), getattr(c, 'vigem_net_game_deadzone', 0.0))
+        cx, cy = gauge_center(self.width(), self.height())
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(OverlayColors.get_stick_ring_color(), 2))
+        r = g["radius"]
+        painter.drawEllipse(QPointF(cx, cy), r, r)
+        dz_pen = QPen(OverlayColors.get_stick_deadzone_color(), 1, Qt.PenStyle.DashLine)
+        if g["dz_r"] > 0:
+            painter.setPen(dz_pen)
+            painter.drawEllipse(QPointF(cx, cy), g["dz_r"], g["dz_r"])
+        if g["game_dz_r"] > 0:
+            faint = QColor(OverlayColors.get_stick_deadzone_color())
+            faint.setAlpha(80)
+            painter.setPen(QPen(faint, 1))
+            painter.drawEllipse(QPointF(cx, cy), g["game_dz_r"], g["game_dz_r"])
+        dot = QColor(OverlayColors.get_stick_dot_color())
+        if not g["deflected"]:
+            dot.setAlpha(90)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(dot)
+        painter.drawEllipse(QPointF(cx + g["dot_dx"], cy + g["dot_dy"]), 5, 5)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
 
     def _draw_crosshair(self, painter: QPainter) -> None:
         """Draw a configurable crosshair dot or cross at the crosshair position."""

@@ -520,6 +520,44 @@ class AimPage(BasePage):
         self.vigemSensitivityCard.hBoxLayout.addWidget(self.vigemSensitivitySpin, 0, Qt.AlignmentFlag.AlignRight)
         self.vigemSensitivityCard.hBoxLayout.addSpacing(16)
 
+        self.vigemInputDzSpin = QDoubleSpinBox()
+        self.vigemInputDzSpin.setRange(0.0, 0.5)
+        self.vigemInputDzSpin.setSingleStep(0.01)
+        self.vigemInputDzSpin.setDecimals(2)
+        self.vigemInputDzSpin.setMinimumWidth(100)
+        self.vigemInputDzCard = SettingCard(
+            FluentIcon.REMOVE,
+            t("vigem_input_deadzone", "Input Dead Zone"),
+            t("vigem_input_deadzone_desc", "Stick values below this fraction of full travel are ignored (jitter filter)"),
+            self.vigemNetGroup)
+        self.vigemInputDzCard.hBoxLayout.addWidget(self.vigemInputDzSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemInputDzCard.hBoxLayout.addSpacing(16)
+
+        self.vigemGameDzSpin = QDoubleSpinBox()
+        self.vigemGameDzSpin.setRange(0.0, 0.5)
+        self.vigemGameDzSpin.setSingleStep(0.01)
+        self.vigemGameDzSpin.setDecimals(2)
+        self.vigemGameDzSpin.setMinimumWidth(100)
+        self.vigemGameDzCard = SettingCard(
+            FluentIcon.SKIP_FORWARD,
+            t("vigem_game_deadzone", "Game Dead Zone"),
+            t("vigem_game_deadzone_desc", "The game's own inner stick dead zone; small corrections are pushed past it so they still register (0 = off)"),
+            self.vigemNetGroup)
+        self.vigemGameDzCard.hBoxLayout.addWidget(self.vigemGameDzSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemGameDzCard.hBoxLayout.addSpacing(16)
+
+        self.vigemReleaseSpin = QSpinBox()
+        self.vigemReleaseSpin.setRange(10, 500)
+        self.vigemReleaseSpin.setSuffix(" ms")
+        self.vigemReleaseSpin.setMinimumWidth(100)
+        self.vigemReleaseCard = SettingCard(
+            FluentIcon.HISTORY,
+            t("vigem_release_ms", "Stick Release Time"),
+            t("vigem_release_ms_desc", "Recenter the stick this long after the last aim move, so it never keeps drifting"),
+            self.vigemNetGroup)
+        self.vigemReleaseCard.hBoxLayout.addWidget(self.vigemReleaseSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemReleaseCard.hBoxLayout.addSpacing(16)
+
         self.vigemConnectBtn = PushButton("Connect")
         self.vigemConnectBtn.setFixedWidth(120)
         self.vigemConnectionLabel = BodyLabel("Disconnected")
@@ -1112,6 +1150,9 @@ class AimPage(BasePage):
         self.vigemNetGroup.addSettingCard(self.vigemPortCard)
         self.vigemNetGroup.addSettingCard(self.vigemTokenCard)
         self.vigemNetGroup.addSettingCard(self.vigemSensitivityCard)
+        self.vigemNetGroup.addSettingCard(self.vigemInputDzCard)
+        self.vigemNetGroup.addSettingCard(self.vigemGameDzCard)
+        self.vigemNetGroup.addSettingCard(self.vigemReleaseCard)
         self.vigemNetGroup.addSettingCard(self.vigemConnectCard)
         self.addContent(self.vigemNetGroup)
         self.vigemNetGroup.setVisible(False)
@@ -1331,6 +1372,9 @@ class AimPage(BasePage):
         self.vigemPortSpin.valueChanged.connect(self._onVigemPortChanged)
         self.vigemTokenEdit.editingFinished.connect(self._onVigemTokenChanged)
         self.vigemSensitivitySpin.valueChanged.connect(self._onVigemSensitivityChanged)
+        self.vigemInputDzSpin.valueChanged.connect(lambda v: self._onVigemNumberChanged('vigem_net_input_deadzone', float(v)))
+        self.vigemGameDzSpin.valueChanged.connect(lambda v: self._onVigemNumberChanged('vigem_net_game_deadzone', float(v)))
+        self.vigemReleaseSpin.valueChanged.connect(lambda v: self._onVigemNumberChanged('vigem_net_release_ms', int(v)))
         self.vigemConnectBtn.clicked.connect(self._onVigemConnectToggle)
 
         # PID
@@ -1462,6 +1506,13 @@ class AimPage(BasePage):
             self.vigemPortSpin.setValue(int(getattr(self._config, 'vigem_net_port', 5555)))
             self.vigemTokenEdit.setText(str(getattr(self._config, 'vigem_net_token', '') or ''))
             self.vigemSensitivitySpin.setValue(float(getattr(self._config, 'vigem_net_sensitivity', 1.0)))
+            for _spin, _attr, _default, _conv in (
+                    (self.vigemInputDzSpin, 'vigem_net_input_deadzone', 0.02, float),
+                    (self.vigemGameDzSpin, 'vigem_net_game_deadzone', 0.0, float),
+                    (self.vigemReleaseSpin, 'vigem_net_release_ms', 50, int)):
+                _spin.blockSignals(True)
+                _spin.setValue(_conv(getattr(self._config, _attr, _default)))
+                _spin.blockSignals(False)
             self._updateVigemConnectionStatus()
 
             # PID — Kp sliders are scaled x200 normally (slider 0–100 → config
@@ -1876,6 +1927,10 @@ class AimPage(BasePage):
     def _onVigemSensitivityChanged(self, value):
         if self._config:
             self._config.vigem_net_sensitivity = float(value)
+
+    def _onVigemNumberChanged(self, attr, value):
+        if self._config:
+            setattr(self._config, attr, value)
 
     def _onVigemConnectToggle(self):
         try:
@@ -2295,6 +2350,12 @@ class AimPage(BasePage):
         super().retranslateUi()
 
         self.generalGroup.titleLabel.setText(t("general_params"))
+        self.vigemInputDzCard.titleLabel.setText(t("vigem_input_deadzone", "Input Dead Zone"))
+        self.vigemInputDzCard.contentLabel.setText(t("vigem_input_deadzone_desc", "Stick values below this fraction of full travel are ignored (jitter filter)"))
+        self.vigemGameDzCard.titleLabel.setText(t("vigem_game_deadzone", "Game Dead Zone"))
+        self.vigemGameDzCard.contentLabel.setText(t("vigem_game_deadzone_desc", "The game's own inner stick dead zone; small corrections are pushed past it so they still register (0 = off)"))
+        self.vigemReleaseCard.titleLabel.setText(t("vigem_release_ms", "Stick Release Time"))
+        self.vigemReleaseCard.contentLabel.setText(t("vigem_release_ms_desc", "Recenter the stick this long after the last aim move, so it never keeps drifting"))
         self.aimPartCard.titleLabel.setText(t("aim_part"))
         self.mouseMoveCard.titleLabel.setText(t("mouse_move_method"))
         self.aimStartDelayCard.titleLabel.setText(t("aim_start_delay", "Aim Delay"))

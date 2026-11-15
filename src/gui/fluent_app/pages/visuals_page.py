@@ -167,6 +167,15 @@ class VisualsPage(BasePage):
             parent=self.displayGroup
         )
 
+        # vigem_network stick gauge
+        self.showStickGaugeCard = SwitchSettingCard(
+            FluentIcon.GAME,
+            t("show_stick_gauge", "Stick Gauge"),
+            t("show_stick_gauge_hint",
+              "Draw a circle showing the virtual stick position and dead zones (only with the vigem_network mouse method)"),
+            parent=self.displayGroup
+        )
+
         # Confidence Box Color Theme
         self.boxThemeCombo = ComboBox()
         self.boxThemeCombo.addItems(["Default", "Cyan", "Red", "Yellow", "White", "Purple"])
@@ -435,6 +444,7 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.tracerThicknessCard)
         self.displayGroup.addSettingCard(self.tracerFromBottomCard)
         self.displayGroup.addSettingCard(self.showAimPredictionCard)
+        self.displayGroup.addSettingCard(self.showStickGaugeCard)
         self.displayGroup.addSettingCard(self.aimMarkerThicknessCard)
         self.displayGroup.addSettingCard(self.boxThemeCard)
         self.displayGroup.addSettingCard(self.chromaSpeedCard)
@@ -485,6 +495,7 @@ class VisualsPage(BasePage):
         self.showTracerLineCard.checkedChanged.connect(self._onShowTracerLineChanged)
         self.tracerFromBottomCard.checkedChanged.connect(self._onTracerFromBottomChanged)
         self.showAimPredictionCard.checkedChanged.connect(self._onShowAimPredictionChanged)
+        self.showStickGaugeCard.checkedChanged.connect(self._onShowStickGaugeChanged)
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
         self.boxThicknessCard.valueChanged.connect(self._onBoxThicknessChanged)
@@ -545,6 +556,7 @@ class VisualsPage(BasePage):
         self.showTracerLineCard.setChecked(bool(getattr(self._config, 'show_tracer_line', False)))
         self.tracerFromBottomCard.setChecked(bool(getattr(self._config, 'tracer_from_bottom', False)))
         self.showAimPredictionCard.setChecked(bool(getattr(self._config, 'show_aim_prediction_marker', True)))
+        self.showStickGaugeCard.setChecked(bool(getattr(self._config, 'show_stick_gauge', True)))
         self.fovThicknessCard.setValue(int(getattr(self._config, 'fov_line_thickness', 2) or 2))
         self.detectRangeThicknessCard.setValue(int(getattr(self._config, 'detect_range_line_thickness', 1) or 1))
         self.tracerThicknessCard.setValue(int(getattr(self._config, 'tracer_line_thickness', 2) or 2))
@@ -648,6 +660,10 @@ class VisualsPage(BasePage):
         if self._config:
             self._config.show_aim_prediction_marker = checked
         self._updateLineThicknessVisibility()
+
+    def _onShowStickGaugeChanged(self, checked):
+        if self._config:
+            self._config.show_stick_gauge = checked
 
     def _onLineThicknessChanged(self, attr, value):
         if self._config:
@@ -948,6 +964,9 @@ class VisualsPage(BasePage):
         self.showAimPredictionCard.titleLabel.setText(t("show_aim_prediction_marker", "Predicted Aim Point"))
         self.showAimPredictionCard.contentLabel.setText(t("show_aim_prediction_marker_hint",
             "Draw a second marker at the locked target's post-prediction point (only while Target Tracking's prediction or Kalman is on)"))
+        self.showStickGaugeCard.titleLabel.setText(t("show_stick_gauge", "Stick Gauge"))
+        self.showStickGaugeCard.contentLabel.setText(t("show_stick_gauge_hint",
+            "Draw a circle showing the virtual stick position and dead zones (only with the vigem_network mouse method)"))
         self.boxThemeCard.titleLabel.setText(t("box_color_theme", "Box Color Theme"))
         self.boxThemeCard.contentLabel.setText(t("box_color_theme_hint", "Color preset for detection boxes"))
         self.chromaSpeedCard.titleLabel.setText(t("chroma_box_speed", "Chroma Speed"))
