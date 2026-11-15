@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <div class="app">
@@ -1933,6 +1933,63 @@
             </div>
           </div>
           </section>
+
+          <section class="module">
+          <div class="field-group-title" id="keys-remote-btn-group-title">Remote Mouse Buttons</div>
+          <div class="field-group" id="keys-remote-btn-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Enabled</div>
+                <div class="field-desc">Listen for mouse buttons sent over UDP by vigem-for-a-game; holding the chosen button engages aim</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="keys-remote_btn_enabled" data-key="remote_btn_enabled" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Aim Button</div>
+                <div class="field-desc">Remote mouse button that activates aiming</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-remote_aim_button" data-key="remote_aim_button" data-type="choice">
+                  <option value="off">Off</option>
+                  <option value="lmb">Left (LMB)</option>
+                  <option value="rmb">Right (RMB)</option>
+                  <option value="mmb">Middle (MMB)</option>
+                  <option value="side1">Side 1</option>
+                  <option value="side2">Side 2</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Bind IP</div>
+                <div class="field-desc">Local address to listen on (0.0.0.0 = all interfaces)</div>
+              </div>
+              <div class="field-control">
+                <input type="text" id="keys-remote_btn_bind_ip" data-key="remote_btn_bind_ip" data-type="str" placeholder="0.0.0.0">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Port</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-remote_btn_bind_port" data-key="remote_btn_bind_port" data-type="number" min="1" max="65535" step="1" placeholder="5602">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Token</div>
+                <div class="field-desc">Optional; must match the sender's token (leave empty for none)</div>
+              </div>
+              <div class="field-control">
+                <input type="password" id="keys-remote_btn_token" data-key="remote_btn_token" data-type="str" placeholder="token">
+              </div>
+            </div>
+          </div>
+          </section>
           </div>
         </div>
 
@@ -2535,6 +2592,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

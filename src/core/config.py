@@ -295,6 +295,11 @@ _FIELD_MAP = {
     'vigem_net_port':             'hardware.vigem_network.port',
     'vigem_net_token':            'hardware.vigem_network.token',
     'vigem_net_sensitivity':      'hardware.vigem_network.sensitivity',
+    'remote_btn_enabled':         'hardware.remote_buttons.enabled',
+    'remote_btn_bind_ip':         'hardware.remote_buttons.bind_ip',
+    'remote_btn_bind_port':       'hardware.remote_buttons.bind_port',
+    'remote_btn_token':           'hardware.remote_buttons.token',
+    'remote_aim_button':          'hardware.remote_buttons.aim_button',
 
     # --- ui ---
     'dark_mode':                  'ui.dark_mode',
@@ -685,6 +690,12 @@ class Config:
         self.vigem_net_port: int = 5555
         self.vigem_net_token: str = ""
         self.vigem_net_sensitivity: float = 1.0
+        # Mouse buttons streamed over UDP from vigem-for-a-game (core/remote_buttons.py)
+        self.remote_btn_enabled: bool = False
+        self.remote_btn_bind_ip: str = "0.0.0.0"
+        self.remote_btn_bind_port: int = 5602
+        self.remote_btn_token: str = ""
+        self.remote_aim_button: str = "rmb"  # "off", "lmb", "rmb", "mmb", "side1", "side2"
 
         # 檢測設定
         # 偵測節流：
@@ -1480,6 +1491,13 @@ def _validate_mouse_method(config: Config) -> None:
         config.makcu_aim_button = 'lmb'
     if getattr(config, 'makcu_always_aim_button', 'off') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
         config.makcu_always_aim_button = 'off'
+    if getattr(config, 'remote_aim_button', 'rmb') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
+        config.remote_aim_button = 'rmb'
+    try:
+        _rp = int(getattr(config, 'remote_btn_bind_port', 5602))
+    except (TypeError, ValueError):
+        _rp = 5602
+    config.remote_btn_bind_port = _rp if 1 <= _rp <= 65535 else 5602
     if getattr(config, 'makcu_connection', 'serial') not in ('serial', 'udp'):
         config.makcu_connection = 'serial'
     try:

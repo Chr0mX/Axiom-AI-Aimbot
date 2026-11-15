@@ -270,6 +270,12 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "vigem_net_port": {"type": "int", "min": 1, "max": 65535},
         "vigem_net_token": {"type": "str"},
         "vigem_net_sensitivity": {"type": "float", "min": 0.1, "max": 10.0},
+        # Remote mouse buttons (UDP from vigem-for-a-game)
+        "remote_btn_enabled": {"type": "bool"},
+        "remote_btn_bind_ip": {"type": "str"},
+        "remote_btn_bind_port": {"type": "int", "min": 1, "max": 65535},
+        "remote_btn_token": {"type": "str"},
+        "remote_aim_button": {"type": "choice", "choices": ["off", "lmb", "rmb", "mmb", "side1", "side2"]},
     },
     "visuals": {
         "show_fov": {"type": "bool"},

@@ -348,6 +348,12 @@ def main():
     )
     toggle_thread.start()
 
+    try:
+        from core.remote_buttons import ensure_remote_buttons
+        ensure_remote_buttons(config)
+    except Exception:
+        logger.exception("Error starting remote button listener")
+
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtCore import Qt
 
@@ -474,6 +480,11 @@ def main():
                 web_control_server.stop()
         except Exception:
             logger.exception("Error stopping Web Control server during shutdown")
+        try:
+            from core.remote_buttons import stop_remote_buttons
+            stop_remote_buttons()
+        except Exception:
+            logger.exception("Error stopping remote button listener during shutdown")
         try:
             save_config(config)
         except Exception:
