@@ -1,5 +1,17 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+:root {
+  --accent: #7ea2ff;
+  --accent-rgb: 126, 162, 255;
+  --bg: #101216;
+  --surface: #181b21;
+  --ink: #eceef2;
+  --ink-soft: #b4bac4;
+  --ink-faint: #8b929d;
+  --line: #2a2f37;
+  --bad: #ff7a7a;
+}
+
 html, body {
   width: 100%;
   height: 100%;
@@ -32,7 +44,7 @@ html, body {
   white-space: normal;
   text-align: right;
 }
-#status.connected    { color: #00e0a0; background: rgba(0,0,0,0.35); }
+#status.connected    { color: var(--accent); background: rgba(0,0,0,0.35); }
 #status.disconnected { color: #ff6060; background: rgba(0,0,0,0.45); }
 
 /* ── Settings toggle button (bottom-right) ────────────────────── */
@@ -41,9 +53,9 @@ html, body {
   bottom: 12px; right: 12px;
   width: 34px; height: 34px;
   background: rgba(20, 20, 28, 0.82);
-  border: 1px solid rgba(0, 224, 160, 0.4);
+  border: 1px solid rgba(var(--accent-rgb), 0.4);
   border-radius: 6px;
-  color: #00e0a0;
+  color: var(--accent);
   font-size: 16px;
   cursor: pointer;
   z-index: 20;
@@ -52,8 +64,8 @@ html, body {
   transition: background 0.15s, border-color 0.15s, opacity 0.4s ease;
 }
 #cfg-toggle:hover {
-  background: rgba(0, 224, 160, 0.15);
-  border-color: rgba(0, 224, 160, 0.7);
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.7);
   opacity: 1;
 }
 #cfg-toggle.faded {
@@ -65,12 +77,12 @@ html, body {
   position: fixed;
   bottom: 54px; right: 12px;
   width: 240px;
-  background: rgba(14, 14, 20, 0.92);
-  border: 1px solid rgba(0, 224, 160, 0.35);
+  background: rgba(16, 18, 22, 0.92);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
   border-radius: 8px;
   padding: 12px;
   font: 12px/1.5 "Consolas", "Menlo", monospace;
-  color: #c8c8d4;
+  color: var(--ink);
   z-index: 20;
   display: none;
   user-select: none;
@@ -80,7 +92,7 @@ html, body {
 .cfg-title {
   font-size: 13px;
   font-weight: bold;
-  color: #00e0a0;
+  color: var(--accent);
   margin-bottom: 10px;
   letter-spacing: 0.04em;
 }
@@ -89,9 +101,9 @@ html, body {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgba(0, 224, 160, 0.6);
+  color: rgba(var(--accent-rgb), 0.6);
   margin: 10px 0 4px;
-  border-bottom: 1px solid rgba(0, 224, 160, 0.15);
+  border-bottom: 1px solid rgba(var(--accent-rgb), 0.15);
   padding-bottom: 2px;
 }
 
@@ -104,19 +116,19 @@ html, body {
 .cfg-row label {
   width: 56px;
   flex-shrink: 0;
-  color: #9898a8;
+  color: var(--ink-soft);
   font-size: 11px;
 }
 .cfg-row input[type="range"] {
   flex: 1;
   height: 4px;
-  accent-color: #00e0a0;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 .cfg-row select {
   flex: 1;
   background: rgba(255,255,255,0.06);
-  color: #e0e0f0;
+  color: var(--ink);
   border: 1px solid rgba(255,255,255,0.15);
   border-radius: 3px;
   font-size: 11px;
@@ -133,11 +145,11 @@ html, body {
 .cfg-val {
   min-width: 22px;
   text-align: right;
-  color: #e0e0f0;
+  color: var(--ink);
   font-size: 11px;
 }
 .cfg-unit {
-  color: #606070;
+  color: var(--ink-faint);
   font-size: 10px;
   width: 16px;
 }

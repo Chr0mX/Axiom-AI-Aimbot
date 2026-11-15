@@ -39,7 +39,7 @@
     fontSize:      11,
     bgColor:       "#000000",
     bgOpacity:     65,
-    borderColor:   "#00e0a0",
+    borderColor:   "#7ea2ff",
     borderOpacity: 60,
     borderWidth:   1,
     borderRadius:  4,

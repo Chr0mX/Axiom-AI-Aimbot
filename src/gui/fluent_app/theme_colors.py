@@ -181,13 +181,13 @@ class ThemeColors:
     PRIMARY = ColorPair.from_config(
         "primary_colors", "primary",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
 
     ACCENT = ColorPair.from_config(
         "primary_colors", "accent",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     # ============================================================
@@ -259,7 +259,7 @@ class ThemeColors:
     TEXT_LINK = ColorPair.from_config(
         "text_colors", "link",
         default_light="#0067C0",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     # ============================================================
@@ -497,7 +497,7 @@ class ThemeColors:
     BUTTON_PRIMARY_BG = ColorPair.from_config(
         "button_colors", "primary", "background",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
 
     BUTTON_PRIMARY_TEXT = ColorPair.from_config(
@@ -572,7 +572,7 @@ class ThemeColors:
     SWITCH_ON_BG = ColorPair.from_config(
         "switch_colors", "on", "background",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     SWITCH_ON_THUMB = ColorPair.from_config(
@@ -593,7 +593,7 @@ class ThemeColors:
     SLIDER_FILL = ColorPair.from_config(
         "slider_colors", "fill",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     SLIDER_THUMB = ColorPair.from_config(
@@ -605,7 +605,7 @@ class ThemeColors:
     SLIDER_THUMB_BORDER = ColorPair.from_config(
         "slider_colors", "thumb_border",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     # ============================================================
@@ -659,7 +659,7 @@ class ThemeColors:
     INPUT_BORDER_FOCUS = ColorPair.from_config(
         "input_colors", "border_focus",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     INPUT_TEXT = ColorPair.from_config(
@@ -780,7 +780,7 @@ class ThemeColors:
     TAG_PRIMARY_TEXT = ColorPair.from_config(
         "tag_colors", "primary", "text",
         default_light="#0067C0",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     TAG_SUCCESS_BG = ColorPair.from_config(
