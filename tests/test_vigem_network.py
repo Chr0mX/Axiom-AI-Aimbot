@@ -309,6 +309,44 @@ class TestMockServer:
             srv.stop()
 
 
+class TestSendMoveUsesConfigRef:
+    class _Cfg:
+        def __init__(self, s):
+            self.vigem_net_sensitivity = s
+
+    def _first_rx(self, srv, cfg, dx):
+        _mod.connect_vigem_network("127.0.0.1", srv.port, "test_token", cfg)
+        try:
+            _mod.send_mouse_move_vigem_network(dx, 0)
+            time.sleep(0.15)
+        finally:
+            _mod.disconnect_vigem_network()
+        time.sleep(0.1)
+        vals = [int(l.split(",")[1].rstrip(")")) for l in srv.received_lines
+                if l.startswith("km.controller(14,")]
+        return vals[0] if vals else None
+
+    def test_sensitivity_read_from_config(self):
+        srv1 = _MockServer()
+        srv2 = _MockServer()
+        try:
+            lo = self._first_rx(srv1, self._Cfg(1.0), 10.0)
+            hi = self._first_rx(srv2, self._Cfg(2.0), 10.0)
+            assert lo is not None and hi is not None
+            assert hi > lo
+        finally:
+            srv1.stop()
+            srv2.stop()
+
+    def test_no_config_defaults_to_one(self):
+        srv = _MockServer()
+        try:
+            rx = self._first_rx(srv, None, 10.0)
+            assert rx == int(10.0 / BASE_PIXELS * _MAX_STICK)
+        finally:
+            srv.stop()
+
+
 # ---------------------------------------------------------------------------
 # Config validation
 # ---------------------------------------------------------------------------

@@ -1889,7 +1889,7 @@ class AimPage(BasePage):
                 if not host:
                     QMessageBox.warning(self, "ViGEm Network", "Host is not configured.")
                     return
-                connect_vigem_network(host, port, token)
+                connect_vigem_network(host, port, token, self._config)
             self._updateVigemConnectionStatus()
         except ImportError:
             pass

@@ -237,10 +237,12 @@ class VigemNetworkClient:
 # ===== Module-level singleton + public API =====
 
 vigem_net_client: Optional[VigemNetworkClient] = None
+_config_ref = None
 
 
-def connect_vigem_network(host: str, port: int, token: str) -> bool:
-    global vigem_net_client
+def connect_vigem_network(host: str, port: int, token: str, config=None) -> bool:
+    global vigem_net_client, _config_ref
+    _config_ref = config
     if vigem_net_client is not None:
         vigem_net_client.disconnect()
     vigem_net_client = VigemNetworkClient()
@@ -261,8 +263,7 @@ def is_vigem_network_connected() -> bool:
 def send_mouse_move_vigem_network(dx: float, dy: float) -> None:
     if vigem_net_client is None or not vigem_net_client.is_connected():
         return
-    from core.config import config
-    sensitivity = getattr(config, 'vigem_net_sensitivity', 1.0)
+    sensitivity = getattr(_config_ref, 'vigem_net_sensitivity', 1.0)
     fx = dx * sensitivity / BASE_PIXELS
     fy = dy * sensitivity / BASE_PIXELS
     rx = _clamp(int(fx * _MAX_STICK), _MIN_STICK, _MAX_STICK)

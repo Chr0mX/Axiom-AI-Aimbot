@@ -475,7 +475,7 @@ def connect_vigem_network(config: "Config") -> dict:
     except ImportError:
         logger.error("[VigemNet] win_utils.vigem_network not importable")
         return {"ok": False, "reason": "import_error"}
-    ok = _connect(host, port, token)
+    ok = _connect(host, port, token, config)
     return {"ok": ok, "reason": "" if ok else "connect_failed"}
 
 

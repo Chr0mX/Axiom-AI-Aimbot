@@ -460,10 +460,9 @@ def start(
     @app.post("/api/control/vigem_network_connect", dependencies=[Depends(_check_token)])
     def post_vigem_network_connect():
         from .app_controller import connect_vigem_network
-        ok = connect_vigem_network(config)
-        if not ok:
-            return {"ok": False, "vigem_network_connected": False, "reason": "connect_failed"}
-        return {"ok": True, "vigem_network_connected": True}
+        res = connect_vigem_network(config)
+        ok = bool(res.get("ok"))
+        return {"ok": ok, "vigem_network_connected": ok, "reason": res.get("reason", "")}
 
     @app.post("/api/control/vigem_network_disconnect", dependencies=[Depends(_check_token)])
     def post_vigem_network_disconnect():
