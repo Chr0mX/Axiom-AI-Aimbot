@@ -459,6 +459,45 @@ def disconnect_makcu(config: "Config") -> None:
 
 
 # ---------------------------------------------------------------------------
+# ViGEm Network — remote virtual Xbox via TCP
+# ---------------------------------------------------------------------------
+
+def connect_vigem_network(config: "Config") -> dict:
+    host = getattr(config, 'vigem_net_host', '').strip()
+    port = getattr(config, 'vigem_net_port', 5555)
+    token = getattr(config, 'vigem_net_token', '')
+    if not host:
+        return {"ok": False, "reason": "no_host"}
+    if not token:
+        return {"ok": False, "reason": "no_token"}
+    try:
+        from win_utils.vigem_network import connect_vigem_network as _connect
+    except ImportError:
+        logger.error("[VigemNet] win_utils.vigem_network not importable")
+        return {"ok": False, "reason": "import_error"}
+    ok = _connect(host, port, token)
+    return {"ok": ok, "reason": "" if ok else "connect_failed"}
+
+
+def disconnect_vigem_network(config: "Config") -> dict:
+    try:
+        from win_utils.vigem_network import disconnect_vigem_network as _disconnect
+    except ImportError:
+        logger.error("[VigemNet] win_utils.vigem_network not importable")
+        return {"ok": False, "reason": "import_error"}
+    _disconnect()
+    return {"ok": True}
+
+
+def is_vigem_network_connected() -> bool:
+    try:
+        from win_utils.vigem_network import is_vigem_network_connected as _is_connected
+        return _is_connected()
+    except ImportError:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Model/provider switching — mirrors model_page.py's own decide logic
 # (needs_trt_build(), the DirectML-crossing restart condition) with none of
 # its GUI rendering: a web route can't switch tabs, show a progress bar, or

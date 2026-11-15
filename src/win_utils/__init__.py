@@ -79,6 +79,16 @@ from .xbox_controller import (
     set_xbox_deadzone,
 )
 
+# Mouse move - ViGEm Network (remote virtual Xbox via TCP)
+from .vigem_network import (
+    connect_vigem_network,
+    disconnect_vigem_network,
+    is_vigem_network_connected,
+    send_mouse_move_vigem_network,
+    send_mouse_click_vigem_network,
+    send_vigem_network_button,
+)
+
 # Mouse click
 from .mouse_click import (
     send_mouse_click_sendinput,
@@ -147,6 +157,8 @@ def send_mouse_move(dx, dy, method="mouse_event"):
         send_mouse_move_makcu(dx, dy)
     elif method == "xbox":
         send_mouse_move_xbox(dx, dy)
+    elif method == "vigem_network":
+        send_mouse_move_vigem_network(dx, dy)
     else:
         # 默認使用 mouse_event 方式（安全穩定）
         send_mouse_move_mouse_event(dx, dy)
@@ -201,6 +213,14 @@ __all__ = [
     'is_xbox_available',
     'set_xbox_sensitivity',
     'set_xbox_deadzone',
+
+    # ViGEm Network
+    'connect_vigem_network',
+    'disconnect_vigem_network',
+    'is_vigem_network_connected',
+    'send_mouse_move_vigem_network',
+    'send_mouse_click_vigem_network',
+    'send_vigem_network_button',
 
     # 滑鼠點擊
     'send_mouse_click',

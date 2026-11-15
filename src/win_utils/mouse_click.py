@@ -60,6 +60,9 @@ def send_mouse_button(method: str = "mouse_event", down: bool = True) -> bool:
         if method == "arduino":
             from .arduino_mouse import send_mouse_click_arduino
             return bool(send_mouse_click_arduino(2 if down else 3))
+        if method == "vigem_network":
+            from .vigem_network import send_vigem_network_button
+            return send_vigem_network_button(down)
         flag = win32con.MOUSEEVENTF_LEFTDOWN if down else win32con.MOUSEEVENTF_LEFTUP
         win32api.mouse_event(flag, 0, 0, 0, 0)
         return True
@@ -94,6 +97,9 @@ def send_mouse_click(method="ddxoft"):
         elif method == "makcu":
             from .makcu_mouse import send_mouse_click_makcu
             return send_mouse_click_makcu()
+        elif method == "vigem_network":
+            from .vigem_network import send_mouse_click_vigem_network
+            return send_mouse_click_vigem_network()
         else:
             return send_mouse_click_ddxoft()  # Default method
         return True

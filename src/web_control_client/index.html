@@ -860,6 +860,7 @@
                   <option value="arduino">arduino</option>
                   <option value="makcu">makcu</option>
                   <option value="xbox">xbox</option>
+                  <option value="vigem_network">vigem_network</option>
                 </select>
               </div>
             </div>
@@ -1599,6 +1600,7 @@
                   <option value="arduino">arduino</option>
                   <option value="makcu">makcu</option>
                   <option value="xbox">xbox</option>
+                  <option value="vigem_network">vigem_network</option>
                 </select>
               </div>
             </div>
@@ -1877,6 +1879,56 @@
               <div class="field-control">
                 <input type="number" id="keys-makcu_mouse_spread" data-key="makcu_mouse_spread" data-type="number" min="0" max="100" step="1">
                 <span class="field-slider-value">%</span>
+              </div>
+            </div>
+          </div>
+          </section>
+
+          <section class="module">
+          <div class="field-group-title" id="keys-vigem-net-group-title">ViGEm Network</div>
+          <div class="field-group" id="keys-vigem-net-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Connected</div>
+                <div class="field-desc">Connect to the vigem-for-a-game Network API on a remote PC</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="keys-vigem-net-toggle"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Host</div>
+                <div class="field-desc">IP address or hostname of the PC running vigem-for-a-game</div>
+              </div>
+              <div class="field-control">
+                <input type="text" id="keys-vigem_net_host" data-key="vigem_net_host" data-type="str" placeholder="192.168.1.100">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Port</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_port" data-key="vigem_net_port" data-type="number" min="1" max="65535" step="1" placeholder="5555">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Token</div>
+                <div class="field-desc">Authentication token (must match the vigem app's Network API token)</div>
+              </div>
+              <div class="field-control">
+                <input type="password" id="keys-vigem_net_token" data-key="vigem_net_token" data-type="str" placeholder="token">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Sensitivity</div>
+                <div class="field-desc">Stick movement multiplier (higher = faster aiming)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_sensitivity" data-key="vigem_net_sensitivity" data-type="number" min="0.1" max="10" step="0.1">
               </div>
             </div>
           </div>

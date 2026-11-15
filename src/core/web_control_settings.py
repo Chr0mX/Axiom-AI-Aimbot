@@ -147,7 +147,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # is left to the client, same precedent as ndi_source_name/
         # ndi_force_reconnect: it already has both values in hand, so no
         # server-side "decide" logic is needed for a plain two-key POST.
-        "mouse_move_method": {"type": "choice", "choices": ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]},
+        "mouse_move_method": {"type": "choice", "choices": ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox", "vigem_network"]},
         "mouse_click_method": {"type": "str"},
         "aim_start_delay_ms": {"type": "int", "min": 0, "max": 1000},
         "pid_unsafe_mode": {"type": "bool"},
@@ -265,6 +265,10 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "makcu_lock_physical_move": {"type": "bool"},
         "makcu_mouse_spread_enabled": {"type": "bool"},
         "makcu_mouse_spread": {"type": "int", "min": 0, "max": 100},
+        # ViGEm Network
+        "vigem_net_host": {"type": "str"},
+        "vigem_net_port": {"type": "int", "min": 1, "max": 65535},
+        "vigem_net_sensitivity": {"type": "float", "min": 0.1, "max": 10.0},
     },
     "visuals": {
         "show_fov": {"type": "bool"},
@@ -341,7 +345,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # pages both had a control bound to the same Config field.
         "mouse_click_method": {
             "type": "choice",
-            "choices": ["mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox"],
+            "choices": ["mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox", "vigem_network"],
         },
         "auto_fire_delay": {"type": "float", "min": 0.0, "max": 2.0},
         "auto_fire_interval": {"type": "float", "min": 0.01, "max": 1.0},

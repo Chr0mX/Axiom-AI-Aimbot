@@ -290,6 +290,12 @@ _FIELD_MAP = {
     'xbox_sensitivity':           'hardware.xbox.sensitivity',
     'xbox_deadzone':              'hardware.xbox.deadzone',
 
+    # --- vigem network ---
+    'vigem_net_host':             'hardware.vigem_network.host',
+    'vigem_net_port':             'hardware.vigem_network.port',
+    'vigem_net_token':            'hardware.vigem_network.token',
+    'vigem_net_sensitivity':      'hardware.vigem_network.sensitivity',
+
     # --- ui ---
     'dark_mode':                  'ui.dark_mode',
     'enable_acrylic':             'ui.enable_acrylic',
@@ -673,6 +679,12 @@ class Config:
         # Xbox 360 虛擬手把設定
         self.xbox_sensitivity: float = 1.0          # 手把靈敏度 (0.1~5.0)
         self.xbox_deadzone: float = 0.05            # 手把死區 (0.0~0.5)
+
+        # ViGEm Network (remote virtual Xbox via TCP)
+        self.vigem_net_host: str = ""
+        self.vigem_net_port: int = 5555
+        self.vigem_net_token: str = ""
+        self.vigem_net_sensitivity: float = 1.0
 
         # 檢測設定
         # 偵測節流：
@@ -1455,12 +1467,12 @@ def _validate_tracking(config: Config) -> None:
 def _validate_mouse_method(config: Config) -> None:
     """驗證並修正滑鼠移動方式"""
     # 驗證滑鼠移動方式是否為有效值
-    valid_move_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox')
+    valid_move_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox', 'vigem_network')
     if config.mouse_move_method not in valid_move_methods:
         config.mouse_move_method = 'mouse_event'
-    
+
     # 驗證滑鼠點擊方式是否為有效值
-    valid_click_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox')
+    valid_click_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox', 'vigem_network')
     if config.mouse_click_method not in valid_click_methods:
         config.mouse_click_method = 'mouse_event'
 
