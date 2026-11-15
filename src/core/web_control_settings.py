@@ -268,6 +268,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # ViGEm Network
         "vigem_net_host": {"type": "str"},
         "vigem_net_port": {"type": "int", "min": 1, "max": 65535},
+        "vigem_net_token": {"type": "str"},
         "vigem_net_sensitivity": {"type": "float", "min": 0.1, "max": 10.0},
     },
     "visuals": {
