@@ -781,12 +781,12 @@ class KeysPage(BasePage):
         self.makcuKeysGroup.addSettingCard(self.makcuSpreadCard)
         self.addContent(self.makcuKeysGroup)
 
-        # Remote mouse buttons (GamepadEnhancer Network API, TCP) — always visible
+        # Remote mouse buttons (pushed by GamepadEnhancer on the ViGEm Network connection) — always visible
         self.remoteBtnGroup = SettingCardGroup(t("remote_btn_group", "Remote Mouse Buttons"), self.scrollWidget)
         self.remoteBtnEnableCard = SwitchSettingCard(
             FluentIcon.WIFI,
-            t("remote_btn_enable", "Listen for Remote Mouse Buttons"),
-            t("remote_btn_enable_desc", "Receive mouse buttons sent by GamepadEnhancer over its Network API (TCP); holding the chosen button engages aim"),
+            t("remote_btn_enable", "Receive Remote Mouse Buttons"),
+            t("remote_btn_enable_desc", "Get the GamepadEnhancer PC's mouse buttons over the ViGEm Network connection (same address and token); holding the chosen button engages aim"),
             parent=self.remoteBtnGroup
         )
         self.remoteAimButtonCombo = ComboBox()
@@ -802,41 +802,11 @@ class KeysPage(BasePage):
         )
         self.remoteAimButtonCard.hBoxLayout.addWidget(self.remoteAimButtonCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.remoteAimButtonCard.hBoxLayout.addSpacing(16)
-        self.remoteBindIpEdit = LineEdit()
-        self.remoteBindIpEdit.setPlaceholderText("0.0.0.0")
-        self.remoteBindIpEdit.setMinimumWidth(150)
-        self.remoteBindPortEdit = LineEdit()
-        self.remoteBindPortEdit.setPlaceholderText("5555")
-        self.remoteBindPortEdit.setFixedWidth(80)
-        self.remoteBindCard = SettingCard(
-            FluentIcon.GLOBE,
-            t("remote_btn_bind", "Listen Address"),
-            t("remote_btn_bind_desc", "Local IP and TCP port to listen on"),
-            self.remoteBtnGroup
-        )
-        self.remoteBindCard.hBoxLayout.addWidget(self.remoteBindIpEdit, 0, Qt.AlignmentFlag.AlignRight)
-        self.remoteBindCard.hBoxLayout.addWidget(self.remoteBindPortEdit, 0, Qt.AlignmentFlag.AlignRight)
-        self.remoteBindCard.hBoxLayout.addSpacing(16)
-        self.remoteTokenEdit = LineEdit()
-        self.remoteTokenEdit.setEchoMode(LineEdit.EchoMode.Password)
-        self.remoteTokenEdit.setPlaceholderText("token")
-        self.remoteTokenEdit.setMinimumWidth(150)
-        self.remoteTokenCard = SettingCard(
-            FluentIcon.VPN,
-            t("remote_btn_token", "Token"),
-            t("remote_btn_token_desc", "Required; must match the sender's token"),
-            self.remoteBtnGroup
-        )
-        self.remoteTokenCard.hBoxLayout.addWidget(self.remoteTokenEdit, 0, Qt.AlignmentFlag.AlignRight)
-        self.remoteTokenCard.hBoxLayout.addSpacing(16)
-        for _c in (self.remoteBtnEnableCard, self.remoteAimButtonCard, self.remoteBindCard, self.remoteTokenCard):
+        for _c in (self.remoteBtnEnableCard, self.remoteAimButtonCard):
             self.remoteBtnGroup.addSettingCard(_c)
         self.addContent(self.remoteBtnGroup)
         self.remoteBtnEnableCard.checkedChanged.connect(self._onRemoteBtnEnabled)
         self.remoteAimButtonCombo.currentIndexChanged.connect(self._onRemoteAimButtonChanged)
-        self.remoteBindIpEdit.editingFinished.connect(self._onRemoteBindChanged)
-        self.remoteBindPortEdit.editingFinished.connect(self._onRemoteBindChanged)
-        self.remoteTokenEdit.editingFinished.connect(self._onRemoteTokenChanged)
         self.makcuKeysGroup.setVisible(False)
 
         self.scrollLayout.addStretch(1)
@@ -981,12 +951,6 @@ class KeysPage(BasePage):
             self.remoteAimButtonCombo.blockSignals(True)
             self.remoteAimButtonCombo.setCurrentIndex(self._remoteAimButtons.index(_rab))
             self.remoteAimButtonCombo.blockSignals(False)
-        if not self.remoteBindIpEdit.hasFocus():
-            self.remoteBindIpEdit.setText(str(getattr(self._config, 'remote_btn_bind_ip', '0.0.0.0') or ''))
-        if not self.remoteBindPortEdit.hasFocus():
-            self.remoteBindPortEdit.setText(str(getattr(self._config, 'remote_btn_bind_port', 5555)))
-        if not self.remoteTokenEdit.hasFocus():
-            self.remoteTokenEdit.setText(str(getattr(self._config, 'remote_btn_token', '') or ''))
 
         for card, attr in ((self.makcuDeviceHotkeysCard, 'makcu_device_hotkeys'),
                            (self.makcuMoveLockCard, 'makcu_lock_physical_move'),
@@ -1428,37 +1392,13 @@ class KeysPage(BasePage):
         self.makcuUdpPortEdit.setText(str(self._config.makcu_udp_port))
 
     def _onRemoteBtnEnabled(self, checked: bool):
+        # The vigem_network client reads this flag live and (un)subscribes on its own.
         if self._config:
             self._config.remote_btn_enabled = bool(checked)
-            self._applyRemoteButtons()
 
     def _onRemoteAimButtonChanged(self, index: int):
         if self._config and 0 <= index < len(self._remoteAimButtons):
             self._config.remote_aim_button = self._remoteAimButtons[index]
-
-    def _onRemoteBindChanged(self):
-        if not self._config:
-            return
-        self._config.remote_btn_bind_ip = self.remoteBindIpEdit.text().strip() or "0.0.0.0"
-        try:
-            port = int(self.remoteBindPortEdit.text().strip() or 5555)
-        except ValueError:
-            port = 5555
-        self._config.remote_btn_bind_port = port if 1 <= port <= 65535 else 5555
-        self.remoteBindPortEdit.setText(str(self._config.remote_btn_bind_port))
-        self._applyRemoteButtons()
-
-    def _onRemoteTokenChanged(self):
-        if self._config:
-            self._config.remote_btn_token = self.remoteTokenEdit.text()
-            self._applyRemoteButtons()
-
-    def _applyRemoteButtons(self):
-        try:
-            from core.remote_buttons import ensure_remote_buttons
-            ensure_remote_buttons(self._config)
-        except Exception:
-            pass
 
     def _onMakcuFeatureToggled(self, attr: str, checked: bool):
         if self._config:
@@ -1592,14 +1532,10 @@ class KeysPage(BasePage):
         self.makcuAlwaysAimModeCard.titleLabel.setText(t("makcu_always_aim_mode", "Always Aim Mode"))
         self.makcuAlwaysAimModeCard.contentLabel.setText(t("makcu_always_aim_mode_desc", "Hold: always-aim while button held  |  Toggle: click to toggle always-aim on/off"))
         self.remoteBtnGroup.titleLabel.setText(t("remote_btn_group", "Remote Mouse Buttons"))
-        self.remoteBtnEnableCard.titleLabel.setText(t("remote_btn_enable", "Listen for Remote Mouse Buttons"))
-        self.remoteBtnEnableCard.contentLabel.setText(t("remote_btn_enable_desc", "Receive mouse buttons sent by GamepadEnhancer over its Network API (TCP); holding the chosen button engages aim"))
+        self.remoteBtnEnableCard.titleLabel.setText(t("remote_btn_enable", "Receive Remote Mouse Buttons"))
+        self.remoteBtnEnableCard.contentLabel.setText(t("remote_btn_enable_desc", "Get the GamepadEnhancer PC's mouse buttons over the ViGEm Network connection (same address and token); holding the chosen button engages aim"))
         self.remoteAimButtonCard.titleLabel.setText(t("remote_aim_button", "Remote Aim Button"))
         self.remoteAimButtonCard.contentLabel.setText(t("remote_aim_button_desc", "Remote mouse button that activates aiming"))
-        self.remoteBindCard.titleLabel.setText(t("remote_btn_bind", "Listen Address"))
-        self.remoteBindCard.contentLabel.setText(t("remote_btn_bind_desc", "Local IP and TCP port to listen on"))
-        self.remoteTokenCard.titleLabel.setText(t("remote_btn_token", "Token"))
-        self.remoteTokenCard.contentLabel.setText(t("remote_btn_token_desc", "Required; must match the sender's token"))
         self.makcuTransportCard.titleLabel.setText(t("makcu_transport", "Connection Type"))
         self.makcuTransportCard.contentLabel.setText(t("makcu_transport_desc", "UDP needs a MAKXD on Ethernet/Wi-Fi with plaintext UDP (encrypted UDP is not supported)"))
         self.makcuUdpCard.titleLabel.setText(t("makcu_udp_address", "Device Address"))

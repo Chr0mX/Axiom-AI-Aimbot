@@ -5,6 +5,7 @@ import threading
 import time
 
 import importlib
+import importlib.util
 import os
 
 # vigem_network is pure stdlib — import it directly without going through
@@ -27,6 +28,9 @@ _MIN_STICK = _mod._MIN_STICK
 _MAX_TRIGGER = _mod._MAX_TRIGGER
 BASE_PIXELS = _mod.BASE_PIXELS
 map_pixels_to_stick = _mod.map_pixels_to_stick
+parse_push_line = _mod.parse_push_line
+
+from types import SimpleNamespace
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +97,18 @@ class _MockServer:
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 self.received_lines.append(line.decode("utf-8", errors="replace"))
+
+    def push(self, text: str):
+        """Send raw text to the connected client (the server pushing km.mouse lines)."""
+        self._conn.sendall(text.encode("utf-8"))
+
+    def drop(self):
+        """Close the connection from the server side."""
+        try:
+            self._conn.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self._conn.close()
 
     def stop(self):
         self._stop.set()
@@ -310,6 +326,179 @@ class TestMockServer:
             srv.stop()
 
 
+def _wait_for(cond, timeout=2.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if cond():
+            return True
+        time.sleep(0.01)
+    return cond()
+
+
+class TestParsePushLine:
+    def test_plain(self):
+        assert parse_push_line("km.mouse(5)") == 5
+        assert parse_push_line("km.mouse(0)") == 0
+        assert parse_push_line("km.mouse(31)") == 31
+
+    def test_prompt_glued_in_front(self):
+        # replies end in "\r\n>>> " with no newline, so the next push arrives behind it
+        assert parse_push_line(">>> km.mouse(4)") == 4
+        assert parse_push_line(">>> >>> km.mouse(2)") == 2
+
+    def test_whitespace_and_cr(self):
+        assert parse_push_line("  km.mouse( 3 )\r") == 3
+
+    def test_not_a_push(self):
+        for line in ("OK", "ERR", "0", ">>> ", "", "km.controller(14,5)", "km.mouse()",
+                     "km.mouse(32)", "km.mouse(-1)", "km.mouse(x)", "km.mouse(1,2)"):
+            assert parse_push_line(line) is None, line
+
+
+class TestMouseStream:
+    """Mouse buttons pushed back by GamepadEnhancer on the same connection."""
+
+    def setup_method(self):
+        self._saved_cfg = _mod._config_ref
+        self.cfg = SimpleNamespace(remote_btn_enabled=True)
+        _mod._config_ref = self.cfg
+
+    def teardown_method(self):
+        _mod._config_ref = self._saved_cfg
+        _mod.vigem_net_client = None
+
+    def test_subscribes_after_connect_when_enabled(self):
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            assert _wait_for(lambda: "km.mouse_stream(1)" in srv.received_lines)
+            client.disconnect()
+        finally:
+            srv.stop()
+
+    def test_does_not_subscribe_when_disabled(self):
+        self.cfg.remote_btn_enabled = False
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            time.sleep(0.2)
+            assert not any(l.startswith("km.mouse_stream") for l in srv.received_lines)
+            client.disconnect()
+        finally:
+            srv.stop()
+
+    def test_toggling_the_setting_subscribes_and_unsubscribes(self):
+        self.cfg.remote_btn_enabled = False
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            time.sleep(0.1)
+            self.cfg.remote_btn_enabled = True
+            assert _wait_for(lambda: "km.mouse_stream(1)" in srv.received_lines)
+            srv.push("km.mouse(2)\r\n")
+            assert _wait_for(lambda: client.mouse_mask() == 2)
+            self.cfg.remote_btn_enabled = False
+            assert _wait_for(lambda: "km.mouse_stream(0)" in srv.received_lines)
+            assert client.mouse_mask() == 0          # unsubscribing releases whatever was held
+            client.disconnect()
+        finally:
+            srv.stop()
+
+    def test_push_updates_mask_and_held_names(self):
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            _mod.vigem_net_client = client
+            srv.push("km.mouse(18)\r\n")             # rmb + side2
+            assert _wait_for(lambda: client.mouse_mask() == 18)
+            assert _mod.vigem_net_button_held("rmb")
+            assert _mod.vigem_net_button_held("side2")
+            assert not _mod.vigem_net_button_held("lmb")
+            assert not _mod.vigem_net_button_held("off")
+            assert not _mod.vigem_net_button_held("bogus")
+            srv.push("km.mouse(0)\r\n")
+            assert _wait_for(lambda: client.mouse_mask() == 0)
+            client.disconnect()
+        finally:
+            srv.stop()
+
+    def test_reply_text_glued_to_a_push_and_split_chunks(self):
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            srv.push("0\r\n>>> km.mouse(4)\r\n")     # a reply, then the push behind its prompt
+            assert _wait_for(lambda: client.mouse_mask() == 4)
+            srv.push("km.mo")
+            time.sleep(0.05)
+            srv.push("use(1)\r\n")
+            assert _wait_for(lambda: client.mouse_mask() == 1)
+            client.disconnect()
+        finally:
+            srv.stop()
+
+    def test_garbage_is_ignored(self):
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            srv.push("ERR\r\nkm.mouse(99)\r\nhello\r\n")
+            time.sleep(0.15)
+            assert client.mouse_mask() == 0
+            assert client.is_connected()
+            client.disconnect()
+        finally:
+            srv.stop()
+
+    def test_stale_mask_reads_zero(self):
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            srv.push("km.mouse(1)\r\n")
+            assert _wait_for(lambda: client.mouse_mask() == 1)
+            client._mouse_t = time.monotonic() - _mod._MOUSE_STALE_S - 0.1   # no push for too long
+            assert client.mouse_mask() == 0
+            client.disconnect()
+        finally:
+            srv.stop()
+
+    def test_disconnect_releases(self):
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            srv.push("km.mouse(2)\r\n")
+            assert _wait_for(lambda: client.mouse_mask() == 2)
+            client.disconnect()
+            assert client.mouse_mask() == 0
+        finally:
+            srv.stop()
+
+    def test_server_closing_the_link_releases(self):
+        srv = _MockServer()
+        try:
+            client = VigemNetworkClient()
+            assert client.connect("127.0.0.1", srv.port, "test_token")
+            srv.push("km.mouse(2)\r\n")
+            assert _wait_for(lambda: client.mouse_mask() == 2)
+            srv.drop()
+            assert _wait_for(lambda: not client.is_connected())
+            assert client.mouse_mask() == 0          # a dropped link must never leave aim engaged
+            client.disconnect()
+        finally:
+            srv.stop()
+
+    def test_no_client_means_nothing_held(self):
+        _mod.vigem_net_client = None
+        assert _mod.vigem_net_mouse_mask() == 0
+        assert not _mod.vigem_net_button_held("rmb")
+
+
 class TestSendMoveUsesConfigRef:
     class _Cfg:
         def __init__(self, s):
@@ -464,6 +653,23 @@ class TestConfigValidation:
     def test_token_excluded_from_snapshots(self):
         from core.config_manager import _SNAPSHOT_EXCLUDED_FIELDS
         assert "vigem_net_token" in _SNAPSHOT_EXCLUDED_FIELDS
+
+    def test_remote_buttons_use_this_connection_not_their_own(self):
+        # Mouse buttons arrive on the vigem_network connection: no separate listener settings remain.
+        from core.config import _FIELD_MAP
+        assert "remote_btn_enabled" in _FIELD_MAP
+        assert "remote_aim_button" in _FIELD_MAP
+        for gone in ("remote_btn_bind_ip", "remote_btn_bind_port", "remote_btn_token"):
+            assert gone not in _FIELD_MAP, gone
+
+    def test_remote_button_defaults_and_validation(self):
+        from core.config import Config
+        c = Config()
+        assert c.remote_btn_enabled is False
+        assert not hasattr(c, "remote_btn_bind_port")
+        c.remote_aim_button = "bogus"
+        c.validate_config()
+        assert c.remote_aim_button == "rmb"
 
     def test_round_trip(self):
         from core.config import Config

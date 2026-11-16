@@ -115,11 +115,6 @@ def _sync_makcu_features(config: Config) -> None:
     so a change from any UI (Qt, Web Control, a loaded preset) lands within
     one method-check interval."""
     try:
-        from .remote_buttons import ensure_remote_buttons
-        ensure_remote_buttons(config)
-    except Exception as exc:
-        logger.debug("[AI Loop] remote buttons sync failed: %s", exc)
-    try:
         from win_utils import set_device_hotkeys
         from win_utils.makcu_mouse import makcu_mouse as _mm
         use_makcu = getattr(config, 'mouse_move_method', '') == 'makcu'
@@ -889,8 +884,10 @@ def ai_logic_loop(
                     except Exception:
                         pass
                 if getattr(config, 'remote_btn_enabled', False):
-                    from .remote_buttons import remote_button_held
-                    if remote_button_held(getattr(config, 'remote_aim_button', 'rmb')):
+                    # Mouse buttons pushed by GamepadEnhancer on the vigem_network connection
+                    # (0 while that link is down, so a dropped link never leaves aim engaged).
+                    from win_utils.vigem_network import vigem_net_button_held
+                    if vigem_net_button_held(getattr(config, 'remote_aim_button', 'rmb')):
                         is_aiming = True
                 # Makcu disengage-delay: keep is_aiming True for up to N seconds after release
                 _disengage_delay = float(getattr(config, 'makcu_disengage_delay', 0.0) or 0.0)

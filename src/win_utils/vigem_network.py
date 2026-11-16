@@ -1,11 +1,19 @@
 """ViGEm Network backend — drives a remote ViGEm virtual Xbox 360 controller
 over TCP using the MAKCU-style km.controller() text protocol.
 
+The same connection also carries the remote PC's mouse buttons back to Axiom:
+when ``config.remote_btn_enabled`` is on, the client sends ``km.mouse_stream(1)``
+after auth and the server (GamepadEnhancer) pushes ``km.mouse(mask)`` lines
+(bit0 L, 1 R, 2 M, 3 X1, 4 X2) on change plus a 1 s keep-alive. One address,
+one port, one token for both directions. The mask reads 0 when the link drops,
+after ``_MOUSE_STALE_S`` without a push, and until fresh data arrives after a
+reconnect.
+
 Pure stdlib (socket/threading/time). No win32api, no ViGEmBus driver needed on
 the Axiom machine; the driver only needs to be installed on the remote PC
-running vigem-for-a-game.
+running GamepadEnhancer.
 
-Protocol reference: vigem-for-a-game/docs/NETWORK_API.md
+Protocol reference: gamepadenhancer/docs/NETWORK_API.md
 """
 
 from __future__ import annotations
@@ -35,6 +43,34 @@ _CONNECT_TIMEOUT_S = 4.0
 _SEND_TIMEOUT_S = 0.15
 
 BASE_PIXELS = 50.0
+
+_MOUSE_STALE_S = 3.0
+_MOUSE_MASK_ALL = 0x1F
+_READ_CHUNK = 512
+_MAX_PENDING_LINE = 1024
+
+# Remote mouse button name -> bit in the km.mouse mask (same names as config.remote_aim_button).
+BUTTON_BITS = {"lmb": 0x01, "rmb": 0x02, "mmb": 0x04, "side1": 0x08, "side2": 0x10}
+
+
+def parse_push_line(line: str) -> Optional[int]:
+    """Mask from a pushed ``km.mouse(N)`` line, or None for anything else.
+
+    Replies end in a prompt (``\\r\\n>>> ``) with no newline after it, so the next
+    pushed line arrives glued to it (``>>> km.mouse(5)``); the prompt is dropped.
+    """
+    line = line.strip()
+    while line.startswith(">>>"):
+        line = line[3:].lstrip()
+    if not (line.startswith("km.mouse(") and line.endswith(")")):
+        return None
+    arg = line[len("km.mouse("):-1].strip()
+    if not arg.isdigit():
+        return None
+    value = int(arg)
+    if value > _MOUSE_MASK_ALL:
+        return None
+    return value
 
 
 def _clamp(v: int, lo: int, hi: int) -> int:
@@ -85,7 +121,14 @@ class VigemNetworkClient:
         self._stop_event = threading.Event()
         self._write_thread: Optional[threading.Thread] = None
         self._reconnect_thread: Optional[threading.Thread] = None
+        self._reader_thread: Optional[threading.Thread] = None
         self._resend_all = False
+
+        # Remote mouse buttons pushed back by the server on this same socket.
+        self._mouse_lock = threading.Lock()
+        self._mouse_mask = 0
+        self._mouse_t = float("-inf")
+        self._mouse_subscribed = False
 
         self._host: str = ""
         self._port: int = 5555
@@ -105,12 +148,15 @@ class VigemNetworkClient:
             self._sock = sock
             self._connected = True
         self._resend_all = True
+        self._mouse_subscribed = False
+        self._clear_mouse()
         self._last_sent_rx = None
         self._last_sent_ry = None
         self._last_sent_rt = None
         self._write_thread = threading.Thread(
             target=self._write_loop, daemon=True, name="vigem-net-write")
         self._write_thread.start()
+        self._start_reader(sock)
         logger.info("[VigemNet] connected to %s:%d", host, port)
         return True
 
@@ -132,8 +178,12 @@ class VigemNetworkClient:
             self._write_thread.join(timeout=1.0)
         if self._reconnect_thread and self._reconnect_thread.is_alive():
             self._reconnect_thread.join(timeout=2.0)
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1.0)
         self._write_thread = None
         self._reconnect_thread = None
+        self._reader_thread = None
+        self._clear_mouse()
         _publish_stick(0, 0)
         logger.info("[VigemNet] disconnected")
 
@@ -197,6 +247,14 @@ class VigemNetworkClient:
                 self._resend_all = False
 
             buf = []
+            # Ask the server to push its mouse buttons (or stop) to match the setting.
+            # Re-armed after every (re)connect because _mouse_subscribed resets there.
+            want_mouse = _mouse_wanted()
+            if want_mouse != self._mouse_subscribed:
+                buf.append(f"km.mouse_stream({1 if want_mouse else 0})\n")
+                self._mouse_subscribed = want_mouse
+                if not want_mouse:
+                    self._clear_mouse()
             if rx is not None and (resend or rx != self._last_sent_rx):
                 buf.append(f"km.controller({_ID_RIGHT_X},{rx})\n")
                 self._last_sent_rx = rx
@@ -237,6 +295,7 @@ class VigemNetworkClient:
                 except Exception:
                     pass
                 self._sock = None
+        self._clear_mouse()          # a dropped link must never leave a remote button "held"
         logger.warning("[VigemNet] connection lost, will reconnect")
         if not self._stop_event.is_set():
             if self._reconnect_thread is None or not self._reconnect_thread.is_alive():
@@ -244,6 +303,61 @@ class VigemNetworkClient:
                     target=self._reconnect_loop, daemon=True,
                     name="vigem-net-reconnect")
                 self._reconnect_thread.start()
+
+    # ---- remote mouse buttons (pushed by the server on this socket) -----------
+
+    def _clear_mouse(self) -> None:
+        with self._mouse_lock:
+            self._mouse_mask = 0
+            self._mouse_t = float("-inf")
+
+    def _set_mouse(self, mask: int) -> None:
+        with self._mouse_lock:
+            self._mouse_mask = mask
+            self._mouse_t = time.monotonic()
+
+    def mouse_mask(self) -> int:
+        """Remote buttons currently held (0 when not connected, not subscribed or stale)."""
+        if not self._connected:
+            return 0
+        with self._mouse_lock:
+            if time.monotonic() - self._mouse_t > _MOUSE_STALE_S:
+                return 0
+            return self._mouse_mask
+
+    def _start_reader(self, sock: socket.socket) -> None:
+        t = threading.Thread(target=self._read_loop, args=(sock,), daemon=True,
+                             name="vigem-net-read")
+        self._reader_thread = t
+        t.start()
+
+    def _read_loop(self, sock: socket.socket) -> None:
+        """Read everything the server sends: replies are ignored, km.mouse(N) pushes update the mask."""
+        buf = b""
+        while not self._stop_event.is_set():
+            with self._lock:
+                if self._sock is not sock:        # replaced by a reconnect, or closed
+                    return
+            try:
+                chunk = sock.recv(_READ_CHUNK)
+            except socket.timeout:
+                continue                          # the socket's short send timeout also applies to recv
+            except OSError:
+                chunk = b""
+            if not chunk:
+                with self._lock:
+                    current = self._sock is sock
+                if current and not self._stop_event.is_set():
+                    self._mark_broken()           # server closed on us: reconnect like a failed send
+                return
+            buf += chunk
+            while b"\n" in buf:
+                raw, buf = buf.split(b"\n", 1)
+                mask = parse_push_line(raw.decode("utf-8", errors="replace"))
+                if mask is not None:
+                    self._set_mouse(mask)
+            if len(buf) > _MAX_PENDING_LINE:      # prompt text with no newline: keep only the tail
+                buf = buf[-64:]
 
     def _reconnect_loop(self) -> None:
         delay = _RECONNECT_BASE_S
@@ -260,6 +374,9 @@ class VigemNetworkClient:
                     self._sock = sock
                     self._connected = True
                 self._resend_all = True
+                self._mouse_subscribed = False     # subscribe again on the new socket
+                self._clear_mouse()
+                self._start_reader(sock)
                 logger.info("[VigemNet] reconnected to %s:%d",
                             self._host, self._port)
                 return
@@ -298,6 +415,28 @@ def _cfg_float(name: str, default: float) -> float:
         return float(getattr(_config_ref, name, default))
     except (TypeError, ValueError):
         return default
+
+
+def _mouse_wanted() -> bool:
+    """Whether to receive the remote PC's mouse buttons (config.remote_btn_enabled, read live)."""
+    try:
+        return bool(getattr(_config_ref, 'remote_btn_enabled', False))
+    except Exception:
+        return False
+
+
+def vigem_net_mouse_mask() -> int:
+    """Remote mouse buttons held right now (bit0 L, 1 R, 2 M, 3 X1, 4 X2); 0 if not connected/subscribed/stale."""
+    c = vigem_net_client
+    return c.mouse_mask() if c is not None else 0
+
+
+def vigem_net_button_held(name: str) -> bool:
+    """True while the named remote button ('lmb'/'rmb'/'mmb'/'side1'/'side2') is held on the GamepadEnhancer PC."""
+    bit = BUTTON_BITS.get(name)
+    if bit is None:
+        return False
+    return bool(vigem_net_mouse_mask() & bit)
 
 
 def _release_seconds() -> float:

@@ -273,11 +273,8 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "vigem_net_input_deadzone": {"type": "float", "min": 0.0, "max": 0.5},
         "vigem_net_game_deadzone": {"type": "float", "min": 0.0, "max": 0.5},
         "vigem_net_release_ms": {"type": "int", "min": 10, "max": 500},
-        # Remote mouse buttons (UDP from vigem-for-a-game)
+        # Remote mouse buttons: pushed back by GamepadEnhancer on the ViGEm Network connection above
         "remote_btn_enabled": {"type": "bool"},
-        "remote_btn_bind_ip": {"type": "str"},
-        "remote_btn_bind_port": {"type": "int", "min": 1, "max": 65535},
-        "remote_btn_token": {"type": "str"},
         "remote_aim_button": {"type": "choice", "choices": ["off", "lmb", "rmb", "mmb", "side1", "side2"]},
     },
     "visuals": {

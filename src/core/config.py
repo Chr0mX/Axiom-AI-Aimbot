@@ -300,9 +300,6 @@ _FIELD_MAP = {
     'vigem_net_game_deadzone':    'hardware.vigem_network.game_deadzone',
     'vigem_net_release_ms':       'hardware.vigem_network.release_ms',
     'remote_btn_enabled':         'hardware.remote_buttons.enabled',
-    'remote_btn_bind_ip':         'hardware.remote_buttons.bind_ip',
-    'remote_btn_bind_port':       'hardware.remote_buttons.bind_port',
-    'remote_btn_token':           'hardware.remote_buttons.token',
     'remote_aim_button':          'hardware.remote_buttons.aim_button',
 
     # --- ui ---
@@ -701,11 +698,9 @@ class Config:
         # Runtime only (not in _FIELD_MAP): stick value last sent, -1..1
         self.vigem_stick_x: float = 0.0
         self.vigem_stick_y: float = 0.0
-        # Mouse buttons sent by GamepadEnhancer over its Network API, TCP (core/remote_buttons.py)
+        # Mouse buttons pushed back by GamepadEnhancer on the vigem_network connection
+        # (win_utils/vigem_network.py): one address/port/token for commands out and clicks in.
         self.remote_btn_enabled: bool = False
-        self.remote_btn_bind_ip: str = "0.0.0.0"
-        self.remote_btn_bind_port: int = 5555
-        self.remote_btn_token: str = ""
         self.remote_aim_button: str = "rmb"  # "off", "lmb", "rmb", "mmb", "side1", "side2"
 
         # 檢測設定
@@ -1515,11 +1510,6 @@ def _validate_mouse_method(config: Config) -> None:
     config.vigem_net_release_ms = max(10, min(500, _rel))
     if getattr(config, 'remote_aim_button', 'rmb') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
         config.remote_aim_button = 'rmb'
-    try:
-        _rp = int(getattr(config, 'remote_btn_bind_port', 5555))
-    except (TypeError, ValueError):
-        _rp = 5555
-    config.remote_btn_bind_port = _rp if 1 <= _rp <= 65535 else 5555
     if getattr(config, 'makcu_connection', 'serial') not in ('serial', 'udp'):
         config.makcu_connection = 'serial'
     try:

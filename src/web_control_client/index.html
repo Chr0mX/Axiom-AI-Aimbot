@@ -1967,7 +1967,7 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Enabled</div>
-                <div class="field-desc">Listen for mouse buttons sent by GamepadEnhancer over its Network API (TCP); holding the chosen button engages aim</div>
+                <div class="field-desc">Receive the GamepadEnhancer PC's mouse buttons over the ViGEm Network connection (same address and token); holding the chosen button engages aim</div>
               </div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="keys-remote_btn_enabled" data-key="remote_btn_enabled" data-type="bool"><span class="slider"></span></label>
@@ -1987,32 +1987,6 @@
                   <option value="side1">Side 1</option>
                   <option value="side2">Side 2</option>
                 </select>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Bind IP</div>
-                <div class="field-desc">Local address to listen on (0.0.0.0 = all interfaces)</div>
-              </div>
-              <div class="field-control">
-                <input type="text" id="keys-remote_btn_bind_ip" data-key="remote_btn_bind_ip" data-type="str" placeholder="0.0.0.0">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Port</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="keys-remote_btn_bind_port" data-key="remote_btn_bind_port" data-type="number" min="1" max="65535" step="1" placeholder="5555">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Token</div>
-                <div class="field-desc">Optional; must match the sender's token (leave empty for none)</div>
-              </div>
-              <div class="field-control">
-                <input type="password" id="keys-remote_btn_token" data-key="remote_btn_token" data-type="str" placeholder="token">
               </div>
             </div>
           </div>
