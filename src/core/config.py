@@ -701,10 +701,10 @@ class Config:
         # Runtime only (not in _FIELD_MAP): stick value last sent, -1..1
         self.vigem_stick_x: float = 0.0
         self.vigem_stick_y: float = 0.0
-        # Mouse buttons streamed over UDP from vigem-for-a-game (core/remote_buttons.py)
+        # Mouse buttons sent by GamepadEnhancer over its Network API, TCP (core/remote_buttons.py)
         self.remote_btn_enabled: bool = False
         self.remote_btn_bind_ip: str = "0.0.0.0"
-        self.remote_btn_bind_port: int = 5602
+        self.remote_btn_bind_port: int = 5555
         self.remote_btn_token: str = ""
         self.remote_aim_button: str = "rmb"  # "off", "lmb", "rmb", "mmb", "side1", "side2"
 
@@ -1516,10 +1516,10 @@ def _validate_mouse_method(config: Config) -> None:
     if getattr(config, 'remote_aim_button', 'rmb') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
         config.remote_aim_button = 'rmb'
     try:
-        _rp = int(getattr(config, 'remote_btn_bind_port', 5602))
+        _rp = int(getattr(config, 'remote_btn_bind_port', 5555))
     except (TypeError, ValueError):
-        _rp = 5602
-    config.remote_btn_bind_port = _rp if 1 <= _rp <= 65535 else 5602
+        _rp = 5555
+    config.remote_btn_bind_port = _rp if 1 <= _rp <= 65535 else 5555
     if getattr(config, 'makcu_connection', 'serial') not in ('serial', 'udp'):
         config.makcu_connection = 'serial'
     try:
