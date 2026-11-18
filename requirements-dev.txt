@@ -1,0 +1,17 @@
+# Development / CI dependencies -- not needed to run Axiom.
+#
+#   pip install -r requirements-dev.txt
+#   ruff check src tests tools        # lint (blocking in CI)
+#   pytest tests -q                   # tests (see CLAUDE.md for what a non-Windows run can reach)
+#   mypy src/core src/version.py      # type check (informational in CI)
+#
+# Just enough for the pure-Python parts of the suite on Linux. Tests that need the Windows
+# stack (pywin32, PyQt6, onnxruntime-directml, dxcam, ...) are reported as skips by
+# tests/conftest.py instead of failing.
+numpy
+opencv-python-headless
+mss
+pyserial
+pytest
+ruff
+mypy

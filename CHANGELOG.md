@@ -1,30 +1,27 @@
 # Changelog
 
-- Web ESP with UVC fixed crop (e.g. 640x640 of a 1920x1080 device): the overlay now shows the real UVC frame and places the crop at its centre instead of stretching the crop over the whole page.
-
-- New "Tracer From Bottom Center" toggle (Visuals, Web Control): tracer lines start at the bottom-center of the screen instead of the crosshair, on the in-game overlay, capture preview and Web ESP.
-
-- Web Control: LAN Speed Test / Test Connection ping no longer inflated by Axiom's own threading (async ping route, 1 ms timer resolution); the result shows how long Axiom itself spent per request. New "UDP stream" line: frame interval, jitter, packet spread, lost and reordered frames of the live UDP capture stream.
-
-- Web Control: live NVIDIA GPU tiles in the sidebar (same sensors and switches as the status panel). Model Info now shows the precision actually running (FP16/FP32 · provider · RUNNING) and what is selected but still pending.
-
-- Web ESP overlay: HUD wording matches Web Control; the top-right badge lists the enabled Visuals (Crosshair, FOV, Boxes, Confidence, Detection Range, Tracer Line, Predicted Aim Point); draws the Predicted Aim Point; sharp on high-DPI screens; less delay (event-driven sending on new detections, 1 ms timer, per-client latest-frame sending, newest-packet-only parsing). New "Web ESP Update Rate" setting (15–240 Hz, default 60) in Visuals and Web Control; the HUD shows draw FPS and data Hz separately.
-
-- New Line Thickness sliders (1–10 px) for FOV, Detection Range, Tracer Line and Predicted Aim Point on the in-game overlay, capture preview, Web ESP and Web Control. The Web ESP tracer is now 2 px by default (was 1 px) to match the desktop overlay.
-
-- Web Control: LAN Speed Test on the Other tab (ping/jitter, download, upload between the browser and the Axiom host).
-
-- Web Control client: FOV shrink mode, advanced FOV, retention and tracking settings on the Inference tab. Web ESP: retention FOV boundary and track-only lock highlight.
-
-- Opt-in lock retention: a locked target that leaves the shrunk FOV stays tracked (not aimed) inside a retention FOV instead of being dropped or stolen; class gate for lock continuation; confidence EMA now decays during misses.
-
-- New opt-in "Dynamic Safeguards" (FOV shrink mode Dynamic): boundary-proximity cap and settle-gated speed/turn terms.
-
-- PID time normalisation (opt-in) now uses the exact P gain `1-(1-Kp)^k`; EMA/FOV slew ignore non-finite or stale `dt`; FOV bounds validated; radius reacquisition rejects ambiguous matches.
-
 ## [Unreleased]
 
 Everything merged since the 6.3 release. `src/version.py` still says 6.3; bump it to publish.
+
+- **Anchor Prediction** (opt-in, Inference page): predicts the locked target's next box (position, size, velocity, optional acceleration, confidence) from a time-based fit over its recent history, and uses it to open/close the Adaptive and Dynamic FOV earlier and to keep a fast target's lock instead of re-locking the wrong one. Modes: Linear, Velocity + Acceleration, Smoothed, Adaptive. Off = exactly the previous behaviour. Optional debug overlay (predicted box, velocity, confidence) on the in-game overlay, capture preview and Web ESP. See `docs/ANCHOR_PREDICTION.md`.
+- **Anchor FOV** (new FOV mode next to Fixed / Adaptive / Dynamic): the FOV centre follows an anchor (the selected detection, the tracker, or a manual point; box centre / top / bottom / custom offset) while the radius is controlled independently. Smoothing, follow speed and a speed cap, optional velocity prediction, Hold / Return to Centre / Search when the anchor is lost, minimum / default / maximum radius. Drawn live on the in-game overlay, the capture preview and Web ESP. See `docs/ANCHOR_FOV.md`.
+- Fix: the aim/Always-Aim MAKCU button read errors were swallowed every frame, so a failing device silently disabled aiming; they are now logged (throttled). Other silent failures on the capture/semantic-filter/MAKCU-writer paths are reported the same way.
+- Fix: importing `model_detect` (Model page, Web Control model info) put the bundled Windows `site-packages` at the front of `sys.path` and shadowed the interpreter's own packages; the path setup now only runs when the file is executed as a script.
+- Security: the update page URL (from the GitHub API response) is only opened if it is an `https://github.com` URL; the NDI installer download has a timeout.
+- Removed: unused code (an old Qt key-code table, a few unused helpers) and 34 obsolete translation strings of removed features. The two MAKCU debug REPLs moved from `src/` to `tools/` (`python tools/makcu_debug.py`, `python tools/makcu_debug_binary.py`).
+- Development: tests no longer fake `win32api`/`cv2` for the whole run (they failed or passed for the wrong reasons depending on file order); CI lints `src tests tools` with all pyflakes rules as a blocking check; test/lint tools moved to `requirements-dev.txt` (removed from the runtime requirement files); `.gitignore` no longer hides every `*.json`.
+- Web ESP with UVC fixed crop (e.g. 640x640 of a 1920x1080 device): the overlay now shows the real UVC frame and places the crop at its centre instead of stretching the crop over the whole page.
+- New "Tracer From Bottom Center" toggle (Visuals, Web Control): tracer lines start at the bottom-center of the screen instead of the crosshair, on the in-game overlay, capture preview and Web ESP.
+- Web Control: LAN Speed Test / Test Connection ping no longer inflated by Axiom's own threading (async ping route, 1 ms timer resolution); the result shows how long Axiom itself spent per request. New "UDP stream" line: frame interval, jitter, packet spread, lost and reordered frames of the live UDP capture stream.
+- Web Control: live NVIDIA GPU tiles in the sidebar (same sensors and switches as the status panel). Model Info now shows the precision actually running (FP16/FP32 · provider · RUNNING) and what is selected but still pending.
+- Web ESP overlay: HUD wording matches Web Control; the top-right badge lists the enabled Visuals (Crosshair, FOV, Boxes, Confidence, Detection Range, Tracer Line, Predicted Aim Point); draws the Predicted Aim Point; sharp on high-DPI screens; less delay (event-driven sending on new detections, 1 ms timer, per-client latest-frame sending, newest-packet-only parsing). New "Web ESP Update Rate" setting (15–240 Hz, default 60) in Visuals and Web Control; the HUD shows draw FPS and data Hz separately.
+- New Line Thickness sliders (1–10 px) for FOV, Detection Range, Tracer Line and Predicted Aim Point on the in-game overlay, capture preview, Web ESP and Web Control. The Web ESP tracer is now 2 px by default (was 1 px) to match the desktop overlay.
+- Web Control: LAN Speed Test on the Other tab (ping/jitter, download, upload between the browser and the Axiom host).
+- Web Control client: FOV shrink mode, advanced FOV, retention and tracking settings on the Inference tab. Web ESP: retention FOV boundary and track-only lock highlight.
+- Opt-in lock retention: a locked target that leaves the shrunk FOV stays tracked (not aimed) inside a retention FOV instead of being dropped or stolen; class gate for lock continuation; confidence EMA now decays during misses.
+- New opt-in "Dynamic Safeguards" (FOV shrink mode Dynamic): boundary-proximity cap and settle-gated speed/turn terms.
+- PID time normalisation (opt-in) now uses the exact P gain `1-(1-Kp)^k`; EMA/FOV slew ignore non-finite or stale `dt`; FOV bounds validated; radius reacquisition rejects ambiguous matches.
 
 - MAKCU V4.103+: device-side autorelease (5 s, kept alive by a 2 s heartbeat) releases injected buttons if Axiom crashes. No effect on V3 firmware.
 - MAKCU docs now point to https://makcu.com/mcp/documentation; the old k4tech Rust library docs were removed.

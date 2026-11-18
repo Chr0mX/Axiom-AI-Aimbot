@@ -45,7 +45,8 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
 - **Advanced Aim Control**
   - PID controller with separate X/Y axis tuning; an **Unsafe Mode** toggle re-maps the reaction-speed (Kp) sliders from the default safe 0–0.5 range up to a full 0–1.0 for users who want to push past the normally-capped travel.
   - Customizable FOV with independent width/height (so it can be a rectangle, not just a square) and an optional circle/ellipse shape, plus an independent detection range.
-  - **Reduce FOV on Active Target** — once a target is locked the FOV shrinks gradually to a set percentage, so another target near the edge can't steal the lock.
+  - **Reduce FOV on Active Target** — once a target is locked the FOV shrinks gradually to a set percentage, so another target near the edge can't steal the lock. Three shrink modes: **Fixed** (always the set percentage), **Adaptive** (tightens while the target is steady, confident and central; opens when it nears the edge) and **Dynamic** (reacts to the target's speed, direction changes and detection stability), with an expansion delay, a recovery time and an optional lock-retention zone.
+  - **Anchor FOV** — a fourth FOV mode where the FOV *moves*: its centre follows an anchor (the selected detection, the tracker, or a manual point; box centre / top / bottom / custom offset) with adjustable smoothing and speed limit, optional velocity prediction, a Hold / Return to Centre / Search behaviour when the anchor is lost, and an independent min / default / max radius. See [docs/ANCHOR_FOV.md](docs/ANCHOR_FOV.md).
   - **Target class filter** — pick which model classes count as targets (e.g. enemies only on a model that also detects teammates).
   - **Aim Start Delay** — wait a set number of milliseconds after aim engages before moving.
   - Single-target mode for focusing on the nearest threat.
@@ -67,6 +68,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
   - Configurable prediction horizon, history length, and a velocity sanity cap that discards history and resets cleanly on a sudden detection jump (e.g. a new target acquired far from the last one) instead of extrapolating garbage.
   - Optional refinements: capture timestamps, least-squares velocity, a velocity deadzone, and own-mouse compensation; a second overlay marker shows the predicted aim point next to the raw one.
   - Both predictors also reset on true target loss so stale velocity never carries into whatever's acquired next.
+  - **Anchor Prediction** (opt-in) — predicts the locked target's next *box* (not just the aim point) from a time-based fit over its recent history, and uses it to open or tighten the Adaptive/Dynamic FOV ahead of time and to keep a fast target's lock instead of switching to the wrong one. Linear / Velocity + Acceleration / Smoothed / Adaptive modes, with an optional debug overlay. See [docs/ANCHOR_PREDICTION.md](docs/ANCHOR_PREDICTION.md).
   - Sticky lock with IOU-based target persistence across frames — tolerates a few bad detection frames without dropping the target; the IOU threshold adapts to FOV size.
   - Smart center-mass aim point that adapts to crouching targets.
   - Weighted target-priority modes — distance-only, confidence-only, or a composite of both.
@@ -311,7 +313,7 @@ Use these logs to verify which provider actually ended up active, or whether run
 2. **Configure Settings**
    - **Model Tab** — Select your ONNX model (searchable dropdown, with a cached-TensorRT-engine badge per entry), pick the inference backend (Auto / DirectML / TensorRT / CPU) and precision, view model info and notes, and pick the game profile and HUD model for weapon detection.
    - **Capture Tab** — Choose and configure your screen capture backend (dxcam / MSS / UVC / NDI / UDP), Capture FPS Limit, HUD UDP Stream; live preview panel.
-   - **Inference Tab** — FOV and detection range, detection sensitivity and other general parameters, and performance tuning.
+   - **Inference Tab** — FOV size and shape, FOV shrinking (Fixed / Adaptive / Dynamic / Anchor), lock retention, Anchor Prediction, detection range, detection sensitivity and other general parameters, target acquisition/tracking timing, and performance tuning.
    - **Aim Tab** — Mouse method, FOV, PID tuning, prediction (Velocity/Kalman), smoothing, aim-point fine-tune, Humanization, Y-axis recoil suppression, sticky lock, target priority; Arduino and Xbox 360 controller setup.
    - **Trigger Tab** — Configure auto-fire delay, interval, and target priority.
    - **Keys & HW Tab** — Hotkeys for aim, toggle and auto-fire (with a warning if a rebind creates a genuinely confusing conflict), plus MAKCU connection and MAKCU button settings.
@@ -349,7 +351,9 @@ Axiom/
 ├── requirements.txt / requirements-directml.txt / requirements-cuda.txt / requirements-tensorrt.txt
 ├── CHANGELOG.md                  # Version history
 ├── docs/
-│   └── MAKCU_Native_API.md       # MAKCU serial wire-protocol reference
+│   ├── MAKCU_Native_API.md       # MAKCU serial wire-protocol reference
+│   ├── ANCHOR_PREDICTION.md      # Anchor Prediction: algorithm, FOV interaction, measured results
+│   └── ANCHOR_FOV.md             # Anchor FOV mode: design, settings, limitations
 ├── Model/                        # ONNX detection model files
 ├── Model_Hud/                    # Beta: YOLO weapon/attachment HUD detector models
 ├── trt_cache/                    # Built TensorRT engines (auto-created)
@@ -359,6 +363,7 @@ Axiom/
 │   ├── main.py                   # Application entry point
 │   ├── version.py                # Version constant — single source of truth for app version
 │   ├── model_detect.py           # Model introspection helper (shown on the Model page)
+│   ├── makcu_binary_decoder.py   # MAKCU V2 binary-frame decoder (dev tooling / kept for future firmware)
 │   ├── install_tensorrt_local.py # TensorRT pip package installer (invoked by the .bat)
 │   ├── install_paddleocr_local.py# PaddleOCR installer (invoked by the .bat)
 │   ├── install_cyndilib.py       # cyndilib (NDI) installer
@@ -367,6 +372,11 @@ Axiom/
 │   │   ├── ai_loop_state.py      # Shared loop state
 │   │   ├── ai_loop_utils.py      # Loop utility functions (FOV filtering, target selection)
 │   │   ├── ai_aiming.py          # Aiming, PID, Y-reduce, humanization dispatch
+│   │   ├── aim_paths.py          # Small aim-math helpers (adaptive lead, output EMA)
+│   │   ├── target_tracking.py    # Lock state machine, time-based tracking signals, IoU/clamp helpers
+│   │   ├── anchor_prediction.py  # Anchor Prediction: predicted target box (feeds the Adaptive/Dynamic FOV)
+│   │   ├── anchor_fov.py         # Anchor FOV mode: FOV centre follows an anchor, independent radius
+│   │   ├── box_style.py          # Box / line thickness rules shared by the overlays
 │   │   ├── auto_fire.py          # Triggerbot logic
 │   │   ├── config.py             # Config class + _FIELD_MAP (schema v3)
 │   │   ├── paths.py              # Where user files live (user/) + one-time move from the root
@@ -379,6 +389,7 @@ Axiom/
 │   │   ├── app_controller.py     # Actions shared by the GUI and Web Control (AI start/stop, model switch, convert)
 │   │   ├── gpu_monitor.py        # NVML GPU sensors for the status panel
 │   │   ├── hud_inference.py      # Beta: YOLO-based weapon HUD detector (process-isolated)
+│   │   ├── hud_categories.py     # Beta: HUD class names -> weapon / attachment categories
 │   │   ├── ocr_inference.py      # Beta: PaddleOCR weapon-name reader (process-isolated)
 │   │   ├── humanization.py       # Micro-jitter, motion variation, speed shaping, micro-stutter, reaction variability
 │   │   ├── inference.py          # ONNX inference wrapper, NMS, postprocessing
@@ -390,6 +401,10 @@ Axiom/
 │   │   ├── screen_capture.py     # Capture backends: dxcam / MSS / UVC / NDI / UDP + preview API
 │   │   ├── udp_receiver.py       # UDP JPEG stream receiver (OBS udp_stream_filter protocol)
 │   │   ├── session_utils.py      # ONNX session setup, TensorRT cache detection
+│   │   ├── model_runtime.py      # What precision/provider the loaded model is really running
+│   │   ├── model_selection.py    # Roll the model selection back when a TensorRT build fails
+│   │   ├── speedtest.py          # Web Control LAN speed-test helpers
+│   │   ├── version_utils.py      # Version/tag parsing, safe release-URL check (no Qt)
 │   │   ├── target_predictor.py   # Velocity-based motion prediction
 │   │   ├── convert_to_engine.py  # ONNX → TensorRT engine builder
 │   │   ├── logging_config.py     # Logging setup
@@ -425,7 +440,10 @@ Axiom/
 │       ├── __init__.py           # is_key_pressed() and shared utilities
 │       ├── mouse_move.py         # SendInput mouse movement
 │       ├── mouse_click.py        # Mouse click simulation
+│       ├── admin.py / console.py # Administrator elevation, console window control
 │       ├── makcu_mouse.py        # MAKCU USB HID device (4 Mbaud, auto-reconnect, button reads)
+│       ├── makcu_protocol.py     # MAKCU V4 / MAKXD binary MAK_API frames
+│       ├── makcu_mouse_binary.py # MAKCU V2 binary driver (not used in production; kept for a future firmware)
 │       ├── arduino_mouse.py      # Arduino Leonardo HID driver
 │       ├── arduino_spoofer.py    # Arduino Leonardo spoof path
 │       ├── ddxoft_mouse.py       # ddxoft driver integration
@@ -433,7 +451,8 @@ Axiom/
 │       ├── xbox_controller.py    # ViGEmBus Xbox 360 emulation
 │       ├── key_utils.py          # Key code helpers
 │       └── vk_codes.py           # Virtual key code table
-├── tools/                        # Standalone dev tools (OBS filter inspector, UDP capture benchmark)
+├── requirements-dev.txt          # Test / lint / type-check tools (not needed to run Axiom)
+├── tools/                        # Standalone dev tools (OBS filter inspector, UDP benchmark, Anchor benchmark, MAKCU debug REPLs)
 └── tests/                        # Pytest test suite (see CLAUDE.md for sandbox-testability notes)
     ├── conftest.py               # Adds src/ to sys.path
     ├── test_config.py
