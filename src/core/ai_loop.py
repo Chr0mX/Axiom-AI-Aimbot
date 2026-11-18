@@ -23,6 +23,7 @@ from . import ai_aiming
 from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
 from .detection_semantics import filter_detections_by_target_class, sync_detection_class_names_from_backend
+from .anchor_fov import anchor_fov_active, clear_anchor_fov, update_anchor_fov
 from .ai_loop_utils import (
     aim_start_delay_elapsed,
     anchor_reset,
@@ -1078,8 +1079,17 @@ def ai_logic_loop(
                 # selection at all this frame. See compute_effective_fov()'s own
                 # docstring for the fov_reduce_since-driven shrink ramp this
                 # feeds.
-                _effective_fov_size, _effective_fov_height = compute_effective_fov(
-                    config, state, current_time)
+                if anchor_fov_active(config):
+                    # Anchor FOV: the controller owns the FOV centre AND radius
+                    # (the shrink modes never run). boxes = every detection that
+                    # passed the class/confidence filters, in capture coordinates.
+                    _fov_cx, _fov_cy, _effective_fov_size, _effective_fov_height = update_anchor_fov(
+                        config, state, all_boxes, crosshair_x, crosshair_y, region, current_time)
+                else:
+                    clear_anchor_fov(config, state)
+                    _fov_cx, _fov_cy = crosshair_x, crosshair_y
+                    _effective_fov_size, _effective_fov_height = compute_effective_fov(
+                        config, state, current_time)
                 # Published every frame (not just while shrunk) so the in-game
                 # overlay, the UVC/NDI/UDP preview's baked-in overlay, and the
                 # Web ESP overlay all draw/reason about the FOV actually in
@@ -1087,7 +1097,7 @@ def ai_logic_loop(
                 config.fov_effective_size = _effective_fov_size
                 config.fov_effective_height = _effective_fov_height
                 boxes, confidences = filter_boxes_by_fov(
-                    boxes, confidences, crosshair_x, crosshair_y, _effective_fov_size, config,
+                    boxes, confidences, _fov_cx, _fov_cy, _effective_fov_size, config,
                     fov_height=_effective_fov_height)
                 # NOTE: single_target_mode's reduction to one box used to happen
                 # here, before process_aiming() ever saw the candidate list. That

@@ -395,6 +395,20 @@ class ThemeColors:
         default_dark=(190, 120, 255, 235)
     )
 
+    # Anchor FOV (core/anchor_fov.py): the anchor point, its link to the FOV
+    # centre and the predicted anchor are teal; a lost anchor turns the FOV
+    # and its label amber so "following" vs "lost/holding" reads at a glance.
+    OVERLAY_ANCHOR_FOV = ColorPairWithAlpha.from_config(
+        "overlay_colors", "anchor_fov",
+        default_light=(0, 150, 150, 235),
+        default_dark=(0, 220, 200, 235)
+    )
+    OVERLAY_ANCHOR_FOV_LOST = ColorPairWithAlpha.from_config(
+        "overlay_colors", "anchor_fov_lost",
+        default_light=(220, 120, 0, 235),
+        default_dark=(255, 170, 40, 235)
+    )
+
     # ============================================================
     # 狀態面板 (Status Panel) 顏色
     # ============================================================

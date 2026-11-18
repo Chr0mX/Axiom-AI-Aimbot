@@ -743,7 +743,8 @@
           updateUvcSubVisibility();
         }
         if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
-        if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled")) updateAnchorVisibility();
+        if (tab === "inference" && (key === "afov_source" || key === "afov_predict_enabled")) updateAnchorFovVisibility();
+        if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
@@ -783,16 +784,43 @@
     var mode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode;
     var ret = el("inf-fov_retention_enabled") ? el("inf-fov_retention_enabled").checked : !!d.fov_retention_enabled;
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
-    show("inf-fov-min-size-card", on);
-    show("inf-fov-min-duration-card", on);
-    show("inf-fov-mode-card", on);
-    show("inf-fov-dynsafe-card", on && mode === "dynamic");
-    show("inf-fov-delay-card", on);
-    show("inf-fov-recovery-card", on);
-    show("inf-fov-retention-card", on && sticky);
-    show("inf-fov-retention-pct-card", on && sticky && ret);
+    // Anchor FOV owns the centre and radius: the shrink cards (and their master switch)
+    // only apply to Fixed/Adaptive/Dynamic. The mode picker itself is always available.
+    var shrink = on && mode !== "anchor";
+    show("inf-fov-reduce-card", mode !== "anchor");
+    show("inf-fov-min-size-card", shrink);
+    show("inf-fov-min-duration-card", shrink);
+    show("inf-fov-mode-card", true);
+    show("inf-fov-dynsafe-card", shrink && mode === "dynamic");
+    show("inf-fov-delay-card", shrink);
+    show("inf-fov-recovery-card", shrink);
+    show("inf-fov-retention-card", shrink && sticky);
+    show("inf-fov-retention-pct-card", shrink && sticky && ret);
+    updateAnchorFovVisibility();
     ["inf-minlock-card", "inf-trackconf-card", "inf-switch-card", "inf-radius-card", "inf-losttimeout-card"]
       .forEach(function (id) { show(id, sticky); });
+  }
+
+  // Mirrors inference_page.py's _updateAnchorFovVisibility(): the Anchor FOV groups appear only
+  // in Anchor mode; Position/Offsets need a box source, Manual X/Y the manual one, the
+  // prediction sliders need prediction on, the Lost Delay needs a lost behaviour.
+  function updateAnchorFovVisibility() {
+    var d = lastSettings.inference || {};
+    var el = function (id) { return document.getElementById(id); };
+    var val = function (key, fallback) { var e = el("inf-" + key); return e ? (e.type === "checkbox" ? e.checked : e.value) : (d[key] !== undefined ? d[key] : fallback); };
+    var mode = val("fov_shrink_mode", "adaptive");
+    var anchor = mode === "anchor";
+    var src = val("afov_source", "detection");
+    var pred = !!val("afov_predict_enabled", false);
+    var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
+    ["anchor", "move", "pred", "lost", "radius"].forEach(function (k) { show("inf-afov-sec-" + k, anchor); });
+    show("inf-afov-position-card", anchor && src !== "manual");
+    show("inf-afov-offx-card", anchor && src !== "manual");
+    show("inf-afov-offy-card", anchor && src !== "manual");
+    show("inf-afov-manx-card", anchor && src === "manual");
+    show("inf-afov-many-card", anchor && src === "manual");
+    show("inf-afov-predstr-card", anchor && pred);
+    show("inf-afov-predtime-card", anchor && pred);
   }
 
   // Mirrors inference_page.py's _updateAnchorVisibility(): settings appear only while Anchor
@@ -810,8 +838,9 @@
     ["horizon", "strength", "conf", "history", "maxdist"].forEach(function (k) { show("inf-anchor-" + k + "-card", active); });
     show("inf-anchor-smoothing-card", on && (mode === "smoothed" || mode === "adaptive"));
     show("inf-anchor-accel-card", active && mode !== "linear");
-    show("inf-anchor-infl-adaptive-card", active && fov);
-    show("inf-anchor-infl-dynamic-card", active && fov);
+    var fovMode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode || "adaptive";
+    show("inf-anchor-infl-adaptive-card", active && fov && fovMode !== "anchor");
+    show("inf-anchor-infl-dynamic-card", active && fov && fovMode !== "anchor");
   }
 
   function updateWeaponDetectVisibility(mode) {
@@ -2776,7 +2805,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "17") return;
+    if (cssVer !== "18") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

@@ -192,6 +192,25 @@ _FIELD_MAP = {
     'prediction_velocity_deadzone_px_s': 'tracking.prediction.velocity_deadzone_px_s',
     'prediction_ego_motion_comp': 'tracking.prediction.ego_motion_comp',
     'prediction_ego_motion_scale': 'tracking.prediction.ego_motion_scale',
+    'afov_source':                'aim.fov_anchor.source',
+    'afov_position':              'aim.fov_anchor.position',
+    'afov_offset_x':              'aim.fov_anchor.offset_x',
+    'afov_offset_y':              'aim.fov_anchor.offset_y',
+    'afov_manual_x':              'aim.fov_anchor.manual_x',
+    'afov_manual_y':              'aim.fov_anchor.manual_y',
+    'afov_follow_speed':          'aim.fov_anchor.follow_speed',
+    'afov_smoothing':             'aim.fov_anchor.smoothing',
+    'afov_max_speed':             'aim.fov_anchor.max_speed',
+    'afov_predict_enabled':       'aim.fov_anchor.predict.enabled',
+    'afov_predict_strength':      'aim.fov_anchor.predict.strength',
+    'afov_predict_time_ms':       'aim.fov_anchor.predict.time_ms',
+    'afov_lost_behavior':         'aim.fov_anchor.lost.behavior',
+    'afov_lost_delay_ms':         'aim.fov_anchor.lost.delay_ms',
+    'afov_reacquire':             'aim.fov_anchor.lost.reacquire',
+    'afov_radius':                'aim.fov_anchor.radius.default',
+    'afov_min_radius':            'aim.fov_anchor.radius.min',
+    'afov_max_radius':            'aim.fov_anchor.radius.max',
+    'afov_dynamic_radius':        'aim.fov_anchor.radius.dynamic',
     'anchor_enabled':             'tracking.anchor.enabled',
     'anchor_mode':                'tracking.anchor.mode',
     'anchor_horizon_ms':          'tracking.anchor.horizon_ms',
@@ -537,6 +556,40 @@ class Config:
         # Sticky Target Lock + Reduce FOV. Off = the lock is dropped as soon as the FOV excludes it.
         self.fov_retention_enabled: bool = False
         self.fov_retention_pct: float = 100.0
+
+        # Anchor FOV (fov_shrink_mode == 'anchor', core/anchor_fov.py): the FOV centre
+        # follows an anchor and its radius is controlled independently of it.
+        self.afov_source: str = 'detection'      # 'detection' / 'tracker' / 'manual'
+        self.afov_position: str = 'center'       # 'center' / 'top' / 'bottom' / 'custom'
+        self.afov_offset_x: int = 0              # px added to the anchor point
+        self.afov_offset_y: int = 0
+        self.afov_manual_x: int = 0              # manual source: px from the crosshair
+        self.afov_manual_y: int = 0
+        self.afov_follow_speed: float = 12.0     # 1/s approach rate (higher = tighter)
+        self.afov_smoothing: float = 0.3         # 0..1 low-pass on the anchor (0 = off)
+        self.afov_max_speed: int = 4000          # px/s cap on the FOV centre (0 = unlimited)
+        self.afov_predict_enabled: bool = False  # lead the anchor by the tracker's velocity
+        self.afov_predict_strength: float = 1.0
+        self.afov_predict_time_ms: int = 80
+        self.afov_lost_behavior: str = 'hold'    # 'hold' / 'return' / 'search'
+        self.afov_lost_delay_ms: int = 150       # anchor must be gone this long first
+        self.afov_reacquire: str = 'smooth'      # 'smooth' / 'fast' (catch-up boost)
+        self.afov_radius: int = 100              # default radius (half the FOV width, px)
+        self.afov_min_radius: int = 50
+        self.afov_max_radius: int = 300
+        self.afov_dynamic_radius: bool = False   # widen with target speed / low confidence
+        # Runtime-only (unpersisted): the Anchor FOV controller's real state, published
+        # every frame while the mode is active so every overlay draws what the filter used.
+        self.fov_center_x = None                 # None = FOV centred on the crosshair
+        self.fov_center_y = None
+        self.afov_active: bool = False
+        self.afov_has_anchor: bool = False
+        self.afov_lost: bool = False
+        self.afov_phase: int = 0
+        self.afov_anchor_x: float = 0.0
+        self.afov_anchor_y: float = 0.0
+        self.afov_pred_x: float = 0.0
+        self.afov_pred_y: float = 0.0
 
         # Runtime state — not serialized (see _FIELD_MAP: neither key appears
         # there). The FOV width/height actually in effect THIS frame
@@ -1243,6 +1296,7 @@ def validate_config(config_instance: Config) -> None:
     _validate_mouse_method(config_instance)
     _validate_aim_math(config_instance)
     _validate_anchor(config_instance)
+    _validate_anchor_fov(config_instance)
     _validate_tracking(config_instance)
     _validate_box_style(config_instance)
     _validate_web_esp(config_instance)
@@ -1478,6 +1532,42 @@ def _validate_anchor(config: Config) -> None:
         0.0, min(1.0, _finite(getattr(config, 'anchor_fov_influence_dynamic', 0.5), 0.5)))
 
 
+def _validate_anchor_fov(config: Config) -> None:
+    """Clamp the Anchor FOV settings (core/anchor_fov.py)."""
+    from .anchor_fov import SOURCES, POSITIONS, LOST_MODES, REACQUIRE_MODES
+
+    def pick(name, allowed, default):
+        if getattr(config, name, default) not in allowed:
+            setattr(config, name, default)
+
+    def num(name, default, lo, hi, cast=float):
+        setattr(config, name, cast(max(lo, min(hi, _finite(getattr(config, name, default), default)))))
+
+    pick('afov_source', SOURCES, 'detection')
+    pick('afov_position', POSITIONS, 'center')
+    pick('afov_lost_behavior', LOST_MODES, 'hold')
+    pick('afov_reacquire', REACQUIRE_MODES, 'smooth')
+    num('afov_offset_x', 0, -1000, 1000, int)
+    num('afov_offset_y', 0, -1000, 1000, int)
+    num('afov_manual_x', 0, -4096, 4096, int)
+    num('afov_manual_y', 0, -4096, 4096, int)
+    num('afov_follow_speed', 12.0, 0.5, 100.0)
+    num('afov_smoothing', 0.3, 0.0, 1.0)
+    num('afov_max_speed', 4000, 0, 50000, int)
+    num('afov_predict_strength', 1.0, 0.0, 2.0)
+    num('afov_predict_time_ms', 80, 0, 500, int)
+    num('afov_lost_delay_ms', 150, 0, 5000, int)
+    config.afov_predict_enabled = bool(getattr(config, 'afov_predict_enabled', False))
+    config.afov_dynamic_radius = bool(getattr(config, 'afov_dynamic_radius', False))
+    # min <= default <= max, all sane: the controller relies on it
+    num('afov_min_radius', 50, 1, 4096, int)
+    num('afov_max_radius', 300, 1, 4096, int)
+    if config.afov_max_radius < config.afov_min_radius:
+        config.afov_max_radius = config.afov_min_radius
+    num('afov_radius', 100, 1, 4096, int)
+    config.afov_radius = max(config.afov_min_radius, min(config.afov_max_radius, config.afov_radius))
+
+
 def _finite(value, default: float) -> float:
     try:
         v = float(value)
@@ -1488,7 +1578,7 @@ def _finite(value, default: float) -> float:
 
 def _validate_tracking(config: Config) -> None:
     """Clamp the FOV-shrink-mode and target-tracking fields."""
-    if getattr(config, 'fov_shrink_mode', 'adaptive') not in ('fixed', 'adaptive', 'dynamic'):
+    if getattr(config, 'fov_shrink_mode', 'adaptive') not in ('fixed', 'adaptive', 'dynamic', 'anchor'):
         config.fov_shrink_mode = 'adaptive'
     # FOV bounds: a zero/negative/NaN extent or a 0% shrink floor would make the
     # filter reject everything or the shrink controller degenerate.

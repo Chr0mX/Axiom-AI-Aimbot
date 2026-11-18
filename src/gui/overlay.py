@@ -42,6 +42,18 @@ def _get_calculate_aim_target():
 _ellipse_intersects_bbox = None
 
 
+def _fov_center(config):
+    """(x, y) the FOV is drawn/tested around: the Anchor FOV controller's centre in
+    that mode, else the crosshair (core.anchor_fov.fov_center)."""
+    from core.anchor_fov import fov_center
+    return fov_center(config)
+
+
+def _anchor_fov_active(config) -> bool:
+    from core.anchor_fov import anchor_fov_active
+    return anchor_fov_active(config)
+
+
 def _get_ellipse_intersects_bbox():
     """Lazily import ai_loop_utils._ellipse_intersects_bbox so the overlay's
     in-FOV test (tracer lines, box-color highlight) matches the real filter
@@ -118,6 +130,20 @@ class OverlayColors:
         if track_only:
             return ThemeColors.OVERLAY_LOCK_TRACK_ONLY.qcolor() if HAS_THEME_COLORS else QColor(0, 200, 255, 240)
         return ThemeColors.OVERLAY_LOCK_AIMING.qcolor() if HAS_THEME_COLORS else QColor(0, 255, 140, 240)
+
+    @staticmethod
+    def get_anchor_fov_color() -> QColor:
+        """Anchor FOV: anchor point, link line and predicted anchor."""
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_ANCHOR_FOV.qcolor()
+        return QColor(0, 220, 200, 235)
+
+    @staticmethod
+    def get_anchor_fov_lost_color() -> QColor:
+        """Anchor FOV while the anchor is lost (hold / return / search)."""
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_ANCHOR_FOV_LOST.qcolor()
+        return QColor(255, 170, 40, 235)
 
     @staticmethod
     def get_anchor_predicted_color() -> QColor:
@@ -307,15 +333,18 @@ class PyQtOverlay(QWidget):
         head_h_ratio = float(getattr(self.config, 'head_height_ratio', 0.26))
         calc_target = _get_calculate_aim_target()
         ellipse_intersects_bbox = _get_ellipse_intersects_bbox() if use_circle else None
+        # The FOV may be centred away from the crosshair (Anchor FOV); the in-FOV
+        # test uses the FOV's own centre, the line still starts at the crosshair.
+        fcx, fcy = _fov_center(self.config)
         for box in self.boxes:
             bx1, by1, bx2, by2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
             # Same in/out-of-FOV test the box-color pass uses, so the tracer
             # respects fov_circle_filter_enabled instead of a hardcoded square test.
             if use_circle:
-                in_fov = ellipse_intersects_bbox(float(cx), float(cy), fov_half_x, fov_half_y, bx1, by1, bx2, by2)
+                in_fov = ellipse_intersects_bbox(fcx, fcy, fov_half_x, fov_half_y, bx1, by1, bx2, by2)
             else:
-                in_fov = (bx1 < cx + fov_half_x and bx2 > cx - fov_half_x and
-                          by1 < cy + fov_half_y and by2 > cy - fov_half_y)
+                in_fov = (bx1 < fcx + fov_half_x and bx2 > fcx - fov_half_x and
+                          by1 < fcy + fov_half_y and by2 > fcy - fov_half_y)
             if not in_fov:
                 continue
             bx, by = calc_target(list(box), aim_part, head_h_ratio, self.config)
@@ -360,10 +389,17 @@ class PyQtOverlay(QWidget):
             # size.
             fov_w = int(getattr(self.config, 'fov_effective_size', self.config.fov_size))
             fov_h = int(getattr(self.config, 'fov_effective_height', getattr(self.config, 'fov_height', fov_w)))
-            cx, cy = self.config.crosshairX, self.config.crosshairY
+            # Centre = the Anchor FOV controller's real centre in that mode (else the crosshair).
+            cx, cy = (int(round(v)) for v in _fov_center(self.config))
             fov_color = OverlayColors.get_fov_color()
+            _afov_lost = bool(getattr(self.config, 'afov_active', False)
+                              and getattr(self.config, 'afov_lost', False)
+                              and _anchor_fov_active(self.config))
+            if _afov_lost:
+                fov_color = OverlayColors.get_anchor_fov_lost_color()
             from core.box_style import fov_thickness
-            pen = QPen(fov_color, fov_thickness(self.config))
+            pen = QPen(fov_color, fov_thickness(self.config),
+                       Qt.PenStyle.DashLine if _afov_lost else Qt.PenStyle.SolidLine)
             painter.setPen(pen)
             if getattr(self.config, 'fov_circle_filter_enabled', False):
                 # QPainter.drawEllipse(x, y, w, h) already draws a circle when
@@ -414,8 +450,7 @@ class PyQtOverlay(QWidget):
             use_circle = getattr(self.config, 'fov_circle_filter_enabled', False)
             fov_half_x = float(getattr(self.config, 'fov_effective_size', self.config.fov_size)) / 2.0
             fov_half_y = float(getattr(self.config, 'fov_effective_height', getattr(self.config, 'fov_height', self.config.fov_size))) / 2.0
-            ox = float(self.config.crosshairX)
-            oy = float(self.config.crosshairY)
+            ox, oy = _fov_center(self.config)
             ellipse_intersects_bbox = _get_ellipse_intersects_bbox() if use_circle else None
 
             show_confidence = self.config.show_confidence
@@ -503,6 +538,7 @@ class PyQtOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(px - 7, py - 7, 14, 14)
 
+        self._draw_anchor_fov(painter)
         self._draw_anchor_debug(painter)
 
         # 繪製追蹤線（從螢幕中心到目標）
@@ -511,6 +547,40 @@ class PyQtOverlay(QWidget):
 
         # 繪製自訂準心
         self._draw_crosshair(painter)
+
+    def _draw_anchor_fov(self, painter: QPainter) -> None:
+        """Anchor FOV markers, straight from the controller's published state: the
+        anchor point, a line from the FOV centre to it, the predicted anchor (only
+        while prediction is on) and a status label. Lost -> amber, with the
+        behaviour shown (HOLD / RETURN / SEARCH)."""
+        cfg = self.config
+        if not (getattr(cfg, 'show_fov', True) and getattr(cfg, 'afov_active', False)
+                and _anchor_fov_active(cfg)):
+            return
+        fcx, fcy = _fov_center(cfg)
+        lost = bool(getattr(cfg, 'afov_lost', False))
+        color = OverlayColors.get_anchor_fov_lost_color() if lost else OverlayColors.get_anchor_fov_color()
+        ax, ay = float(getattr(cfg, 'afov_anchor_x', fcx)), float(getattr(cfg, 'afov_anchor_y', fcy))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if not lost:
+            painter.setPen(QPen(color, 1, Qt.PenStyle.DotLine))
+            painter.drawLine(int(fcx), int(fcy), int(ax), int(ay))        # anchor <-> FOV centre
+            painter.setPen(QPen(color, 2))
+            painter.setBrush(color)
+            painter.drawEllipse(int(ax) - 4, int(ay) - 4, 8, 8)          # the anchor point
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if getattr(cfg, 'afov_predict_enabled', False):
+                px, py = int(getattr(cfg, 'afov_pred_x', ax)), int(getattr(cfg, 'afov_pred_y', ay))
+                painter.setPen(QPen(color, 1))
+                painter.drawLine(px - 6, py, px + 6, py)                 # predicted anchor
+                painter.drawLine(px, py - 6, px, py + 6)
+        else:
+            painter.setPen(QPen(color, 1))
+            painter.drawLine(int(fcx) - 6, int(fcy), int(fcx) + 6, int(fcy))
+            painter.drawLine(int(fcx), int(fcy) - 6, int(fcx), int(fcy) + 6)
+            names = ('', 'LOST', 'LOST · HOLD', 'LOST · RETURN', 'LOST · SEARCH')
+            ph = int(getattr(cfg, 'afov_phase', 1))
+            painter.drawText(int(fcx) + 8, int(fcy) - 8, names[ph] if 0 <= ph < len(names) else 'LOST')
 
     def _draw_anchor_debug(self, painter: QPainter) -> None:
         """Anchor Prediction debug overlay. The actual box is the one already

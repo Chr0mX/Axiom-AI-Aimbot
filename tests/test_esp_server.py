@@ -365,6 +365,30 @@ class TestLineWidthsAndPredictedPoint:
         off = s["boxes"][0][0] - 100                       # boxes are shifted by offset_x
         assert s["aim_predicted"]["x"] == 10 + off
 
+    def test_anchor_fov_snapshot_carries_the_controllers_real_state(self):
+        on = dict(fov_shrink_mode="anchor", afov_active=True, fov_center_x=410.4, fov_center_y=250.6,
+                  afov_lost=False, afov_phase=0, afov_anchor_x=420.0, afov_anchor_y=240.0,
+                  afov_pred_x=440.0, afov_pred_y=240.0, afov_predict_enabled=True)
+        s = self._snap(**on)
+        assert s["fov_center"] == {"x": 410, "y": 251}
+        assert s["afov"]["anchor"] == {"x": 420, "y": 240} and s["afov"]["pred"] == {"x": 440, "y": 240}
+        assert s["afov"]["lost"] is False
+        # prediction off -> no predicted point; lost is reported with its phase
+        s = self._snap(**{**on, "afov_predict_enabled": False, "afov_lost": True, "afov_phase": 4})
+        assert s["afov"]["pred"] is None and s["afov"]["lost"] is True and s["afov"]["phase"] == 4
+
+    def test_anchor_fov_keys_are_null_for_every_other_mode(self):
+        for extra in (dict(), dict(fov_shrink_mode="adaptive", afov_active=True, fov_center_x=1.0, fov_center_y=2.0),
+                      dict(fov_shrink_mode="anchor", afov_active=False)):
+            s = self._snap(**extra)
+            assert s["fov_center"] is None and s["afov"] is None
+
+    def test_anchor_fov_is_shifted_like_the_boxes_for_a_udp_crop(self):
+        s = self._snap(fov_shrink_mode="anchor", afov_active=True, fov_center_x=100.0, fov_center_y=50.0,
+                       afov_anchor_x=120.0, afov_anchor_y=60.0, screenshot_method="udp")
+        off = s["boxes"][0][0] - 100
+        assert s["fov_center"]["x"] == 100 + off and s["afov"]["anchor"]["x"] == 120 + off
+
     SNAP = (100.0, 200.0, 140.0, 280.0, 130.4, 200.0, 170.4, 280.0, 120.0, 240.0, 150.4, 240.0, 612.34, -8.0, 0.8456)
 
     def test_anchor_debug_snapshot_is_gated_by_toggle_feature_and_data(self):

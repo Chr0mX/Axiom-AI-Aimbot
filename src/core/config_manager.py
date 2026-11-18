@@ -181,6 +181,7 @@ _PRESET_DIFF_GROUPS: List[tuple] = [
     ('target_priority_', 'Target Priority'),
     ('sticky_lock_', 'Sticky Lock'),
     ('anchor_', 'Anchor Prediction'),
+    ('afov_', 'Anchor FOV'),
     ('fov_', 'FOV'),
     # These groups are only ever reachable through a *full* Config
     # ConfigManager (aim_only=False) — an aim preset can never contain a

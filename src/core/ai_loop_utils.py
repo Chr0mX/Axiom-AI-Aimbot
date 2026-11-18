@@ -4,6 +4,7 @@ import math
 import queue
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
+from .anchor_fov import anchor_fov_active
 from .anchor_prediction import anchor_active
 from .target_tracking import clamp01, edge_ratio as _edge_ratio, find_continuation, lost_timeout_s
 
@@ -501,7 +502,8 @@ def active_retention_fov(config: Config) -> Optional[Tuple[int, int]]:
     overlays so they only draw the boundary when it can matter."""
     if (getattr(config, 'fov_retention_enabled', False)
             and getattr(config, 'sticky_lock_enabled', False)
-            and getattr(config, 'fov_reduce_on_target_enabled', False)):
+            and getattr(config, 'fov_reduce_on_target_enabled', False)
+            and not anchor_fov_active(config)):      # Anchor FOV owns the radius: no shrink to retain against
         return retention_fov_size(config)
     return None
 
@@ -543,6 +545,7 @@ def resolve_retained_lock(
     if (not getattr(config, 'fov_retention_enabled', False)
             or not getattr(config, 'sticky_lock_enabled', False)
             or not getattr(config, 'fov_reduce_on_target_enabled', False)
+            or anchor_fov_active(config)
             or state.locked_box is None or len(all_boxes) <= len(boxes)):
         state.retained_since = 0.0
         return None

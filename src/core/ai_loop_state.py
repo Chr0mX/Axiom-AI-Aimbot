@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from .anchor_prediction import AnchorBank, AnchorView, FovAdjuster
 from .target_tracking import TargetTracker
@@ -70,6 +70,8 @@ class LoopState:
     anchor_view: AnchorView = field(default_factory=AnchorView)
     anchor_fov: FovAdjuster = field(default_factory=FovAdjuster)
     anchor_params_t: float = 0.0
+    # Anchor FOV controller (core/anchor_fov.py), created lazily, only used in that mode.
+    afov: Any = None
 
     # Y-reduce velocity gate — track target Y position across frames to estimate vy.
     aim_y_last_target_y: float = 0.0

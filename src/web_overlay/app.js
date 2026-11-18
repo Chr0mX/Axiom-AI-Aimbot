@@ -314,6 +314,12 @@
       const { sx, sy, offX, offY } = scaler(state);
       const X = (v) => v * sx + offX, Y = (v) => v * sy + offY;
       const cx = X(state.center.x), cy = Y(state.center.y);
+      // The FOV's own centre: the Anchor FOV controller's centre when that mode is on
+      // (state.fov_center), otherwise the crosshair. Everything FOV-related below uses it.
+      const fc = state.fov_center || state.center;
+      const fcx = X(fc.x), fcy = Y(fc.y);
+      const afov = state.afov || null;
+      const afovLost = !!(afov && afov.lost);
 
       // Detect range — sx === sy (see scaler()), so this stays a true
       // square/circle regardless of the browser window's own aspect ratio.
@@ -335,12 +341,45 @@
       if (st.show_fov) {
         const fovHeight = st.fov_height != null ? st.fov_height : st.fov_size;
         const fovx = st.fov_size * sx, fovy = fovHeight * sy;
-        const fovColor = [255, 255, 255, 180];
+        const fovColor = afovLost ? [255, 170, 40, 235] : [255, 255, 255, 180];   // amber while the anchor is lost
         if (st.fov_circle_filter_enabled) {
           ctx.strokeStyle = rgba(fovColor); ctx.lineWidth = st.fov_line_thickness || 2;
-          ctx.beginPath(); ctx.ellipse(cx, cy, fovx / 2, fovy / 2, 0, 0, Math.PI * 2); ctx.stroke();
+          if (afovLost) ctx.setLineDash([8, 6]);
+          ctx.beginPath(); ctx.ellipse(fcx, fcy, fovx / 2, fovy / 2, 0, 0, Math.PI * 2); ctx.stroke();
+          ctx.setLineDash([]);
         } else {
-          fovCorners(cx, cy, fovx, fovy, fovColor, st.fov_line_thickness || 2);
+          fovCorners(fcx, fcy, fovx, fovy, fovColor, st.fov_line_thickness || 2);
+        }
+      }
+
+      // Anchor FOV markers (the controller's published state, not a simulation): the anchor
+      // point, a link to the FOV centre, the predicted anchor (prediction on) and, when the
+      // anchor is lost, an amber label naming what the FOV does about it.
+      if (st.show_fov && afov) {
+        const PHASES = ["", "LOST", "LOST · HOLD", "LOST · RETURN", "LOST · SEARCH"];
+        if (!afovLost) {
+          const ax = X(afov.anchor.x), ay = Y(afov.anchor.y);
+          ctx.save();
+          ctx.strokeStyle = ctx.fillStyle = "rgba(0,220,200,0.92)";
+          ctx.lineWidth = 1; ctx.setLineDash([2, 4]);
+          ctx.beginPath(); ctx.moveTo(fcx, fcy); ctx.lineTo(ax, ay); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.beginPath(); ctx.arc(ax, ay, 4, 0, Math.PI * 2); ctx.fill();
+          if (afov.pred) {
+            const px = X(afov.pred.x), py = Y(afov.pred.y);
+            ctx.beginPath(); ctx.moveTo(px - 6, py); ctx.lineTo(px + 6, py);
+            ctx.moveTo(px, py - 6); ctx.lineTo(px, py + 6); ctx.stroke();
+          }
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.strokeStyle = ctx.fillStyle = "rgba(255,170,40,0.95)";
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(fcx - 6, fcy); ctx.lineTo(fcx + 6, fcy);
+          ctx.moveTo(fcx, fcy - 6); ctx.lineTo(fcx, fcy + 6); ctx.stroke();
+          ctx.font = "12px sans-serif";
+          ctx.fillText(PHASES[afov.phase] || "LOST", fcx + 8, fcy - 8);
+          ctx.restore();
         }
       }
 
@@ -377,7 +416,7 @@
           const conf = i < confs.length ? confs[i] : 0.5;
           const thickness = boxThicknessFor(st, conf);
 
-          const ox = state.center.x, oy = state.center.y;
+          const ox = fc.x, oy = fc.y;
           let inFov;
           if (st.fov_circle_filter_enabled) {
             // Same ellipse/AABB test as ai_loop_utils._ellipse_intersects_bbox

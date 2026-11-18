@@ -1382,3 +1382,37 @@ class TestAnchorPredictionSettings:
         config = _config(show_anchor_debug=False)
         assert wcs.apply_tab_settings(config, "visuals", {"show_anchor_debug": True})["ok"] is True
         assert config.show_anchor_debug is True
+
+
+class TestAnchorFovSettings:
+    KEYS = ("afov_source", "afov_position", "afov_offset_x", "afov_offset_y", "afov_manual_x", "afov_manual_y",
+            "afov_follow_speed", "afov_smoothing", "afov_max_speed", "afov_predict_enabled",
+            "afov_predict_strength", "afov_predict_time_ms", "afov_lost_behavior", "afov_lost_delay_ms",
+            "afov_reacquire", "afov_radius", "afov_min_radius", "afov_max_radius", "afov_dynamic_radius")
+
+    def test_every_schema_field_is_a_real_persisted_config_field(self):
+        from unittest.mock import patch
+        with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+            from core.config import Config, _FIELD_MAP
+            c = Config()
+        for k in self.KEYS:
+            assert k in wcs._SCHEMA["inference"] and hasattr(c, k) and k in _FIELD_MAP
+        assert "anchor" in wcs._SCHEMA["inference"]["fov_shrink_mode"]["choices"]
+
+    def test_round_trip_and_percent_units(self):
+        config = _config(afov_smoothing=0.3, afov_predict_strength=1.0, afov_source="detection",
+                         afov_lost_behavior="hold", afov_radius=100, fov_shrink_mode="adaptive")
+        shown = wcs.get_tab_settings(config, "inference")
+        assert shown["afov_smoothing"] == pytest.approx(30.0) and shown["afov_predict_strength"] == pytest.approx(100.0)
+        res = wcs.apply_tab_settings(config, "inference", {
+            "fov_shrink_mode": "Anchor", "afov_source": "tracker", "afov_smoothing": 60,
+            "afov_lost_behavior": "search", "afov_radius": 140})
+        assert res["ok"] is True
+        assert config.fov_shrink_mode == "anchor" and config.afov_source == "tracker"
+        assert config.afov_smoothing == pytest.approx(0.6) and config.afov_lost_behavior == "search"
+        assert config.afov_radius == 140
+
+    def test_bad_values_are_rejected_atomically(self):
+        config = _config(afov_source="detection", afov_radius=100)
+        bad = wcs.apply_tab_settings(config, "inference", {"afov_radius": 120, "afov_source": "psychic"})
+        assert bad["ok"] is False and bad["field"] == "afov_source" and config.afov_radius == 100

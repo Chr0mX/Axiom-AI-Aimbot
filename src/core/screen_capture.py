@@ -441,6 +441,13 @@ def _draw_detection_overlay(
 
     cx = int(getattr(cfg, 'crosshairX', w // 2))
     cy = int(getattr(cfg, 'crosshairY', h // 2))
+    # The FOV's own centre: the Anchor FOV controller's real centre in that mode, else
+    # the crosshair. Only the FOV drawing / in-FOV tests use it; the tracer still starts at (cx, cy).
+    from .anchor_fov import fov_center as _fov_center, anchor_fov_active as _anchor_fov_active
+    _fx, _fy = _fov_center(cfg)
+    fcx, fcy = int(round(_fx)), int(round(_fy))
+    afov_on = bool(_anchor_fov_active(cfg) and getattr(cfg, 'afov_active', False))
+    afov_lost = afov_on and bool(getattr(cfg, 'afov_lost', False))
 
     def _c(b: int, g: int, r: int, a: int = 255) -> tuple:
         return (b, g, r, a) if has_alpha else (b, g, r)
@@ -461,14 +468,14 @@ def _draw_detection_overlay(
         fov_h = int(getattr(cfg, 'fov_effective_height', getattr(cfg, 'fov_height', fov_w)))
         half_x = max(1, fov_w // 2)
         half_y = max(1, fov_h // 2)
-        x1, y1 = cx - half_x, cy - half_y
-        x2, y2 = cx + half_x, cy + half_y
-        color = _c(0, 0, 255)
+        x1, y1 = fcx - half_x, fcy - half_y
+        x2, y2 = fcx + half_x, fcy + half_y
+        color = _c(0, 160, 255) if afov_lost else _c(0, 0, 255)      # amber while the anchor is lost
         fov_w_px = fov_thickness(cfg)
         if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
             # cv2.ellipse's axes are already independent per axis, so this
             # draws a plain circle for free when half_x == half_y.
-            cv2.ellipse(frame, (cx, cy), (half_x, half_y), 0, 0, 360, color, fov_w_px, cv2.LINE_AA)
+            cv2.ellipse(frame, (fcx, fcy), (half_x, half_y), 0, 0, 360, color, fov_w_px, cv2.LINE_AA)
         else:
             corner = max(8, min(20, min(fov_w, fov_h) // 6))
             cv2.line(frame, (x1, y1), (x1 + corner, y1), color, fov_w_px, cv2.LINE_AA)
@@ -479,6 +486,27 @@ def _draw_detection_overlay(
             cv2.line(frame, (x1, y2), (x1, y2 - corner), color, fov_w_px, cv2.LINE_AA)
             cv2.line(frame, (x2, y2), (x2 - corner, y2), color, fov_w_px, cv2.LINE_AA)
             cv2.line(frame, (x2, y2), (x2, y2 - corner), color, fov_w_px, cv2.LINE_AA)
+
+    if bool(getattr(cfg, 'show_fov', True)) and afov_on:
+        # Anchor FOV markers from the controller's published state (same as overlay.py):
+        # anchor point + link to the FOV centre + predicted anchor; lost -> amber label.
+        ax = int(getattr(cfg, 'afov_anchor_x', fcx)); ay = int(getattr(cfg, 'afov_anchor_y', fcy))
+        if not afov_lost:
+            acol = _c(200, 220, 0)
+            cv2.line(frame, (fcx, fcy), (ax, ay), acol, 1, cv2.LINE_AA)
+            cv2.circle(frame, (ax, ay), 4, acol, -1, cv2.LINE_AA)
+            if bool(getattr(cfg, 'afov_predict_enabled', False)):
+                px = int(getattr(cfg, 'afov_pred_x', ax)); py = int(getattr(cfg, 'afov_pred_y', ay))
+                cv2.line(frame, (px - 6, py), (px + 6, py), acol, 1, cv2.LINE_AA)
+                cv2.line(frame, (px, py - 6), (px, py + 6), acol, 1, cv2.LINE_AA)
+        else:
+            lcol = _c(0, 160, 255)
+            cv2.line(frame, (fcx - 6, fcy), (fcx + 6, fcy), lcol, 1, cv2.LINE_AA)
+            cv2.line(frame, (fcx, fcy - 6), (fcx, fcy + 6), lcol, 1, cv2.LINE_AA)
+            names = ('', 'LOST', 'LOST - HOLD', 'LOST - RETURN', 'LOST - SEARCH')
+            ph = int(getattr(cfg, 'afov_phase', 1))
+            cv2.putText(frame, names[ph] if 0 <= ph < len(names) else 'LOST', (fcx + 8, max(12, fcy - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, lcol, 1, cv2.LINE_AA)
 
     if bool(getattr(cfg, 'show_fov', True)):
         # Lock-retention boundary (only while retention is in effect): where a
@@ -536,10 +564,10 @@ def _draw_detection_overlay(
                 # Same ellipse/AABB test as ai_loop_utils._ellipse_intersects_bbox
                 # (a circle when fov_half_x == fov_half_y, same as it always was).
                 in_fov = ellipse_intersects_bbox(
-                    float(cx), float(cy), fov_half_x, fov_half_y, float(x1), float(y1), float(x2), float(y2))
+                    float(fcx), float(fcy), fov_half_x, fov_half_y, float(x1), float(y1), float(x2), float(y2))
             else:
-                in_fov = (x1 < cx + fov_half_x and x2 > cx - fov_half_x and
-                          y1 < cy + fov_half_y and y2 > cy - fov_half_y)
+                in_fov = (x1 < fcx + fov_half_x and x2 > fcx - fov_half_x and
+                          y1 < fcy + fov_half_y and y2 > fcy - fov_half_y)
             dc = chroma_color if in_fov else box_color
             if getattr(cfg, 'box_full_rect', False):
                 cv2.rectangle(frame, (x1, y1), (x2, y2), dc, thickness, cv2.LINE_AA)
@@ -571,9 +599,9 @@ def _draw_detection_overlay(
             bx = (x1 + x2) // 2
             by = (y1 + y2) // 2
             if tracer_use_circle:
-                in_reach = (((bx - cx) / tracer_half_x) ** 2 + ((by - cy) / tracer_half_y) ** 2) <= 1.0
+                in_reach = (((bx - fcx) / tracer_half_x) ** 2 + ((by - fcy) / tracer_half_y) ** 2) <= 1.0
             else:
-                in_reach = abs(bx - cx) <= tracer_half_x and abs(by - cy) <= tracer_half_y
+                in_reach = abs(bx - fcx) <= tracer_half_x and abs(by - fcy) <= tracer_half_y
             if in_reach:
                 origin = (w // 2, h - 1) if bool(getattr(cfg, 'tracer_from_bottom', False)) else (cx, cy)
                 cv2.line(frame, origin, (bx, by), _c(255, 255, 255), tracer_thickness(cfg), cv2.LINE_AA)
