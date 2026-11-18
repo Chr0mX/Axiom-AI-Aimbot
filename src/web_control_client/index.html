@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=17">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <div class="app">
@@ -1273,65 +1273,21 @@
             <div class="field-card">
               <div class="field-info"><div class="field-title">Prediction Horizon</div></div>
               <div class="field-control">
-                <input type="number" id="aim-prediction_horizon_ms" data-key="prediction_horizon_ms" data-type="number" min="5" max="150" step="1">
+                <input type="number" id="aim-prediction_horizon_ms" data-key="prediction_horizon_ms" data-type="number" min="5" max="50" step="1">
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Prediction Method</div>
-                <div class="field-desc">Velocity, EMA, a rolling average of recent steps, or Anchor (FOV-based velocity + acceleration)</div>
+                <div class="field-desc">Velocity, EMA, or a rolling average of recent steps</div>
               </div>
               <div class="field-control">
                 <select id="aim-prediction_method" data-key="prediction_method" data-type="choice">
                   <option value="velocity">Velocity</option>
                   <option value="ema">EMA</option>
                   <option value="rolling">Rolling</option>
-                  <option value="anchor">Anchor</option>
                 </select>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Anchor Strength</div><div class="field-desc">Scales the whole lead; 1 is the full prediction</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-anchor_strength" data-key="anchor_strength" data-type="number" min="0" max="1.5" step="0.05">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Anchor Smoothing</div><div class="field-desc">Higher follows the target more smoothly but reacts slower</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-anchor_smoothing" data-key="anchor_smoothing" data-type="number" min="0" max="1" step="0.05">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Velocity Influence</div><div class="field-desc">Weight of the velocity term</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-anchor_velocity_influence" data-key="anchor_velocity_influence" data-type="number" min="0" max="1.5" step="0.05">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Acceleration Influence</div><div class="field-desc">Weight of the acceleration term; 0 is velocity only</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-anchor_accel_influence" data-key="anchor_accel_influence" data-type="number" min="0" max="1" step="0.05">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Max Prediction Distance</div><div class="field-desc">Longest lead as a share of the current FOV; 0 is no cap. The point is also kept inside the FOV</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-anchor_max_distance_pct" data-key="anchor_max_distance_pct" data-type="number" min="0" max="100" step="1">
-                <span class="field-slider-value">% of FOV</span>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Confidence Threshold</div><div class="field-desc">Below this the lead is zero; it fades in above it</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-anchor_confidence_threshold" data-key="anchor_confidence_threshold" data-type="number" min="0" max="1" step="0.05">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Adaptive Adjustment</div><div class="field-desc">Follow the FOV Shrink Mode: Adaptive trusts consistent motion more, Dynamic reacts faster to direction changes</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-anchor_adaptive" data-key="anchor_adaptive" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
@@ -2058,15 +2014,6 @@
                 <label class="switch"><input type="checkbox" id="vis-show_aim_prediction_marker" data-key="show_aim_prediction_marker" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Anchor Trajectory</div>
-                <div class="field-desc">Draw the aim anchor's recent path, the lead to its predicted point, and the prediction distance and confidence (Anchor method only).</div>
-              </div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-show_anchor_trajectory" data-key="show_anchor_trajectory" data-type="bool"><span class="slider"></span></label>
-              </div>
-            </div>
             </div>
             <div class="field-card">
               <div class="field-info">
@@ -2536,6 +2483,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=16"></script>
 </body>
 </html>

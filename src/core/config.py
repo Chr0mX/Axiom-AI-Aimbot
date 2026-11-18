@@ -192,13 +192,6 @@ _FIELD_MAP = {
     'prediction_velocity_deadzone_px_s': 'tracking.prediction.velocity_deadzone_px_s',
     'prediction_ego_motion_comp': 'tracking.prediction.ego_motion_comp',
     'prediction_ego_motion_scale': 'tracking.prediction.ego_motion_scale',
-    'anchor_strength':            'tracking.prediction.anchor.strength',
-    'anchor_smoothing':           'tracking.prediction.anchor.smoothing',
-    'anchor_velocity_influence':  'tracking.prediction.anchor.velocity_influence',
-    'anchor_accel_influence':     'tracking.prediction.anchor.accel_influence',
-    'anchor_max_distance_pct':    'tracking.prediction.anchor.max_distance_pct',
-    'anchor_confidence_threshold': 'tracking.prediction.anchor.confidence_threshold',
-    'anchor_adaptive':            'tracking.prediction.anchor.adaptive',
     'sticky_gap_extrapolate':     'tracking.sticky_lock.gap_extrapolate',
     'sticky_gap_frames':          'tracking.sticky_lock.gap_frames',
     'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
@@ -242,7 +235,6 @@ _FIELD_MAP = {
     'show_tracer_line':           'display.show_tracer_line',
     'tracer_from_bottom':         'display.tracer_from_bottom',
     'show_aim_prediction_marker': 'display.show_aim_prediction_marker',
-    'show_anchor_trajectory':     'display.show_anchor_trajectory',
     'box_color_theme':            'display.box_color_theme',
     'chroma_box_speed':           'display.chroma_box_speed',
     'show_status_panel':          'display.status_panel.show',
@@ -661,10 +653,6 @@ class Config:
         # kalman_enabled is visible, distinct from the existing per-box aim
         # marker (which is always the raw, pre-prediction point).
         self.show_aim_prediction_marker: bool = True
-        # Anchor prediction readout (prediction_method == 'anchor'): the recent
-        # path of the aim anchor up to its predicted point, plus the lead
-        # distance and prediction confidence — see anchor_trail below.
-        self.show_anchor_trajectory: bool = True
 
         # Crosshair overlay
         self.show_crosshair: bool = False
@@ -838,7 +826,7 @@ class Config:
         self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
         self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
         self.prediction_history_len: int = 3         # 歷史點數量
-        self.prediction_method: str = "velocity"     # velocity | ema | rolling | anchor
+        self.prediction_method: str = "velocity"     # velocity | ema | rolling
         self.prediction_lead_frames: float = 3.0     # rolling predictor, in frames
         self.prediction_adaptive_lead: bool = False
         # Velocity-estimate refinements — all off by default so existing
@@ -848,15 +836,6 @@ class Config:
         self.prediction_velocity_deadzone_px_s: float = 0.0  # soft-zero speeds below this (0 = off)
         self.prediction_ego_motion_comp: bool = False     # remove our own mouse moves from apparent motion
         self.prediction_ego_motion_scale: float = 1.0     # screen px per mouse count sent
-        # Anchor prediction (prediction_method == 'anchor'); the horizon is
-        # prediction_horizon_ms. See core/anchor_prediction.py.
-        self.anchor_strength: float = 1.0                 # 0..1.5 — scales the whole lead
-        self.anchor_smoothing: float = 0.4                # 0..1 — filter time constant, 20..220 ms
-        self.anchor_velocity_influence: float = 1.0       # 0..1.5 — weight of the velocity term
-        self.anchor_accel_influence: float = 0.35         # 0..1 — weight of the acceleration term
-        self.anchor_max_distance_pct: float = 25.0        # lead cap, % of the effective FOV's shorter side (0 = none)
-        self.anchor_confidence_threshold: float = 0.35    # below this the lead is zero
-        self.anchor_adaptive: bool = True                 # trust follows the Adaptive/Dynamic FOV mode
 
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
@@ -935,14 +914,6 @@ class Config:
         self.aim_predicted_x: float = 0.0
         self.aim_predicted_y: float = 0.0
         self.aim_prediction_active: bool = False
-        # Anchor prediction readout, runtime-only like aim_predicted_x/y.
-        # anchor_pred_active is true only while prediction_method == 'anchor'
-        # produced this frame's point; the trail is published only while
-        # show_anchor_trajectory is on.
-        self.anchor_pred_active: bool = False
-        self.anchor_pred_confidence: float = 0.0
-        self.anchor_pred_distance: float = 0.0
-        self.anchor_trail: list = []
 
         # 延遲/性能統計（預設關閉，避免輸出干擾）
         self.enable_latency_stats: bool = False
@@ -1433,7 +1404,7 @@ def _validate_gpu_monitor(config: Config) -> None:
 
 def _validate_aim_math(config: Config) -> None:
     """Clamp the optional Advanced Aim Tuning fields."""
-    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'ema', 'rolling', 'anchor'):
+    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'ema', 'rolling'):
         config.prediction_method = 'velocity'
     config.aim_x_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
     config.aim_y_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))
@@ -1444,17 +1415,6 @@ def _validate_aim_math(config: Config) -> None:
         0.0, min(500.0, float(getattr(config, 'prediction_velocity_deadzone_px_s', 0.0) or 0.0)))
     config.prediction_ego_motion_scale = max(
         0.1, min(5.0, float(getattr(config, 'prediction_ego_motion_scale', 1.0) or 1.0)))
-    config.prediction_horizon_ms = max(0.0, min(500.0, _finite(getattr(config, 'prediction_horizon_ms', 10.0), 10.0)))
-    config.anchor_strength = max(0.0, min(1.5, _finite(getattr(config, 'anchor_strength', 1.0), 1.0)))
-    config.anchor_smoothing = max(0.0, min(1.0, _finite(getattr(config, 'anchor_smoothing', 0.4), 0.4)))
-    config.anchor_velocity_influence = max(
-        0.0, min(1.5, _finite(getattr(config, 'anchor_velocity_influence', 1.0), 1.0)))
-    config.anchor_accel_influence = max(0.0, min(1.0, _finite(getattr(config, 'anchor_accel_influence', 0.35), 0.35)))
-    config.anchor_max_distance_pct = max(
-        0.0, min(100.0, _finite(getattr(config, 'anchor_max_distance_pct', 25.0), 25.0)))
-    config.anchor_confidence_threshold = max(
-        0.0, min(1.0, _finite(getattr(config, 'anchor_confidence_threshold', 0.35), 0.35)))
-    config.anchor_adaptive = bool(getattr(config, 'anchor_adaptive', True))
 
 
 def _finite(value, default: float) -> float:

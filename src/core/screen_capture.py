@@ -610,31 +610,6 @@ def _draw_detection_overlay(
         except Exception:
             pass
 
-    if (bool(getattr(cfg, 'show_anchor_trajectory', False))
-            and bool(getattr(cfg, 'anchor_pred_active', False))):
-        # Anchor prediction readout, like overlay.py's: the anchor's recent path
-        # (older = thinner steps of the same predicted color), a dot on the
-        # current anchor, the lead to the predicted point and "+distance conf".
-        try:
-            pred_col = _c(255, 210, 80)
-            width = max(1, aim_marker_thickness(cfg) - 1)
-            trail = list(getattr(cfg, 'anchor_trail', None) or [])
-            for i in range(1, len(trail)):
-                cv2.line(frame, (int(trail[i - 1][0]), int(trail[i - 1][1])),
-                         (int(trail[i][0]), int(trail[i][1])), pred_col, width, cv2.LINE_AA)
-            px = int(getattr(cfg, 'aim_predicted_x', 0.0))
-            py = int(getattr(cfg, 'aim_predicted_y', 0.0))
-            if trail:
-                ax, ay = int(trail[-1][0]), int(trail[-1][1])
-                cv2.line(frame, (ax, ay), (px, py), pred_col, width, cv2.LINE_AA)
-                cv2.circle(frame, (ax, ay), 3, _c(60, 60, 255), -1, cv2.LINE_AA)
-            label = (f"+{float(getattr(cfg, 'anchor_pred_distance', 0.0)):.0f}px  "
-                     f"{float(getattr(cfg, 'anchor_pred_confidence', 0.0)):.0%}")
-            cv2.putText(frame, label, (px + 10, py - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
-                        pred_col, 1, cv2.LINE_AA)
-        except Exception:
-            pass
-
     return frame
 
 

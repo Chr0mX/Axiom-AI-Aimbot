@@ -496,51 +496,12 @@ class PyQtOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(px - 7, py - 7, 14, 14)
 
-        self._draw_anchor_trajectory(painter)
-
         # 繪製追蹤線（從螢幕中心到目標）
         if getattr(self.config, 'show_tracer_line', False):
             self.draw_tracer_lines(painter)
 
         # 繪製自訂準心
         self._draw_crosshair(painter)
-
-    def _draw_anchor_trajectory(self, painter: QPainter) -> None:
-        """Anchor-prediction readout: the anchor's recent path (older = fainter),
-        a dot on its current position, a dashed lead segment to the predicted
-        point, and "+distance  confidence" next to it. Predicted things use the
-        predicted-marker color, the current anchor the aim-marker color, so
-        actual and predicted are never confused. Published by
-        ai_aiming._predict_anchor(); inactive for every other method."""
-        cfg = self.config
-        if not (getattr(cfg, 'show_anchor_trajectory', False) and getattr(cfg, 'anchor_pred_active', False)):
-            return
-        from core.box_style import aim_marker_thickness
-        width = max(1, aim_marker_thickness(cfg) - 1)
-        color = OverlayColors.get_predicted_aim_marker_color()
-        trail = getattr(cfg, 'anchor_trail', None) or []
-        n = len(trail)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        for i in range(1, n):
-            faded = QColor(color)
-            faded.setAlpha(max(25, int(color.alpha() * i / n)))
-            painter.setPen(QPen(faded, width))
-            painter.drawLine(int(trail[i - 1][0]), int(trail[i - 1][1]), int(trail[i][0]), int(trail[i][1]))
-        px = int(getattr(cfg, 'aim_predicted_x', 0.0))
-        py = int(getattr(cfg, 'aim_predicted_y', 0.0))
-        if n:
-            ax, ay = int(trail[-1][0]), int(trail[-1][1])
-            painter.setPen(QPen(color, width, Qt.PenStyle.DashLine))
-            painter.drawLine(ax, ay, px, py)
-            actual = OverlayColors.get_aim_marker_color()
-            painter.setPen(QPen(actual, 1))
-            painter.setBrush(actual)
-            painter.drawEllipse(ax - 3, ay - 3, 6, 6)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(color)
-        painter.drawText(px + 10, py - 10,
-                         f"+{float(getattr(cfg, 'anchor_pred_distance', 0.0)):.0f}px  "
-                         f"{float(getattr(cfg, 'anchor_pred_confidence', 0.0)):.0%}")
 
     def _draw_crosshair(self, painter: QPainter) -> None:
         """Draw a configurable crosshair dot or cross at the crosshair position."""

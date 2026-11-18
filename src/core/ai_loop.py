@@ -935,7 +935,6 @@ def ai_logic_loop(
                     config.display_locked_box = None
                     config.display_locked_box_is_decaying = False
                     config.aim_prediction_active = False
-                    config.anchor_pred_active = False
                     _set_makcu_move_lock(config, False)
                     # Pause capture and preprocessing as well, so the capture
                     # thread, the uvc/udp decode (see _decode_wanted() in
@@ -1207,7 +1206,6 @@ def ai_logic_loop(
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
                         config.aim_prediction_active = False
-                        config.anchor_pred_active = False
                         config.lock_track_only = False
                         # Target lost — clear stale prediction/Kalman state so a
                         # newly-acquired target isn't corrupted by the old one's history.
@@ -1217,8 +1215,6 @@ def ai_logic_loop(
                             ai_aiming._ema_predictor.reset()
                         if ai_aiming._rolling_predictor is not None:
                             ai_aiming._rolling_predictor.reset()
-                        if ai_aiming._anchor is not None:
-                            ai_aiming._anchor.reset()
                         if ai_aiming._kalman is not None:
                             ai_aiming._kalman.reset()
 

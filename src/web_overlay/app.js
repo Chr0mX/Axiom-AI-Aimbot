@@ -179,7 +179,6 @@
     ["show_detect_range", "Detection Range"],
     ["show_tracer_line", "Tracer Line"],
     ["show_aim_prediction_marker", "Predicted Aim Point"],
-    ["show_anchor_trajectory", "Anchor Trajectory"],
   ];
   function enabledOverlays(st) {
     return BADGE_ITEMS.filter(([key]) => !!(st && st[key])).map(([, label]) => label);
@@ -443,42 +442,6 @@
         ctx.beginPath();
         ctx.ellipse(X(state.aim_predicted.x), Y(state.aim_predicted.y), pr, pr, 0, 0, Math.PI * 2);
         ctx.stroke();
-      }
-
-      // Anchor prediction readout (anchor method only): the anchor's recent path fading in,
-      // a dot on its current position, a dashed lead to the predicted point and
-      // "+distance  confidence" — same look as the in-game overlay.
-      if (st.show_anchor_trajectory && state.anchor) {
-        const an = state.anchor, tr = an.trail || [];
-        ctx.lineWidth = Math.max(1, (st.aim_marker_line_thickness || 2) - 1);
-        ctx.setLineDash([]);
-        for (let i = 1; i < tr.length; i++) {
-          ctx.strokeStyle = `rgba(80,210,255,${(0.9 * i / tr.length).toFixed(2)})`;
-          ctx.beginPath();
-          ctx.moveTo(X(tr[i - 1][0]), Y(tr[i - 1][1]));
-          ctx.lineTo(X(tr[i][0]), Y(tr[i][1]));
-          ctx.stroke();
-        }
-        const pp = state.aim_predicted;
-        if (tr.length && pp) {
-          const last = tr[tr.length - 1];
-          ctx.strokeStyle = "rgba(80,210,255,0.92)";
-          ctx.setLineDash([5, 4]);
-          ctx.beginPath();
-          ctx.moveTo(X(last[0]), Y(last[1]));
-          ctx.lineTo(X(pp.x), Y(pp.y));
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.fillStyle = "rgba(255,70,70,0.95)";
-          ctx.beginPath();
-          ctx.arc(X(last[0]), Y(last[1]), 3, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        if (pp) {
-          ctx.fillStyle = "rgba(80,210,255,0.95)";
-          ctx.font = `${Math.max(10, 11 * sy)}px "Consolas", "Menlo", monospace`;
-          ctx.fillText(`+${Math.round(an.dist)}px  ${Math.round(an.conf * 100)}%`, X(pp.x) + 10, Y(pp.y) - 10);
-        }
       }
 
       // Crosshair — scaled per axis like everything else above; previously

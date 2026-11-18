@@ -365,27 +365,6 @@ class TestLineWidthsAndPredictedPoint:
         off = s["boxes"][0][0] - 100                       # boxes are shifted by offset_x
         assert s["aim_predicted"]["x"] == 10 + off
 
-    def test_anchor_readout_only_while_active_and_shown(self):
-        trail = [(100.0, 50.0), (110.4, 50.0), (121.0, 51.0)]
-        base = dict(anchor_pred_active=True, show_anchor_trajectory=True, anchor_trail=trail,
-                    anchor_pred_distance=33.349, anchor_pred_confidence=0.84567,
-                    prediction_enabled=True, prediction_method="anchor")
-        s = self._snap(**base)
-        assert s["anchor"] == {"trail": [[100, 50], [110, 50], [121, 51]], "dist": 33.3, "conf": 0.846}
-        assert s["settings"]["show_anchor_trajectory"] is True
-        assert self._snap(**{**base, "anchor_pred_active": False})["anchor"] is None
-        hidden = self._snap(**{**base, "show_anchor_trajectory": False})
-        assert hidden["anchor"] is None and hidden["settings"]["show_anchor_trajectory"] is False
-        # The badge only counts it as an enabled overlay while the anchor method is really in use.
-        other = self._snap(**{**base, "prediction_method": "velocity"})
-        assert other["settings"]["show_anchor_trajectory"] is False
-
-    def test_anchor_trail_is_shifted_like_the_boxes_for_a_udp_crop(self):
-        s = self._snap(anchor_pred_active=True, show_anchor_trajectory=True, anchor_trail=[(10.0, 20.0)],
-                       screenshot_method="udp", prediction_enabled=True, prediction_method="anchor")
-        off = s["boxes"][0][0] - 100
-        assert s["anchor"]["trail"][0][0] == 10 + off
-
 
 # ---------------------------------------------------------------------------
 # Broadcaster: event-driven scheduling, latest-only senders, web_esp_fps
