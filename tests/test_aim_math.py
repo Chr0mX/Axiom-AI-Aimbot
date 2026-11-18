@@ -143,3 +143,66 @@ def test_new_prediction_options_are_persisted_and_clamped():
     _validate_aim_math(cfg)
     assert cfg.prediction_velocity_deadzone_px_s == 500.0
     assert cfg.prediction_ego_motion_scale == 0.1
+
+
+def _anchor_config():
+    from unittest.mock import patch
+    with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+        from core.config import Config
+        return Config()
+
+
+def test_anchor_settings_defaults_are_off_and_sensible():
+    c = _anchor_config()
+    assert c.anchor_enabled is False and c.anchor_mode == "adaptive" and c.show_anchor_debug is False
+    assert (c.anchor_horizon_ms, c.anchor_strength, c.anchor_velocity_smoothing, c.anchor_accel_comp,
+            c.anchor_confidence_threshold, c.anchor_history_len, c.anchor_max_distance_pct,
+            c.anchor_fov_influence_adaptive, c.anchor_fov_influence_dynamic) == (
+        100.0, 1.0, 0.4, 0.35, 0.35, 6, 25.0, 0.5, 0.5)
+    assert c.anchor_debug is None
+
+
+def test_anchor_settings_persist_and_belong_to_aim_presets():
+    from core.config import _FIELD_MAP
+    from core.config_manager import _AIM_PRESET_FIELDS
+    keys = ("anchor_enabled", "anchor_mode", "anchor_horizon_ms", "anchor_strength", "anchor_velocity_smoothing",
+            "anchor_accel_comp", "anchor_confidence_threshold", "anchor_history_len", "anchor_max_distance_pct",
+            "anchor_fov_influence_adaptive", "anchor_fov_influence_dynamic")
+    for k in keys:
+        assert _FIELD_MAP[k].startswith("tracking.anchor.") and k in _AIM_PRESET_FIELDS
+    assert _FIELD_MAP["show_anchor_debug"] == "display.show_anchor_debug"
+    assert "show_anchor_debug" not in _AIM_PRESET_FIELDS and "anchor_debug" not in _FIELD_MAP
+    c = _anchor_config()
+    c.anchor_enabled, c.anchor_mode, c.anchor_history_len, c.show_anchor_debug = True, "smoothed", 9, True
+    c.anchor_fov_influence_dynamic = 0.8
+    restored = _anchor_config()
+    restored.from_dict(c.to_dict())
+    assert (restored.anchor_enabled, restored.anchor_mode, restored.anchor_history_len,
+            restored.show_anchor_debug, restored.anchor_fov_influence_dynamic) == (True, "smoothed", 9, True, 0.8)
+
+
+def test_old_config_files_without_anchor_keys_load_with_defaults():
+    c = _anchor_config()
+    c.from_dict({"aim": {"fov_size": 250}})
+    assert c.fov_size == 250 and c.anchor_enabled is False and c.anchor_mode == "adaptive"
+
+
+def test_anchor_settings_are_clamped():
+    import math
+    from types import SimpleNamespace
+    from core.config import _validate_anchor
+    cfg = SimpleNamespace(
+        anchor_enabled=1, anchor_mode="bogus", anchor_horizon_ms=9999, anchor_strength=-4,
+        anchor_velocity_smoothing=float("nan"), anchor_accel_comp=7, anchor_confidence_threshold=-1,
+        anchor_history_len=99, anchor_max_distance_pct=500, anchor_fov_influence_adaptive=3,
+        anchor_fov_influence_dynamic=-3)
+    _validate_anchor(cfg)
+    assert cfg.anchor_enabled is True and cfg.anchor_mode == "adaptive"
+    assert (cfg.anchor_horizon_ms, cfg.anchor_strength, cfg.anchor_velocity_smoothing, cfg.anchor_accel_comp,
+            cfg.anchor_confidence_threshold, cfg.anchor_history_len, cfg.anchor_max_distance_pct,
+            cfg.anchor_fov_influence_adaptive, cfg.anchor_fov_influence_dynamic) == (
+        500.0, 0.0, 0.4, 1.0, 0.0, 12, 100.0, 1.0, 0.0)
+    low = SimpleNamespace(anchor_horizon_ms=1, anchor_history_len=1, anchor_mode="disabled")
+    _validate_anchor(low)
+    assert low.anchor_horizon_ms == 20.0 and low.anchor_history_len == 4 and low.anchor_mode == "disabled"
+    assert all(math.isfinite(v) for v in vars(cfg).values() if isinstance(v, float))

@@ -180,6 +180,7 @@ _PRESET_DIFF_GROUPS: List[tuple] = [
     ('detect_semantic_', 'Semantic Filter'),
     ('target_priority_', 'Target Priority'),
     ('sticky_lock_', 'Sticky Lock'),
+    ('anchor_', 'Anchor Prediction'),
     ('fov_', 'FOV'),
     # These groups are only ever reachable through a *full* Config
     # ConfigManager (aim_only=False) — an aim preset can never contain a

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
+from .ai_loop_utils import anchor_on_match, anchor_ref_box
 from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
@@ -309,7 +310,7 @@ def process_aiming(
             selected, _continued = select_target(
                 valid_targets, locked_box=state.locked_box, tracker=state.tracker,
                 config=config, now=current_time, iou_thresh=iou_thresh, norm=_fov_ref * 0.5,
-                class_of=class_of)
+                class_of=class_of, ref_box=anchor_ref_box(config, state, current_time))
             if selected is None:
                 return False
         else:
@@ -350,6 +351,8 @@ def process_aiming(
             edge_ratio=edge_ratio(selected_box, crosshair_x, crosshair_y, _fw, _fh,
                                   bool(getattr(config, 'fov_circle_filter_enabled', False))),
             same_target=_same)
+        anchor_on_match(config, state, selected_box, _conf, current_time,
+                        crosshair_x, crosshair_y, _fw, _fh)
         if class_of is not None:
             _cid = class_of(selected_box)
             if _cid is not None or not _same:

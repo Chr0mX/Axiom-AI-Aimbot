@@ -25,6 +25,7 @@ from .ai_loop_state import LoopState
 from .detection_semantics import filter_detections_by_target_class, sync_detection_class_names_from_backend
 from .ai_loop_utils import (
     aim_start_delay_elapsed,
+    anchor_reset,
     apply_cam_shift_deadzone,
     calculate_detection_region,
     clear_queues,
@@ -935,6 +936,7 @@ def ai_logic_loop(
                     config.display_locked_box = None
                     config.display_locked_box_is_decaying = False
                     config.aim_prediction_active = False
+                    config.anchor_debug = None
                     _set_makcu_move_lock(config, False)
                     # Pause capture and preprocessing as well, so the capture
                     # thread, the uvc/udp decode (see _decode_wanted() in
@@ -1206,6 +1208,7 @@ def ai_logic_loop(
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
                         config.aim_prediction_active = False
+                        anchor_reset(config, state)
                         config.lock_track_only = False
                         # Target lost — clear stale prediction/Kalman state so a
                         # newly-acquired target isn't corrupted by the old one's history.

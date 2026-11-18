@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=16">
+  <link rel="stylesheet" href="styles.css?v=17">
 </head>
 <body>
   <div class="app">
@@ -687,6 +687,128 @@
               <div class="field-control">
                 <input type="number" id="inf-detect_range_size" data-key="detect_range_size" data-type="number" min="100" max="1080" step="1">
                 <span class="field-slider-value">px</span>
+              </div>
+            </div>
+          </div>
+          </section>
+
+          <section class="module">
+          <div class="field-group-title">Anchor Prediction</div>
+          <div class="field-group">
+            <div class="field-card" id="inf-anchor-enable-card">
+              <div class="field-info">
+                <div class="field-title">Enable Anchor Prediction</div>
+                <div class="field-desc">Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-anchor_enabled" data-key="anchor_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-mode-card">
+              <div class="field-info">
+                <div class="field-title">Prediction Mode</div>
+                <div class="field-desc">Linear: current velocity. Velocity + Acceleration: also uses acceleration. Smoothed: smooths velocity/acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes.</div>
+              </div>
+              <div class="field-control">
+                <select id="inf-anchor_mode" data-key="anchor_mode" data-type="choice">
+                  <option value="disabled">Disabled</option>
+                  <option value="linear">Linear</option>
+                  <option value="velocity_accel">Velocity + Acceleration</option>
+                  <option value="smoothed">Smoothed</option>
+                  <option value="adaptive">Adaptive</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-horizon-card">
+              <div class="field-info">
+                <div class="field-title">Prediction Horizon</div>
+                <div class="field-desc">How far ahead to predict the box.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_horizon_ms" data-key="anchor_horizon_ms" data-type="number" min="20" max="500" step="5">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-strength-card">
+              <div class="field-info">
+                <div class="field-title">Prediction Strength</div>
+                <div class="field-desc">Scales the whole predicted movement (100% = full).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_strength" data-key="anchor_strength" data-type="number" min="0" max="150" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-smoothing-card">
+              <div class="field-info">
+                <div class="field-title">Velocity Smoothing</div>
+                <div class="field-desc">Higher = steadier but slower to react (Smoothed / Adaptive modes).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_velocity_smoothing" data-key="anchor_velocity_smoothing" data-type="number" min="0" max="100" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-accel-card">
+              <div class="field-info">
+                <div class="field-title">Acceleration Compensation</div>
+                <div class="field-desc">How much of the estimated acceleration is applied. 0 = velocity only.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_accel_comp" data-key="anchor_accel_comp" data-type="number" min="0" max="100" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-conf-card">
+              <div class="field-info">
+                <div class="field-title">Confidence Threshold</div>
+                <div class="field-desc">Below this prediction confidence nothing is extrapolated.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_confidence_threshold" data-key="anchor_confidence_threshold" data-type="number" min="0" max="100" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-history-card">
+              <div class="field-info">
+                <div class="field-title">Prediction History Length</div>
+                <div class="field-desc">How many recent detections the motion estimate uses (Velocity + Acceleration needs 4 or more).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_history_len" data-key="anchor_history_len" data-type="number" min="4" max="12" step="1">
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-maxdist-card">
+              <div class="field-info">
+                <div class="field-title">Maximum Prediction Distance</div>
+                <div class="field-desc">Longest predicted movement, as a % of the FOV size. 0 = no limit.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_max_distance_pct" data-key="anchor_max_distance_pct" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">% of FOV</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-infl-adaptive-card">
+              <div class="field-info">
+                <div class="field-title">Prediction Influence on Adaptive FOV</div>
+                <div class="field-desc">How strongly the prediction opens the Adaptive FOV early for a target heading for its edge. 0 = ignore the prediction.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_fov_influence_adaptive" data-key="anchor_fov_influence_adaptive" data-type="number" min="0" max="100" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="inf-anchor-infl-dynamic-card">
+              <div class="field-info">
+                <div class="field-title">Prediction Influence on Dynamic FOV</div>
+                <div class="field-desc">How strongly the predicted speed/direction change feeds the Dynamic FOV. 0 = ignore the prediction.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-anchor_fov_influence_dynamic" data-key="anchor_fov_influence_dynamic" data-type="number" min="0" max="100" step="5">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
           </div>
@@ -2014,6 +2136,15 @@
                 <label class="switch"><input type="checkbox" id="vis-show_aim_prediction_marker" data-key="show_aim_prediction_marker" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Anchor Prediction Debug</div>
+                <div class="field-desc">Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Prediction on the Inference page).</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_anchor_debug" data-key="show_anchor_debug" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
             </div>
             <div class="field-card">
               <div class="field-info">
@@ -2483,6 +2614,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 </body>
 </html>

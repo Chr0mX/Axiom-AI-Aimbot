@@ -4,6 +4,7 @@ import math
 import queue
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
+from .anchor_prediction import anchor_active
 from .target_tracking import clamp01, edge_ratio as _edge_ratio, find_continuation, lost_timeout_s
 
 if TYPE_CHECKING:
@@ -270,10 +271,24 @@ def _fov_tightness(mode: str, config: Config, state: LoopState, now: Optional[fl
     conf_q = clamp01(0.5 + (tr.conf_ema - floor) * 5.0)   # at the keep-bar: 0.5, 0.1 above: 1.0
     stab_q = clamp01((tr.stab_ema - 0.3) / 0.5)            # frame-to-frame box overlap
     quality = 0.4 * conf_q + 0.3 * stab_q + 0.3 * tr.hit_ema
+    # The tracker's smoothed edge/speed/turn signals. With Anchor Prediction on,
+    # they are nudged by what the predicted box says is about to happen
+    # (core/anchor_prediction.py FovAdjuster); off, they are the raw values.
+    edge_r, speed_e, turn_e = tr.edge_ratio, tr.speed_ema, tr.turn_ema
+    if now is not None and anchor_active(config):
+        fov_ref_a = max(1.0, float(getattr(config, 'fov_size', 0) or 1))
+        adj = state.anchor_fov
+        adj.update(state.anchor_view, tr.edge_ratio, tr.speed_ema, tr.turn_ema, fov_ref_a,
+                   float(getattr(config, 'anchor_fov_influence_adaptive', 0.5)),
+                   float(getattr(config, 'anchor_fov_influence_dynamic', 0.5)), now)
+        edge_r += adj.edge_adj                  # Adaptive influence (also the Dynamic Safeguards edge cap)
+        if mode == 'dynamic':
+            speed_e += adj.speed_adj            # Dynamic influence
+            turn_e += adj.turn_adj
     if mode == 'dynamic':
         fov_ref = max(1.0, float(getattr(config, 'fov_size', 0) or 1))
-        motion_q = clamp01(1.0 - (tr.speed_ema / fov_ref) / 1.5)  # >1.5 FOV widths/s = rapid
-        turn_q = clamp01(1.0 - tr.turn_ema * 2.0)                 # sudden direction change
+        motion_q = clamp01(1.0 - (speed_e / fov_ref) / 1.5)  # >1.5 FOV widths/s = rapid
+        turn_q = clamp01(1.0 - turn_e * 2.0)                 # sudden direction change
         safe = bool(getattr(config, 'fov_dynamic_safeguards', False))
         if safe and now is not None:
             w = clamp01(tr.lock_age(now) / _DYN_SETTLE_S)      # 0 = brand new, 1 = settled
@@ -282,9 +297,9 @@ def _fov_tightness(mode: str, config: Config, state: LoopState, now: Optional[fl
         quality = 0.30 * motion_q + 0.25 * turn_q + 0.15 * conf_q + 0.15 * tr.hit_ema + 0.15 * stab_q
         tight = clamp01((quality - 0.5) / 0.4)
         if safe:       # boundary safety is a hard limit, not another weighted term
-            tight = min(tight, clamp01((0.9 - tr.edge_ratio) / 0.45))
+            tight = min(tight, clamp01((0.9 - edge_r) / 0.45))
         return tight
-    edge_q = clamp01((0.9 - tr.edge_ratio) / 0.45)      # near the FOV boundary -> expand
+    edge_q = clamp01((0.9 - edge_r) / 0.45)      # near the FOV boundary -> expand
     return min(edge_q, clamp01((quality - 0.5) / 0.4))
 
 
@@ -536,7 +551,8 @@ def resolve_retained_lock(
         all_boxes, all_confidences, crosshair_x, crosshair_y, rw, config, fov_height=rh)
     idx, ambiguous = find_continuation(
         r_boxes, locked_box=state.locked_box, tracker=state.tracker, config=config,
-        now=now, iou_thresh=iou_thresh, class_of=class_of)
+        now=now, iou_thresh=iou_thresh, class_of=class_of,
+        ref_box=anchor_ref_box(config, state, now))
     if ambiguous:
         state.retained_since = 0.0
         return AMBIGUOUS_LOCK
@@ -559,6 +575,59 @@ def resolve_retained_lock(
     return cand, conf
 
 
+# How often the live Config is re-read into the anchor tracks' parameters.
+_ANCHOR_PARAMS_REFRESH_S = 0.25
+
+
+def anchor_on_match(config: Config, state: LoopState, box, conf: float, now: float,
+                    crosshair_x: float, crosshair_y: float, fov_w: float, fov_h: float) -> None:
+    """Feed the locked target's box to its anchor track (keyed by the tracker's
+    lock id, so a new lock starts with no history) and refresh the FOV view and
+    the optional debug snapshot. Call right after ``tracker.on_match``. A single
+    early return when Anchor Prediction is off."""
+    if not anchor_active(config):
+        return
+    bank = state.anchor
+    if now - state.anchor_params_t >= _ANCHOR_PARAMS_REFRESH_S or state.anchor_params_t > now:
+        bank.params.update_from(config)
+        state.anchor_params_t = now
+    track = bank.update(state.tracker.lock_id, now, box, conf)
+    cw, ch = get_capture_dimensions(config)
+    track.set_bounds(cw, ch)
+    pred = track.predict()
+    state.anchor_view.fill(pred, bank.params.horizon_s, crosshair_x, crosshair_y, fov_w, fov_h,
+                           bool(getattr(config, 'fov_circle_filter_enabled', False)), now)
+    if len(bank) > 1:
+        bank.prune(now)
+    if getattr(config, 'show_anchor_debug', False):
+        config.anchor_debug = (pred.x1, pred.y1, pred.x2, pred.y2, pred.px1, pred.py1, pred.px2, pred.py2,
+                               pred.cx, pred.cy, pred.pcx, pred.pcy, pred.vx, pred.vy, pred.confidence)
+    elif getattr(config, 'anchor_debug', None) is not None:
+        config.anchor_debug = None
+
+
+def anchor_ref_box(config: Config, state: LoopState, now: float):
+    """The lock's predicted box *right now* (its last box advanced by the
+    estimated motion), or None when Anchor Prediction is off / not confident.
+    Used as an extra overlap reference when re-finding the lock."""
+    if not anchor_active(config):
+        return None
+    track = state.anchor.get(state.tracker.lock_id)
+    if track is None:
+        return None
+    pred = track.predict(0.0, now)
+    return pred.predicted_box() if pred.valid else None
+
+
+def anchor_reset(config: Config, state: LoopState) -> None:
+    """Forget every anchor track (lock lost/released)."""
+    state.anchor.clear()
+    state.anchor_view.invalidate()
+    state.anchor_fov.reset()
+    state.anchor_params_t = 0.0
+    config.anchor_debug = None
+
+
 def track_retained(config: Config, state: LoopState, box, conf: float,
                    crosshair_x: float, crosshair_y: float, now: float) -> None:
     """Keep the lock's identity alive for a frame where the target is outside
@@ -570,6 +639,7 @@ def track_retained(config: Config, state: LoopState, box, conf: float,
         edge_ratio=_edge_ratio(box, crosshair_x, crosshair_y, fw, fh,
                                bool(getattr(config, 'fov_circle_filter_enabled', False))),
         same_target=True)
+    anchor_on_match(config, state, box, conf, now, crosshair_x, crosshair_y, fw, fh)
     state.locked_box = box
     state.locked_confidence = conf
     state.no_detection_frames = 0

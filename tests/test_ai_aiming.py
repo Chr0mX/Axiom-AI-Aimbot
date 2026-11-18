@@ -666,3 +666,77 @@ class TestPidTimeNormalizeWiring:
         fast = self._second_move(sent_moves, True, 1 / 240)
         slow = self._second_move(sent_moves, True, 1 / 30)
         assert 0 < fast < slow                      # shorter frame -> smaller per-frame move
+
+
+class TestAnchorPredictionWiring:
+    """Anchor Prediction is an additive layer: process_aiming() feeds it the
+    locked box, but it must never change the mouse movement that is sent."""
+
+    ANCHOR = dict(
+        anchor_enabled=True, anchor_mode="adaptive", anchor_horizon_ms=100.0, anchor_strength=1.0,
+        anchor_velocity_smoothing=0.3, anchor_accel_comp=0.5, anchor_confidence_threshold=0.2,
+        anchor_history_len=6, anchor_max_distance_pct=100.0, anchor_fov_influence_adaptive=0.5,
+        anchor_fov_influence_dynamic=0.5, prediction_max_velocity=5000.0, fov_size=600, fov_height=600,
+        screenshot_method="mss", screen_width=1000, screen_height=1000,
+    )
+
+    @staticmethod
+    def _run(sent_moves, frames=20, step=10.0, fps=60.0, **cfg):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(**cfg)
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        sent_moves.clear()
+        for i in range(frames):
+            cx = 400.0 + step * i
+            box = [cx - 20, 480.0, cx + 20, 560.0]
+            process_aiming(config, [box], 500, 520, pid_x, pid_y, "sendinput", state,
+                           current_time=1000.0 + i / fps, confidences=[0.9])
+        return config, state, list(sent_moves)
+
+    def test_off_by_default_tracks_nothing_and_touches_no_config(self, sent_moves):
+        config, state, _ = self._run(sent_moves)
+        assert len(state.anchor) == 0 and not state.anchor_view.valid
+        assert not hasattr(config, "anchor_debug")
+
+    def test_enabled_tracks_the_locked_box_without_changing_the_mouse_output(self, sent_moves):
+        _, _, moves_off = self._run(sent_moves)
+        config, state, moves_on = self._run(sent_moves, **self.ANCHOR)
+        assert moves_on == moves_off and len(moves_on) > 0
+        track = state.anchor.get(state.tracker.lock_id)
+        assert track is not None and track.samples >= 6
+        assert track.vx == pytest.approx(600.0, rel=0.05)           # 10 px/frame at 60 FPS
+        assert state.anchor_view.valid and state.anchor_view.speed_now == pytest.approx(600.0, rel=0.05)
+
+    def test_mode_disabled_or_master_off_changes_nothing(self, sent_moves):
+        for override in (dict(anchor_mode="disabled"), dict(anchor_enabled=False)):
+            _, state, _ = self._run(sent_moves, **dict(self.ANCHOR, **override))
+            assert len(state.anchor) == 0
+
+    def test_debug_snapshot_follows_the_toggle(self, sent_moves):
+        config, _, _ = self._run(sent_moves, **dict(self.ANCHOR, show_anchor_debug=True))
+        assert config.anchor_debug is not None and len(config.anchor_debug) == 15
+        config, _, _ = self._run(sent_moves, **dict(self.ANCHOR, show_anchor_debug=False))
+        assert getattr(config, "anchor_debug", None) is None
+
+    def test_a_new_lock_starts_a_fresh_track(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(**self.ANCHOR)
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        for i in range(20):
+            cx = 400.0 + 10.0 * i
+            process_aiming(config, [[cx - 20, 480.0, cx + 20, 560.0]], 500, 520, pid_x, pid_y,
+                           "sendinput", state, current_time=1000.0 + i / 60, confidences=[0.9])
+        first = state.tracker.lock_id
+        process_aiming(config, [[880.0, 100.0, 920.0, 180.0]], 500, 520, pid_x, pid_y, "sendinput", state,
+                       current_time=1000.0 + 20 / 60, confidences=[0.9])      # a different target (IoU 0)
+        assert state.tracker.lock_id == first + 1
+        new = state.anchor.get(state.tracker.lock_id)
+        assert new.samples == 1 and new.vx == 0.0

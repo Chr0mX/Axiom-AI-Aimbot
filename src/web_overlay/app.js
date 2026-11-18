@@ -179,6 +179,7 @@
     ["show_detect_range", "Detection Range"],
     ["show_tracer_line", "Tracer Line"],
     ["show_aim_prediction_marker", "Predicted Aim Point"],
+    ["show_anchor_debug", "Anchor Debug"],
   ];
   function enabledOverlays(st) {
     return BADGE_ITEMS.filter(([key]) => !!(st && st[key])).map(([, label]) => label);
@@ -442,6 +443,44 @@
         ctx.beginPath();
         ctx.ellipse(X(state.aim_predicted.x), Y(state.aim_predicted.y), pr, pr, 0, 0, Math.PI * 2);
         ctx.stroke();
+      }
+
+      // Anchor Prediction debug overlay (same look as the in-game one): predicted box dashed,
+      // dot on the current centre, cross on the predicted centre, velocity arrow, "v=… conf%".
+      // The server sends `anchor` only while the toggle is on and a prediction exists.
+      if (st.show_anchor_debug && state.anchor) {
+        const an = state.anchor, col = "rgba(190,120,255,0.95)";
+        const lw = Math.max(1, (st.aim_marker_line_thickness || 2) - 1);
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = col;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(X(an.pbox[0]), Y(an.pbox[1]), X(an.pbox[2]) - X(an.pbox[0]), Y(an.pbox[3]) - Y(an.pbox[1]));
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(255,70,70,0.95)";
+        ctx.beginPath();
+        ctx.arc(X(an.c[0]), Y(an.c[1]), 3, 0, Math.PI * 2);
+        ctx.fill();
+        const pcx = X(an.pc[0]), pcy = Y(an.pc[1]);
+        ctx.beginPath();
+        ctx.moveTo(pcx - 5, pcy); ctx.lineTo(pcx + 5, pcy);
+        ctx.moveTo(pcx, pcy - 5); ctx.lineTo(pcx, pcy + 5);
+        ctx.stroke();
+        const sp = Math.hypot(an.v[0], an.v[1]);
+        if (sp >= 20) {
+          const ln = Math.max(12, Math.min(60, sp * 0.1)) * sx;
+          const ux = an.v[0] / sp, uy = an.v[1] / sp;
+          const ax = X(an.c[0]), ay = Y(an.c[1]), ex = ax + ux * ln, ey = ay + uy * ln;
+          ctx.beginPath();
+          ctx.moveTo(ax, ay); ctx.lineTo(ex, ey);
+          for (const sg of [1, -1]) {
+            const a = Math.atan2(uy, ux) + Math.PI + sg * 0.5;
+            ctx.moveTo(ex, ey); ctx.lineTo(ex + 8 * Math.cos(a), ey + 8 * Math.sin(a));
+          }
+          ctx.stroke();
+        }
+        ctx.fillStyle = col;
+        ctx.font = `${Math.max(10, 11 * sy)}px "Consolas", "Menlo", monospace`;
+        ctx.fillText(`v=${Math.round(sp)}px/s  ${Math.round(an.conf * 100)}%`, X(an.pbox[0]), Y(an.pbox[1]) - 6);
       }
 
       // Crosshair — scaled per axis like everything else above; previously

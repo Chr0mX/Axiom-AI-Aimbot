@@ -120,6 +120,13 @@ class OverlayColors:
         return ThemeColors.OVERLAY_LOCK_AIMING.qcolor() if HAS_THEME_COLORS else QColor(0, 255, 140, 240)
 
     @staticmethod
+    def get_anchor_predicted_color() -> QColor:
+        """Anchor Prediction debug overlay: predicted box / centre / arrow / text."""
+        if HAS_THEME_COLORS:
+            return ThemeColors.OVERLAY_ANCHOR_PREDICTED.qcolor()
+        return QColor(190, 120, 255, 235)
+
+    @staticmethod
     def get_predicted_aim_marker_color() -> QColor:
         """Locked target's post-prediction/Kalman marker color — distinct
         from get_aim_marker_color() (always the raw, pre-prediction point)."""
@@ -496,12 +503,52 @@ class PyQtOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(px - 7, py - 7, 14, 14)
 
+        self._draw_anchor_debug(painter)
+
         # 繪製追蹤線（從螢幕中心到目標）
         if getattr(self.config, 'show_tracer_line', False):
             self.draw_tracer_lines(painter)
 
         # 繪製自訂準心
         self._draw_crosshair(painter)
+
+    def _draw_anchor_debug(self, painter: QPainter) -> None:
+        """Anchor Prediction debug overlay. The actual box is the one already
+        drawn above; this adds the predicted box (dashed), a dot on the current
+        centre, a cross on the predicted centre, a velocity arrow and
+        "v=… px/s  conf%". The snapshot is only published while
+        show_anchor_debug is on (ai_loop_utils.anchor_on_match)."""
+        cfg = self.config
+        snap = getattr(cfg, 'anchor_debug', None)
+        if not snap or not getattr(cfg, 'show_anchor_debug', False):
+            return
+        import math
+        from core.box_style import aim_marker_thickness
+        x1, y1, x2, y2, px1, py1, px2, py2, cx, cy, pcx, pcy, vx, vy, conf = snap
+        color = OverlayColors.get_anchor_predicted_color()
+        width = max(1, aim_marker_thickness(cfg) - 1)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(color, width, Qt.PenStyle.DashLine))
+        painter.drawRect(int(px1), int(py1), int(px2 - px1), int(py2 - py1))
+        actual = OverlayColors.get_aim_marker_color()
+        painter.setPen(QPen(actual, 1))
+        painter.setBrush(actual)
+        painter.drawEllipse(int(cx) - 3, int(cy) - 3, 6, 6)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(color, width))
+        painter.drawLine(int(pcx) - 5, int(pcy), int(pcx) + 5, int(pcy))
+        painter.drawLine(int(pcx), int(pcy) - 5, int(pcx), int(pcy) + 5)
+        speed = math.hypot(vx, vy)
+        if speed >= 20.0:                                  # direction arrow: ~0.1 s of travel, 12-60 px long
+            ln = max(12.0, min(60.0, speed * 0.1))
+            ux, uy = vx / speed, vy / speed
+            ex, ey = cx + ux * ln, cy + uy * ln
+            painter.drawLine(int(cx), int(cy), int(ex), int(ey))
+            for sgn in (1.0, -1.0):                        # arrow head
+                ang = math.atan2(uy, ux) + math.pi + sgn * 0.5
+                painter.drawLine(int(ex), int(ey), int(ex + 8 * math.cos(ang)), int(ey + 8 * math.sin(ang)))
+        painter.setPen(color)
+        painter.drawText(int(px1), int(py1) - 6, f"v={speed:.0f}px/s  {conf:.0%}")
 
     def _draw_crosshair(self, painter: QPainter) -> None:
         """Draw a configurable crosshair dot or cross at the crosshair position."""

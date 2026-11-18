@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import colorsys
 import logging
+import math
 import os
 import re
 import shutil
@@ -607,6 +608,28 @@ def _draw_detection_overlay(
             px = int(getattr(cfg, 'aim_predicted_x', 0.0))
             py = int(getattr(cfg, 'aim_predicted_y', 0.0))
             cv2.circle(frame, (px, py), 7, _c(255, 210, 80), aim_marker_thickness(cfg), cv2.LINE_AA)
+        except Exception:
+            pass
+
+    snap = getattr(cfg, 'anchor_debug', None)
+    if snap and bool(getattr(cfg, 'show_anchor_debug', False)):
+        # Anchor Prediction debug overlay, like overlay.py's: predicted box, current
+        # centre dot, predicted centre cross, velocity arrow and "v=… px/s  conf%".
+        try:
+            x1, y1, x2, y2, px1, py1, px2, py2, acx, acy, pcx, pcy, vx, vy, conf = snap
+            col = _c(255, 120, 190)
+            thick = max(1, aim_marker_thickness(cfg) - 1)
+            cv2.rectangle(frame, (int(px1), int(py1)), (int(px2), int(py2)), col, thick, cv2.LINE_AA)
+            cv2.circle(frame, (int(acx), int(acy)), 3, _c(60, 60, 255), -1, cv2.LINE_AA)
+            cv2.drawMarker(frame, (int(pcx), int(pcy)), col, cv2.MARKER_CROSS, 11, thick, cv2.LINE_AA)
+            speed = math.hypot(vx, vy)
+            if speed >= 20.0:
+                ln = max(12.0, min(60.0, speed * 0.1))
+                cv2.arrowedLine(frame, (int(acx), int(acy)),
+                                (int(acx + vx / speed * ln), int(acy + vy / speed * ln)),
+                                col, thick, cv2.LINE_AA, 0, 0.3)
+            cv2.putText(frame, f"v={speed:.0f}px/s  {conf:.0%}", (int(px1), max(10, int(py1) - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
         except Exception:
             pass
 

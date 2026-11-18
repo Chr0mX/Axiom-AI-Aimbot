@@ -686,6 +686,7 @@
         if (tab === "capture") updateCaptureVisibility(data.screenshot_method);
         if (tab === "inference") {
           updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
+          updateAnchorVisibility();
           updateWeaponDetectVisibility(data.second_inference_mode);
         }
         if (tab === "aim") {
@@ -742,6 +743,7 @@
           updateUvcSubVisibility();
         }
         if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
+        if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
@@ -791,6 +793,25 @@
     show("inf-fov-retention-pct-card", on && sticky && ret);
     ["inf-minlock-card", "inf-trackconf-card", "inf-switch-card", "inf-radius-card", "inf-losttimeout-card"]
       .forEach(function (id) { show(id, sticky); });
+  }
+
+  // Mirrors inference_page.py's _updateAnchorVisibility(): settings appear only while Anchor
+  // Prediction is on; smoothing/acceleration only where the mode uses them; the FOV-influence
+  // cards only while FOV shrinking is on.
+  function updateAnchorVisibility() {
+    var d = lastSettings.inference || {};
+    var el = function (id) { return document.getElementById(id); };
+    var on = el("inf-anchor_enabled") ? el("inf-anchor_enabled").checked : !!d.anchor_enabled;
+    var mode = (el("inf-anchor_mode") || {}).value || d.anchor_mode || "adaptive";
+    var fov = el("inf-fov_reduce_on_target_enabled") ? el("inf-fov_reduce_on_target_enabled").checked : !!d.fov_reduce_on_target_enabled;
+    var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
+    var active = on && mode !== "disabled";
+    show("inf-anchor-mode-card", on);
+    ["horizon", "strength", "conf", "history", "maxdist"].forEach(function (k) { show("inf-anchor-" + k + "-card", active); });
+    show("inf-anchor-smoothing-card", on && (mode === "smoothed" || mode === "adaptive"));
+    show("inf-anchor-accel-card", active && mode !== "linear");
+    show("inf-anchor-infl-adaptive-card", active && fov);
+    show("inf-anchor-infl-dynamic-card", active && fov);
   }
 
   function updateWeaponDetectVisibility(mode) {
@@ -2755,7 +2776,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "16") return;
+    if (cssVer !== "17") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

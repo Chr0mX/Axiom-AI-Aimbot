@@ -386,6 +386,15 @@ class ThemeColors:
         default_dark=(80, 210, 255, 230)
     )
 
+    # Anchor Prediction debug overlay (show_anchor_debug): the predicted box, its
+    # centre cross, the direction arrow and the readout. Violet so it can't be
+    # mistaken for the actual box, the red aim X or the cyan predicted-aim ring.
+    OVERLAY_ANCHOR_PREDICTED = ColorPairWithAlpha.from_config(
+        "overlay_colors", "anchor_predicted",
+        default_light=(170, 90, 235, 235),
+        default_dark=(190, 120, 255, 235)
+    )
+
     # ============================================================
     # 狀態面板 (Status Panel) 顏色
     # ============================================================

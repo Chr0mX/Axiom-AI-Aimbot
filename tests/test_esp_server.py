@@ -365,6 +365,30 @@ class TestLineWidthsAndPredictedPoint:
         off = s["boxes"][0][0] - 100                       # boxes are shifted by offset_x
         assert s["aim_predicted"]["x"] == 10 + off
 
+    SNAP = (100.0, 200.0, 140.0, 280.0, 130.4, 200.0, 170.4, 280.0, 120.0, 240.0, 150.4, 240.0, 612.34, -8.0, 0.8456)
+
+    def test_anchor_debug_snapshot_is_gated_by_toggle_feature_and_data(self):
+        on = dict(anchor_debug=self.SNAP, show_anchor_debug=True, anchor_enabled=True, anchor_mode="adaptive")
+        s = self._snap(**on)
+        assert s["anchor"] == {"box": [100, 200, 140, 280], "pbox": [130, 200, 170, 280], "c": [120, 240],
+                               "pc": [150, 240], "v": [612.3, -8.0], "conf": 0.846}
+        assert s["settings"]["show_anchor_debug"] is True
+        for off in (dict(show_anchor_debug=False), dict(anchor_enabled=False), dict(anchor_mode="disabled"),
+                    dict(anchor_debug=None)):
+            r = self._snap(**{**on, **off})
+            assert r["anchor"] is None
+        assert self._snap(**{**on, "anchor_enabled": False})["settings"]["show_anchor_debug"] is False
+
+    def test_anchor_debug_is_shifted_like_the_boxes_for_a_udp_crop(self):
+        s = self._snap(anchor_debug=self.SNAP, show_anchor_debug=True, anchor_enabled=True,
+                       screenshot_method="udp")
+        off = s["boxes"][0][0] - 100
+        assert s["anchor"]["c"][0] == 120 + off and s["anchor"]["pbox"][0] == 130 + off
+
+    def test_malformed_anchor_snapshot_is_dropped_not_fatal(self):
+        s = self._snap(anchor_debug=(1, 2, 3), show_anchor_debug=True, anchor_enabled=True)
+        assert s["anchor"] is None
+
 
 # ---------------------------------------------------------------------------
 # Broadcaster: event-driven scheduling, latest-only senders, web_esp_fps

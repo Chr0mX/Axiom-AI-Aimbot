@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from .ai_loop_utils import get_capture_dimensions, get_effective_detect_range_size
+from .anchor_prediction import anchor_active
 from .box_style import aim_marker_thickness, detect_range_thickness, fov_thickness, tracer_thickness
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,25 @@ def _build_snapshot() -> dict:
         except (TypeError, ValueError):
             aim_predicted = None
 
+    # Anchor Prediction debug overlay: actual/predicted box and centres, velocity, confidence
+    # (shifted like the boxes). Present only while the toggle is on, the feature is active and
+    # a prediction was published.
+    anchor = None
+    snap = getattr(c, "anchor_debug", None)
+    if snap and getattr(c, "show_anchor_debug", False) and anchor_active(c):
+        try:
+            s = [float(v) for v in snap]
+            anchor = {
+                "box": [int(s[0]) + offset_x, int(s[1]) + offset_y, int(s[2]) + offset_x, int(s[3]) + offset_y],
+                "pbox": [int(s[4]) + offset_x, int(s[5]) + offset_y, int(s[6]) + offset_x, int(s[7]) + offset_y],
+                "c": [int(s[8]) + offset_x, int(s[9]) + offset_y],
+                "pc": [int(s[10]) + offset_x, int(s[11]) + offset_y],
+                "v": [round(s[12], 1), round(s[13], 1)],
+                "conf": round(s[14], 3),
+            }
+        except (TypeError, ValueError, IndexError):
+            anchor = None
+
     return {
         "t": int(time.monotonic() * 1000),
         # Detection counter (ai_loop bumps it per inference result); lets the page tell new data
@@ -236,6 +256,7 @@ def _build_snapshot() -> dict:
             "box_corner_length_pct": int(getattr(c, "box_corner_length_pct", 0) or 0),
             "show_detect_range": bool(getattr(c, "show_detect_range", True)),
             "show_aim_prediction_marker": bool(getattr(c, "show_aim_prediction_marker", True)),
+            "show_anchor_debug": bool(getattr(c, "show_anchor_debug", False)) and anchor_active(c),
             # Line widths (px) of the FOV / Detection Range / Tracer / Predicted Aim Point.
             "fov_line_thickness": fov_thickness(c),
             "detect_range_line_thickness": detect_range_thickness(c),
@@ -264,6 +285,7 @@ def _build_snapshot() -> dict:
         "boxes": _boxes(getattr(c, "latest_all_boxes", [])),
         "confidences": [float(x) for x in (getattr(c, "latest_all_confidences", []) or [])],
         "aim_predicted": aim_predicted,
+        "anchor": anchor,
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
         # Lock is held outside the control FOV: tracked, but no aiming this frame.

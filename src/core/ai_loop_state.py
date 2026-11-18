@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .anchor_prediction import AnchorBank, AnchorView, FovAdjuster
 from .target_tracking import TargetTracker
 
 
@@ -60,6 +61,15 @@ class LoopState:
     # RELEASED) and the smoothed confidence/stability/motion signals the
     # adaptive and dynamic FOV modes read. See core/target_tracking.py.
     tracker: TargetTracker = field(default_factory=TargetTracker)
+
+    # Anchor prediction (core/anchor_prediction.py) — only touched while
+    # anchor_active(config); `anchor` holds one track per lock id, `anchor_view`
+    # the FOV-relevant numbers derived from the newest prediction, and
+    # `anchor_fov` the smoothed Adaptive/Dynamic FOV corrections.
+    anchor: AnchorBank = field(default_factory=AnchorBank)
+    anchor_view: AnchorView = field(default_factory=AnchorView)
+    anchor_fov: FovAdjuster = field(default_factory=FovAdjuster)
+    anchor_params_t: float = 0.0
 
     # Y-reduce velocity gate — track target Y position across frames to estimate vy.
     aim_y_last_target_y: float = 0.0
