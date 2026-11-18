@@ -8,7 +8,6 @@ If no COM port is given the highest-numbered available port is auto-selected.
 """
 
 import os
-import re
 import struct
 import sys
 import time
@@ -19,7 +18,7 @@ sys.path.insert(0, _deps_dir)
 sys.path.insert(0, _src_dir)
 
 from win_utils.makcu_mouse_binary import (
-    MakcuMouseBinary, _build_frame, _sorted_ports,
+    MakcuMouseBinary, _sorted_ports,
     _CMD_VERSION, _CMD_INFO, _CMD_MOUSE_STREAM, _CMD_BUTTONS_STREAM,
     _CMD_BAUD, _DEFAULT_BAUD,
 )

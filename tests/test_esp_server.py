@@ -10,7 +10,6 @@ import json
 import socket
 import time
 
-import pytest
 
 from core import esp_server
 

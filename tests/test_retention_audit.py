@@ -9,7 +9,6 @@ mouse output, or anything Windows-specific.
 """
 from types import SimpleNamespace
 
-import pytest
 
 from core.ai_loop_state import LoopState
 from core.ai_loop_utils import (

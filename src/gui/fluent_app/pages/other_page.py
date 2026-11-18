@@ -8,9 +8,8 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QApplication
 from PyQt6.QtGui import QDesktopServices, QIcon
 from qfluentwidgets import (
     SettingCardGroup, SettingCard, SwitchSettingCard,
-    PushSettingCard, FluentIcon, PrimaryPushButton,
-    PushButton, BodyLabel, ComboBox, HyperlinkCard,
-    SubtitleLabel, CaptionLabel, isDarkTheme
+    FluentIcon, PrimaryPushButton,
+    PushButton, BodyLabel, ComboBox, SubtitleLabel, CaptionLabel, isDarkTheme
 )
 
 from ..base_page import BasePage

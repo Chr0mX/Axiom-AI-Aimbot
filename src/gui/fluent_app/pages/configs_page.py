@@ -5,7 +5,7 @@ import os
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
+    QVBoxLayout, QFileDialog,
     QInputDialog, QMessageBox, QSplitter, QFrame
 )
 from qfluentwidgets import (

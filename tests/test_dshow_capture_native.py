@@ -13,7 +13,6 @@ believed correct against the upstream header, but "believed" isn't
 This module imports cleanly on Linux (no win32api, no ctypes.WinDLL at
 import time), so it needs no special collection handling.
 """
-import os
 import platform
 
 import pytest

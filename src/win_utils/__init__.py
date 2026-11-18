@@ -60,7 +60,7 @@ from .makcu_mouse import (
     send_mouse_move_makcu,
     send_mouse_click_makcu,
     connect_makcu,
-    connect_makcu_udp,
+    connect_makcu_udp,  # noqa: F401  (public re-export)
     disconnect_makcu,
     is_makcu_connected,
 )
@@ -70,7 +70,7 @@ from .xbox_controller import (
     XboxController,
     xbox_controller,
     send_mouse_move_xbox,
-    send_mouse_click_xbox,
+    send_mouse_click_xbox,  # noqa: F401  (public re-export)
     connect_xbox,
     disconnect_xbox,
     is_xbox_connected,
@@ -87,7 +87,7 @@ from .mouse_click import (
     send_mouse_click,
     send_mouse_button,
 )
-from .arduino_mouse import send_mouse_click_arduino
+from .arduino_mouse import send_mouse_click_arduino  # noqa: F401  (public re-export)
 
 # Key detection
 from .key_utils import is_key_pressed, set_device_hotkeys
@@ -105,7 +105,7 @@ from .gamepad_input import (
 # Administrator privileges
 from .admin import (
     is_admin,
-    request_admin_privileges,
+    request_admin_privileges,  # noqa: F401  (public re-export)
     check_and_request_admin,
 )
 

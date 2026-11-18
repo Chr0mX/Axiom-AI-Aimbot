@@ -4,8 +4,6 @@
 import time
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
-from PyQt6.QtWidgets import QWidget, QHBoxLayout
-from PyQt6.QtGui import QKeySequence
 from qfluentwidgets import (
     SettingCardGroup, SettingCard, SwitchSettingCard, FluentIcon,
     PushButton, BodyLabel, ComboBox, LineEdit,
@@ -20,7 +18,6 @@ from ..theme_colors import ThemeColors
 # 手柄按鍵讀取
 from win_utils.gamepad_input import (
     is_gamepad_vk, poll_pressed_gamepad_button, GP_VK_TRANSLATION_MAP,
-    GP_VK_MIN, GP_VK_MAX,
 )
 
 MOUSE_VK_BIND_OPTIONS = (

@@ -132,7 +132,7 @@ def _pip(packages: list, upgrade: bool = True, extra_index: str = "") -> None:
 
 def install_paddleocr() -> None:
     log(f"Installing PaddlePaddle CPU ({PADDLE_PACKAGE})...")
-    log(f"  Index : https://pypi.org/simple")
+    log("  Index : https://pypi.org/simple")
     _pip([PADDLE_PACKAGE])
     log(f"Installing: {', '.join(PADDLEOCR_PACKAGES)}")
     _pip(PADDLEOCR_PACKAGES)

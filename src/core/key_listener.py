@@ -3,7 +3,7 @@
 
 import time
 
-from win_utils import get_vk_name, is_key_pressed
+from win_utils import is_key_pressed
 
 
 def aim_toggle_key_listener(config, update_gui_callback=None):
@@ -25,9 +25,6 @@ def aim_toggle_key_listener(config, update_gui_callback=None):
     last_state = False
     key_code = getattr(config, 'aim_toggle_key', 0x78)  # 備用預設值 F9 鍵（實際預設由 config.py 定義為 Insert 鍵）
     
-    # 獲取按鍵名稱
-    key_name = get_vk_name(key_code)
-    
     sleep_interval = 0.03  # 30ms 檢查間隔
     
     
@@ -39,7 +36,6 @@ def aim_toggle_key_listener(config, update_gui_callback=None):
             current_key_code = getattr(config, 'aim_toggle_key', 0x78)
             if current_key_code != key_code:
                 key_code = current_key_code
-                key_name = get_vk_name(key_code)
             
             # 檢測按鍵狀態（支援鍵盤/滑鼠/手柄，及經由 MAKCU 的按鍵）
             state = is_key_pressed(key_code)

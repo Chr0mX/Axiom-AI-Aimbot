@@ -4,7 +4,6 @@ import colorsys
 import logging
 import math
 import os
-import re
 import shutil
 import subprocess
 import threading
@@ -23,7 +22,6 @@ from .box_style import (
 )
 
 if TYPE_CHECKING:
-    from mss.base import MSSBase
 
     from .config import Config
 

@@ -18,6 +18,9 @@ import pytest
 
 @pytest.fixture
 def sc(monkeypatch):
+    from conftest import drop_modules_imported_since
+
+    before = set(sys.modules)
     had_module = 'core.screen_capture' in sys.modules
     if not had_module:
         monkeypatch.setitem(sys.modules, 'cv2', MagicMock())
@@ -26,10 +29,9 @@ def sc(monkeypatch):
     monkeypatch.setattr(module, '_preview_last_read', [float('-inf')])
     yield module
     if not had_module:
-        # Unload the stubbed-cv2 copy so other tests import (or skip) for real.
-        sys.modules.pop('core.screen_capture', None)
-        if hasattr(sys.modules.get('core'), 'screen_capture'):
-            delattr(sys.modules['core'], 'screen_capture')
+        # Unload everything imported against the stubbed cv2/mss (screen_capture and
+        # whatever it pulled in, e.g. core.inference) so other tests import (or skip) for real.
+        drop_modules_imported_since(before)
 
 
 def test_preview_wanted_follows_reads(sc):

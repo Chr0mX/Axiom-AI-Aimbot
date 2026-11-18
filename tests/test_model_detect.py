@@ -19,7 +19,6 @@ into sys.modules — the same technique tests/test_web_control_settings.py
 already uses for model_detect itself.
 """
 
-import os
 import sys
 import types
 
@@ -100,3 +99,15 @@ class TestTrtRuntimeCaching:
         # Precision falls back to the filename convention when the (empty,
         # in this fake) tensor loop never sets it from a binding dtype.
         assert info["precision"] == "FP16"
+
+
+def test_importing_model_detect_does_not_touch_sys_path():
+    """Importing it (Model page, Web Control model info, tests) must not put the vendored
+    Windows site-packages — or anything else — at the front of sys.path: that shadowed the
+    interpreter's own cv2/numpy. The bootstraps only run for the stand-alone script."""
+    import importlib
+    import sys
+
+    before = list(sys.path)
+    importlib.reload(model_detect)
+    assert sys.path == before

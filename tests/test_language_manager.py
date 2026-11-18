@@ -15,9 +15,7 @@
 import json
 import os
 import tempfile
-from unittest.mock import patch, MagicMock
 
-import pytest
 
 
 def _make_language_manager(lang_data=None, config_data=None):

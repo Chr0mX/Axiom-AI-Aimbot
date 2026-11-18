@@ -1,10 +1,10 @@
 import os
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QWidget, QLabel, QFrame
 from PyQt6.QtGui import QColor, QPixmap
 from qfluentwidgets import (MaskDialogBase, PrimaryPushButton, PushButton,
                             RadioButton, ScrollArea, BodyLabel,
-                            SubtitleLabel, isDarkTheme)
+                            SubtitleLabel)
 from ..theme_colors import ThemeColors
 from ..language_manager import t
 

@@ -17,9 +17,7 @@
 import sys
 import os
 import struct
-import time
-from unittest import mock
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -454,8 +452,9 @@ class TestConfigValidation:
             return Config()
 
     def test_default_mouse_move_method(self):
+        # MAKCU is the shipped default move method (the click method below stays mouse_event).
         c = self._make_config()
-        assert c.mouse_move_method == "mouse_event"
+        assert c.mouse_move_method == "makcu"
 
     def test_default_mouse_click_method(self):
         c = self._make_config()
@@ -488,8 +487,9 @@ class TestConfigValidation:
         c.mouse_move_method = "ddxoft"
         c.mouse_click_method = "arduino"
         d = c.to_dict()
-        assert d["mouse_move_method"] == "ddxoft"
-        assert d["mouse_click_method"] == "arduino"
+        # to_dict() writes the grouped (schema v3) layout, not flat attribute names.
+        assert d["hardware"]["mouse_move_method"] == "ddxoft"
+        assert d["hardware"]["mouse_click_method"] == "arduino"
 
     def test_from_dict_loads_mouse_methods(self):
         c = self._make_config()

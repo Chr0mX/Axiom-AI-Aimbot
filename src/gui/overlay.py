@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, QTimer
 import ctypes
 
 if TYPE_CHECKING:
-    from core.config import Config
+    pass
 
 # Import theme color definitions
 try:

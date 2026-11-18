@@ -8,7 +8,6 @@
 3. get_vk_name - 按鍵名稱取得
 """
 
-import pytest
 
 
 class TestVKCodeMap:

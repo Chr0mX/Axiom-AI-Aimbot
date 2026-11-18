@@ -14,18 +14,17 @@ from ctypes import POINTER, pointer, sizeof, byref, WinDLL, c_int
 from ctypes.wintypes import DWORD, ULONG
 from PyQt6.QtWidgets import (QWidget, QApplication, QVBoxLayout, QHBoxLayout,
                              QLabel, QFrame, QGraphicsDropShadowEffect)
-from PyQt6.QtGui import (QPainter, QColor, QFont, QPixmap, QLinearGradient, 
-                         QBrush, QPainterPath, QPen)
-from PyQt6.QtCore import Qt, QTimer, QSize, QThread, pyqtSignal
+from PyQt6.QtGui import (QPainter, QColor, QPixmap, QBrush, QPainterPath)
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 
 from core.gpu_monitor import (SENSOR_KEYS, STATUS_NO_GPU, STATUS_NO_NVML, STATUS_OK,
                               GpuMonitor, format_reading, nvml_installed, short_gpu_name)
-from core.language_manager import get_text, language_manager
+from core.language_manager import get_text
 from version import __version__
 
 # Try to import theme functions from qfluentwidgets
 try:
-    from qfluentwidgets import isDarkTheme, themeColor
+    from qfluentwidgets import isDarkTheme
     HAS_FLUENT_WIDGETS = True
 except ImportError:
     HAS_FLUENT_WIDGETS = False
@@ -34,7 +33,7 @@ except ImportError:
 
 # Import theme color definitions
 try:
-    from gui.fluent_app.theme_colors import ThemeColors, to_css_rgba
+    from gui.fluent_app.theme_colors import ThemeColors
     HAS_THEME_COLORS = True
 except ImportError:
     HAS_THEME_COLORS = False
@@ -808,7 +807,6 @@ class StatusPanel(QWidget):
         current_model = getattr(self.config, 'model_path', '')
         current_method = getattr(self.config, 'mouse_move_method', 'ddxoft')
         current_screenshot_method = getattr(self.config, 'screenshot_method', 'mss')
-        current_lang = language_manager.get_current_language()
 
         # 檢查是否需要更新 UI 文本 (例如語言改變或狀態改變)
         # 為了簡化，簡單比較關鍵值，或者直接更新所有文字(開銷很小)

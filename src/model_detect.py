@@ -34,10 +34,19 @@ if __name__ == "__main__":
 
 # ── from here we are running under the embedded Python (or non-Windows) ─────
 
-# Inject embedded site-packages (belt-and-suspenders for edge cases)
-_embedded_pkgs = os.path.join(_SRC_DIR, "python", "Lib", "site-packages")
-if os.path.isdir(_embedded_pkgs) and _embedded_pkgs not in sys.path:
-    sys.path.insert(0, _embedded_pkgs)
+# NOTE: the two path bootstraps below (embedded site-packages + TensorRT/CUDA DLL
+# dirs) are only for running this file as a stand-alone script. They used to run on
+# *import*, so merely importing model_detect (the Model page, the Web Control model
+# info route, the test suite) put the vendored Windows site-packages at sys.path[0]
+# and shadowed whatever the interpreter had installed (e.g. cv2/numpy). Inside the
+# app main.py has already set the same paths up, so an import must not touch them.
+
+def _inject_embedded_site_packages() -> None:
+    """Inject embedded site-packages (belt-and-suspenders for edge cases)."""
+    embedded_pkgs = os.path.join(_SRC_DIR, "python", "Lib", "site-packages")
+    if os.path.isdir(embedded_pkgs) and embedded_pkgs not in sys.path:
+        sys.path.insert(0, embedded_pkgs)
+
 
 # Inject TensorRT + CUDA DLL dirs — mirrors main.py's _register_nvidia_dll_dirs().
 # AppData is pinned to sys.path[0] so the Axiom-installed tensorrt package always
@@ -88,7 +97,11 @@ def _inject_tensorrt_paths() -> None:
             sys.path.remove(_appdata)
         sys.path.insert(0, _appdata)
 
-_inject_tensorrt_paths()
+
+def _bootstrap_script_environment() -> None:
+    """Make a stand-alone ``python src/model_detect.py`` run find its packages."""
+    _inject_embedded_site_packages()
+    _inject_tensorrt_paths()
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -327,7 +340,7 @@ def inspect_model(path: str) -> dict:
 def print_model_info(path: str, info: dict) -> None:
     SEP = "━" * 48
     print(SEP)
-    print(f"  Model Inspector")
+    print("  Model Inspector")
     print(f"  File      : {os.path.basename(path)}")
     print(f"  Format    : {info['format']}")
     print(SEP)
@@ -339,7 +352,7 @@ def print_model_info(path: str, info: dict) -> None:
     if info["num_classes"] is not None:
         print(f"  Classes       : {info['num_classes']}  (inferred)")
     else:
-        print(f"  Classes       : unknown")
+        print("  Classes       : unknown")
     if info["precision"]:
         print(f"  Precision     : {info['precision']}")
     print(f"  File size     : {info['file_size']}")
@@ -391,4 +404,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    _bootstrap_script_environment()
     main()

@@ -2,7 +2,7 @@
 Base Page for Axiom GUI
 Provides a base page class with large title and smooth scroll area.
 """
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFrame
 from qfluentwidgets import SmoothScrollArea, TitleLabel, FluentWindow
 

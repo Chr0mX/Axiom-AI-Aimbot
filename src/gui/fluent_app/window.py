@@ -97,7 +97,7 @@ class AxiomWindow(FluentWindow):
         self.updateLogo()
         
         # Enlarge title bar Logo and text
-        from PyQt6.QtGui import QPixmap, QFont
+        from PyQt6.QtGui import QFont
         if hasattr(self, 'titleBar'):
             # Enlarge iconLabel (originally 18x18 -> 32x32)
             self.titleBar.iconLabel.setFixedSize(32, 32)
@@ -759,7 +759,6 @@ class AxiomWindow(FluentWindow):
         4. TitleBar - 標題列
         """
         from PyQt6.QtGui import QPainter
-        from PyQt6.QtWidgets import QFrame
         
         # --- 1. stackedWidget 設為透明（這是最大的遮擋層）---
         self.stackedWidget.setStyleSheet("""

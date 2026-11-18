@@ -13,10 +13,8 @@ ConfigManager 模組單元測試
 import json
 import os
 import tempfile
-import shutil
 from unittest.mock import patch
 
-import pytest
 
 from core.config_manager import _settings_from_file
 
@@ -35,13 +33,13 @@ class TestConfigManagerInit:
         from core.config_manager import ConfigManager
         with tempfile.TemporaryDirectory() as tmpdir:
             configs_dir = os.path.join(tmpdir, "test_configs")
-            cm = ConfigManager(configs_dir)
+            ConfigManager(configs_dir)
             assert os.path.exists(configs_dir)
 
     def test_init_existing_directory(self):
         from core.config_manager import ConfigManager
         with tempfile.TemporaryDirectory() as tmpdir:
-            cm = ConfigManager(tmpdir)
+            ConfigManager(tmpdir)
             assert os.path.exists(tmpdir)
 
 
@@ -708,7 +706,7 @@ class TestAimPresetsLeaveKeysAlone:
         assert (c.min_confidence, c.keep_detecting, c.always_aim) == (conf, keep, always)
 
     def test_new_preset_does_not_save_keys(self, tmp_path):
-        from core.config_manager import ConfigManager, _AIM_PRESET_FIELDS
+        from core.config_manager import _AIM_PRESET_FIELDS
         for attr in ("AimKeys", "aim_toggle_key", "always_aim", "min_confidence",
                      "detect_range_size", "keep_detecting", "auto_fire_key"):
             assert attr not in _AIM_PRESET_FIELDS

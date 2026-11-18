@@ -1,16 +1,20 @@
 """Advanced Aim Tuning: offsets, predictors, output EMA, adaptive lead."""
 
-import sys
-from unittest.mock import MagicMock
-
-sys.modules.setdefault("win32api", MagicMock())
-sys.modules.setdefault("win32con", MagicMock())
-sys.modules.setdefault("cv2", MagicMock())
+import pytest
 
 from core.aim_paths import adaptive_lead_s, ema_step
-from win_utils.makcu_protocol import merge_relative_move
-from core.ai_aiming import calculate_aim_target
 from core.target_predictor import EmaPredictor, RollingVelocityPredictor
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _win32_dependent_imports(win32_stubs):
+    """core.ai_aiming and win_utils import win32api at import time: bind them once per
+    module against the stubbed platform modules (see conftest.win32_stubs), so nothing
+    leaks into other test files."""
+    global merge_relative_move, calculate_aim_target
+    from win_utils.makcu_protocol import merge_relative_move
+    from core.ai_aiming import calculate_aim_target
+    yield
 
 
 class _Cfg:

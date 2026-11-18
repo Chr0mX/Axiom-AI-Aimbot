@@ -11,8 +11,8 @@ import platform
 import re
 import subprocess
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtGui import QColor, QFont, QIcon, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout,
     QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider,

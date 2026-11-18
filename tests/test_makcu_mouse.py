@@ -12,8 +12,7 @@ MAKCU KM Host 滑鼠控制模組測試套件
 
 import sys
 import os
-from unittest import mock
-from unittest.mock import patch, MagicMock, PropertyMock, call
+from unittest.mock import patch, MagicMock, call
 
 import pytest
 
@@ -606,20 +605,6 @@ class TestMakcuStreamReader:
         m = _run_stream(garbage + _frame(0x01))
         assert m._btn_mask == 0x01
         assert m.lmb_held is True
-
-    def test_side1_press_parses(self):
-        """mask=0x08 → side1 (S1) 按下"""
-        m = _run_stream(_frame(0x08))
-        assert m._btn_mask == 0x08
-        assert m.side1_held is True
-        assert m.side2_held is False
-
-    def test_side2_press_parses(self):
-        """mask=0x10 → side2 (S2) 按下"""
-        m = _run_stream(_frame(0x10))
-        assert m._btn_mask == 0x10
-        assert m.side2_held is True
-        assert m.side1_held is False
 
 
 def _bin_frame(btn_id, state, tag=0x53, length=3, sub_type=0x01):

@@ -15,7 +15,6 @@ module scope) so a missing `onnxruntime` in this sandbox fails only that
 test at run time instead of aborting collection of the whole file.
 """
 
-import os
 from unittest.mock import patch
 
 

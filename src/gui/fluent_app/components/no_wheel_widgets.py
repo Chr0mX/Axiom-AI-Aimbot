@@ -2,7 +2,6 @@
 """自訂控制項 - 禁用滑鼠滾輪調整"""
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget
 from qfluentwidgets import Slider, SpinBox, DoubleSpinBox
 
 

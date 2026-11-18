@@ -9,10 +9,10 @@ import os
 import json
 from PyQt6.QtGui import QColor
 from dataclasses import dataclass
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Dict, Any
 
 try:
-    from qfluentwidgets import isDarkTheme, themeColor
+    from qfluentwidgets import isDarkTheme
     HAS_FLUENT_WIDGETS = True
 except ImportError:
     HAS_FLUENT_WIDGETS = False

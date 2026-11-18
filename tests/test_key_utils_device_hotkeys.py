@@ -3,13 +3,18 @@
 import sys
 from unittest.mock import MagicMock
 
-sys.modules.setdefault("win32api", MagicMock())
-sys.modules.setdefault("win32con", MagicMock())
+import pytest
 
-import win32api  # noqa: E402
 
-from win_utils.key_utils import is_key_pressed, set_device_hotkeys  # noqa: E402
-from win_utils.makcu_mouse import MakcuMouse  # noqa: E402
+@pytest.fixture(autouse=True, scope="module")
+def _win32_dependent_imports(win32_stubs):
+    """win_utils imports win32api at import time: bind it once per module against the
+    stubbed platform modules (see conftest.win32_stubs), so nothing leaks into other files."""
+    global win32api, is_key_pressed, set_device_hotkeys, MakcuMouse
+    win32api = win32_stubs["win32api"]
+    from win_utils.key_utils import is_key_pressed, set_device_hotkeys
+    from win_utils.makcu_mouse import MakcuMouse
+    yield
 
 
 def _install(monkeypatch):

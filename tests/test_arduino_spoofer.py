@@ -36,9 +36,9 @@ class TestFindBoardsTxt:
             with patch("glob.glob", return_value=[boards]):
                 with patch("os.environ.get", return_value=tmpdir):
                     with patch("os.path.exists", side_effect=lambda p: p == boards):
-                        result = find_boards_txt()
                         # 可能找到也可能找不到，取決於路徑匹配
-                        # 主要驗證不會崩潰
+                        # 主要驗證不會崩潰 (must simply not raise)
+                        find_boards_txt()
 
 
 class TestSpoofArduinoBoard:

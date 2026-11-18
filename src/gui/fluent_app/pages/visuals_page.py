@@ -5,10 +5,10 @@ import webbrowser
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, SettingCard,
-    FluentIcon, CheckBox, ComboBox, BodyLabel, PushButton
+    FluentIcon, CheckBox, ComboBox, PushButton
 )
 from ..components.slider_spin_card import SliderLabelCard
 from ..components.no_wheel_widgets import NoWheelSpinBox

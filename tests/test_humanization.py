@@ -551,7 +551,6 @@ class TestConfigIntegration:
 
     def test_from_dict_without_humanization_key_uses_defaults(self):
         """If JSON has no 'humanization' key the defaults are unchanged."""
-        from core.humanization import HumanizationConfig
         c = _make_config()
         original_enabled = c.humanization.enabled
         c.from_dict({'pid_kp_x': 0.5})  # no 'humanization' key

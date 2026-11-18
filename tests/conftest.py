@@ -46,6 +46,9 @@ def _isolated_cwd(tmp_path, monkeypatch):
 _WINDOWS_ONLY_MODULES = (
     "win32", "pywintypes", "pythoncom", "winerror", "PyQt6", "qfluentwidgets",
     "onnxruntime", "vgamepad", "dxcam", "cv2",
+    # Not Windows-only, but optional runtime packages a bare dev checkout may lack
+    # (requirements-dev.txt installs them for CI).
+    "mss", "serial",
 )
 
 
@@ -65,7 +68,9 @@ def pytest_runtest_makereport(item, call):
     if sys.platform == "win32":
         return
     report = outcome.get_result()
-    if call.when == "call" and report.failed and call.excinfo is not None:
+    # "setup" too: a fixture that imports a Windows-only module (or one that needs
+    # OpenCV) fails there, before the test body runs.
+    if call.when in ("setup", "call") and report.failed and call.excinfo is not None:
         if _is_windows_only_env_error(call.excinfo):
             report.outcome = "skipped"
             report.longrepr = (
@@ -73,3 +78,80 @@ def pytest_runtest_makereport(item, call):
                 "Skipped: requires Windows-only dependency "
                 f"({call.excinfo.value})",
             )
+
+
+# ---------------------------------------------------------------------------
+# Stubbing platform modules without polluting the rest of the session
+# ---------------------------------------------------------------------------
+# A few test modules need ``win32api``/``win32con`` (and, where OpenCV isn't
+# installed, ``cv2``) to be importable. Doing that with a module-level
+# ``sys.modules.setdefault(name, MagicMock())`` fakes the module for the whole
+# remaining run: later files that rely on the real thing (or on conftest's
+# "Windows-only dependency => skip" rule) then run against a MagicMock and fail
+# for reasons unrelated to the code under test. Use the ``win32_stubs`` fixture
+# instead -- it is scoped to one test module and undoes everything on exit.
+
+# First-party modules that import win32api (directly or via ``win_utils``) at
+# import time. They are dropped from ``sys.modules`` before and after a stubbed
+# module so each is imported against the stubs it is meant to see, and no module
+# bound to a stub is left behind for a later test file.
+_WIN32_DEPENDENT_MODULES = (
+    "win_utils",
+    "core.ai_aiming",
+    "core.ai_loop",
+    "core.ai_loop_utils",
+    "core.auto_fire",
+    "core.key_listener",
+    "core.app_controller",
+)
+
+
+def drop_modules_imported_since(before):
+    """Forget every first-party module imported after the ``set(sys.modules)`` snapshot
+    ``before``. A module first imported while a stub was installed keeps its reference to
+    that stub for good (``core.inference`` bound to a MagicMock ``cv2`` fails every later
+    test that uses it), so a fixture that stubs a dependency must drop what it pulled in."""
+    for name in set(sys.modules) - set(before):
+        if name.split(".")[0] in ("core", "win_utils", "gui"):
+            del sys.modules[name]
+            parent, _, child = name.rpartition(".")
+            if parent in sys.modules and hasattr(sys.modules[parent], child):
+                delattr(sys.modules[parent], child)
+
+
+def purge_win32_dependent_modules():
+    """Forget the first-party modules that bind win32api at import time."""
+    for name in list(sys.modules):
+        for prefix in _WIN32_DEPENDENT_MODULES:
+            if name == prefix or name.startswith(prefix + "."):
+                del sys.modules[name]
+                parent, _, child = name.rpartition(".")
+                if parent in sys.modules and hasattr(sys.modules[parent], child):
+                    delattr(sys.modules[parent], child)
+                break
+
+
+@pytest.fixture(scope="module")
+def win32_stubs():
+    """MagicMock ``win32api``/``win32con`` (and ``cv2`` only if it isn't installed)
+    for the duration of one test module. Yields the stub mapping."""
+    from unittest.mock import MagicMock
+
+    stubs = {"win32api": MagicMock(), "win32con": MagicMock()}
+    try:
+        import cv2  # noqa: F401  (real OpenCV present: leave it alone)
+    except ImportError:
+        stubs["cv2"] = MagicMock()
+
+    purge_win32_dependent_modules()
+    before = set(sys.modules)
+    with pytest.MonkeyPatch.context() as mp:
+        for name, stub in stubs.items():
+            mp.setitem(sys.modules, name, stub)
+        try:
+            yield stubs
+        finally:
+            # Everything first imported against the stubs (core.inference bound to the
+            # stubbed cv2, win_utils bound to the stubbed win32api, ...) goes too.
+            drop_modules_imported_since(before)
+            purge_win32_dependent_modules()
