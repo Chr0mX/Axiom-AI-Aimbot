@@ -228,8 +228,8 @@ class _ManagerBox(QFrame):
                 item_border = rgba("#000000", 22)
                 item_hover_bg = rgba("#FFFFFF", hover_a + 8)
                 item_hover_border = rgba("#000000", 30)
-                item_selected_bg = rgba("#0078D4", selected_a)
-                item_selected_border = rgba("#0078D4", 110)
+                item_selected_bg = rgba(ThemeColors.ACCENT.get(), selected_a)
+                item_selected_border = rgba(ThemeColors.ACCENT.get(), 110)
                 separator_color = rgba("#000000", 30)
         else:
             panel_bg = base_panel_bg

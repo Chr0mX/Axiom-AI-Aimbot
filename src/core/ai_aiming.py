@@ -13,20 +13,10 @@ from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .aim_paths import adaptive_lead_s, ema_step
 from .target_predictor import EmaPredictor, RollingVelocityPredictor, VelocityPredictor
-from .target_tracking import edge_ratio, lost_timeout_s, select_target
+from .target_tracking import box_iou, edge_ratio, lost_timeout_s, select_target
 
 if TYPE_CHECKING:
     from .config import Config
-
-def _box_iou(a: List[float], b: List[float]) -> float:
-    """Intersection over Union for two [x1, y1, x2, y2] boxes."""
-    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
-    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
-    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-    if inter == 0.0:
-        return 0.0
-    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
-
 
 # Module-level singleton — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
@@ -334,7 +324,7 @@ def process_aiming(
         # suppression right when it's needed. Reset the gate's timestamp
         # whenever the selected box isn't a continuation of the previous one.
         _iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
-        if _prev_locked_box is None or _box_iou(_prev_locked_box, selected_box) < _iou_thresh:
+        if _prev_locked_box is None or box_iou(_prev_locked_box, selected_box) < _iou_thresh:
             state.aim_y_last_target_t = 0.0
             # Same "is this genuinely a new target" edge as above — arms the
             # acquisition-phase guard below (state.lock_acquired_t) exactly
@@ -345,7 +335,7 @@ def process_aiming(
         _fw = float(getattr(config, 'fov_effective_size', 0) or getattr(config, 'fov_size', 222))
         _fh = float(getattr(config, 'fov_effective_height', 0) or getattr(config, 'fov_height', _fw) or _fw)
         _same = _continued or (_prev_locked_box is not None
-                               and _box_iou(_prev_locked_box, selected_box) >= _iou_thresh)
+                               and box_iou(_prev_locked_box, selected_box) >= _iou_thresh)
         state.tracker.on_match(
             current_time, selected_box, _conf,
             edge_ratio=edge_ratio(selected_box, crosshair_x, crosshair_y, _fw, _fh,

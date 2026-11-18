@@ -80,7 +80,16 @@ class TestOpenUpdateUrl:
     """測試開啟更新連結"""
 
     @patch("webbrowser.open")
-    def test_opens_url(self, mock_open):
+    def test_opens_github_release_url(self, mock_open):
         from core.updater import open_update_url
-        open_update_url("https://example.com/release")
-        mock_open.assert_called_once_with("https://example.com/release")
+        open_update_url("https://github.com/iishong0w0/Axiom-AI-Aimbot/releases/tag/main-6.4")
+        mock_open.assert_called_once_with("https://github.com/iishong0w0/Axiom-AI-Aimbot/releases/tag/main-6.4")
+
+    @patch("webbrowser.open")
+    def test_untrusted_url_opens_the_releases_page_instead(self, mock_open):
+        """The URL is taken from a remote API response: only https://github.com/ is opened."""
+        from core.updater import REPO_NAME, REPO_OWNER, open_update_url
+        for bad in ("https://example.com/release", "file:///C:/x.exe", "http://github.com/x"):
+            mock_open.reset_mock()
+            open_update_url(bad)
+            mock_open.assert_called_once_with(f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases")

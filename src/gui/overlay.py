@@ -12,6 +12,9 @@ from PyQt6.QtGui import QPainter, QColor, QPen, QFont
 from PyQt6.QtCore import Qt, QTimer
 import ctypes
 
+# Pure module (no Qt/Windows imports): the FOV centre every drawing/in-FOV test here uses.
+from core.anchor_fov import anchor_fov_active, fov_center
+
 if TYPE_CHECKING:
     pass
 
@@ -40,18 +43,6 @@ def _get_calculate_aim_target():
 
 
 _ellipse_intersects_bbox = None
-
-
-def _fov_center(config):
-    """(x, y) the FOV is drawn/tested around: the Anchor FOV controller's centre in
-    that mode, else the crosshair (core.anchor_fov.fov_center)."""
-    from core.anchor_fov import fov_center
-    return fov_center(config)
-
-
-def _anchor_fov_active(config) -> bool:
-    from core.anchor_fov import anchor_fov_active
-    return anchor_fov_active(config)
 
 
 def _get_ellipse_intersects_bbox():
@@ -335,7 +326,7 @@ class PyQtOverlay(QWidget):
         ellipse_intersects_bbox = _get_ellipse_intersects_bbox() if use_circle else None
         # The FOV may be centred away from the crosshair (Anchor FOV); the in-FOV
         # test uses the FOV's own centre, the line still starts at the crosshair.
-        fcx, fcy = _fov_center(self.config)
+        fcx, fcy = fov_center(self.config)
         for box in self.boxes:
             bx1, by1, bx2, by2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
             # Same in/out-of-FOV test the box-color pass uses, so the tracer
@@ -390,11 +381,11 @@ class PyQtOverlay(QWidget):
             fov_w = int(getattr(self.config, 'fov_effective_size', self.config.fov_size))
             fov_h = int(getattr(self.config, 'fov_effective_height', getattr(self.config, 'fov_height', fov_w)))
             # Centre = the Anchor FOV controller's real centre in that mode (else the crosshair).
-            cx, cy = (int(round(v)) for v in _fov_center(self.config))
+            cx, cy = (int(round(v)) for v in fov_center(self.config))
             fov_color = OverlayColors.get_fov_color()
             _afov_lost = bool(getattr(self.config, 'afov_active', False)
                               and getattr(self.config, 'afov_lost', False)
-                              and _anchor_fov_active(self.config))
+                              and anchor_fov_active(self.config))
             if _afov_lost:
                 fov_color = OverlayColors.get_anchor_fov_lost_color()
             from core.box_style import fov_thickness
@@ -450,7 +441,7 @@ class PyQtOverlay(QWidget):
             use_circle = getattr(self.config, 'fov_circle_filter_enabled', False)
             fov_half_x = float(getattr(self.config, 'fov_effective_size', self.config.fov_size)) / 2.0
             fov_half_y = float(getattr(self.config, 'fov_effective_height', getattr(self.config, 'fov_height', self.config.fov_size))) / 2.0
-            ox, oy = _fov_center(self.config)
+            ox, oy = fov_center(self.config)
             ellipse_intersects_bbox = _get_ellipse_intersects_bbox() if use_circle else None
 
             show_confidence = self.config.show_confidence
@@ -555,9 +546,9 @@ class PyQtOverlay(QWidget):
         behaviour shown (HOLD / RETURN / SEARCH)."""
         cfg = self.config
         if not (getattr(cfg, 'show_fov', True) and getattr(cfg, 'afov_active', False)
-                and _anchor_fov_active(cfg)):
+                and anchor_fov_active(cfg)):
             return
-        fcx, fcy = _fov_center(cfg)
+        fcx, fcy = fov_center(cfg)
         lost = bool(getattr(cfg, 'afov_lost', False))
         color = OverlayColors.get_anchor_fov_lost_color() if lost else OverlayColors.get_anchor_fov_color()
         ax, ay = float(getattr(cfg, 'afov_anchor_x', fcx)), float(getattr(cfg, 'afov_anchor_y', fcy))

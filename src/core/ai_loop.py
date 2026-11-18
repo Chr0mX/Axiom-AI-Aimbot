@@ -24,6 +24,7 @@ from .ai_aiming import process_aiming
 from .ai_loop_state import LoopState
 from .detection_semantics import filter_detections_by_target_class, sync_detection_class_names_from_backend
 from .anchor_fov import anchor_fov_active, clear_anchor_fov, update_anchor_fov
+from .logging_config import log_throttled
 from .ai_loop_utils import (
     aim_start_delay_elapsed,
     anchor_reset,
@@ -164,7 +165,7 @@ def _probe_model_input_size(session, abs_model_path: str) -> int:
         if len(ps) >= 4 and isinstance(ps[2], int) and ps[2] > 0:
             return ps[2]
     except Exception:
-        pass
+        logger.warning("[AI] Could not probe the model input size from %s", abs_model_path, exc_info=True)
     return 0
 
 
@@ -366,7 +367,7 @@ def _set_thread_priority(level: str) -> None:
             _PRIORITY_MAP.get(level, 2),
         )
     except Exception:
-        pass
+        logger.debug("[AI] SetThreadPriority(%s) failed", level, exc_info=True)
 
 
 def _set_process_priority(level: str) -> Optional[int]:
@@ -392,7 +393,7 @@ def _restore_process_priority(previous: Optional[int]) -> None:
         k32 = ctypes.windll.kernel32
         k32.SetPriorityClass(k32.GetCurrentProcess(), previous)
     except Exception:
-        pass
+        logger.debug("[AI] Restoring the process priority class failed", exc_info=True)
 
 
 def _set_windows_timer_resolution_1ms(enable: bool) -> bool:
@@ -803,7 +804,9 @@ def ai_logic_loop(
                     try:
                         sync_detection_class_names_from_backend(model, config)
                     except Exception:
-                        pass
+                        log_throttled(logger, "ai_loop.class_names", logging.WARNING,
+                                      "[AI] Could not read the model's class names; class filtering "
+                                      "may not match the loaded model", exc_info=True)
 
                 if current_time - state.last_pid_update > state.pid_check_interval:
                     pid_x.Kp, pid_x.Ki, pid_x.Kd = config.pid_kp_x, config.pid_ki_x, config.pid_kd_x
@@ -859,7 +862,9 @@ def ai_logic_loop(
                                 # Hold mode: always-aim while button is held
                                 _effective_always_aim = _effective_always_aim or always_btn_now
                     except Exception:
-                        pass
+                        log_throttled(logger, "ai_loop.makcu_always_btn", logging.WARNING,
+                                      "[AI] Reading the MAKCU Always Aim button failed; it is ignored "
+                                      "while this keeps happening", exc_info=True)
                 config.makcu_always_aim_active = _effective_always_aim
 
                 if _use_makcu:
@@ -884,7 +889,9 @@ def ai_logic_loop(
                                 # Hold mode: aim while button is held
                                 is_aiming = is_aiming or btn_now
                     except Exception:
-                        pass
+                        log_throttled(logger, "ai_loop.makcu_aim_btn", logging.WARNING,
+                                      "[AI] Reading the MAKCU aim button failed; the device button does "
+                                      "not engage aim while this keeps happening", exc_info=True)
                 # Makcu disengage-delay: keep is_aiming True for up to N seconds after release
                 _disengage_delay = float(getattr(config, 'makcu_disengage_delay', 0.0) or 0.0)
                 _raw_is_aiming = is_aiming  # pre-delay-extension value — see _was_aiming[0] below

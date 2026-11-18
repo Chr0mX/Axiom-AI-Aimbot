@@ -1,5 +1,6 @@
 """Pure version-string helpers (no Qt/Windows imports, so testable anywhere)."""
 import re
+from urllib.parse import urlparse
 
 _LEADING_INT_RE = re.compile(r'\d+')
 
@@ -23,3 +24,21 @@ def parse_version(v_str):
     while len(parts) < 3:
         parts.append(0)
     return tuple(parts)
+
+
+_RELEASE_URL_HOSTS = frozenset({"github.com", "www.github.com"})
+
+
+def is_safe_release_url(url) -> bool:
+    """True only for an ``https://github.com/...`` URL.
+
+    The update page URL comes straight out of the GitHub API response and is handed to
+    ``webbrowser.open()``; anything else (``file:``, ``javascript:``, another host, a
+    ``github.com@evil.example`` userinfo trick) must never reach the browser.
+    """
+    try:
+        parts = urlparse(str(url).strip())
+        return (parts.scheme == "https" and parts.hostname in _RELEASE_URL_HOSTS
+                and parts.username is None and parts.password is None)
+    except ValueError:
+        return False

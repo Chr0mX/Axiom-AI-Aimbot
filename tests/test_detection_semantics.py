@@ -226,3 +226,22 @@ class TestFilterDetectionsByTargetClass:
         out_b, out_c, out_i = filter_detections_by_target_class(boxes, [0.5, 0.5], [0, 1], cfg)
         assert out_b == [[20, 20, 30, 30]]
         assert out_i == [1]
+
+
+def test_malformed_box_is_kept_and_reported_once(caplog):
+    """A box the aspect heuristic cannot evaluate must not drop the frame (it is kept), but the
+    failure is logged -- once per throttle interval, not silently and not every frame."""
+    import logging
+    from types import SimpleNamespace
+
+    from core.detection_semantics import filter_detections_by_semantic_class
+    from core.logging_config import reset_log_throttle
+
+    reset_log_throttle()
+    cfg = SimpleNamespace(detect_min_bbox_area_px=0, detect_min_bbox_short_side_px=0, _detect_class_names={})
+    bad = ["a", "b", "c", "d"]
+    with caplog.at_level(logging.WARNING, logger="core.detection_semantics"):
+        for _ in range(3):
+            boxes, _confs, _ids = filter_detections_by_semantic_class([[10, 10, 60, 160], bad], [0.9, 0.9], [0, 0], cfg)
+            assert bad in boxes and len(boxes) == 2
+    assert len([r for r in caplog.records if "Could not evaluate a detection box" in r.getMessage()]) == 1

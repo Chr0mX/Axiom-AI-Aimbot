@@ -48,7 +48,7 @@ from __future__ import annotations
 import math
 from typing import Dict, Optional, Sequence
 
-from .target_tracking import box_iou, edge_ratio
+from .target_tracking import box_iou, clamp01, edge_ratio
 
 MODES = ('disabled', 'linear', 'velocity_accel', 'smoothed', 'adaptive')
 
@@ -74,10 +74,6 @@ _TAU_MIN_S = 0.02
 _TAU_SPAN_S = 0.20              # smoothing 0..1 -> time constant 20..220 ms
 _SIGMA_FLOOR_PX = 0.5           # assumed detector jitter when the track looks perfectly clean
 _SIGNIFICANCE_K = 2.0           # speed / acceleration must clear this many standard errors to count
-
-
-def _clamp01(v: float) -> float:
-    return 0.0 if v < 0.0 else 1.0 if v > 1.0 else v
 
 
 def _alpha(dt: float, tau: float) -> float:
@@ -245,7 +241,7 @@ class AnchorTrack:
         h = max(1.0, abs(y2 - y1))
         cx = 0.5 * (x1 + x2)
         cy = 0.5 * (y1 + y2)
-        self.det_conf = _clamp01(det_conf) if math.isfinite(det_conf) else 0.0
+        self.det_conf = clamp01(det_conf) if math.isfinite(det_conf) else 0.0
         p = self.params
 
         if self._n == 0:
@@ -364,7 +360,7 @@ class AnchorTrack:
             # the newest sample by the kept acceleration -- so velocity noise stays the low linear-fit
             # noise unless the acceleration is real.
             self.acc_thr = _SIGNIFICANCE_K * 2.0 * sigma * math.sqrt(acc_var)
-            keep = _clamp01((math.hypot(rax, ray) - self.acc_thr) / self.acc_thr) if self.acc_thr > 0.0 else 1.0
+            keep = clamp01((math.hypot(rax, ray) - self.acc_thr) / self.acc_thr) if self.acc_thr > 0.0 else 1.0
             rax *= keep
             ray *= keep
             rvx -= rax * tau_bar
@@ -376,7 +372,7 @@ class AnchorTrack:
             self.vx, self.vy, self.ax, self.ay, self.vw, self.vh = rvx, rvy, rax, ray, rvw, rvh
             self._have_smooth = p.mode in ('smoothed', 'adaptive')
         else:
-            a = _alpha(dt, _TAU_MIN_S + _TAU_SPAN_S * _clamp01(p.smoothing))
+            a = _alpha(dt, _TAU_MIN_S + _TAU_SPAN_S * clamp01(p.smoothing))
             self.vx += (rvx - self.vx) * a
             self.vy += (rvy - self.vy) * a
             self.ax += (rax - self.ax) * a
@@ -430,8 +426,8 @@ class AnchorTrack:
         return vlx, vly, 0.0, 0.0, vw, vh, sxx, 0.0, tau_bar
 
     def _update_confidence(self) -> None:
-        support = _clamp01((self.last_t - self.t_start) / _SUPPORT_FULL_S)
-        accuracy = 1.0 - _clamp01(self.err_ema / _ERR_ZERO_FIT)
+        support = clamp01((self.last_t - self.t_start) / _SUPPORT_FULL_S)
+        accuracy = 1.0 - clamp01(self.err_ema / _ERR_ZERO_FIT)
         self.confidence = support * accuracy * (0.5 + 0.5 * self.det_conf)
 
     # ── query ───────────────────────────────────────────────────────────
@@ -459,7 +455,7 @@ class AnchorTrack:
             return r
 
         # Effective acceleration and the time the lead covers.
-        a_c = 0.0 if p.mode == 'linear' else _clamp01(p.accel_comp)
+        a_c = 0.0 if p.mode == 'linear' else clamp01(p.accel_comp)
         ax, ay = self.ax * a_c, self.ay * a_c
         conf = self.confidence
         if lag > self._coast_s:
@@ -479,17 +475,17 @@ class AnchorTrack:
         keep = (speed - dz) / speed
         thr = self.sig_thr
         if thr > 0.0:                                      # ramp 0 -> 1 between thr and 2*thr: don't extrapolate jitter
-            keep *= _clamp01((speed - thr) / thr)
+            keep *= clamp01((speed - thr) / thr)
             if keep <= 0.0:
                 return r
         dx = _axis_lead(vx * keep, ax, T)
         dy = _axis_lead(vy * keep, ay, T)
 
-        gate = _clamp01((conf - p.conf_threshold) / _CONF_RAMP) if conf > p.conf_threshold else 0.0
+        gate = clamp01((conf - p.conf_threshold) / _CONF_RAMP) if conf > p.conf_threshold else 0.0
         scale = max(0.0, p.strength) * gate
         if p.mode == 'adaptive':
-            q = (0.4 * conf + 0.3 * _clamp01((self.stab_ema - 0.3) / 0.5)
-                 + 0.3 * _clamp01(1.0 - 2.0 * self.turn_ema))
+            q = (0.4 * conf + 0.3 * clamp01((self.stab_ema - 0.3) / 0.5)
+                 + 0.3 * clamp01(1.0 - 2.0 * self.turn_ema))
             scale *= 0.3 + 0.7 * q
         dx *= scale
         dy *= scale
@@ -661,8 +657,8 @@ class FovAdjuster:
         a = _alpha(dt, _TAU_ADJ_S) if 0.0 < dt < 1.0 else (1.0 if dt >= 1.0 else 0.0)
         e_t = s_t = u_t = 0.0
         if view.valid and now - view.t < _MAX_GAP_S:
-            w_a = _clamp01(infl_adaptive) * view.confidence
-            w_d = _clamp01(infl_dynamic) * view.confidence
+            w_a = clamp01(infl_adaptive) * view.confidence
+            w_d = clamp01(infl_dynamic) * view.confidence
             d = view.edge_pred - edge_now
             if d > 0.0:                       # heading for the boundary
                 e_t = w_a * min(d, _EDGE_TOWARD_CAP) if view.edge_pred > _EDGE_TOWARD_MIN else 0.0

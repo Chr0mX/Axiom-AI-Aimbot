@@ -37,7 +37,7 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence
 
-from .target_tracking import TrackState
+from .target_tracking import TrackState, box_iou, clamp
 
 SOURCES = ('detection', 'tracker', 'manual')
 POSITIONS = ('center', 'top', 'bottom', 'custom')
@@ -82,10 +82,6 @@ def fov_center(config) -> tuple:
     return float(getattr(config, 'crosshairX', 0)), float(getattr(config, 'crosshairY', 0))
 
 
-def _clamp(v: float, lo: float, hi: float) -> float:
-    return lo if v < lo else hi if v > hi else v
-
-
 def _finite(v) -> bool:
     return isinstance(v, (int, float)) and math.isfinite(v)
 
@@ -122,21 +118,21 @@ class AnchorFovParams:
         self.off_y = _num(c, 'afov_offset_y', 0.0)
         self.manual_x = _num(c, 'afov_manual_x', 0.0)
         self.manual_y = _num(c, 'afov_manual_y', 0.0)
-        self.follow = _clamp(_num(c, 'afov_follow_speed', 12.0), 0.5, 100.0)
-        self.smoothing = _clamp(_num(c, 'afov_smoothing', 0.3), 0.0, 1.0)
+        self.follow = clamp(_num(c, 'afov_follow_speed', 12.0), 0.5, 100.0)
+        self.smoothing = clamp(_num(c, 'afov_smoothing', 0.3), 0.0, 1.0)
         self.max_speed = max(0.0, _num(c, 'afov_max_speed', 4000.0))      # px/s, 0 = unlimited
         self.predict = bool(getattr(c, 'afov_predict_enabled', False))
-        self.strength = _clamp(_num(c, 'afov_predict_strength', 1.0), 0.0, 2.0)
-        self.lead_s = _clamp(_num(c, 'afov_predict_time_ms', 80.0), 0.0, 500.0) / 1000.0
+        self.strength = clamp(_num(c, 'afov_predict_strength', 1.0), 0.0, 2.0)
+        self.lead_s = clamp(_num(c, 'afov_predict_time_ms', 80.0), 0.0, 500.0) / 1000.0
         lm = str(getattr(c, 'afov_lost_behavior', 'hold'))
         self.lost_mode = lm if lm in LOST_MODES else 'hold'
-        self.lost_delay_s = _clamp(_num(c, 'afov_lost_delay_ms', 150.0), 0.0, 5000.0) / 1000.0
+        self.lost_delay_s = clamp(_num(c, 'afov_lost_delay_ms', 150.0), 0.0, 5000.0) / 1000.0
         rq = str(getattr(c, 'afov_reacquire', 'smooth'))
         self.reacquire = rq if rq in REACQUIRE_MODES else 'smooth'
-        rmin = _clamp(_num(c, 'afov_min_radius', 50.0), 1.0, 4096.0)
-        rmax = _clamp(_num(c, 'afov_max_radius', 300.0), rmin, 4096.0)
+        rmin = clamp(_num(c, 'afov_min_radius', 50.0), 1.0, 4096.0)
+        rmax = clamp(_num(c, 'afov_max_radius', 300.0), rmin, 4096.0)
         self.min_radius, self.max_radius = rmin, rmax
-        self.radius = _clamp(_num(c, 'afov_radius', 100.0), rmin, rmax)
+        self.radius = clamp(_num(c, 'afov_radius', 100.0), rmin, rmax)
         self.dynamic_radius = bool(getattr(c, 'afov_dynamic_radius', False))
 
 
@@ -175,16 +171,6 @@ def anchor_point(box: Sequence[float], position: str, off_x: float, off_y: float
     return x + off_x, y + off_y
 
 
-def _iou(a: Sequence[float], b: Sequence[float]) -> float:
-    ix = min(a[2], b[2]) - max(a[0], b[0])
-    iy = min(a[3], b[3]) - max(a[1], b[1])
-    if ix <= 0.0 or iy <= 0.0:
-        return 0.0
-    inter = ix * iy
-    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
-    return inter / union if union > 0.0 else 0.0
-
-
 # ── anchor source resolution ─────────────────────────────────────────────────
 
 def _tracker_motion(s: AnchorSample, tr, now: float) -> None:
@@ -197,10 +183,10 @@ def _tracker_motion(s: AnchorSample, tr, now: float) -> None:
         return
     s.speed = float(getattr(tr, 'speed_ema', 0.0) or 0.0)
     conf = float(getattr(tr, 'conf_ema', 0.0) or 0.0)
-    s.conf = _clamp(conf, 0.0, 1.0)
+    s.conf = clamp(conf, 0.0, 1.0)
     if tr.state is TrackState.TEMPORARILY_LOST:
         return                       # position is already extrapolated; no second lead
-    rel = _clamp((conf - 0.25) / 0.5, 0.0, 1.0)
+    rel = clamp((conf - 0.25) / 0.5, 0.0, 1.0)
     age = tr.lock_age(now)
     if age < 0.25:                   # a brand-new lock has no velocity history yet
         rel *= age / 0.25
@@ -227,7 +213,7 @@ def resolve_detection_anchor(s: AnchorSample, p: AnchorFovParams, boxes, locked_
     if locked_box is not None:
         best_iou = _MIN_IOU
         for b in boxes:
-            v = _iou(b, locked_box)
+            v = box_iou(b, locked_box)
             if v > best_iou:
                 best, best_iou = b, v
     else:
@@ -342,7 +328,7 @@ class AnchorFovController:
         if searching:
             return p.max_radius
         if p.dynamic_radius and valid:
-            f = _clamp(s.speed / (base_r * _DYN_SPEED_RADII_S), 0.0, 1.0)
+            f = clamp(s.speed / (base_r * _DYN_SPEED_RADII_S), 0.0, 1.0)
             f = min(1.0, f + (1.0 - s.conf) * 0.5)
             return base_r + (p.max_radius - base_r) * f
         return base_r
@@ -360,7 +346,7 @@ class AnchorFovController:
         if not self.initialised:
             self.cx = self.sx = float(cross_x)
             self.cy = self.sy = float(cross_y)
-            self.radius = _clamp(p.radius * radius_scale, p.min_radius, p.max_radius)
+            self.radius = clamp(p.radius * radius_scale, p.min_radius, p.max_radius)
             self.ax, self.ay, self.px, self.py = self.cx, self.cy, self.cx, self.cy
             self.initialised = True
             dt = 0.0
@@ -370,7 +356,7 @@ class AnchorFovController:
                 dt = 0.0
         self.last_t = now
 
-        base_r = _clamp(p.radius * radius_scale, p.min_radius, p.max_radius)
+        base_r = clamp(p.radius * radius_scale, p.min_radius, p.max_radius)
         l, t, r, b = bounds
         searching = False
 
@@ -381,10 +367,10 @@ class AnchorFovController:
             self.lost_since = 0.0
             self.lost = False
             self.phase = PH_FOLLOW
-            self.ax = _clamp(s.x, l, r)
-            self.ay = _clamp(s.y, t, b)
+            self.ax = clamp(s.x, l, r)
+            self.ay = clamp(s.y, t, b)
             self._lead(p, s, dt, base_r)
-            tx, ty = _clamp(self.px, l, r), _clamp(self.py, t, b)
+            tx, ty = clamp(self.px, l, r), clamp(self.py, t, b)
         else:
             self.was_valid = False
             self.lost = True
@@ -422,15 +408,15 @@ class AnchorFovController:
                 step = math.hypot(dx, dy)
                 if step > lim:
                     dx, dy = dx * lim / step, dy * lim / step
-            self.cx = _clamp(self.cx + dx, l, r)
-            self.cy = _clamp(self.cy + dy, t, b)
+            self.cx = clamp(self.cx + dx, l, r)
+            self.cy = clamp(self.cy + dy, t, b)
             # 3) radius
             rt = self._radius_target(p, s, base_r, s.valid, searching)
             self.radius += (rt - self.radius) * (1.0 - math.exp(-dt / _RADIUS_TAU_S))
         else:
             # first/stalled frame: keep the target consistent, move nothing
-            self.sx, self.sy = _clamp(self.sx, l, r), _clamp(self.sy, t, b)
-        self.radius = _clamp(self.radius, p.min_radius, p.max_radius)
+            self.sx, self.sy = clamp(self.sx, l, r), clamp(self.sy, t, b)
+        self.radius = clamp(self.radius, p.min_radius, p.max_radius)
 
 
 # ── glue used by the inference loop ──────────────────────────────────────────

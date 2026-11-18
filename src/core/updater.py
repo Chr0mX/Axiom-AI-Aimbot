@@ -5,7 +5,7 @@ import webbrowser
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from version import __version__
-from .version_utils import parse_version  # noqa: F401
+from .version_utils import is_safe_release_url, parse_version  # noqa: F401
 
 # GitHub Repository Info
 # iishong0w0 is intentionally the release authority for update checks.
@@ -64,5 +64,8 @@ class UpdateChecker(QThread):
             self.check_failed.emit(str(e))
 
 def open_update_url(url):
-    """打開預設瀏覽器下載頁面"""
+    """打開預設瀏覽器下載頁面 (only https://github.com/ pages; anything else opens the
+    repository's releases page instead — the URL comes from a remote API response)."""
+    if not is_safe_release_url(url):
+        url = f"https://github.com/{REPO_OWNER}/{REPO_NAME}/releases"
     webbrowser.open(url)

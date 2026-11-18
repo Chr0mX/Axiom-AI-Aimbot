@@ -16,6 +16,8 @@ import cv2
 import mss
 import numpy as np
 
+from .anchor_fov import anchor_fov_active, fov_center
+from .logging_config import log_throttled
 from .box_style import (
     aim_marker_thickness, box_thickness, corner_length, detect_range_thickness, fov_thickness,
     highlight_thickness, tracer_thickness,
@@ -441,10 +443,9 @@ def _draw_detection_overlay(
     cy = int(getattr(cfg, 'crosshairY', h // 2))
     # The FOV's own centre: the Anchor FOV controller's real centre in that mode, else
     # the crosshair. Only the FOV drawing / in-FOV tests use it; the tracer still starts at (cx, cy).
-    from .anchor_fov import fov_center as _fov_center, anchor_fov_active as _anchor_fov_active
-    _fx, _fy = _fov_center(cfg)
+    _fx, _fy = fov_center(cfg)
     fcx, fcy = int(round(_fx)), int(round(_fy))
-    afov_on = bool(_anchor_fov_active(cfg) and getattr(cfg, 'afov_active', False))
+    afov_on = bool(anchor_fov_active(cfg) and getattr(cfg, 'afov_active', False))
     afov_lost = afov_on and bool(getattr(cfg, 'afov_lost', False))
 
     def _c(b: int, g: int, r: int, a: int = 255) -> tuple:
@@ -988,7 +989,9 @@ class NDICapture:
                                 interval_seconds=0.05,
                             )
                         except Exception:
-                            pass
+                            log_throttled(logger, "ndi.reconnect", logging.WARNING,
+                                          "[Capture][NDI] Reconnecting the NDI receiver failed; retrying",
+                                          exc_info=True)
                     elif not self.source_name and not self._source_assigned:
                         self._assign_first_available_source()
                 if not self._receiver.is_connected():
@@ -1436,7 +1439,9 @@ class _UVCPreviewThread(threading.Thread):
                     set_preview_frame(preview)
                     set_preview_region(region)
                 except Exception:
-                    pass
+                    log_throttled(logger, "uvc_preview.frame", logging.WARNING,
+                                  "[UVC] Rendering the preview frame failed; the preview is stale "
+                                  "while this keeps happening", exc_info=True)
             remaining = self._interval - (time.perf_counter() - t0)
             if remaining > 0.001:
                 time.sleep(remaining)
