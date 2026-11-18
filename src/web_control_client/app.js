@@ -827,7 +827,9 @@
     var method = el("aim-prediction_method") ? el("aim-prediction_method").value : "velocity";
     setCard("aim-prediction_method", predOn);
     setCard("aim-prediction_lead_frames", predOn && method === "rolling");
-    setCard("aim-prediction_adaptive_lead", predOn && method !== "rolling");
+    setCard("aim-prediction_adaptive_lead", predOn && method !== "rolling" && method !== "anchor");
+    ["strength", "smoothing", "velocity_influence", "accel_influence", "max_distance_pct", "confidence_threshold", "adaptive"]
+      .forEach(function (k) { setCard("aim-anchor_" + k, predOn && method === "anchor"); });
     setCard("aim-prediction_capture_timestamps", predOn && method !== "rolling");
     setCard("aim-prediction_lsq_fit", predOn && method === "velocity");
     setCard("aim-prediction_velocity_deadzone_px_s", predOn && method === "velocity");
@@ -2755,7 +2757,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "16") return;
+    if (cssVer !== "17") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

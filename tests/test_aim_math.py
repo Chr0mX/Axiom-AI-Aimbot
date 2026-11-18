@@ -143,3 +143,57 @@ def test_new_prediction_options_are_persisted_and_clamped():
     _validate_aim_math(cfg)
     assert cfg.prediction_velocity_deadzone_px_s == 500.0
     assert cfg.prediction_ego_motion_scale == 0.1
+
+
+def test_anchor_prediction_settings_defaults_persist_and_belong_to_aim_presets():
+    from core.config import _FIELD_MAP, Config
+    from core.config_manager import _AIM_PRESET_FIELDS
+    anchor_keys = ("anchor_strength", "anchor_smoothing", "anchor_velocity_influence",
+                   "anchor_accel_influence", "anchor_max_distance_pct",
+                   "anchor_confidence_threshold", "anchor_adaptive")
+    c = Config()
+    assert (c.anchor_strength, c.anchor_smoothing, c.anchor_velocity_influence,
+            c.anchor_accel_influence, c.anchor_max_distance_pct,
+            c.anchor_confidence_threshold, c.anchor_adaptive) == (1.0, 0.4, 1.0, 0.35, 25.0, 0.35, True)
+    assert c.show_anchor_trajectory is True
+    assert (c.anchor_pred_active, c.anchor_trail) == (False, [])
+    for key in anchor_keys:
+        assert _FIELD_MAP[key].startswith("tracking.prediction.anchor.")
+        assert key in _AIM_PRESET_FIELDS                  # tracking behaviour travels with aim presets
+    assert _FIELD_MAP["show_anchor_trajectory"] == "display.show_anchor_trajectory"
+    # Runtime readout state is never persisted.
+    for key in ("anchor_pred_active", "anchor_pred_confidence", "anchor_pred_distance", "anchor_trail"):
+        assert key not in _FIELD_MAP
+
+    c.prediction_method = "anchor"
+    c.anchor_strength = 0.7
+    c.anchor_accel_influence = 0.2
+    c.show_anchor_trajectory = False
+    restored = Config()
+    restored.from_dict(c.to_dict())
+    assert restored.prediction_method == "anchor"
+    assert restored.anchor_strength == 0.7
+    assert restored.anchor_accel_influence == 0.2
+    assert restored.show_anchor_trajectory is False
+
+
+def test_anchor_prediction_settings_are_clamped():
+    from types import SimpleNamespace
+    from core.config import _validate_aim_math
+    cfg = SimpleNamespace(
+        prediction_method="anchor", prediction_horizon_ms=9999, anchor_strength=9, anchor_smoothing=-1,
+        anchor_velocity_influence=float("nan"), anchor_accel_influence=5, anchor_max_distance_pct=900,
+        anchor_confidence_threshold=-3, anchor_adaptive=0)
+    _validate_aim_math(cfg)
+    assert cfg.prediction_method == "anchor"
+    assert cfg.prediction_horizon_ms == 500.0
+    assert cfg.anchor_strength == 1.5
+    assert cfg.anchor_smoothing == 0.0
+    assert cfg.anchor_velocity_influence == 1.0            # NaN -> default
+    assert cfg.anchor_accel_influence == 1.0
+    assert cfg.anchor_max_distance_pct == 100.0
+    assert cfg.anchor_confidence_threshold == 0.0
+    assert cfg.anchor_adaptive is False
+    bad = SimpleNamespace(prediction_method="nonsense")
+    _validate_aim_math(bad)
+    assert bad.prediction_method == "velocity"

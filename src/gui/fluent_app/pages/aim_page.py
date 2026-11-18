@@ -846,7 +846,7 @@ class AimPage(BasePage):
         self.predictionHorizonCard = SliderLabelCard(
             FluentIcon.HISTORY,
             t("prediction_horizon", "Prediction Horizon"),
-            5, 50,
+            5, 150,
             format_func=lambda v: f"{v} ms",
             label_width=55,
             parent=self.trackingGroup
@@ -1150,12 +1150,12 @@ class AimPage(BasePage):
 
         self.mathGroup = SettingCardGroup(t("aim_tuning_group", "Advanced Aim Tuning"), self.scrollWidget)
         self.predictionMethodCombo = ComboBox()
-        self.predictionMethodCombo.addItems(["Velocity", "EMA", "Rolling"])
+        self.predictionMethodCombo.addItems(["Velocity", "EMA", "Rolling", "Anchor"])
         self.predictionMethodCombo.setMinimumWidth(130)
         self.predictionMethodCard = SettingCard(
             FluentIcon.HISTORY,
             t("prediction_method", "Prediction Method"),
-            t("prediction_method_desc", "Velocity, EMA, or a rolling average of recent steps"),
+            t("prediction_method_desc", "Velocity, EMA, a rolling average of recent steps, or Anchor (FOV-based velocity + acceleration)"),
             self.mathGroup,
         )
         self.predictionMethodCard.hBoxLayout.addWidget(self.predictionMethodCombo, 0)
@@ -1168,6 +1168,38 @@ class AimPage(BasePage):
             FluentIcon.SPEED_HIGH,
             t("prediction_adaptive_lead", "Adaptive Lead"),
             t("prediction_adaptive_lead_desc", "Stretch the time lead when the mouse is moving slowly"),
+            parent=self.mathGroup,
+        )
+        # Anchor method (core/anchor_prediction.py). The horizon is Prediction Horizon above.
+        self.anchorStrengthCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH, t("anchor_strength", "Anchor Strength"),
+            0, 150, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+        )
+        self.anchorSmoothingCard = SliderLabelCard(
+            FluentIcon.SYNC, t("anchor_smoothing", "Anchor Smoothing"),
+            0, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+        )
+        self.anchorVelocityCard = SliderLabelCard(
+            FluentIcon.SPEED_HIGH, t("anchor_velocity_influence", "Velocity Influence"),
+            0, 150, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+        )
+        self.anchorAccelCard = SliderLabelCard(
+            FluentIcon.SPEED_OFF, t("anchor_accel_influence", "Acceleration Influence"),
+            0, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+        )
+        self.anchorMaxDistCard = SliderLabelCard(
+            FluentIcon.ZOOM, t("anchor_max_distance_pct", "Max Prediction Distance"),
+            0, 100, format_func=lambda v: "No cap" if v == 0 else f"{v}% of FOV", label_width=90,
+            parent=self.mathGroup,
+        )
+        self.anchorConfidenceCard = SliderLabelCard(
+            FluentIcon.CERTIFICATE, t("anchor_confidence_threshold", "Confidence Threshold"),
+            0, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
+        )
+        self.anchorAdaptiveCard = SwitchSettingCard(
+            FluentIcon.ROBOT,
+            t("anchor_adaptive", "Adaptive Adjustment"),
+            t("anchor_adaptive_desc", "Follow the FOV Shrink Mode: Adaptive trusts consistent motion more, Dynamic reacts faster to direction changes"),
             parent=self.mathGroup,
         )
         self.captureTimestampsCard = SwitchSettingCard(
@@ -1226,6 +1258,8 @@ class AimPage(BasePage):
         )
         for card in (
             self.predictionMethodCard, self.predictionLeadFramesCard, self.predictionAdaptiveLeadCard,
+            self.anchorStrengthCard, self.anchorSmoothingCard, self.anchorVelocityCard, self.anchorAccelCard,
+            self.anchorMaxDistCard, self.anchorConfidenceCard, self.anchorAdaptiveCard,
             self.captureTimestampsCard, self.lsqFitCard, self.velocityDeadzoneCard,
             self.egoMotionCard, self.egoScaleCard,
             self.emaSmoothingCard, self.emaAmountCard, self.aimXOffsetCard, self.aimYOffsetCard,
@@ -1322,6 +1356,10 @@ class AimPage(BasePage):
         self.predictionMethodCombo.currentTextChanged.connect(self._onAimMathChanged)
         self.predictionLeadFramesCard.valueChanged.connect(self._onAimMathChanged)
         self.predictionAdaptiveLeadCard.checkedChanged.connect(self._onAimMathChanged)
+        for _anchor_card in (self.anchorStrengthCard, self.anchorSmoothingCard, self.anchorVelocityCard,
+                             self.anchorAccelCard, self.anchorMaxDistCard, self.anchorConfidenceCard):
+            _anchor_card.valueChanged.connect(self._onAimMathChanged)
+        self.anchorAdaptiveCard.checkedChanged.connect(self._onAimMathChanged)
         self.captureTimestampsCard.checkedChanged.connect(self._onAimMathChanged)
         self.lsqFitCard.checkedChanged.connect(self._onAimMathChanged)
         self.velocityDeadzoneCard.valueChanged.connect(self._onAimMathChanged)
@@ -1450,11 +1488,18 @@ class AimPage(BasePage):
             self.camMotionCompSizeSegment.setCurrentItem(cmc_size)
             self.camMotionCompSizeCard.setEnabled(cmc_on)
 
-            method_map = {"velocity": "Velocity", "ema": "EMA", "rolling": "Rolling"}
+            method_map = {"velocity": "Velocity", "ema": "EMA", "rolling": "Rolling", "anchor": "Anchor"}
             self.predictionMethodCombo.setCurrentText(method_map.get(
                 str(getattr(self._config, 'prediction_method', 'velocity')), "Velocity"))
             self.predictionLeadFramesCard.setValue(int(getattr(self._config, 'prediction_lead_frames', 3)))
             self.predictionAdaptiveLeadCard.setChecked(bool(getattr(self._config, 'prediction_adaptive_lead', False)))
+            self.anchorStrengthCard.setValue(int(round(float(getattr(self._config, 'anchor_strength', 1.0)) * 100)))
+            self.anchorSmoothingCard.setValue(int(round(float(getattr(self._config, 'anchor_smoothing', 0.4)) * 100)))
+            self.anchorVelocityCard.setValue(int(round(float(getattr(self._config, 'anchor_velocity_influence', 1.0)) * 100)))
+            self.anchorAccelCard.setValue(int(round(float(getattr(self._config, 'anchor_accel_influence', 0.35)) * 100)))
+            self.anchorMaxDistCard.setValue(int(round(float(getattr(self._config, 'anchor_max_distance_pct', 25.0)))))
+            self.anchorConfidenceCard.setValue(int(round(float(getattr(self._config, 'anchor_confidence_threshold', 0.35)) * 100)))
+            self.anchorAdaptiveCard.setChecked(bool(getattr(self._config, 'anchor_adaptive', True)))
             self.captureTimestampsCard.setChecked(bool(getattr(self._config, 'prediction_capture_timestamps', False)))
             self.lsqFitCard.setChecked(bool(getattr(self._config, 'prediction_lsq_fit', False)))
             self.velocityDeadzoneCard.setValue(int(float(getattr(self._config, 'prediction_velocity_deadzone_px_s', 0.0) or 0.0)))
@@ -2020,14 +2065,21 @@ class AimPage(BasePage):
     # === Target Tracking Callbacks ===
 
     def _onAimMathChanged(self, *_args):
-        # Reads all 14 Advanced Aim Tuning widgets; while _loadFromConfig()
+        # Reads all 21 Advanced Aim Tuning widgets; while _loadFromConfig()
         # is still setting them it would write the not-yet-updated ones'
         # old values back over a preset/web change.
         if not self._config or self._isLoadingConfig:
             return
-        method = {"Velocity": "velocity", "EMA": "ema", "Rolling": "rolling"}.get(
+        method = {"Velocity": "velocity", "EMA": "ema", "Rolling": "rolling", "Anchor": "anchor"}.get(
             self.predictionMethodCombo.currentText(), "velocity")
         self._config.prediction_method = method
+        self._config.anchor_strength = self.anchorStrengthCard.value() / 100.0
+        self._config.anchor_smoothing = self.anchorSmoothingCard.value() / 100.0
+        self._config.anchor_velocity_influence = self.anchorVelocityCard.value() / 100.0
+        self._config.anchor_accel_influence = self.anchorAccelCard.value() / 100.0
+        self._config.anchor_max_distance_pct = float(self.anchorMaxDistCard.value())
+        self._config.anchor_confidence_threshold = self.anchorConfidenceCard.value() / 100.0
+        self._config.anchor_adaptive = bool(self.anchorAdaptiveCard.isChecked())
         self._config.prediction_lead_frames = float(self.predictionLeadFramesCard.value())
         self._config.prediction_adaptive_lead = bool(self.predictionAdaptiveLeadCard.isChecked())
         self._config.prediction_capture_timestamps = bool(self.captureTimestampsCard.isChecked())
@@ -2052,7 +2104,12 @@ class AimPage(BasePage):
         # Rolling uses a frame lead; Velocity/EMA use the time horizon, which
         # Adaptive Lead stretches (ai_aiming skips it for Rolling).
         self.predictionLeadFramesCard.setVisible(pred_on and method == "Rolling")
-        self.predictionAdaptiveLeadCard.setVisible(pred_on and method != "Rolling")
+        # Adaptive Lead is the Velocity/EMA stretch; Anchor has its own Adaptive Adjustment.
+        self.predictionAdaptiveLeadCard.setVisible(pred_on and method not in ("Rolling", "Anchor"))
+        for _anchor_card in (self.anchorStrengthCard, self.anchorSmoothingCard, self.anchorVelocityCard,
+                             self.anchorAccelCard, self.anchorMaxDistCard, self.anchorConfidenceCard,
+                             self.anchorAdaptiveCard):
+            _anchor_card.setVisible(pred_on and method == "Anchor")
         # Rolling uses a frame count, so timestamps don't apply to it; the
         # least-squares fit and deadzone are Velocity-method options.
         self.captureTimestampsCard.setVisible(pred_on and method != "Rolling")
@@ -2275,6 +2332,14 @@ class AimPage(BasePage):
         self.trackingGroup.titleLabel.setText(t("target_tracking", "Target Tracking"))
         self.mathGroup.titleLabel.setText(t("aim_tuning_group", "Advanced Aim Tuning"))
         self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Prediction Method"))
+        self.anchorStrengthCard.titleLabel.setText(t("anchor_strength", "Anchor Strength"))
+        self.anchorSmoothingCard.titleLabel.setText(t("anchor_smoothing", "Anchor Smoothing"))
+        self.anchorVelocityCard.titleLabel.setText(t("anchor_velocity_influence", "Velocity Influence"))
+        self.anchorAccelCard.titleLabel.setText(t("anchor_accel_influence", "Acceleration Influence"))
+        self.anchorMaxDistCard.titleLabel.setText(t("anchor_max_distance_pct", "Max Prediction Distance"))
+        self.anchorConfidenceCard.titleLabel.setText(t("anchor_confidence_threshold", "Confidence Threshold"))
+        self.anchorAdaptiveCard.titleLabel.setText(t("anchor_adaptive", "Adaptive Adjustment"))
+        self.anchorAdaptiveCard.contentLabel.setText(t("anchor_adaptive_desc", "Follow the FOV Shrink Mode: Adaptive trusts consistent motion more, Dynamic reacts faster to direction changes"))
         self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
         self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
         self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))

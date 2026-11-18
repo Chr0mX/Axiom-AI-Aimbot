@@ -10,6 +10,7 @@ already used in test_makcu_mouse.py/test_screen_capture.py for other
 win_utils-dependent modules.
 """
 
+import math
 import sys
 import types
 from types import SimpleNamespace
@@ -666,3 +667,152 @@ class TestPidTimeNormalizeWiring:
         fast = self._second_move(sent_moves, True, 1 / 240)
         slow = self._second_move(sent_moves, True, 1 / 30)
         assert 0 < fast < slow                      # shorter frame -> smaller per-frame move
+
+
+class TestAnchorPredictionIntegration:
+    """prediction_method == 'anchor' inside process_aiming(): a FOV-based,
+    timestamp-driven lead that composes with the Adaptive/Dynamic FOV modes."""
+
+    FPS = 60.0
+
+    @staticmethod
+    def _run(monkeypatch, sent_moves, centers, *, times=None, **cfg):
+        """Feed one 40x80 box per entry in ``centers`` (None = skip a frame);
+        return (config, state, [published aim_predicted_x per frame])."""
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        monkeypatch.setattr(aiming_mod, "_anchor", None)
+        monkeypatch.setattr(aiming_mod, "_predictor", None)
+        monkeypatch.setattr(aiming_mod, "_kalman", None)
+        base = dict(
+            prediction_enabled=True, prediction_method="anchor", prediction_horizon_ms=100.0,
+            prediction_max_velocity=5000.0, fov_size=1000, fov_height=1000,
+            fov_circle_filter_enabled=False, fov_shrink_mode="fixed", anchor_adaptive=True,
+            show_anchor_trajectory=True,
+        )
+        base.update(cfg)
+        config = _make_config(**base)
+        config.anchor_pred_active = False
+        config.anchor_trail = []          # Config() initialises these
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        clock = {"t": 0.0}
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: clock["t"])
+        published = []
+        for i, c in enumerate(centers):
+            t = times[i] if times is not None else i / TestAnchorPredictionIntegration.FPS
+            clock["t"] = t
+            if c is None:
+                continue
+            cx, cy = c
+            box = [cx - 20.0, cy - 40.0, cx + 20.0, cy + 40.0]
+            process_aiming(config, [box], 500, 500, pid_x, pid_y, "sendinput", state,
+                           current_time=1000.0 + t, confidences=[0.9])
+            published.append(config.aim_predicted_x)
+        return config, state, published
+
+    @staticmethod
+    def _moving(n, x0=300.0, step=10.0):
+        return [(x0 + step * i, 500.0) for i in range(n)]
+
+    def test_moving_target_gets_a_lead_and_publishes_readout(self, sent_moves, monkeypatch):
+        config, state, pub = self._run(monkeypatch, sent_moves, self._moving(20))
+        raw_x = 300.0 + 10.0 * 19
+        # 600 px/s * 100 ms = 60 px ahead (fixed mode: no modulation).
+        assert pub[-1] == pytest.approx(raw_x + 60.0, abs=4.0)
+        assert config.anchor_pred_active is True
+        assert config.anchor_pred_confidence > 0.8
+        assert config.anchor_pred_distance == pytest.approx(60.0, abs=4.0)
+        assert len(config.anchor_trail) >= 10
+        assert config.anchor_trail[-1][0] == pytest.approx(raw_x, abs=2.0)
+
+    def test_stationary_target_has_no_lead(self, sent_moves, monkeypatch):
+        config, _, pub = self._run(monkeypatch, sent_moves, [(400.0, 500.0)] * 20)
+        assert pub[-1] == pytest.approx(400.0, abs=0.01)
+        assert config.anchor_pred_distance == 0.0
+
+    def test_trail_is_only_published_when_the_trajectory_is_shown(self, sent_moves, monkeypatch):
+        config, _, _ = self._run(monkeypatch, sent_moves, self._moving(20), show_anchor_trajectory=False)
+        assert config.anchor_trail == []
+        assert config.anchor_pred_active is True
+
+    def test_lead_is_capped_by_the_fov_percentage(self, sent_moves, monkeypatch):
+        config, _, pub = self._run(monkeypatch, sent_moves, self._moving(20),
+                                   anchor_max_distance_pct=2.0)   # 2 % of 1000 = 20 px
+        assert config.anchor_pred_distance == pytest.approx(20.0, abs=0.01)
+        assert pub[-1] == pytest.approx(300.0 + 190.0 + 20.0, abs=0.5)
+
+    def test_the_shrunk_fov_tightens_the_cap(self, sent_moves, monkeypatch):
+        config, _, _ = self._run(monkeypatch, sent_moves, self._moving(20),
+                                 anchor_max_distance_pct=10.0,
+                                 fov_effective_size=400, fov_effective_height=400)
+        assert config.anchor_pred_distance == pytest.approx(40.0, abs=0.01)   # 10 % of 400
+
+    def test_prediction_is_clamped_inside_the_fov(self, sent_moves, monkeypatch):
+        # FOV spans x 400..600 around the crosshair; the target is at ~560 and
+        # moving right, so the 60 px lead would leave it.
+        config, _, pub = self._run(monkeypatch, sent_moves, self._moving(20, x0=370.0),
+                                   fov_size=200, fov_height=200, anchor_max_distance_pct=100.0)
+        assert pub[-1] <= 600.0 + 1e-6
+
+    def test_other_methods_do_not_publish_the_anchor_readout(self, sent_moves, monkeypatch):
+        config, _, _ = self._run(monkeypatch, sent_moves, self._moving(20), prediction_method="velocity")
+        assert config.anchor_pred_active is False
+
+    def test_disabling_prediction_clears_the_readout(self, sent_moves, monkeypatch):
+        config, _, pub = self._run(monkeypatch, sent_moves, self._moving(20), prediction_enabled=False)
+        assert config.anchor_pred_active is False
+        assert pub[-1] == pytest.approx(300.0 + 190.0)
+
+    def test_target_switch_restarts_the_estimate(self, sent_moves, monkeypatch):
+        centers = self._moving(20) + [(900.0, 300.0)]      # a different target, IoU 0
+        config, _, pub = self._run(monkeypatch, sent_moves, centers)
+        assert pub[-1] == pytest.approx(900.0, abs=0.01)    # no lead carried over from the old one
+        assert config.anchor_pred_confidence < 0.3
+
+    def test_variable_frame_rate_uses_timestamps_not_frame_counts(self, sent_moves, monkeypatch):
+        # Same 600 px/s motion sampled at 30 fps instead of 60.
+        times = [i / 30.0 for i in range(20)]
+        centers = [(300.0 + 20.0 * i, 500.0) for i in range(20)]
+        config, _, pub = self._run(monkeypatch, sent_moves, centers, times=times)
+        assert config.anchor_pred_distance == pytest.approx(60.0, abs=5.0)
+
+    def test_detection_gap_does_not_carry_a_stale_lead(self, sent_moves, monkeypatch):
+        centers = self._moving(20)
+        times = [i / 60.0 for i in range(20)]
+        centers.append((900.0, 500.0))
+        times.append(times[-1] + 0.6)                        # lost for 0.6 s, then reacquired elsewhere
+        config, _, pub = self._run(monkeypatch, sent_moves, centers, times=times)
+        assert pub[-1] == pytest.approx(900.0, abs=0.01)
+        assert config.anchor_pred_distance == 0.0
+
+    @pytest.mark.parametrize("mode", ["fixed", "adaptive", "dynamic"])
+    def test_works_with_every_fov_shrink_mode(self, sent_moves, monkeypatch, mode):
+        config, _, pub = self._run(monkeypatch, sent_moves, self._moving(24), fov_shrink_mode=mode)
+        assert config.anchor_pred_active is True
+        assert 20.0 < config.anchor_pred_distance <= 80.0
+        assert math.isfinite(pub[-1])
+
+    def test_adaptive_adjustment_follows_the_mode_and_can_be_turned_off(self, sent_moves, monkeypatch):
+        fixed = self._run(monkeypatch, sent_moves, self._moving(14), fov_shrink_mode="fixed")[0]
+        adaptive = self._run(monkeypatch, sent_moves, self._moving(14), fov_shrink_mode="adaptive")[0]
+        off = self._run(monkeypatch, sent_moves, self._moving(14), fov_shrink_mode="adaptive",
+                        anchor_adaptive=False)[0]
+        # A fresh lock hasn't earned full trust yet, so adaptive leads less than fixed...
+        assert 0.0 < adaptive.anchor_pred_distance < fixed.anchor_pred_distance
+        # ...and with the adjustment off the mode makes no difference.
+        assert off.anchor_pred_distance == pytest.approx(fixed.anchor_pred_distance)
+
+    def test_adaptive_mode_cuts_the_lead_after_a_direction_change(self, sent_moves, monkeypatch):
+        steady = self._moving(30)
+        zig = self._moving(20) + [(300.0 + 190.0 - 10.0 * k, 500.0) for k in range(1, 11)]
+        a = self._run(monkeypatch, sent_moves, steady, fov_shrink_mode="adaptive")[0]
+        b = self._run(monkeypatch, sent_moves, zig, fov_shrink_mode="adaptive")[0]
+        assert b.anchor_pred_distance < a.anchor_pred_distance
+
+    def test_kalman_can_stack_after_anchor(self, sent_moves, monkeypatch):
+        config, _, pub = self._run(monkeypatch, sent_moves, self._moving(20), kalman_enabled=True)
+        assert math.isfinite(pub[-1]) and config.anchor_pred_active is True

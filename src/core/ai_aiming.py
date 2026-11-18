@@ -11,6 +11,7 @@ from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .aim_paths import adaptive_lead_s, ema_step
+from .anchor_prediction import AnchorPredictor, ModeAdjust, adjust_for_mode, effective_fov
 from .target_predictor import EmaPredictor, RollingVelocityPredictor, VelocityPredictor
 from .target_tracking import edge_ratio, lost_timeout_s, select_target
 
@@ -32,6 +33,43 @@ _predictor: Optional[VelocityPredictor] = None
 _ema_predictor: Optional[EmaPredictor] = None
 _rolling_predictor: Optional[RollingVelocityPredictor] = None
 _kalman: Optional[KalmanFilter2D] = None
+_anchor: Optional[AnchorPredictor] = None
+_anchor_adjust = ModeAdjust()
+
+
+def _get_anchor(config: Config) -> AnchorPredictor:
+    """The anchor predictor, with its settings refreshed from ``config``."""
+    global _anchor
+    if _anchor is None:
+        _anchor = AnchorPredictor()
+    _anchor.params.update_from(config)
+    return _anchor
+
+
+def _predict_anchor(config: Config, state: LoopState, x: float, y: float, box,
+                    conf: float, now_t: float, off_x: float, off_y: float,
+                    crosshair_x: float, crosshair_y: float) -> Tuple[float, float]:
+    """Anchor-method step of the prediction stage.
+
+    ``x``/``y`` are in the prediction frame (screen minus camera drift, plus
+    own-move compensation); ``off_x``/``off_y`` is that frame's offset from the
+    screen, so the FOV (a screen-space region) can be placed in it and the
+    published trail mapped back onto the screen.
+    """
+    ap = _get_anchor(config)
+    mode = str(getattr(config, 'fov_shrink_mode', 'fixed')) if getattr(config, 'anchor_adaptive', True) else 'fixed'
+    adj = adjust_for_mode(mode, state.tracker, _anchor_adjust)
+    fw, fh = effective_fov(config)
+    ap.set_fov(crosshair_x - off_x, crosshair_y - off_y, fw, fh,
+               bool(getattr(config, 'fov_circle_filter_enabled', False)))
+    ap.update(x, y, now_t, box[2] - box[0], box[3] - box[1], conf, adj.agility)
+    px, py = ap.predict(adj.horizon_scale, adj.strength_scale)
+    config.anchor_pred_active = True
+    config.anchor_pred_confidence = ap.confidence
+    config.anchor_pred_distance = ap.lead_dist
+    if getattr(config, 'show_anchor_trajectory', False):
+        config.anchor_trail = [(tx + off_x, ty + off_y) for tx, ty in ap.trail()]
+    return px, py
 
 
 def _get_kalman(config: Config) -> KalmanFilter2D:
@@ -103,6 +141,8 @@ def _reset_unused_predictors(method: str) -> None:
         _ema_predictor.reset()
     if method != "rolling" and _rolling_predictor is not None:
         _rolling_predictor.reset()
+    if method != "anchor" and _anchor is not None:
+        _anchor.reset()
 
 
 def calculate_aim_target(
@@ -423,14 +463,18 @@ def process_aiming(
         # feeling permanently a step behind.
         if getattr(config, 'prediction_enabled', False):
             method = str(getattr(config, 'prediction_method', 'velocity') or 'velocity')
-            if method not in ('velocity', 'ema', 'rolling'):
+            if method not in ('velocity', 'ema', 'rolling', 'anchor'):
                 method = 'velocity'
+            if method != 'anchor':
+                config.anchor_pred_active = False
             if _in_acquisition:
                 _reset_unused_predictors('')
                 if method == 'velocity':
                     _get_predictor(config).reset()
                 elif method == 'ema':
                     _get_ema_predictor().reset()
+                elif method == 'anchor':
+                    _get_anchor(config).reset()
                 else:
                     _get_rolling_predictor().reset()
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
@@ -444,6 +488,10 @@ def process_aiming(
                 now_t = time.perf_counter()
             if method == 'ema':
                 pred_x, pred_y = _get_ema_predictor().update(pred_x, pred_y, now_t, horizon_s)
+            elif method == 'anchor':
+                pred_x, pred_y = _predict_anchor(
+                    config, state, pred_x, pred_y, selected_box, _conf, now_t,
+                    target_x - pred_x, target_y - pred_y, crosshair_x, crosshair_y)
             elif method == 'rolling':
                 lead_frames = float(getattr(config, 'prediction_lead_frames', 3.0) or 3.0)
                 pred_x, pred_y = _get_rolling_predictor().update(pred_x, pred_y, now_t, lead_frames)
@@ -451,6 +499,7 @@ def process_aiming(
                 pred_x, pred_y = _get_predictor(config).update(pred_x, pred_y, now_t, horizon_s)
             _reset_unused_predictors(method)
         else:
+            config.anchor_pred_active = False
             _reset_unused_predictors('')
 
         # --- Kalman filter aim-point smoothing (optional) ---

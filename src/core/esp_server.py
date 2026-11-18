@@ -198,6 +198,20 @@ def _build_snapshot() -> dict:
         except (TypeError, ValueError):
             aim_predicted = None
 
+    # Anchor prediction readout (prediction_method == 'anchor'): recent anchor path (shifted like
+    # the boxes), lead distance and confidence. Only built while the toggle is on.
+    anchor = None
+    if getattr(c, "anchor_pred_active", False) and getattr(c, "show_anchor_trajectory", False):
+        try:
+            anchor = {
+                "trail": [[int(p[0]) + offset_x, int(p[1]) + offset_y]
+                          for p in (getattr(c, "anchor_trail", None) or [])],
+                "dist": round(float(getattr(c, "anchor_pred_distance", 0.0)), 1),
+                "conf": round(float(getattr(c, "anchor_pred_confidence", 0.0)), 3),
+            }
+        except (TypeError, ValueError, IndexError):
+            anchor = None
+
     return {
         "t": int(time.monotonic() * 1000),
         # Detection counter (ai_loop bumps it per inference result); lets the page tell new data
@@ -236,6 +250,9 @@ def _build_snapshot() -> dict:
             "box_corner_length_pct": int(getattr(c, "box_corner_length_pct", 0) or 0),
             "show_detect_range": bool(getattr(c, "show_detect_range", True)),
             "show_aim_prediction_marker": bool(getattr(c, "show_aim_prediction_marker", True)),
+            "show_anchor_trajectory": bool(getattr(c, "show_anchor_trajectory", False))
+                                      and bool(getattr(c, "prediction_enabled", False))
+                                      and getattr(c, "prediction_method", "") == "anchor",
             # Line widths (px) of the FOV / Detection Range / Tracer / Predicted Aim Point.
             "fov_line_thickness": fov_thickness(c),
             "detect_range_line_thickness": detect_range_thickness(c),
@@ -264,6 +281,7 @@ def _build_snapshot() -> dict:
         "boxes": _boxes(getattr(c, "latest_all_boxes", [])),
         "confidences": [float(x) for x in (getattr(c, "latest_all_confidences", []) or [])],
         "aim_predicted": aim_predicted,
+        "anchor": anchor,
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
         # Lock is held outside the control FOV: tracked, but no aiming this frame.

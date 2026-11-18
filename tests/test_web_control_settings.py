@@ -1337,3 +1337,41 @@ class TestFovTrackingFields:
         config = _config(fov_retention_pct=100.0, reacquire_radius_px=150)
         res = wcs.apply_tab_settings(config, "inference", {field: val})
         assert res["ok"] is True and getattr(config, field) == want
+
+
+class TestAnchorPredictionSettings:
+    def test_anchor_fields_round_trip_through_the_aim_and_visuals_tabs(self):
+        config = _config(prediction_method="velocity", anchor_strength=1.0, anchor_smoothing=0.4,
+                         anchor_velocity_influence=1.0, anchor_accel_influence=0.35,
+                         anchor_max_distance_pct=25.0, anchor_confidence_threshold=0.35,
+                         anchor_adaptive=True, prediction_horizon_ms=10.0, show_anchor_trajectory=True)
+        result = wcs.apply_tab_settings(config, "aim", {
+            "prediction_method": "Anchor", "anchor_strength": 0.8, "anchor_accel_influence": 0.5,
+            "anchor_max_distance_pct": 40, "anchor_adaptive": False, "prediction_horizon_ms": 120})
+        assert result["ok"] is True
+        assert config.prediction_method == "anchor"
+        assert (config.anchor_strength, config.anchor_accel_influence) == (0.8, 0.5)
+        assert config.anchor_max_distance_pct == 40
+        assert config.anchor_adaptive is False
+        assert config.prediction_horizon_ms == 120            # the horizon range now reaches 150 ms
+        shown = wcs.get_tab_settings(config, "aim")
+        assert shown["prediction_method"] == "anchor" and shown["anchor_strength"] == 0.8
+        assert wcs.apply_tab_settings(config, "visuals", {"show_anchor_trajectory": False})["ok"] is True
+        assert config.show_anchor_trajectory is False
+
+    def test_out_of_range_anchor_values_are_clamped_and_junk_is_rejected_atomically(self):
+        config = _config(anchor_strength=1.0, anchor_smoothing=0.4)
+        result = wcs.apply_tab_settings(config, "aim", {"anchor_smoothing": 0.9, "anchor_strength": 9})
+        assert result["ok"] is True                              # same convention as every other numeric field
+        assert (config.anchor_strength, config.anchor_smoothing) == (1.5, 0.9)
+        bad = wcs.apply_tab_settings(config, "aim", {"anchor_smoothing": 0.1, "anchor_strength": "nope"})
+        assert bad["ok"] is False and bad["field"] == "anchor_strength"
+        assert (config.anchor_strength, config.anchor_smoothing) == (1.5, 0.9)   # nothing written
+
+    def test_every_anchor_schema_field_exists_on_config(self):
+        from core.config import Config
+        c = Config()
+        for key in ("anchor_strength", "anchor_smoothing", "anchor_velocity_influence", "anchor_accel_influence",
+                    "anchor_max_distance_pct", "anchor_confidence_threshold", "anchor_adaptive"):
+            assert key in wcs._SCHEMA["aim"] and hasattr(c, key)
+        assert "show_anchor_trajectory" in wcs._SCHEMA["visuals"] and hasattr(c, "show_anchor_trajectory")
