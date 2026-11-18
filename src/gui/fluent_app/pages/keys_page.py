@@ -142,9 +142,6 @@ class KeyBindButton(PushButton):
         """更新按鈕文字"""
         self.setText(vk_to_name(self._vkCode))
 
-    def vkCode(self) -> int:
-        return self._vkCode
-
     def _startListening(self):
         """開始監聽按鍵"""
         self._listening = True
@@ -238,39 +235,6 @@ class KeyBindButton(PushButton):
             self.setText(vk_to_name(gp_vk))
             self.keyBound.emit(gp_vk)
             self._stopListening()
-
-    def _qtKeyToVk(self, qtKey: int) -> int:
-        """將 Qt Key 轉換為 Windows VK code"""
-        # 字母
-        if Qt.Key.Key_A <= qtKey <= Qt.Key.Key_Z:
-            return 0x41 + (qtKey - Qt.Key.Key_A)
-        # 數字
-        if Qt.Key.Key_0 <= qtKey <= Qt.Key.Key_9:
-            return 0x30 + (qtKey - Qt.Key.Key_0)
-        # F1-F12
-        if Qt.Key.Key_F1 <= qtKey <= Qt.Key.Key_F12:
-            return 0x70 + (qtKey - Qt.Key.Key_F1)
-        # 特殊鍵
-        mapping = {
-            Qt.Key.Key_Escape: 0x1B,
-            Qt.Key.Key_Tab: 0x09,
-            Qt.Key.Key_Backspace: 0x08,
-            Qt.Key.Key_Return: 0x0D,
-            Qt.Key.Key_Enter: 0x0D,
-            Qt.Key.Key_Insert: 0x2D,
-            Qt.Key.Key_Delete: 0x2E,
-            Qt.Key.Key_Space: 0x20,
-            Qt.Key.Key_Left: 0x25,
-            Qt.Key.Key_Up: 0x26,
-            Qt.Key.Key_Right: 0x27,
-            Qt.Key.Key_Down: 0x28,
-            Qt.Key.Key_Shift: 0x10,
-            Qt.Key.Key_Control: 0x11,
-            Qt.Key.Key_Alt: 0x12,
-            Qt.Key.Key_CapsLock: 0x14,
-        }
-        return mapping.get(qtKey, 0)
-
 
 # Known USB identifiers for MAKCU devices
 _MAKCU_VID = 0x1A86

@@ -107,11 +107,6 @@ def is_paddle_importable() -> bool:
     return bool(out)
 
 
-def is_paddle_gpu() -> bool:
-    out = _run_check("import paddle; print(paddle.is_compiled_with_cuda())")
-    return out == "True"
-
-
 # ── Installation ──────────────────────────────────────────────────────────────
 
 def _pip(packages: list, upgrade: bool = True, extra_index: str = "") -> None:

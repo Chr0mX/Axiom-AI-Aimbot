@@ -2,7 +2,7 @@
 MAKCU V2 Binary Protocol — interactive debug REPL.
 
 Run directly:
-    python src/makcu_debug_binary.py [COM_PORT] [BAUD]
+    python tools/makcu_debug_binary.py [COM_PORT] [BAUD]
 
 If no COM port is given the highest-numbered available port is auto-selected.
 """
@@ -12,7 +12,7 @@ import struct
 import sys
 import time
 
-_src_dir = os.path.dirname(os.path.abspath(__file__))
+_src_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")  # <repo>/src
 _deps_dir = os.path.join(_src_dir, "python", "dependencies")
 sys.path.insert(0, _deps_dir)
 sys.path.insert(0, _src_dir)

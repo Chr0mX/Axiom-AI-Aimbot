@@ -105,12 +105,6 @@ class FluentColors:
         return QColor(255, 255, 255, 20) if isDarkTheme() else QColor(0, 0, 0, 15)
 
     @staticmethod
-    def get_accent_color():
-        if HAS_THEME_COLORS:
-            return ThemeColors.ACCENT.qcolor()
-        return QColor(0, 122, 255)  # macOS Blue
-    
-    @staticmethod
     def get_success_color():
         if HAS_THEME_COLORS:
             return ThemeColors.SUCCESS.qcolor()

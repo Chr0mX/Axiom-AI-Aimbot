@@ -3,7 +3,7 @@ import os
 import re
 import time
 
-_src_dir = os.path.dirname(os.path.abspath(__file__))
+_src_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")  # <repo>/src
 _deps_dir = os.path.join(_src_dir, "python", "dependencies")
 sys.path.insert(0, _deps_dir)
 sys.path.insert(0, _src_dir)

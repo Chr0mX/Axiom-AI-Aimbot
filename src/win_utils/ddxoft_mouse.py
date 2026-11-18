@@ -213,14 +213,6 @@ class DDXoftMouse:
         self.failure_count = 0
         self.last_status = None
     
-    def print_statistics(self):
-        stats = self.get_statistics()
-        logger.info(
-            "[ddxoft] Stats — success: %d  failure: %d  total: %d  rate: %.1f%%  last: %s",
-            stats['success_count'], stats['failure_count'], stats['total_count'],
-            stats['success_rate'], stats['last_status'],
-        )
-    
     def test_functionality(self):
         """測試 ddxoft 功能並診斷問題"""
         if not self.ensure_initialized():
