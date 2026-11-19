@@ -835,11 +835,18 @@
     var mode = (el("inf-anchor_mode") || {}).value || d.anchor_mode || "adaptive";
     var fov = el("inf-fov_reduce_on_target_enabled") ? el("inf-fov_reduce_on_target_enabled").checked : !!d.fov_reduce_on_target_enabled;
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
+    // The estimator tuning is shared with the Aim tab's "Anchor" Prediction Method, which works
+    // without the master switch (server extra aim_uses_anchor = prediction on + method anchor);
+    // the horizon and the FOV influences are FOV-only and still need Enable Anchor Prediction.
+    var aimAnchor = !!d.aim_uses_anchor;
+    var shared = on || aimAnchor;
     var active = on && mode !== "disabled";
-    show("inf-anchor-mode-card", on);
-    ["horizon", "strength", "conf", "history", "maxdist"].forEach(function (k) { show("inf-anchor-" + k + "-card", active); });
-    show("inf-anchor-smoothing-card", on && (mode === "smoothed" || mode === "adaptive"));
-    show("inf-anchor-accel-card", active && mode !== "linear");
+    var sharedActive = shared && mode !== "disabled";
+    show("inf-anchor-mode-card", shared);
+    show("inf-anchor-horizon-card", active);
+    ["strength", "conf", "history", "maxdist"].forEach(function (k) { show("inf-anchor-" + k + "-card", sharedActive); });
+    show("inf-anchor-smoothing-card", shared && (mode === "smoothed" || mode === "adaptive"));
+    show("inf-anchor-accel-card", sharedActive && mode !== "linear");
     var fovMode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode || "adaptive";
     show("inf-anchor-infl-adaptive-card", active && fov && fovMode !== "anchor");
     show("inf-anchor-infl-dynamic-card", active && fov && fovMode !== "anchor");
@@ -2836,7 +2843,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "18") return;
+    if (cssVer !== "19") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

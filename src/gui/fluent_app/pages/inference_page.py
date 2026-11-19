@@ -82,7 +82,7 @@ _AFOV_CARDS = (
 # one table used both when the cards are built and by retranslateUi().
 _ANCHOR_TEXT = {
     "anchorEnableCard": ("anchor_enabled", "Enable Anchor Prediction",
-                         "Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before."),
+                         "Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. The tuning below is shared with the Aim page's Anchor prediction method, which works without this switch."),
     "anchorModeCard": ("anchor_mode", "Prediction Mode",
                        "Linear: current velocity. Velocity + Acceleration: also uses acceleration. Smoothed: smooths velocity/acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes."),
     "anchorHorizonCard": ("anchor_horizon", "Prediction Horizon",
@@ -768,12 +768,21 @@ class InferencePage(BasePage):
         on = bool(getattr(self._config, 'anchor_enabled', False))
         mode = str(getattr(self._config, 'anchor_mode', 'adaptive'))
         fov_on = bool(getattr(self._config, 'fov_reduce_on_target_enabled', False))
-        self.anchorModeCard.setVisible(on)
-        for card in (self.anchorHorizonCard, self.anchorStrengthCard, self.anchorConfCard,
+        # The estimator tuning (mode, strength, smoothing, acceleration, confidence, history,
+        # max distance) is shared: it also drives the Aim page's "Anchor" prediction method,
+        # which works without the master switch. The horizon and the FOV influences are
+        # FOV-only, so they still need Enable Anchor Prediction.
+        # (Checks the method itself, not aim_uses_anchor(): with the mode on Disabled the Mode
+        # card has to stay reachable or the user could never switch it back on.)
+        shared = on or (bool(getattr(self._config, 'prediction_enabled', False))
+                        and str(getattr(self._config, 'prediction_method', 'velocity')) == 'anchor')
+        self.anchorModeCard.setVisible(shared)
+        for card in (self.anchorStrengthCard, self.anchorConfCard,
                      self.anchorHistoryCard, self.anchorMaxDistCard):
-            card.setVisible(on and mode != 'disabled')
-        self.anchorSmoothingCard.setVisible(on and mode in ('smoothed', 'adaptive'))
-        self.anchorAccelCard.setVisible(on and mode in ('velocity_accel', 'smoothed', 'adaptive'))
+            card.setVisible(shared and mode != 'disabled')
+        self.anchorHorizonCard.setVisible(on and mode != 'disabled')
+        self.anchorSmoothingCard.setVisible(shared and mode in ('smoothed', 'adaptive'))
+        self.anchorAccelCard.setVisible(shared and mode in ('velocity_accel', 'smoothed', 'adaptive'))
         fov_anchor = str(getattr(self._config, 'fov_shrink_mode', 'adaptive')) == 'anchor'
         for card in (self.anchorInflAdaptiveCard, self.anchorInflDynamicCard):
             card.setVisible(on and mode != 'disabled' and fov_on and not fov_anchor)

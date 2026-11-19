@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=18">
+  <link rel="stylesheet" href="styles.css?v=19">
 </head>
 <body>
   <div class="app">
@@ -1640,13 +1640,14 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Prediction Method</div>
-                <div class="field-desc">Velocity, EMA, or a rolling average of recent steps</div>
+                <div class="field-desc">Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; tuned under Anchor Prediction on the Inference tab)</div>
               </div>
               <div class="field-control">
                 <select id="aim-prediction_method" data-key="prediction_method" data-type="choice">
                   <option value="velocity">Velocity</option>
                   <option value="ema">EMA</option>
                   <option value="rolling">Rolling</option>
+                  <option value="anchor">Anchor</option>
                 </select>
               </div>
             </div>
@@ -2970,6 +2971,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=18"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>

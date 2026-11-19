@@ -24,6 +24,9 @@ from ..base_page import BasePage
 from ..language_manager import t
 from ..theme_colors import ThemeColors
 
+_PREDICTION_METHOD_DESC = ("Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; "
+                           "tuned under Anchor Prediction on the Inference page)")
+
 
 class _AimPointPreview(QWidget):
     """Live canvas: simulated ESP box with head/body zones and aim-point X mark."""
@@ -1245,12 +1248,12 @@ class AimPage(BasePage):
 
         self.mathGroup = SettingCardGroup(t("aim_tuning_group", "Advanced Aim Tuning"), self.scrollWidget)
         self.predictionMethodCombo = ComboBox()
-        self.predictionMethodCombo.addItems(["Velocity", "EMA", "Rolling"])
+        self.predictionMethodCombo.addItems(["Velocity", "EMA", "Rolling", "Anchor"])
         self.predictionMethodCombo.setMinimumWidth(130)
         self.predictionMethodCard = SettingCard(
             FluentIcon.HISTORY,
             t("prediction_method", "Prediction Method"),
-            t("prediction_method_desc", "Velocity, EMA, or a rolling average of recent steps"),
+            t("prediction_method_desc", _PREDICTION_METHOD_DESC),
             self.mathGroup,
         )
         self.predictionMethodCard.hBoxLayout.addWidget(self.predictionMethodCombo, 0)
@@ -1569,7 +1572,7 @@ class AimPage(BasePage):
             self.camMotionCompSizeSegment.setCurrentItem(cmc_size)
             self.camMotionCompSizeCard.setEnabled(cmc_on)
 
-            method_map = {"velocity": "Velocity", "ema": "EMA", "rolling": "Rolling"}
+            method_map = {"velocity": "Velocity", "ema": "EMA", "rolling": "Rolling", "anchor": "Anchor"}
             self.predictionMethodCombo.setCurrentText(method_map.get(
                 str(getattr(self._config, 'prediction_method', 'velocity')), "Velocity"))
             self.predictionLeadFramesCard.setValue(int(getattr(self._config, 'prediction_lead_frames', 3)))
@@ -2201,7 +2204,7 @@ class AimPage(BasePage):
         # old values back over a preset/web change.
         if not self._config or self._isLoadingConfig:
             return
-        method = {"Velocity": "velocity", "EMA": "ema", "Rolling": "rolling"}.get(
+        method = {"Velocity": "velocity", "EMA": "ema", "Rolling": "rolling", "Anchor": "anchor"}.get(
             self.predictionMethodCombo.currentText(), "velocity")
         self._config.prediction_method = method
         self._config.prediction_lead_frames = float(self.predictionLeadFramesCard.value())
@@ -2225,8 +2228,9 @@ class AimPage(BasePage):
         pred_on = self.predictionEnableCard.isChecked()
         method = self.predictionMethodCombo.currentText()
         self.predictionMethodCard.setVisible(pred_on)
-        # Rolling uses a frame lead; Velocity/EMA use the time horizon, which
-        # Adaptive Lead stretches (ai_aiming skips it for Rolling).
+        # Rolling uses a frame lead; Velocity/EMA/Anchor use the time horizon, which
+        # Adaptive Lead stretches (ai_aiming skips it for Rolling). Anchor's own tuning
+        # (mode, strength, smoothing, ...) is the Anchor Prediction group on the Inference page.
         self.predictionLeadFramesCard.setVisible(pred_on and method == "Rolling")
         self.predictionAdaptiveLeadCard.setVisible(pred_on and method != "Rolling")
         # Rolling uses a frame count, so timestamps don't apply to it; the
@@ -2457,6 +2461,7 @@ class AimPage(BasePage):
         self.trackingGroup.titleLabel.setText(t("target_tracking", "Target Tracking"))
         self.mathGroup.titleLabel.setText(t("aim_tuning_group", "Advanced Aim Tuning"))
         self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Prediction Method"))
+        self.predictionMethodCard.contentLabel.setText(t("prediction_method_desc", _PREDICTION_METHOD_DESC))
         self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
         self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
         self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))
