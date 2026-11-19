@@ -628,6 +628,8 @@ def anchor_reset(config: Config, state: LoopState) -> None:
     state.anchor_view.invalidate()
     state.anchor_fov.reset()
     state.anchor_params_t = 0.0
+    state.aim_anchor.reset()
+    state.aim_anchor_params_t = 0.0
     config.anchor_debug = None
 
 

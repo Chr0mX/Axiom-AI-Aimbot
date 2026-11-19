@@ -925,7 +925,7 @@ class Config:
         self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
         self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
         self.prediction_history_len: int = 3         # 歷史點數量
-        self.prediction_method: str = "velocity"     # velocity | ema | rolling
+        self.prediction_method: str = "velocity"     # velocity | ema | rolling | anchor (core/anchor_prediction.py, shares the anchor_* tuning)
         self.prediction_lead_frames: float = 3.0     # rolling predictor, in frames
         self.prediction_adaptive_lead: bool = False
         # Velocity-estimate refinements — all off by default so existing
@@ -1527,7 +1527,7 @@ def _validate_gpu_monitor(config: Config) -> None:
 
 def _validate_aim_math(config: Config) -> None:
     """Clamp the optional Advanced Aim Tuning fields."""
-    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'ema', 'rolling'):
+    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'ema', 'rolling', 'anchor'):
         config.prediction_method = 'velocity'
     config.aim_x_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
     config.aim_y_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))

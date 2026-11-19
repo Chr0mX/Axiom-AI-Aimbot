@@ -1384,6 +1384,32 @@ class TestAnchorPredictionSettings:
         assert config.show_anchor_debug is True
 
 
+class TestAnchorAimLeadSettings:
+    """Prediction Method 'anchor' on the Aim tab + the read-only extra the Inference tab uses to
+    show the shared Anchor tuning cards (client: updateAnchorVisibility() / d.aim_uses_anchor)."""
+
+    def test_anchor_is_an_accepted_prediction_method(self):
+        assert "anchor" in wcs._SCHEMA["aim"]["prediction_method"]["choices"]
+        config = _config(prediction_method="velocity")
+        assert wcs.apply_tab_settings(config, "aim", {"prediction_method": "Anchor"})["ok"] is True
+        assert config.prediction_method == "anchor"
+        bad = wcs.apply_tab_settings(config, "aim", {"prediction_method": "psychic"})
+        assert bad["ok"] is False and config.prediction_method == "anchor"
+
+    @pytest.mark.parametrize("enabled,method,mode,want", [
+        (True, "anchor", "adaptive", True),
+        (True, "anchor", "disabled", True),        # method-based: the Mode card must stay reachable
+        (True, "velocity", "adaptive", False),
+        (False, "anchor", "adaptive", False),
+    ])
+    def test_inference_tab_extra_follows_the_aim_method(self, enabled, method, mode, want):
+        config = _config(prediction_enabled=enabled, prediction_method=method, anchor_mode=mode)
+        assert wcs.get_tab_settings(config, "inference")["aim_uses_anchor"] is want
+
+    def test_extra_defaults_to_false_on_a_bare_config(self):
+        assert wcs.get_tab_settings(_config(), "inference")["aim_uses_anchor"] is False
+
+
 class TestAnchorFovSettings:
     KEYS = ("afov_source", "afov_position", "afov_offset_x", "afov_offset_y", "afov_manual_x", "afov_manual_y",
             "afov_follow_speed", "afov_smoothing", "afov_max_speed", "afov_predict_enabled",

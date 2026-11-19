@@ -676,3 +676,42 @@ class FovAdjuster:
         self.edge_adj = self._e if abs(self._e) >= _ADJ_DEADBAND else 0.0
         self.speed_adj = self._s if abs(self._s) >= 1.0 else 0.0
         self.turn_adj = self._u if abs(self._u) >= _ADJ_DEADBAND else 0.0
+
+
+# ── aim-lead method ──────────────────────────────────────────────────────────
+# ``prediction_method == 'anchor'`` (Aim page) leads the *aim point* with the same
+# estimator the FOV layer uses. It has its own track (``LoopState.aim_anchor``) fed with
+# the compensated box, the aim-lead horizon and the shared ``anchor_*`` tuning; it works
+# whether or not "Enable Anchor Prediction" (the FOV / lock-association layer) is on.
+
+def aim_uses_anchor(config) -> bool:
+    """True while the aim-lead Prediction Method is Anchor: prediction is on, the
+    method is ``anchor`` and the shared Anchor mode is not ``disabled``."""
+    return (bool(getattr(config, 'prediction_enabled', False))
+            and getattr(config, 'prediction_method', 'velocity') == 'anchor'
+            and getattr(config, 'anchor_mode', 'adaptive') in MODES[1:])
+
+
+def predict_aim_point(track: "AnchorTrack", now: float, box: Sequence[float], aim_x: float,
+                      aim_y: float, horizon_s: float, det_conf: float = 1.0):
+    """Feed ``box`` (at time ``now``) to ``track`` and return the aim point led by the
+    track's predicted box ``horizon_s`` ahead.
+
+    The aim point keeps its relative place inside the box: it moves with the predicted
+    centre and scales with the predicted size (so a head offset follows a box that is
+    growing). Returns ``(aim_x, aim_y)`` unchanged when the sample was ignored
+    (non-finite / out of order), the aim point is not finite, or the prediction is not
+    valid (too little history, stationary, low confidence).
+    """
+    if not (math.isfinite(aim_x) and math.isfinite(aim_y)):
+        return aim_x, aim_y
+    if not track.update(now, box, det_conf):
+        return aim_x, aim_y
+    p = track.predict(horizon_s, now)
+    if not p.valid:
+        return aim_x, aim_y
+    w, h = p.x2 - p.x1, p.y2 - p.y1
+    sx = (p.px2 - p.px1) / w if w > 0.0 else 1.0
+    sy = (p.py2 - p.py1) / h if h > 0.0 else 1.0
+    return p.pcx + (aim_x - p.cx) * sx, p.pcy + (aim_y - p.cy) * sy
+

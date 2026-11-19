@@ -1124,3 +1124,35 @@ class TestTrackingSettings:
         assert c.min_lock_duration_ms == 5000 and c.target_switch_threshold == 1.0
         assert c.reacquire_radius_px == 0
         assert c.tracking_confidence == 0.6          # capped at the acquisition bar
+
+
+class TestPredictionMethodValidation:
+    """prediction_method accepts velocity / ema / rolling / anchor; anything else falls back to velocity."""
+
+    def test_default_is_velocity(self):
+        assert _make_config().prediction_method == 'velocity'
+
+    @pytest.mark.parametrize("method", ["velocity", "ema", "rolling", "anchor"])
+    def test_known_methods_survive_validation(self, method):
+        from core.config import validate_config
+        c = _make_config()
+        c.prediction_method = method
+        validate_config(c)
+        assert c.prediction_method == method
+
+    @pytest.mark.parametrize("junk", ["", "ANCHOR2", "kalman", None, 3])
+    def test_unknown_methods_fall_back_to_velocity(self, junk):
+        from core.config import validate_config
+        c = _make_config()
+        c.prediction_method = junk
+        validate_config(c)
+        assert c.prediction_method == 'velocity'
+
+    def test_anchor_round_trips_through_the_file_format(self):
+        c = _make_config()
+        c.prediction_method = 'anchor'
+        d = c.to_dict()
+        assert d['tracking']['prediction']['method'] == 'anchor'
+        c2 = _make_config()
+        c2.from_dict(d)
+        assert c2.prediction_method == 'anchor'

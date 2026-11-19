@@ -230,7 +230,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "prediction_horizon_ms": {"type": "float", "min": 5, "max": 50},
         "prediction_max_velocity": {"type": "float", "min": 300, "max": 3000},
         "prediction_history_len": {"type": "int", "min": 2, "max": 6},
-        "prediction_method": {"type": "choice", "choices": ["velocity", "ema", "rolling"]},
+        "prediction_method": {"type": "choice", "choices": ["velocity", "ema", "rolling", "anchor"]},
         "prediction_lead_frames": {"type": "float", "min": 1, "max": 10},
         "prediction_adaptive_lead": {"type": "bool"},
         "prediction_capture_timestamps": {"type": "bool"},
@@ -510,6 +510,13 @@ def get_tab_settings(config, tab: str) -> dict:
         # retention / tracking cards here only apply while it is on (same
         # visibility rule as inference_page.py's _updateTrackingVisibility()).
         result["sticky_lock_enabled"] = bool(getattr(config, "sticky_lock_enabled", False))
+        # Read-only extra: the aim-lead Prediction Method (Aim tab) can be Anchor, which shares the
+        # Anchor Prediction tuning cards shown on this tab (see inference_page._updateAnchorVisibility).
+        # Method-based, not aim_uses_anchor(): with the mode on Disabled the Mode card must stay
+        # reachable or it could never be switched back on.
+        result["aim_uses_anchor"] = bool(
+            getattr(config, "prediction_enabled", False)
+            and str(getattr(config, "prediction_method", "velocity")) == "anchor")
 
     if tab == "keys":
         # Read-only extras — these three drive the Keys & HW panel's own
