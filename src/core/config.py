@@ -192,6 +192,36 @@ _FIELD_MAP = {
     'prediction_velocity_deadzone_px_s': 'tracking.prediction.velocity_deadzone_px_s',
     'prediction_ego_motion_comp': 'tracking.prediction.ego_motion_comp',
     'prediction_ego_motion_scale': 'tracking.prediction.ego_motion_scale',
+    'afov_source':                'aim.fov_anchor.source',
+    'afov_position':              'aim.fov_anchor.position',
+    'afov_offset_x':              'aim.fov_anchor.offset_x',
+    'afov_offset_y':              'aim.fov_anchor.offset_y',
+    'afov_manual_x':              'aim.fov_anchor.manual_x',
+    'afov_manual_y':              'aim.fov_anchor.manual_y',
+    'afov_follow_speed':          'aim.fov_anchor.follow_speed',
+    'afov_smoothing':             'aim.fov_anchor.smoothing',
+    'afov_max_speed':             'aim.fov_anchor.max_speed',
+    'afov_predict_enabled':       'aim.fov_anchor.predict.enabled',
+    'afov_predict_strength':      'aim.fov_anchor.predict.strength',
+    'afov_predict_time_ms':       'aim.fov_anchor.predict.time_ms',
+    'afov_lost_behavior':         'aim.fov_anchor.lost.behavior',
+    'afov_lost_delay_ms':         'aim.fov_anchor.lost.delay_ms',
+    'afov_reacquire':             'aim.fov_anchor.lost.reacquire',
+    'afov_radius':                'aim.fov_anchor.radius.default',
+    'afov_min_radius':            'aim.fov_anchor.radius.min',
+    'afov_max_radius':            'aim.fov_anchor.radius.max',
+    'afov_dynamic_radius':        'aim.fov_anchor.radius.dynamic',
+    'anchor_enabled':             'tracking.anchor.enabled',
+    'anchor_mode':                'tracking.anchor.mode',
+    'anchor_horizon_ms':          'tracking.anchor.horizon_ms',
+    'anchor_strength':            'tracking.anchor.strength',
+    'anchor_velocity_smoothing':  'tracking.anchor.velocity_smoothing',
+    'anchor_accel_comp':          'tracking.anchor.accel_comp',
+    'anchor_confidence_threshold': 'tracking.anchor.confidence_threshold',
+    'anchor_history_len':         'tracking.anchor.history_len',
+    'anchor_max_distance_pct':    'tracking.anchor.max_distance_pct',
+    'anchor_fov_influence_adaptive': 'tracking.anchor.fov_influence_adaptive',
+    'anchor_fov_influence_dynamic': 'tracking.anchor.fov_influence_dynamic',
     'sticky_gap_extrapolate':     'tracking.sticky_lock.gap_extrapolate',
     'sticky_gap_frames':          'tracking.sticky_lock.gap_frames',
     'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
@@ -235,6 +265,8 @@ _FIELD_MAP = {
     'show_tracer_line':           'display.show_tracer_line',
     'tracer_from_bottom':         'display.tracer_from_bottom',
     'show_aim_prediction_marker': 'display.show_aim_prediction_marker',
+    'show_anchor_debug':          'display.show_anchor_debug',
+    'show_stick_gauge':           'display.show_stick_gauge',
     'box_color_theme':            'display.box_color_theme',
     'chroma_box_speed':           'display.chroma_box_speed',
     'show_status_panel':          'display.status_panel.show',
@@ -289,6 +321,17 @@ _FIELD_MAP = {
     'makcu_mouse_spread':         'hardware.makcu.mouse_spread.percent',
     'xbox_sensitivity':           'hardware.xbox.sensitivity',
     'xbox_deadzone':              'hardware.xbox.deadzone',
+
+    # --- vigem network ---
+    'vigem_net_host':             'hardware.vigem_network.host',
+    'vigem_net_port':             'hardware.vigem_network.port',
+    'vigem_net_token':            'hardware.vigem_network.token',
+    'vigem_net_sensitivity':      'hardware.vigem_network.sensitivity',
+    'vigem_net_input_deadzone':   'hardware.vigem_network.input_deadzone',
+    'vigem_net_game_deadzone':    'hardware.vigem_network.game_deadzone',
+    'vigem_net_release_ms':       'hardware.vigem_network.release_ms',
+    'remote_btn_enabled':         'hardware.remote_buttons.enabled',
+    'remote_aim_button':          'hardware.remote_buttons.aim_button',
 
     # --- ui ---
     'dark_mode':                  'ui.dark_mode',
@@ -526,6 +569,40 @@ class Config:
         self.fov_retention_enabled: bool = False
         self.fov_retention_pct: float = 100.0
 
+        # Anchor FOV (fov_shrink_mode == 'anchor', core/anchor_fov.py): the FOV centre
+        # follows an anchor and its radius is controlled independently of it.
+        self.afov_source: str = 'detection'      # 'detection' / 'tracker' / 'manual'
+        self.afov_position: str = 'center'       # 'center' / 'top' / 'bottom' / 'custom'
+        self.afov_offset_x: int = 0              # px added to the anchor point
+        self.afov_offset_y: int = 0
+        self.afov_manual_x: int = 0              # manual source: px from the crosshair
+        self.afov_manual_y: int = 0
+        self.afov_follow_speed: float = 12.0     # 1/s approach rate (higher = tighter)
+        self.afov_smoothing: float = 0.3         # 0..1 low-pass on the anchor (0 = off)
+        self.afov_max_speed: int = 4000          # px/s cap on the FOV centre (0 = unlimited)
+        self.afov_predict_enabled: bool = False  # lead the anchor by the tracker's velocity
+        self.afov_predict_strength: float = 1.0
+        self.afov_predict_time_ms: int = 80
+        self.afov_lost_behavior: str = 'hold'    # 'hold' / 'return' / 'search'
+        self.afov_lost_delay_ms: int = 150       # anchor must be gone this long first
+        self.afov_reacquire: str = 'smooth'      # 'smooth' / 'fast' (catch-up boost)
+        self.afov_radius: int = 100              # default radius (half the FOV width, px)
+        self.afov_min_radius: int = 50
+        self.afov_max_radius: int = 300
+        self.afov_dynamic_radius: bool = False   # widen with target speed / low confidence
+        # Runtime-only (unpersisted): the Anchor FOV controller's real state, published
+        # every frame while the mode is active so every overlay draws what the filter used.
+        self.fov_center_x = None                 # None = FOV centred on the crosshair
+        self.fov_center_y = None
+        self.afov_active: bool = False
+        self.afov_has_anchor: bool = False
+        self.afov_lost: bool = False
+        self.afov_phase: int = 0
+        self.afov_anchor_x: float = 0.0
+        self.afov_anchor_y: float = 0.0
+        self.afov_pred_x: float = 0.0
+        self.afov_pred_y: float = 0.0
+
         # Runtime state — not serialized (see _FIELD_MAP: neither key appears
         # there). The FOV width/height actually in effect THIS frame
         # (fov_size/fov_height, or the shrunk values while the reduce-on-
@@ -653,6 +730,12 @@ class Config:
         # kalman_enabled is visible, distinct from the existing per-box aim
         # marker (which is always the raw, pre-prediction point).
         self.show_aim_prediction_marker: bool = True
+        # Anchor prediction debug overlay (actual vs predicted box, centres,
+        # direction, velocity, confidence). Off by default; nothing is built or
+        # published for it while off — see anchor_debug below.
+        self.show_anchor_debug: bool = False
+
+        self.show_stick_gauge: bool = True  # vigem_network stick gauge on the overlays
 
         # Crosshair overlay
         self.show_crosshair: bool = False
@@ -673,6 +756,22 @@ class Config:
         # Xbox 360 虛擬手把設定
         self.xbox_sensitivity: float = 1.0          # 手把靈敏度 (0.1~5.0)
         self.xbox_deadzone: float = 0.05            # 手把死區 (0.0~0.5)
+
+        # ViGEm Network (remote virtual Xbox via TCP)
+        self.vigem_net_host: str = ""
+        self.vigem_net_port: int = 5555
+        self.vigem_net_token: str = ""
+        self.vigem_net_sensitivity: float = 1.0
+        self.vigem_net_input_deadzone: float = 0.02  # fraction of full stick treated as 0
+        self.vigem_net_game_deadzone: float = 0.0    # game's own inner dead zone to skip past (0 = off)
+        self.vigem_net_release_ms: int = 50          # recenter the stick this long after the last move
+        # Runtime only (not in _FIELD_MAP): stick value last sent, -1..1
+        self.vigem_stick_x: float = 0.0
+        self.vigem_stick_y: float = 0.0
+        # Mouse buttons pushed back by GamepadEnhancer on the vigem_network connection
+        # (win_utils/vigem_network.py): one address/port/token for commands out and clicks in.
+        self.remote_btn_enabled: bool = False
+        self.remote_aim_button: str = "rmb"  # "off", "lmb", "rmb", "mmb", "side1", "side2"
 
         # 檢測設定
         # 偵測節流：
@@ -826,7 +925,7 @@ class Config:
         self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
         self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
         self.prediction_history_len: int = 3         # 歷史點數量
-        self.prediction_method: str = "velocity"     # velocity | ema | rolling
+        self.prediction_method: str = "velocity"     # velocity | ema | rolling | anchor (core/anchor_prediction.py, shares the anchor_* tuning)
         self.prediction_lead_frames: float = 3.0     # rolling predictor, in frames
         self.prediction_adaptive_lead: bool = False
         # Velocity-estimate refinements — all off by default so existing
@@ -836,6 +935,23 @@ class Config:
         self.prediction_velocity_deadzone_px_s: float = 0.0  # soft-zero speeds below this (0 = off)
         self.prediction_ego_motion_comp: bool = False     # remove our own mouse moves from apparent motion
         self.prediction_ego_motion_scale: float = 1.0     # screen px per mouse count sent
+
+        # Anchor prediction — an additive layer that predicts the locked
+        # target's future box and feeds the Adaptive/Dynamic FOV and lock
+        # association (core/anchor_prediction.py). Off by default: with
+        # anchor_enabled False nothing below is ever read and the app behaves
+        # exactly as before.
+        self.anchor_enabled: bool = False
+        self.anchor_mode: str = 'adaptive'            # disabled | linear | velocity_accel | smoothed | adaptive
+        self.anchor_horizon_ms: float = 100.0         # how far ahead to predict (20-500)
+        self.anchor_strength: float = 1.0             # scales the predicted displacement (0-1.5)
+        self.anchor_velocity_smoothing: float = 0.4   # velocity/acceleration EMA time constant (0-1 -> 20-220 ms)
+        self.anchor_accel_comp: float = 0.35          # weight of the acceleration term (0 = off)
+        self.anchor_confidence_threshold: float = 0.35  # below this the lead is zero
+        self.anchor_history_len: int = 6              # samples used by the estimator (4-12)
+        self.anchor_max_distance_pct: float = 25.0    # lead cap, % of the configured FOV's shorter side (0 = none)
+        self.anchor_fov_influence_adaptive: float = 0.5   # how much the prediction nudges Adaptive FOV (0-1)
+        self.anchor_fov_influence_dynamic: float = 0.5    # how much the prediction nudges Dynamic FOV (0-1)
 
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
@@ -914,6 +1030,11 @@ class Config:
         self.aim_predicted_x: float = 0.0
         self.aim_predicted_y: float = 0.0
         self.aim_prediction_active: bool = False
+        # Anchor debug snapshot (runtime-only): None, or a 15-tuple
+        # (x1,y1,x2,y2, px1,py1,px2,py2, cx,cy, pcx,pcy, vx,vy, confidence) of the
+        # actual box, the predicted box, their centres, velocity and confidence.
+        # Published only while show_anchor_debug is on; cleared on lock loss.
+        self.anchor_debug = None
 
         # 延遲/性能統計（預設關閉，避免輸出干擾）
         self.enable_latency_stats: bool = False
@@ -1204,6 +1325,8 @@ def validate_config(config_instance: Config) -> None:
     # 向後兼容：修正滑鼠移動方式
     _validate_mouse_method(config_instance)
     _validate_aim_math(config_instance)
+    _validate_anchor(config_instance)
+    _validate_anchor_fov(config_instance)
     _validate_tracking(config_instance)
     _validate_box_style(config_instance)
     _validate_web_esp(config_instance)
@@ -1404,7 +1527,7 @@ def _validate_gpu_monitor(config: Config) -> None:
 
 def _validate_aim_math(config: Config) -> None:
     """Clamp the optional Advanced Aim Tuning fields."""
-    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'ema', 'rolling'):
+    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'ema', 'rolling', 'anchor'):
         config.prediction_method = 'velocity'
     config.aim_x_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
     config.aim_y_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))
@@ -1417,6 +1540,64 @@ def _validate_aim_math(config: Config) -> None:
         0.1, min(5.0, float(getattr(config, 'prediction_ego_motion_scale', 1.0) or 1.0)))
 
 
+def _validate_anchor(config: Config) -> None:
+    """Clamp the Anchor Prediction settings."""
+    from .anchor_prediction import MODES
+    if getattr(config, 'anchor_mode', 'adaptive') not in MODES:
+        config.anchor_mode = 'adaptive'
+    config.anchor_enabled = bool(getattr(config, 'anchor_enabled', False))
+    config.anchor_horizon_ms = max(20.0, min(500.0, _finite(getattr(config, 'anchor_horizon_ms', 100.0), 100.0)))
+    config.anchor_strength = max(0.0, min(1.5, _finite(getattr(config, 'anchor_strength', 1.0), 1.0)))
+    config.anchor_velocity_smoothing = max(
+        0.0, min(1.0, _finite(getattr(config, 'anchor_velocity_smoothing', 0.4), 0.4)))
+    config.anchor_accel_comp = max(0.0, min(1.0, _finite(getattr(config, 'anchor_accel_comp', 0.35), 0.35)))
+    config.anchor_confidence_threshold = max(
+        0.0, min(1.0, _finite(getattr(config, 'anchor_confidence_threshold', 0.35), 0.35)))
+    config.anchor_history_len = int(max(4, min(12, _finite(getattr(config, 'anchor_history_len', 6), 6))))
+    config.anchor_max_distance_pct = max(
+        0.0, min(100.0, _finite(getattr(config, 'anchor_max_distance_pct', 25.0), 25.0)))
+    config.anchor_fov_influence_adaptive = max(
+        0.0, min(1.0, _finite(getattr(config, 'anchor_fov_influence_adaptive', 0.5), 0.5)))
+    config.anchor_fov_influence_dynamic = max(
+        0.0, min(1.0, _finite(getattr(config, 'anchor_fov_influence_dynamic', 0.5), 0.5)))
+
+
+def _validate_anchor_fov(config: Config) -> None:
+    """Clamp the Anchor FOV settings (core/anchor_fov.py)."""
+    from .anchor_fov import SOURCES, POSITIONS, LOST_MODES, REACQUIRE_MODES
+
+    def pick(name, allowed, default):
+        if getattr(config, name, default) not in allowed:
+            setattr(config, name, default)
+
+    def num(name, default, lo, hi, cast=float):
+        setattr(config, name, cast(max(lo, min(hi, _finite(getattr(config, name, default), default)))))
+
+    pick('afov_source', SOURCES, 'detection')
+    pick('afov_position', POSITIONS, 'center')
+    pick('afov_lost_behavior', LOST_MODES, 'hold')
+    pick('afov_reacquire', REACQUIRE_MODES, 'smooth')
+    num('afov_offset_x', 0, -1000, 1000, int)
+    num('afov_offset_y', 0, -1000, 1000, int)
+    num('afov_manual_x', 0, -4096, 4096, int)
+    num('afov_manual_y', 0, -4096, 4096, int)
+    num('afov_follow_speed', 12.0, 0.5, 100.0)
+    num('afov_smoothing', 0.3, 0.0, 1.0)
+    num('afov_max_speed', 4000, 0, 50000, int)
+    num('afov_predict_strength', 1.0, 0.0, 2.0)
+    num('afov_predict_time_ms', 80, 0, 500, int)
+    num('afov_lost_delay_ms', 150, 0, 5000, int)
+    config.afov_predict_enabled = bool(getattr(config, 'afov_predict_enabled', False))
+    config.afov_dynamic_radius = bool(getattr(config, 'afov_dynamic_radius', False))
+    # min <= default <= max, all sane: the controller relies on it
+    num('afov_min_radius', 50, 1, 4096, int)
+    num('afov_max_radius', 300, 1, 4096, int)
+    if config.afov_max_radius < config.afov_min_radius:
+        config.afov_max_radius = config.afov_min_radius
+    num('afov_radius', 100, 1, 4096, int)
+    config.afov_radius = max(config.afov_min_radius, min(config.afov_max_radius, config.afov_radius))
+
+
 def _finite(value, default: float) -> float:
     try:
         v = float(value)
@@ -1427,7 +1608,7 @@ def _finite(value, default: float) -> float:
 
 def _validate_tracking(config: Config) -> None:
     """Clamp the FOV-shrink-mode and target-tracking fields."""
-    if getattr(config, 'fov_shrink_mode', 'adaptive') not in ('fixed', 'adaptive', 'dynamic'):
+    if getattr(config, 'fov_shrink_mode', 'adaptive') not in ('fixed', 'adaptive', 'dynamic', 'anchor'):
         config.fov_shrink_mode = 'adaptive'
     # FOV bounds: a zero/negative/NaN extent or a 0% shrink floor would make the
     # filter reject everything or the shrink controller degenerate.
@@ -1455,12 +1636,12 @@ def _validate_tracking(config: Config) -> None:
 def _validate_mouse_method(config: Config) -> None:
     """驗證並修正滑鼠移動方式"""
     # 驗證滑鼠移動方式是否為有效值
-    valid_move_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox')
+    valid_move_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox', 'vigem_network')
     if config.mouse_move_method not in valid_move_methods:
         config.mouse_move_method = 'mouse_event'
-    
+
     # 驗證滑鼠點擊方式是否為有效值
-    valid_click_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox')
+    valid_click_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox', 'vigem_network')
     if config.mouse_click_method not in valid_click_methods:
         config.mouse_click_method = 'mouse_event'
 
@@ -1468,6 +1649,19 @@ def _validate_mouse_method(config: Config) -> None:
         config.makcu_aim_button = 'lmb'
     if getattr(config, 'makcu_always_aim_button', 'off') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
         config.makcu_always_aim_button = 'off'
+    for _attr, _default in (('vigem_net_input_deadzone', 0.02), ('vigem_net_game_deadzone', 0.0)):
+        try:
+            _v = float(getattr(config, _attr, _default))
+        except (TypeError, ValueError):
+            _v = _default
+        setattr(config, _attr, max(0.0, min(0.5, _v)) if _v == _v else _default)
+    try:
+        _rel = int(getattr(config, 'vigem_net_release_ms', 50))
+    except (TypeError, ValueError):
+        _rel = 50
+    config.vigem_net_release_ms = max(10, min(500, _rel))
+    if getattr(config, 'remote_aim_button', 'rmb') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
+        config.remote_aim_button = 'rmb'
     if getattr(config, 'makcu_connection', 'serial') not in ('serial', 'udp'):
         config.makcu_connection = 'serial'
     try:

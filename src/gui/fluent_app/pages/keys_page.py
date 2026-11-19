@@ -4,8 +4,6 @@
 import time
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
-from PyQt6.QtWidgets import QWidget, QHBoxLayout
-from PyQt6.QtGui import QKeySequence
 from qfluentwidgets import (
     SettingCardGroup, SettingCard, SwitchSettingCard, FluentIcon,
     PushButton, BodyLabel, ComboBox, LineEdit,
@@ -20,7 +18,6 @@ from ..theme_colors import ThemeColors
 # 手柄按鍵讀取
 from win_utils.gamepad_input import (
     is_gamepad_vk, poll_pressed_gamepad_button, GP_VK_TRANSLATION_MAP,
-    GP_VK_MIN, GP_VK_MAX,
 )
 
 MOUSE_VK_BIND_OPTIONS = (
@@ -145,9 +142,6 @@ class KeyBindButton(PushButton):
         """更新按鈕文字"""
         self.setText(vk_to_name(self._vkCode))
 
-    def vkCode(self) -> int:
-        return self._vkCode
-
     def _startListening(self):
         """開始監聽按鍵"""
         self._listening = True
@@ -241,39 +235,6 @@ class KeyBindButton(PushButton):
             self.setText(vk_to_name(gp_vk))
             self.keyBound.emit(gp_vk)
             self._stopListening()
-
-    def _qtKeyToVk(self, qtKey: int) -> int:
-        """將 Qt Key 轉換為 Windows VK code"""
-        # 字母
-        if Qt.Key.Key_A <= qtKey <= Qt.Key.Key_Z:
-            return 0x41 + (qtKey - Qt.Key.Key_A)
-        # 數字
-        if Qt.Key.Key_0 <= qtKey <= Qt.Key.Key_9:
-            return 0x30 + (qtKey - Qt.Key.Key_0)
-        # F1-F12
-        if Qt.Key.Key_F1 <= qtKey <= Qt.Key.Key_F12:
-            return 0x70 + (qtKey - Qt.Key.Key_F1)
-        # 特殊鍵
-        mapping = {
-            Qt.Key.Key_Escape: 0x1B,
-            Qt.Key.Key_Tab: 0x09,
-            Qt.Key.Key_Backspace: 0x08,
-            Qt.Key.Key_Return: 0x0D,
-            Qt.Key.Key_Enter: 0x0D,
-            Qt.Key.Key_Insert: 0x2D,
-            Qt.Key.Key_Delete: 0x2E,
-            Qt.Key.Key_Space: 0x20,
-            Qt.Key.Key_Left: 0x25,
-            Qt.Key.Key_Up: 0x26,
-            Qt.Key.Key_Right: 0x27,
-            Qt.Key.Key_Down: 0x28,
-            Qt.Key.Key_Shift: 0x10,
-            Qt.Key.Key_Control: 0x11,
-            Qt.Key.Key_Alt: 0x12,
-            Qt.Key.Key_CapsLock: 0x14,
-        }
-        return mapping.get(qtKey, 0)
-
 
 # Known USB identifiers for MAKCU devices
 _MAKCU_VID = 0x1A86
@@ -780,6 +741,33 @@ class KeysPage(BasePage):
         self.makcuKeysGroup.addSettingCard(self.makcuSpreadEnableCard)
         self.makcuKeysGroup.addSettingCard(self.makcuSpreadCard)
         self.addContent(self.makcuKeysGroup)
+
+        # Remote mouse buttons (pushed by GamepadEnhancer on the ViGEm Network connection) — always visible
+        self.remoteBtnGroup = SettingCardGroup(t("remote_btn_group", "Remote Mouse Buttons"), self.scrollWidget)
+        self.remoteBtnEnableCard = SwitchSettingCard(
+            FluentIcon.WIFI,
+            t("remote_btn_enable", "Receive Remote Mouse Buttons"),
+            t("remote_btn_enable_desc", "Get the GamepadEnhancer PC's mouse buttons over the ViGEm Network connection (same address and token); holding the chosen button engages aim"),
+            parent=self.remoteBtnGroup
+        )
+        self.remoteAimButtonCombo = ComboBox()
+        self.remoteAimButtonCombo.setMinimumWidth(140)
+        self._remoteAimButtons = ["off", "lmb", "rmb", "mmb", "side1", "side2"]
+        for _name in ("Off", "Left (LMB)", "Right (RMB)", "Middle (MMB)", "Side 1", "Side 2"):
+            self.remoteAimButtonCombo.addItem(_name)
+        self.remoteAimButtonCard = SettingCard(
+            FluentIcon.PLAY,
+            t("remote_aim_button", "Remote Aim Button"),
+            t("remote_aim_button_desc", "Remote mouse button that activates aiming"),
+            self.remoteBtnGroup
+        )
+        self.remoteAimButtonCard.hBoxLayout.addWidget(self.remoteAimButtonCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.remoteAimButtonCard.hBoxLayout.addSpacing(16)
+        for _c in (self.remoteBtnEnableCard, self.remoteAimButtonCard):
+            self.remoteBtnGroup.addSettingCard(_c)
+        self.addContent(self.remoteBtnGroup)
+        self.remoteBtnEnableCard.checkedChanged.connect(self._onRemoteBtnEnabled)
+        self.remoteAimButtonCombo.currentIndexChanged.connect(self._onRemoteAimButtonChanged)
         self.makcuKeysGroup.setVisible(False)
 
         self.scrollLayout.addStretch(1)
@@ -914,6 +902,16 @@ class KeysPage(BasePage):
             self.makcuUdpHostEdit.setText(str(getattr(self._config, 'makcu_udp_host', '') or ''))
         if not self.makcuUdpPortEdit.hasFocus():
             self.makcuUdpPortEdit.setText(str(getattr(self._config, 'makcu_udp_port', 8080)))
+
+        # Remote mouse buttons
+        self.remoteBtnEnableCard.blockSignals(True)
+        self.remoteBtnEnableCard.setChecked(bool(getattr(self._config, 'remote_btn_enabled', False)))
+        self.remoteBtnEnableCard.blockSignals(False)
+        _rab = getattr(self._config, 'remote_aim_button', 'rmb')
+        if _rab in self._remoteAimButtons:
+            self.remoteAimButtonCombo.blockSignals(True)
+            self.remoteAimButtonCombo.setCurrentIndex(self._remoteAimButtons.index(_rab))
+            self.remoteAimButtonCombo.blockSignals(False)
 
         for card, attr in ((self.makcuDeviceHotkeysCard, 'makcu_device_hotkeys'),
                            (self.makcuMoveLockCard, 'makcu_lock_physical_move'),
@@ -1354,6 +1352,15 @@ class KeysPage(BasePage):
         self._config.makcu_udp_port = port if 1 <= port <= 65535 else 8080
         self.makcuUdpPortEdit.setText(str(self._config.makcu_udp_port))
 
+    def _onRemoteBtnEnabled(self, checked: bool):
+        # The vigem_network client reads this flag live and (un)subscribes on its own.
+        if self._config:
+            self._config.remote_btn_enabled = bool(checked)
+
+    def _onRemoteAimButtonChanged(self, index: int):
+        if self._config and 0 <= index < len(self._remoteAimButtons):
+            self._config.remote_aim_button = self._remoteAimButtons[index]
+
     def _onMakcuFeatureToggled(self, attr: str, checked: bool):
         if self._config:
             setattr(self._config, attr, bool(checked))
@@ -1485,6 +1492,11 @@ class KeysPage(BasePage):
         self.makcuAlwaysAimButtonCard.contentLabel.setText(t("makcu_always_aim_button_desc", "Optional side mouse button that activates Always Aim"))
         self.makcuAlwaysAimModeCard.titleLabel.setText(t("makcu_always_aim_mode", "Always Aim Mode"))
         self.makcuAlwaysAimModeCard.contentLabel.setText(t("makcu_always_aim_mode_desc", "Hold: always-aim while button held  |  Toggle: click to toggle always-aim on/off"))
+        self.remoteBtnGroup.titleLabel.setText(t("remote_btn_group", "Remote Mouse Buttons"))
+        self.remoteBtnEnableCard.titleLabel.setText(t("remote_btn_enable", "Receive Remote Mouse Buttons"))
+        self.remoteBtnEnableCard.contentLabel.setText(t("remote_btn_enable_desc", "Get the GamepadEnhancer PC's mouse buttons over the ViGEm Network connection (same address and token); holding the chosen button engages aim"))
+        self.remoteAimButtonCard.titleLabel.setText(t("remote_aim_button", "Remote Aim Button"))
+        self.remoteAimButtonCard.contentLabel.setText(t("remote_aim_button_desc", "Remote mouse button that activates aiming"))
         self.makcuTransportCard.titleLabel.setText(t("makcu_transport", "Connection Type"))
         self.makcuTransportCard.contentLabel.setText(t("makcu_transport_desc", "UDP needs a MAKXD on Ethernet/Wi-Fi with plaintext UDP (encrypted UDP is not supported)"))
         self.makcuUdpCard.titleLabel.setText(t("makcu_udp_address", "Device Address"))

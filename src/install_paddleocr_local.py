@@ -107,11 +107,6 @@ def is_paddle_importable() -> bool:
     return bool(out)
 
 
-def is_paddle_gpu() -> bool:
-    out = _run_check("import paddle; print(paddle.is_compiled_with_cuda())")
-    return out == "True"
-
-
 # ── Installation ──────────────────────────────────────────────────────────────
 
 def _pip(packages: list, upgrade: bool = True, extra_index: str = "") -> None:
@@ -132,7 +127,7 @@ def _pip(packages: list, upgrade: bool = True, extra_index: str = "") -> None:
 
 def install_paddleocr() -> None:
     log(f"Installing PaddlePaddle CPU ({PADDLE_PACKAGE})...")
-    log(f"  Index : https://pypi.org/simple")
+    log("  Index : https://pypi.org/simple")
     _pip([PADDLE_PACKAGE])
     log(f"Installing: {', '.join(PADDLEOCR_PACKAGES)}")
     _pip(PADDLEOCR_PACKAGES)

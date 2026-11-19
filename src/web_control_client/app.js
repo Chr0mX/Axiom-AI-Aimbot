@@ -13,6 +13,7 @@
   var tokenShowBtn = document.getElementById("token-show");
   var alwaysAimToggle = document.getElementById("always-aim-toggle");
   var makcuToggle = document.getElementById("makcu-toggle");
+  var vigemNetToggle = document.getElementById("keys-vigem-net-toggle");
   var aiStartBtn = document.getElementById("ai-start-btn");
   var aiStopBtn = document.getElementById("ai-stop-btn");
   var aiControlReason = document.getElementById("ai-control-reason");
@@ -243,6 +244,7 @@
   // other's if both happen to update in the same applyStatus() call.
   var suppressToggleEcho = false;
   var suppressMakcuToggleEcho = false;
+  var suppressVigemNetToggleEcho = false;
 
   // The model select is populated once from GET /api/models (loadModelList,
   // fetched once on page load — not every poll tick) and the "currently
@@ -686,6 +688,7 @@
         if (tab === "capture") updateCaptureVisibility(data.screenshot_method);
         if (tab === "inference") {
           updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
+          updateAnchorVisibility();
           updateWeaponDetectVisibility(data.second_inference_mode);
         }
         if (tab === "aim") {
@@ -742,6 +745,8 @@
           updateUvcSubVisibility();
         }
         if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
+        if (tab === "inference" && (key === "afov_source" || key === "afov_predict_enabled")) updateAnchorFovVisibility();
+        if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
@@ -781,16 +786,70 @@
     var mode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode;
     var ret = el("inf-fov_retention_enabled") ? el("inf-fov_retention_enabled").checked : !!d.fov_retention_enabled;
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
-    show("inf-fov-min-size-card", on);
-    show("inf-fov-min-duration-card", on);
-    show("inf-fov-mode-card", on);
-    show("inf-fov-dynsafe-card", on && mode === "dynamic");
-    show("inf-fov-delay-card", on);
-    show("inf-fov-recovery-card", on);
-    show("inf-fov-retention-card", on && sticky);
-    show("inf-fov-retention-pct-card", on && sticky && ret);
+    // Anchor FOV owns the centre and radius: the shrink cards (and their master switch)
+    // only apply to Fixed/Adaptive/Dynamic. The mode picker itself is always available.
+    var shrink = on && mode !== "anchor";
+    show("inf-fov-reduce-card", mode !== "anchor");
+    show("inf-fov-min-size-card", shrink);
+    show("inf-fov-min-duration-card", shrink);
+    show("inf-fov-mode-card", true);
+    show("inf-fov-dynsafe-card", shrink && mode === "dynamic");
+    show("inf-fov-delay-card", shrink);
+    show("inf-fov-recovery-card", shrink);
+    show("inf-fov-retention-card", shrink && sticky);
+    show("inf-fov-retention-pct-card", shrink && sticky && ret);
+    updateAnchorFovVisibility();
     ["inf-minlock-card", "inf-trackconf-card", "inf-switch-card", "inf-radius-card", "inf-losttimeout-card"]
       .forEach(function (id) { show(id, sticky); });
+  }
+
+  // Mirrors inference_page.py's _updateAnchorFovVisibility(): the Anchor FOV groups appear only
+  // in Anchor mode; Position/Offsets need a box source, Manual X/Y the manual one, the
+  // prediction sliders need prediction on, the Lost Delay needs a lost behaviour.
+  function updateAnchorFovVisibility() {
+    var d = lastSettings.inference || {};
+    var el = function (id) { return document.getElementById(id); };
+    var val = function (key, fallback) { var e = el("inf-" + key); return e ? (e.type === "checkbox" ? e.checked : e.value) : (d[key] !== undefined ? d[key] : fallback); };
+    var mode = val("fov_shrink_mode", "adaptive");
+    var anchor = mode === "anchor";
+    var src = val("afov_source", "detection");
+    var pred = !!val("afov_predict_enabled", false);
+    var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
+    ["anchor", "move", "pred", "lost", "radius"].forEach(function (k) { show("inf-afov-sec-" + k, anchor); });
+    show("inf-afov-position-card", anchor && src !== "manual");
+    show("inf-afov-offx-card", anchor && src !== "manual");
+    show("inf-afov-offy-card", anchor && src !== "manual");
+    show("inf-afov-manx-card", anchor && src === "manual");
+    show("inf-afov-many-card", anchor && src === "manual");
+    show("inf-afov-predstr-card", anchor && pred);
+    show("inf-afov-predtime-card", anchor && pred);
+  }
+
+  // Mirrors inference_page.py's _updateAnchorVisibility(): settings appear only while Anchor
+  // Prediction is on; smoothing/acceleration only where the mode uses them; the FOV-influence
+  // cards only while FOV shrinking is on.
+  function updateAnchorVisibility() {
+    var d = lastSettings.inference || {};
+    var el = function (id) { return document.getElementById(id); };
+    var on = el("inf-anchor_enabled") ? el("inf-anchor_enabled").checked : !!d.anchor_enabled;
+    var mode = (el("inf-anchor_mode") || {}).value || d.anchor_mode || "adaptive";
+    var fov = el("inf-fov_reduce_on_target_enabled") ? el("inf-fov_reduce_on_target_enabled").checked : !!d.fov_reduce_on_target_enabled;
+    var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
+    // The estimator tuning is shared with the Aim tab's "Anchor" Prediction Method, which works
+    // without the master switch (server extra aim_uses_anchor = prediction on + method anchor);
+    // the horizon and the FOV influences are FOV-only and still need Enable Anchor Prediction.
+    var aimAnchor = !!d.aim_uses_anchor;
+    var shared = on || aimAnchor;
+    var active = on && mode !== "disabled";
+    var sharedActive = shared && mode !== "disabled";
+    show("inf-anchor-mode-card", shared);
+    show("inf-anchor-horizon-card", active);
+    ["strength", "conf", "history", "maxdist"].forEach(function (k) { show("inf-anchor-" + k + "-card", sharedActive); });
+    show("inf-anchor-smoothing-card", shared && (mode === "smoothed" || mode === "adaptive"));
+    show("inf-anchor-accel-card", sharedActive && mode !== "linear");
+    var fovMode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode || "adaptive";
+    show("inf-anchor-infl-adaptive-card", active && fov && fovMode !== "anchor");
+    show("inf-anchor-infl-dynamic-card", active && fov && fovMode !== "anchor");
   }
 
   function updateWeaponDetectVisibility(mode) {
@@ -972,6 +1031,11 @@
     document.getElementById("keys-makcu-disengage-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-always-aim-button-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-always-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
+    var isVigemNet = data.mouse_move_method === "vigem_network";
+    ["keys-vigem-net-group", "keys-vigem-net-group-title"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle("hidden", !isVigemNet);
+    });
   }
 
   var vkOptionsLoaded = false;
@@ -2248,6 +2312,11 @@
       makcuToggle.checked = !!s.makcu_connected;
       suppressMakcuToggleEcho = false;
     }
+    if (vigemNetToggle && !vigemNetToggle.disabled) {
+      suppressVigemNetToggleEcho = true;
+      vigemNetToggle.checked = !!s.vigem_network_connected;
+      suppressVigemNetToggleEcho = false;
+    }
 
     if (!modelFormPrefilled && s.model) {
       applyModelSelection(s.model);
@@ -2431,6 +2500,25 @@
         makcuToggle.disabled = false;
       });
   });
+
+  if (vigemNetToggle) {
+    vigemNetToggle.addEventListener("change", function () {
+      if (suppressVigemNetToggleEcho) return;
+      var connecting = vigemNetToggle.checked;
+      var path = connecting ? "/api/control/vigem_network_connect" : "/api/control/vigem_network_disconnect";
+      vigemNetToggle.disabled = true;
+      fetch(path, { method: "POST", headers: authHeaders() })
+        .then(function (res) {
+          if (!res.ok) { vigemNetToggle.checked = !connecting; return; }
+          return res.json();
+        })
+        .then(function (data) {
+          if (data && data.ok === false) vigemNetToggle.checked = false;
+        })
+        .catch(function () { vigemNetToggle.checked = !connecting; })
+        .then(function () { vigemNetToggle.disabled = false; });
+    });
+  }
 
   function runAiControl(path) {
     aiStartBtn.disabled = true;
@@ -2755,7 +2843,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "16") return;
+    if (cssVer !== "19") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import colorsys
 import logging
+import math
 import os
-import re
 import shutil
 import subprocess
 import threading
@@ -16,13 +16,14 @@ import cv2
 import mss
 import numpy as np
 
+from .anchor_fov import anchor_fov_active, fov_center
+from .logging_config import log_throttled
 from .box_style import (
     aim_marker_thickness, box_thickness, corner_length, detect_range_thickness, fov_thickness,
     highlight_thickness, tracer_thickness,
 )
 
 if TYPE_CHECKING:
-    from mss.base import MSSBase
 
     from .config import Config
 
@@ -440,6 +441,12 @@ def _draw_detection_overlay(
 
     cx = int(getattr(cfg, 'crosshairX', w // 2))
     cy = int(getattr(cfg, 'crosshairY', h // 2))
+    # The FOV's own centre: the Anchor FOV controller's real centre in that mode, else
+    # the crosshair. Only the FOV drawing / in-FOV tests use it; the tracer still starts at (cx, cy).
+    _fx, _fy = fov_center(cfg)
+    fcx, fcy = int(round(_fx)), int(round(_fy))
+    afov_on = bool(anchor_fov_active(cfg) and getattr(cfg, 'afov_active', False))
+    afov_lost = afov_on and bool(getattr(cfg, 'afov_lost', False))
 
     def _c(b: int, g: int, r: int, a: int = 255) -> tuple:
         return (b, g, r, a) if has_alpha else (b, g, r)
@@ -460,14 +467,14 @@ def _draw_detection_overlay(
         fov_h = int(getattr(cfg, 'fov_effective_height', getattr(cfg, 'fov_height', fov_w)))
         half_x = max(1, fov_w // 2)
         half_y = max(1, fov_h // 2)
-        x1, y1 = cx - half_x, cy - half_y
-        x2, y2 = cx + half_x, cy + half_y
-        color = _c(0, 0, 255)
+        x1, y1 = fcx - half_x, fcy - half_y
+        x2, y2 = fcx + half_x, fcy + half_y
+        color = _c(0, 160, 255) if afov_lost else _c(0, 0, 255)      # amber while the anchor is lost
         fov_w_px = fov_thickness(cfg)
         if bool(getattr(cfg, 'fov_circle_filter_enabled', False)):
             # cv2.ellipse's axes are already independent per axis, so this
             # draws a plain circle for free when half_x == half_y.
-            cv2.ellipse(frame, (cx, cy), (half_x, half_y), 0, 0, 360, color, fov_w_px, cv2.LINE_AA)
+            cv2.ellipse(frame, (fcx, fcy), (half_x, half_y), 0, 0, 360, color, fov_w_px, cv2.LINE_AA)
         else:
             corner = max(8, min(20, min(fov_w, fov_h) // 6))
             cv2.line(frame, (x1, y1), (x1 + corner, y1), color, fov_w_px, cv2.LINE_AA)
@@ -478,6 +485,27 @@ def _draw_detection_overlay(
             cv2.line(frame, (x1, y2), (x1, y2 - corner), color, fov_w_px, cv2.LINE_AA)
             cv2.line(frame, (x2, y2), (x2 - corner, y2), color, fov_w_px, cv2.LINE_AA)
             cv2.line(frame, (x2, y2), (x2, y2 - corner), color, fov_w_px, cv2.LINE_AA)
+
+    if bool(getattr(cfg, 'show_fov', True)) and afov_on:
+        # Anchor FOV markers from the controller's published state (same as overlay.py):
+        # anchor point + link to the FOV centre + predicted anchor; lost -> amber label.
+        ax = int(getattr(cfg, 'afov_anchor_x', fcx)); ay = int(getattr(cfg, 'afov_anchor_y', fcy))
+        if not afov_lost:
+            acol = _c(200, 220, 0)
+            cv2.line(frame, (fcx, fcy), (ax, ay), acol, 1, cv2.LINE_AA)
+            cv2.circle(frame, (ax, ay), 4, acol, -1, cv2.LINE_AA)
+            if bool(getattr(cfg, 'afov_predict_enabled', False)):
+                px = int(getattr(cfg, 'afov_pred_x', ax)); py = int(getattr(cfg, 'afov_pred_y', ay))
+                cv2.line(frame, (px - 6, py), (px + 6, py), acol, 1, cv2.LINE_AA)
+                cv2.line(frame, (px, py - 6), (px, py + 6), acol, 1, cv2.LINE_AA)
+        else:
+            lcol = _c(0, 160, 255)
+            cv2.line(frame, (fcx - 6, fcy), (fcx + 6, fcy), lcol, 1, cv2.LINE_AA)
+            cv2.line(frame, (fcx, fcy - 6), (fcx, fcy + 6), lcol, 1, cv2.LINE_AA)
+            names = ('', 'LOST', 'LOST - HOLD', 'LOST - RETURN', 'LOST - SEARCH')
+            ph = int(getattr(cfg, 'afov_phase', 1))
+            cv2.putText(frame, names[ph] if 0 <= ph < len(names) else 'LOST', (fcx + 8, max(12, fcy - 8)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, lcol, 1, cv2.LINE_AA)
 
     if bool(getattr(cfg, 'show_fov', True)):
         # Lock-retention boundary (only while retention is in effect): where a
@@ -535,10 +563,10 @@ def _draw_detection_overlay(
                 # Same ellipse/AABB test as ai_loop_utils._ellipse_intersects_bbox
                 # (a circle when fov_half_x == fov_half_y, same as it always was).
                 in_fov = ellipse_intersects_bbox(
-                    float(cx), float(cy), fov_half_x, fov_half_y, float(x1), float(y1), float(x2), float(y2))
+                    float(fcx), float(fcy), fov_half_x, fov_half_y, float(x1), float(y1), float(x2), float(y2))
             else:
-                in_fov = (x1 < cx + fov_half_x and x2 > cx - fov_half_x and
-                          y1 < cy + fov_half_y and y2 > cy - fov_half_y)
+                in_fov = (x1 < fcx + fov_half_x and x2 > fcx - fov_half_x and
+                          y1 < fcy + fov_half_y and y2 > fcy - fov_half_y)
             dc = chroma_color if in_fov else box_color
             if getattr(cfg, 'box_full_rect', False):
                 cv2.rectangle(frame, (x1, y1), (x2, y2), dc, thickness, cv2.LINE_AA)
@@ -570,9 +598,9 @@ def _draw_detection_overlay(
             bx = (x1 + x2) // 2
             by = (y1 + y2) // 2
             if tracer_use_circle:
-                in_reach = (((bx - cx) / tracer_half_x) ** 2 + ((by - cy) / tracer_half_y) ** 2) <= 1.0
+                in_reach = (((bx - fcx) / tracer_half_x) ** 2 + ((by - fcy) / tracer_half_y) ** 2) <= 1.0
             else:
-                in_reach = abs(bx - cx) <= tracer_half_x and abs(by - cy) <= tracer_half_y
+                in_reach = abs(bx - fcx) <= tracer_half_x and abs(by - fcy) <= tracer_half_y
             if in_reach:
                 origin = (w // 2, h - 1) if bool(getattr(cfg, 'tracer_from_bottom', False)) else (cx, cy)
                 cv2.line(frame, origin, (bx, by), _c(255, 255, 255), tracer_thickness(cfg), cv2.LINE_AA)
@@ -607,6 +635,49 @@ def _draw_detection_overlay(
             px = int(getattr(cfg, 'aim_predicted_x', 0.0))
             py = int(getattr(cfg, 'aim_predicted_y', 0.0))
             cv2.circle(frame, (px, py), 7, _c(255, 210, 80), aim_marker_thickness(cfg), cv2.LINE_AA)
+        except Exception:
+            pass
+
+    snap = getattr(cfg, 'anchor_debug', None)
+    if snap and bool(getattr(cfg, 'show_anchor_debug', False)):
+        # Anchor Prediction debug overlay, like overlay.py's: predicted box, current
+        # centre dot, predicted centre cross, velocity arrow and "v=… px/s  conf%".
+        try:
+            x1, y1, x2, y2, px1, py1, px2, py2, acx, acy, pcx, pcy, vx, vy, conf = snap
+            col = _c(255, 120, 190)
+            thick = max(1, aim_marker_thickness(cfg) - 1)
+            cv2.rectangle(frame, (int(px1), int(py1)), (int(px2), int(py2)), col, thick, cv2.LINE_AA)
+            cv2.circle(frame, (int(acx), int(acy)), 3, _c(60, 60, 255), -1, cv2.LINE_AA)
+            cv2.drawMarker(frame, (int(pcx), int(pcy)), col, cv2.MARKER_CROSS, 11, thick, cv2.LINE_AA)
+            speed = math.hypot(vx, vy)
+            if speed >= 20.0:
+                ln = max(12.0, min(60.0, speed * 0.1))
+                cv2.arrowedLine(frame, (int(acx), int(acy)),
+                                (int(acx + vx / speed * ln), int(acy + vy / speed * ln)),
+                                col, thick, cv2.LINE_AA, 0, 0.3)
+            cv2.putText(frame, f"v={speed:.0f}px/s  {conf:.0%}", (int(px1), max(10, int(py1) - 6)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, col, 1, cv2.LINE_AA)
+        except Exception:
+            pass
+
+    if (getattr(cfg, 'mouse_move_method', '') == 'vigem_network'
+            and bool(getattr(cfg, 'show_stick_gauge', True))):
+        # vigem_network virtual stick gauge, like overlay.py's _draw_stick_gauge.
+        try:
+            from .stick_gauge import gauge_center, stick_gauge_geometry
+            g = stick_gauge_geometry(
+                getattr(cfg, 'vigem_stick_x', 0.0), getattr(cfg, 'vigem_stick_y', 0.0),
+                getattr(cfg, 'vigem_net_input_deadzone', 0.0),
+                getattr(cfg, 'vigem_net_game_deadzone', 0.0))
+            gx, gy = gauge_center(w, h)
+            gx, gy = int(gx), int(gy)
+            cv2.circle(frame, (gx, gy), int(g["radius"]), _c(200, 200, 200), 2, cv2.LINE_AA)
+            if g["dz_r"] > 0:
+                cv2.circle(frame, (gx, gy), int(g["dz_r"]), _c(255, 200, 0), 1, cv2.LINE_AA)
+            if g["game_dz_r"] > 0:
+                cv2.circle(frame, (gx, gy), int(g["game_dz_r"]), _c(160, 120, 0), 1, cv2.LINE_AA)
+            dot_c = _c(0, 230, 140) if g["deflected"] else _c(90, 130, 110)
+            cv2.circle(frame, (gx + int(g["dot_dx"]), gy + int(g["dot_dy"])), 5, dot_c, -1, cv2.LINE_AA)
         except Exception:
             pass
 
@@ -939,7 +1010,9 @@ class NDICapture:
                                 interval_seconds=0.05,
                             )
                         except Exception:
-                            pass
+                            log_throttled(logger, "ndi.reconnect", logging.WARNING,
+                                          "[Capture][NDI] Reconnecting the NDI receiver failed; retrying",
+                                          exc_info=True)
                     elif not self.source_name and not self._source_assigned:
                         self._assign_first_available_source()
                 if not self._receiver.is_connected():
@@ -1387,7 +1460,9 @@ class _UVCPreviewThread(threading.Thread):
                     set_preview_frame(preview)
                     set_preview_region(region)
                 except Exception:
-                    pass
+                    log_throttled(logger, "uvc_preview.frame", logging.WARNING,
+                                  "[UVC] Rendering the preview frame failed; the preview is stale "
+                                  "while this keeps happening", exc_info=True)
             remaining = self._interval - (time.perf_counter() - t0)
             if remaining > 0.001:
                 time.sleep(remaining)

@@ -39,7 +39,7 @@
     fontSize:      11,
     bgColor:       "#000000",
     bgOpacity:     65,
-    borderColor:   "#00e0a0",
+    borderColor:   "#7ea2ff",
     borderOpacity: 60,
     borderWidth:   1,
     borderRadius:  4,
@@ -179,6 +179,8 @@
     ["show_detect_range", "Detection Range"],
     ["show_tracer_line", "Tracer Line"],
     ["show_aim_prediction_marker", "Predicted Aim Point"],
+    ["show_anchor_debug", "Anchor Debug"],
+    ["show_stick_gauge", "Stick Gauge"],
   ];
   function enabledOverlays(st) {
     return BADGE_ITEMS.filter(([key]) => !!(st && st[key])).map(([, label]) => label);
@@ -313,6 +315,12 @@
       const { sx, sy, offX, offY } = scaler(state);
       const X = (v) => v * sx + offX, Y = (v) => v * sy + offY;
       const cx = X(state.center.x), cy = Y(state.center.y);
+      // The FOV's own centre: the Anchor FOV controller's centre when that mode is on
+      // (state.fov_center), otherwise the crosshair. Everything FOV-related below uses it.
+      const fc = state.fov_center || state.center;
+      const fcx = X(fc.x), fcy = Y(fc.y);
+      const afov = state.afov || null;
+      const afovLost = !!(afov && afov.lost);
 
       // Detect range — sx === sy (see scaler()), so this stays a true
       // square/circle regardless of the browser window's own aspect ratio.
@@ -334,12 +342,45 @@
       if (st.show_fov) {
         const fovHeight = st.fov_height != null ? st.fov_height : st.fov_size;
         const fovx = st.fov_size * sx, fovy = fovHeight * sy;
-        const fovColor = [255, 255, 255, 180];
+        const fovColor = afovLost ? [255, 170, 40, 235] : [255, 255, 255, 180];   // amber while the anchor is lost
         if (st.fov_circle_filter_enabled) {
           ctx.strokeStyle = rgba(fovColor); ctx.lineWidth = st.fov_line_thickness || 2;
-          ctx.beginPath(); ctx.ellipse(cx, cy, fovx / 2, fovy / 2, 0, 0, Math.PI * 2); ctx.stroke();
+          if (afovLost) ctx.setLineDash([8, 6]);
+          ctx.beginPath(); ctx.ellipse(fcx, fcy, fovx / 2, fovy / 2, 0, 0, Math.PI * 2); ctx.stroke();
+          ctx.setLineDash([]);
         } else {
-          fovCorners(cx, cy, fovx, fovy, fovColor, st.fov_line_thickness || 2);
+          fovCorners(fcx, fcy, fovx, fovy, fovColor, st.fov_line_thickness || 2);
+        }
+      }
+
+      // Anchor FOV markers (the controller's published state, not a simulation): the anchor
+      // point, a link to the FOV centre, the predicted anchor (prediction on) and, when the
+      // anchor is lost, an amber label naming what the FOV does about it.
+      if (st.show_fov && afov) {
+        const PHASES = ["", "LOST", "LOST · HOLD", "LOST · RETURN", "LOST · SEARCH"];
+        if (!afovLost) {
+          const ax = X(afov.anchor.x), ay = Y(afov.anchor.y);
+          ctx.save();
+          ctx.strokeStyle = ctx.fillStyle = "rgba(0,220,200,0.92)";
+          ctx.lineWidth = 1; ctx.setLineDash([2, 4]);
+          ctx.beginPath(); ctx.moveTo(fcx, fcy); ctx.lineTo(ax, ay); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.beginPath(); ctx.arc(ax, ay, 4, 0, Math.PI * 2); ctx.fill();
+          if (afov.pred) {
+            const px = X(afov.pred.x), py = Y(afov.pred.y);
+            ctx.beginPath(); ctx.moveTo(px - 6, py); ctx.lineTo(px + 6, py);
+            ctx.moveTo(px, py - 6); ctx.lineTo(px, py + 6); ctx.stroke();
+          }
+          ctx.restore();
+        } else {
+          ctx.save();
+          ctx.strokeStyle = ctx.fillStyle = "rgba(255,170,40,0.95)";
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(fcx - 6, fcy); ctx.lineTo(fcx + 6, fcy);
+          ctx.moveTo(fcx, fcy - 6); ctx.lineTo(fcx, fcy + 6); ctx.stroke();
+          ctx.font = "12px sans-serif";
+          ctx.fillText(PHASES[afov.phase] || "LOST", fcx + 8, fcy - 8);
+          ctx.restore();
         }
       }
 
@@ -376,7 +417,7 @@
           const conf = i < confs.length ? confs[i] : 0.5;
           const thickness = boxThicknessFor(st, conf);
 
-          const ox = state.center.x, oy = state.center.y;
+          const ox = fc.x, oy = fc.y;
           let inFov;
           if (st.fov_circle_filter_enabled) {
             // Same ellipse/AABB test as ai_loop_utils._ellipse_intersects_bbox
@@ -442,6 +483,68 @@
         ctx.beginPath();
         ctx.ellipse(X(state.aim_predicted.x), Y(state.aim_predicted.y), pr, pr, 0, 0, Math.PI * 2);
         ctx.stroke();
+      }
+
+      // Anchor Prediction debug overlay (same look as the in-game one): predicted box dashed,
+      // dot on the current centre, cross on the predicted centre, velocity arrow, "v=… conf%".
+      // The server sends `anchor` only while the toggle is on and a prediction exists.
+      if (st.show_anchor_debug && state.anchor) {
+        const an = state.anchor, col = "rgba(190,120,255,0.95)";
+        const lw = Math.max(1, (st.aim_marker_line_thickness || 2) - 1);
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = col;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(X(an.pbox[0]), Y(an.pbox[1]), X(an.pbox[2]) - X(an.pbox[0]), Y(an.pbox[3]) - Y(an.pbox[1]));
+        ctx.setLineDash([]);
+        ctx.fillStyle = "rgba(255,70,70,0.95)";
+        ctx.beginPath();
+        ctx.arc(X(an.c[0]), Y(an.c[1]), 3, 0, Math.PI * 2);
+        ctx.fill();
+        const pcx = X(an.pc[0]), pcy = Y(an.pc[1]);
+        ctx.beginPath();
+        ctx.moveTo(pcx - 5, pcy); ctx.lineTo(pcx + 5, pcy);
+        ctx.moveTo(pcx, pcy - 5); ctx.lineTo(pcx, pcy + 5);
+        ctx.stroke();
+        const sp = Math.hypot(an.v[0], an.v[1]);
+        if (sp >= 20) {
+          const ln = Math.max(12, Math.min(60, sp * 0.1)) * sx;
+          const ux = an.v[0] / sp, uy = an.v[1] / sp;
+          const ax = X(an.c[0]), ay = Y(an.c[1]), ex = ax + ux * ln, ey = ay + uy * ln;
+          ctx.beginPath();
+          ctx.moveTo(ax, ay); ctx.lineTo(ex, ey);
+          for (const sg of [1, -1]) {
+            const a = Math.atan2(uy, ux) + Math.PI + sg * 0.5;
+            ctx.moveTo(ex, ey); ctx.lineTo(ex + 8 * Math.cos(a), ey + 8 * Math.sin(a));
+          }
+          ctx.stroke();
+        }
+        ctx.fillStyle = col;
+        ctx.font = `${Math.max(10, 11 * sy)}px "Consolas", "Menlo", monospace`;
+        ctx.fillText(`v=${Math.round(sp)}px/s  ${Math.round(an.conf * 100)}%`, X(an.pbox[0]), Y(an.pbox[1]) - 6);
+      }
+
+      // vigem_network virtual stick gauge (bottom-right of the screen area).
+      if (st.show_stick_gauge && state.stick) {
+        const sk = state.stick, gr = 70 * Math.min(sx, sy);
+        const gcx = X(state.screen.w) - 24 * sx - gr, gcy = Y(state.screen.h) - 24 * sy - gr;
+        let kx = +sk.x || 0, ky = +sk.y || 0;
+        const km = Math.hypot(kx, ky);
+        if (km > 1) { kx /= km; ky /= km; }
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.beginPath(); ctx.arc(gcx, gcy, gr, 0, Math.PI * 2); ctx.stroke();
+        ctx.lineWidth = 1;
+        if (sk.dz > 0) {
+          ctx.strokeStyle = "rgba(255,200,0,0.67)"; ctx.setLineDash([4, 3]);
+          ctx.beginPath(); ctx.arc(gcx, gcy, sk.dz * gr, 0, Math.PI * 2); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        if (sk.game_dz > 0) {
+          ctx.strokeStyle = "rgba(255,200,0,0.3)";
+          ctx.beginPath(); ctx.arc(gcx, gcy, sk.game_dz * gr, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.fillStyle = km > 0 ? "rgba(0,230,140,0.95)" : "rgba(0,230,140,0.35)";
+        ctx.beginPath(); ctx.arc(gcx + kx * gr, gcy + ky * gr, 5, 0, Math.PI * 2); ctx.fill();
       }
 
       // Crosshair — scaled per axis like everything else above; previously

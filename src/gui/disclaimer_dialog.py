@@ -1,6 +1,5 @@
 import os
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QTextBrowser, QPushButton,
-                             QHBoxLayout, QLabel)
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QTextBrowser, QHBoxLayout)
 from PyQt6.QtCore import Qt
 from qfluentwidgets import PrimaryPushButton, PushButton, StrongBodyLabel
 

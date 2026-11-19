@@ -9,7 +9,6 @@
 4. _BUTTON_FLAG_TO_GP_VK / _GP_VK_TO_BUTTON_FLAG 映射
 """
 
-import pytest
 
 
 class TestIsGamepadVk:
@@ -43,7 +42,7 @@ class TestGamepadConstants:
             GP_VK_LSTICK, GP_VK_RSTICK,
             GP_VK_DPAD_UP, GP_VK_DPAD_DOWN,
             GP_VK_DPAD_LEFT, GP_VK_DPAD_RIGHT,
-            GP_VK_MIN, GP_VK_MAX, is_gamepad_vk,
+            is_gamepad_vk,
         )
         all_vks = [
             GP_VK_A, GP_VK_B, GP_VK_X, GP_VK_Y,

@@ -29,6 +29,17 @@ from . import makcu_protocol as mp
 
 logger = logging.getLogger(__name__)
 
+
+def _log_unexpected_write_error() -> None:
+    """A non-serial exception while writing a command (the SerialException case
+    is the normal disconnect path and handled separately). Must not kill the
+    writer thread, but must not vanish silently either; throttled so a
+    per-frame failure is one line every few seconds."""
+    from core.logging_config import log_throttled
+    log_throttled(logger, "makcu.write_unexpected", logging.WARNING,
+                  "[MAKCU] Unexpected error while writing a command; the command was dropped",
+                  exc_info=True)
+
 # The physical-movement lock (set_physical_move_lock) auto-releases unless the
 # caller re-asserts it within this window, so a stalled/crashed aim loop can
 # never leave the user's own mouse blocked.
@@ -665,7 +676,7 @@ class MakcuMouse:
             except serial.SerialException:
                 self._connected = False
             except Exception:
-                pass
+                _log_unexpected_write_error()
 
     def _reconnect_worker(self):
         """Watchdog: re-establish connection automatically after USB glitches,
@@ -1225,7 +1236,7 @@ class MakcuMouse:
         except serial.SerialException:
             self._connected = False
         except Exception:
-            pass
+            _log_unexpected_write_error()
 
     # ------------------------------------------------------------------
     # Button state — read from live stream mask, no serial I/O

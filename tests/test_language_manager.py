@@ -15,9 +15,7 @@
 import json
 import os
 import tempfile
-from unittest.mock import patch, MagicMock
 
-import pytest
 
 
 def _make_language_manager(lang_data=None, config_data=None):
@@ -227,3 +225,35 @@ class TestLegacyMapping:
         assert LanguageManager.LEGACY_MAPPING["zh_tw"] == "Chinese_中文"
         assert LanguageManager.LEGACY_MAPPING["en"] == "English_English"
         assert LanguageManager.LEGACY_MAPPING["ja"] == "Japanese_日本語"
+
+
+class TestLanguageFiles:
+    """Every translation file is valid JSON and only translates keys that still exist in
+    the English reference file, so strings of removed features can't pile up again."""
+
+    @staticmethod
+    def _load_all():
+        import glob
+        import json
+        import os
+
+        import core.language_manager as lm
+        folder = os.path.join(os.path.dirname(os.path.abspath(lm.__file__)), "language_data")
+        out = {}
+        for path in sorted(glob.glob(os.path.join(folder, "*.json"))):
+            with open(path, encoding="utf-8") as f:
+                out[os.path.basename(path)] = json.load(f)
+        return out
+
+    def test_every_language_file_is_a_flat_string_map(self):
+        files = self._load_all()
+        assert "English_English.json" in files and len(files) == 10
+        for name, data in files.items():
+            assert isinstance(data, dict) and data, name
+            assert all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()), name
+
+    def test_no_translation_key_is_missing_from_english(self):
+        files = self._load_all()
+        english = set(files["English_English.json"])
+        for name, data in files.items():
+            assert not set(data) - english, f"{name} has keys absent from English: {sorted(set(data) - english)}"

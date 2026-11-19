@@ -69,6 +69,7 @@ _SNAPSHOT_EXCLUDED_FIELDS = frozenset({
     'preset_slots',
     'uvc_ffmpeg_path',
     'web_esp_enabled',
+    'vigem_net_token',
 })
 
 # Model paths a snapshot may set must stay inside the app folder (e.g.
@@ -180,6 +181,8 @@ _PRESET_DIFF_GROUPS: List[tuple] = [
     ('detect_semantic_', 'Semantic Filter'),
     ('target_priority_', 'Target Priority'),
     ('sticky_lock_', 'Sticky Lock'),
+    ('anchor_', 'Anchor Prediction'),
+    ('afov_', 'Anchor FOV'),
     ('fov_', 'FOV'),
     # These groups are only ever reachable through a *full* Config
     # ConfigManager (aim_only=False) — an aim preset can never contain a

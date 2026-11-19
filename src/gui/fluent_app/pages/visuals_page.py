@@ -5,10 +5,10 @@ import webbrowser
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard, SettingCard,
-    FluentIcon, CheckBox, ComboBox, BodyLabel, PushButton
+    FluentIcon, CheckBox, ComboBox, PushButton
 )
 from ..components.slider_spin_card import SliderLabelCard
 from ..components.no_wheel_widgets import NoWheelSpinBox
@@ -164,6 +164,24 @@ class VisualsPage(BasePage):
             t("show_aim_prediction_marker", "Predicted Aim Point"),
             t("show_aim_prediction_marker_hint",
               "Draw a second marker at the locked target's post-prediction point (only while Target Tracking's prediction or Kalman is on)"),
+            parent=self.displayGroup
+        )
+
+        # Anchor Prediction debug overlay (predicted box, centres, direction, velocity, confidence)
+        self.showAnchorDebugCard = SwitchSettingCard(
+            FluentIcon.CERTIFICATE,
+            t("show_anchor_debug", "Anchor Prediction Debug"),
+            t("show_anchor_debug_hint",
+              "Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Prediction on the Inference page)"),
+            parent=self.displayGroup
+        )
+
+        # vigem_network stick gauge
+        self.showStickGaugeCard = SwitchSettingCard(
+            FluentIcon.GAME,
+            t("show_stick_gauge", "Stick Gauge"),
+            t("show_stick_gauge_hint",
+              "Draw a circle showing the virtual stick position and dead zones (only with the vigem_network mouse method)"),
             parent=self.displayGroup
         )
 
@@ -435,6 +453,8 @@ class VisualsPage(BasePage):
         self.displayGroup.addSettingCard(self.tracerThicknessCard)
         self.displayGroup.addSettingCard(self.tracerFromBottomCard)
         self.displayGroup.addSettingCard(self.showAimPredictionCard)
+        self.displayGroup.addSettingCard(self.showAnchorDebugCard)
+        self.displayGroup.addSettingCard(self.showStickGaugeCard)
         self.displayGroup.addSettingCard(self.aimMarkerThicknessCard)
         self.displayGroup.addSettingCard(self.boxThemeCard)
         self.displayGroup.addSettingCard(self.chromaSpeedCard)
@@ -485,6 +505,8 @@ class VisualsPage(BasePage):
         self.showTracerLineCard.checkedChanged.connect(self._onShowTracerLineChanged)
         self.tracerFromBottomCard.checkedChanged.connect(self._onTracerFromBottomChanged)
         self.showAimPredictionCard.checkedChanged.connect(self._onShowAimPredictionChanged)
+        self.showAnchorDebugCard.checkedChanged.connect(self._onShowAnchorDebugChanged)
+        self.showStickGaugeCard.checkedChanged.connect(self._onShowStickGaugeChanged)
         self.boxThemeCombo.currentTextChanged.connect(self._onBoxThemeChanged)
         self.chromaSpeedCard.valueChanged.connect(self._onChromaSpeedChanged)
         self.boxThicknessCard.valueChanged.connect(self._onBoxThicknessChanged)
@@ -545,6 +567,8 @@ class VisualsPage(BasePage):
         self.showTracerLineCard.setChecked(bool(getattr(self._config, 'show_tracer_line', False)))
         self.tracerFromBottomCard.setChecked(bool(getattr(self._config, 'tracer_from_bottom', False)))
         self.showAimPredictionCard.setChecked(bool(getattr(self._config, 'show_aim_prediction_marker', True)))
+        self.showAnchorDebugCard.setChecked(bool(getattr(self._config, 'show_anchor_debug', False)))
+        self.showStickGaugeCard.setChecked(bool(getattr(self._config, 'show_stick_gauge', True)))
         self.fovThicknessCard.setValue(int(getattr(self._config, 'fov_line_thickness', 2) or 2))
         self.detectRangeThicknessCard.setValue(int(getattr(self._config, 'detect_range_line_thickness', 1) or 1))
         self.tracerThicknessCard.setValue(int(getattr(self._config, 'tracer_line_thickness', 2) or 2))
@@ -648,6 +672,14 @@ class VisualsPage(BasePage):
         if self._config:
             self._config.show_aim_prediction_marker = checked
         self._updateLineThicknessVisibility()
+
+    def _onShowAnchorDebugChanged(self, checked):
+        if self._config:
+            self._config.show_anchor_debug = checked
+
+    def _onShowStickGaugeChanged(self, checked):
+        if self._config:
+            self._config.show_stick_gauge = checked
 
     def _onLineThicknessChanged(self, attr, value):
         if self._config:
@@ -948,6 +980,12 @@ class VisualsPage(BasePage):
         self.showAimPredictionCard.titleLabel.setText(t("show_aim_prediction_marker", "Predicted Aim Point"))
         self.showAimPredictionCard.contentLabel.setText(t("show_aim_prediction_marker_hint",
             "Draw a second marker at the locked target's post-prediction point (only while Target Tracking's prediction or Kalman is on)"))
+        self.showAnchorDebugCard.titleLabel.setText(t("show_anchor_debug", "Anchor Prediction Debug"))
+        self.showAnchorDebugCard.contentLabel.setText(t("show_anchor_debug_hint",
+            "Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Prediction on the Inference page)"))
+        self.showStickGaugeCard.titleLabel.setText(t("show_stick_gauge", "Stick Gauge"))
+        self.showStickGaugeCard.contentLabel.setText(t("show_stick_gauge_hint",
+            "Draw a circle showing the virtual stick position and dead zones (only with the vigem_network mouse method)"))
         self.boxThemeCard.titleLabel.setText(t("box_color_theme", "Box Color Theme"))
         self.boxThemeCard.contentLabel.setText(t("box_color_theme_hint", "Color preset for detection boxes"))
         self.chromaSpeedCard.titleLabel.setText(t("chroma_box_speed", "Chroma Speed"))

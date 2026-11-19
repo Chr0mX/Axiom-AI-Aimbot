@@ -5,7 +5,7 @@ from ctypes.wintypes import DWORD
 from PyQt6.QtCore import QUrl, QTimer
 from PyQt6.QtGui import QIcon, QDesktopServices, QColor
 from qfluentwidgets import (FluentWindow, NavigationItemPosition, FluentIcon,
-                            Theme, setTheme, qconfig, InfoBar, InfoBarPosition)
+                            Theme, setTheme, setThemeColor, qconfig, InfoBar, InfoBarPosition)
 from qfluentwidgets.common.style_sheet import setCustomStyleSheet
 from qfluentwidgets.components.settings.setting_card import SettingCard
 
@@ -22,6 +22,7 @@ from .pages.other_page import OtherPage
 from .pages.convert_page import ConvertPage
 from .components.language_dialog import LanguageDialog
 from .language_manager import getLanguageManager, t
+from .theme_colors import ThemeColors
 from core.updater import UpdateChecker, open_update_url
 from version import __version__
 
@@ -61,6 +62,8 @@ class AxiomWindow(FluentWindow):
         _forced_theme = Theme.DARK if _currently_dark else Theme.LIGHT
         qconfig.set(qconfig.themeMode, _forced_theme, save=False)
         setTheme(_forced_theme)
+        # Propagate the app's own accent to all Fluent widgets
+        setThemeColor(QColor(ThemeColors.ACCENT.get()))
 
         # Force set Windows title bar color, unaffected by system theme
         self._forceWindowsTitleBarColor(isDark=_currently_dark)
@@ -94,7 +97,7 @@ class AxiomWindow(FluentWindow):
         self.updateLogo()
         
         # Enlarge title bar Logo and text
-        from PyQt6.QtGui import QPixmap, QFont
+        from PyQt6.QtGui import QFont
         if hasattr(self, 'titleBar'):
             # Enlarge iconLabel (originally 18x18 -> 32x32)
             self.titleBar.iconLabel.setFixedSize(32, 32)
@@ -420,6 +423,7 @@ class AxiomWindow(FluentWindow):
             qconfig.set(qconfig.themeMode, Theme.LIGHT, save=False)
             self._isDarkTheme = False
             self.themeButton.setIcon(FluentIcon.QUIET_HOURS)
+        setThemeColor(QColor(ThemeColors.ACCENT.get()))
         self._forceWindowsTitleBarColor(isDark=self._isDarkTheme)
         self.updateLogo()
         self.updateIcons()
@@ -755,7 +759,6 @@ class AxiomWindow(FluentWindow):
         4. TitleBar - 標題列
         """
         from PyQt6.QtGui import QPainter
-        from PyQt6.QtWidgets import QFrame
         
         # --- 1. stackedWidget 設為透明（這是最大的遮擋層）---
         self.stackedWidget.setStyleSheet("""
@@ -972,6 +975,7 @@ class AxiomWindow(FluentWindow):
             qconfig.set(qconfig.themeMode, Theme.DARK, save=False)
             self._isDarkTheme = True
             self.themeButton.setIcon(FluentIcon.BRIGHTNESS)
+        setThemeColor(QColor(ThemeColors.ACCENT.get()))
 
         # 保存主題設定到配置
         if self._config is not None:

@@ -2,24 +2,23 @@
 MAKCU V2 Binary Protocol — interactive debug REPL.
 
 Run directly:
-    python src/makcu_debug_binary.py [COM_PORT] [BAUD]
+    python tools/makcu_debug_binary.py [COM_PORT] [BAUD]
 
 If no COM port is given the highest-numbered available port is auto-selected.
 """
 
 import os
-import re
 import struct
 import sys
 import time
 
-_src_dir = os.path.dirname(os.path.abspath(__file__))
+_src_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")  # <repo>/src
 _deps_dir = os.path.join(_src_dir, "python", "dependencies")
 sys.path.insert(0, _deps_dir)
 sys.path.insert(0, _src_dir)
 
 from win_utils.makcu_mouse_binary import (
-    MakcuMouseBinary, _build_frame, _sorted_ports,
+    MakcuMouseBinary, _sorted_ports,
     _CMD_VERSION, _CMD_INFO, _CMD_MOUSE_STREAM, _CMD_BUTTONS_STREAM,
     _CMD_BAUD, _DEFAULT_BAUD,
 )

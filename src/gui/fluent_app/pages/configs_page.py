@@ -5,7 +5,7 @@ import os
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFileDialog,
+    QVBoxLayout, QFileDialog,
     QInputDialog, QMessageBox, QSplitter, QFrame
 )
 from qfluentwidgets import (
@@ -218,8 +218,8 @@ class _ManagerBox(QFrame):
                 item_border = rgba("#FFFFFF", 24)
                 item_hover_bg = rgba("#FFFFFF", hover_a)
                 item_hover_border = rgba("#FFFFFF", 34)
-                item_selected_bg = rgba("#4CC2FF", selected_a)
-                item_selected_border = rgba("#4CC2FF", 120)
+                item_selected_bg = rgba(ThemeColors.ACCENT.get(), selected_a)
+                item_selected_border = rgba(ThemeColors.ACCENT.get(), 120)
                 separator_color = rgba("#FFFFFF", 32)
             else:
                 panel_bg = rgba("#FFFFFF", soft_a + 8)
@@ -228,8 +228,8 @@ class _ManagerBox(QFrame):
                 item_border = rgba("#000000", 22)
                 item_hover_bg = rgba("#FFFFFF", hover_a + 8)
                 item_hover_border = rgba("#000000", 30)
-                item_selected_bg = rgba("#0078D4", selected_a)
-                item_selected_border = rgba("#0078D4", 110)
+                item_selected_bg = rgba(ThemeColors.ACCENT.get(), selected_a)
+                item_selected_border = rgba(ThemeColors.ACCENT.get(), 110)
                 separator_color = rgba("#000000", 30)
         else:
             panel_bg = base_panel_bg

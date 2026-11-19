@@ -666,3 +666,254 @@ class TestPidTimeNormalizeWiring:
         fast = self._second_move(sent_moves, True, 1 / 240)
         slow = self._second_move(sent_moves, True, 1 / 30)
         assert 0 < fast < slow                      # shorter frame -> smaller per-frame move
+
+
+class TestAnchorPredictionWiring:
+    """Anchor Prediction is an additive layer: process_aiming() feeds it the
+    locked box, but it must never change the mouse movement that is sent."""
+
+    ANCHOR = dict(
+        anchor_enabled=True, anchor_mode="adaptive", anchor_horizon_ms=100.0, anchor_strength=1.0,
+        anchor_velocity_smoothing=0.3, anchor_accel_comp=0.5, anchor_confidence_threshold=0.2,
+        anchor_history_len=6, anchor_max_distance_pct=100.0, anchor_fov_influence_adaptive=0.5,
+        anchor_fov_influence_dynamic=0.5, prediction_max_velocity=5000.0, fov_size=600, fov_height=600,
+        screenshot_method="mss", screen_width=1000, screen_height=1000,
+    )
+
+    @staticmethod
+    def _run(sent_moves, frames=20, step=10.0, fps=60.0, **cfg):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(**cfg)
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        sent_moves.clear()
+        for i in range(frames):
+            cx = 400.0 + step * i
+            box = [cx - 20, 480.0, cx + 20, 560.0]
+            process_aiming(config, [box], 500, 520, pid_x, pid_y, "sendinput", state,
+                           current_time=1000.0 + i / fps, confidences=[0.9])
+        return config, state, list(sent_moves)
+
+    def test_off_by_default_tracks_nothing_and_touches_no_config(self, sent_moves):
+        config, state, _ = self._run(sent_moves)
+        assert len(state.anchor) == 0 and not state.anchor_view.valid
+        assert not hasattr(config, "anchor_debug")
+
+    def test_enabled_tracks_the_locked_box_without_changing_the_mouse_output(self, sent_moves):
+        _, _, moves_off = self._run(sent_moves)
+        config, state, moves_on = self._run(sent_moves, **self.ANCHOR)
+        assert moves_on == moves_off and len(moves_on) > 0
+        track = state.anchor.get(state.tracker.lock_id)
+        assert track is not None and track.samples >= 6
+        assert track.vx == pytest.approx(600.0, rel=0.05)           # 10 px/frame at 60 FPS
+        assert state.anchor_view.valid and state.anchor_view.speed_now == pytest.approx(600.0, rel=0.05)
+
+    def test_mode_disabled_or_master_off_changes_nothing(self, sent_moves):
+        for override in (dict(anchor_mode="disabled"), dict(anchor_enabled=False)):
+            _, state, _ = self._run(sent_moves, **dict(self.ANCHOR, **override))
+            assert len(state.anchor) == 0
+
+    def test_debug_snapshot_follows_the_toggle(self, sent_moves):
+        config, _, _ = self._run(sent_moves, **dict(self.ANCHOR, show_anchor_debug=True))
+        assert config.anchor_debug is not None and len(config.anchor_debug) == 15
+        config, _, _ = self._run(sent_moves, **dict(self.ANCHOR, show_anchor_debug=False))
+        assert getattr(config, "anchor_debug", None) is None
+
+    def test_a_new_lock_starts_a_fresh_track(self, sent_moves):
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+
+        config = _make_config(**self.ANCHOR)
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        for i in range(20):
+            cx = 400.0 + 10.0 * i
+            process_aiming(config, [[cx - 20, 480.0, cx + 20, 560.0]], 500, 520, pid_x, pid_y,
+                           "sendinput", state, current_time=1000.0 + i / 60, confidences=[0.9])
+        first = state.tracker.lock_id
+        process_aiming(config, [[880.0, 100.0, 920.0, 180.0]], 500, 520, pid_x, pid_y, "sendinput", state,
+                       current_time=1000.0 + 20 / 60, confidences=[0.9])      # a different target (IoU 0)
+        assert state.tracker.lock_id == first + 1
+        new = state.anchor.get(state.tracker.lock_id)
+        assert new.samples == 1 and new.vx == 0.0
+
+
+class TestAnchorAimLead:
+    """Prediction Method 'anchor' (Aim page): the aim point is led by the Anchor estimator on its
+    own track (``state.aim_anchor``), independently of "Enable Anchor Prediction" (the FOV /
+    association layer) and of the other predictors. Pure maths: tests/test_anchor_aim_lead.py."""
+
+    FPS = 60.0
+    STEP = 10.0                                    # px per frame -> 600 px/s
+    HORIZON_MS = 100.0
+    ANCHOR_TUNING = dict(
+        anchor_mode="adaptive", anchor_strength=1.0, anchor_velocity_smoothing=0.3,
+        anchor_accel_comp=0.5, anchor_confidence_threshold=0.2, anchor_history_len=6,
+        anchor_max_distance_pct=100.0, fov_size=600, fov_height=600,
+    )
+
+    @classmethod
+    def _run(cls, sent_moves, monkeypatch, frames=25, step=None, **cfg):
+        """Drive process_aiming() with a target sliding along X past a fixed crosshair at 60 FPS
+        (the clock is deterministic: the prediction stage reads time.perf_counter()).
+        Returns (config, state, [dx per frame])."""
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        for name in ("_predictor", "_ema_predictor", "_rolling_predictor", "_kalman"):
+            monkeypatch.setattr(aiming_mod, name, None)
+        clock = {"t": 0.0}
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: clock["t"])
+        step = cls.STEP if step is None else step
+        settings = dict(prediction_enabled=True, prediction_horizon_ms=cls.HORIZON_MS,
+                        prediction_max_velocity=5000.0, prediction_method="anchor",
+                        prediction_adaptive_lead=False, **cls.ANCHOR_TUNING)
+        settings.update(cfg)
+        config = _make_config(**settings)
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        dxs = []
+        for i in range(frames):
+            clock["t"] = i / cls.FPS
+            cx = 400.0 + step * i
+            sent_moves.clear()
+            process_aiming(config, [[cx - 20, 480.0, cx + 20, 560.0]], 500, 520, pid_x, pid_y,
+                           "sendinput", state, current_time=1000.0 + i / cls.FPS, confidences=[0.9])
+            dxs.append(sent_moves[0][0] if sent_moves else None)
+        return config, state, dxs
+
+    def test_a_moving_target_is_led_by_about_velocity_times_horizon(self, sent_moves, monkeypatch):
+        _, _, off = self._run(sent_moves, monkeypatch, prediction_enabled=False)
+        _, state, led = self._run(sent_moves, monkeypatch)
+        lead = led[-1] - off[-1]
+        assert lead == pytest.approx(self.STEP * self.FPS * self.HORIZON_MS / 1000.0, rel=0.10)   # ~60 px
+        assert state.aim_anchor.samples >= 6
+
+    def test_works_without_the_fov_layer_switch(self, sent_moves, monkeypatch):
+        """Independent coupling: 'Enable Anchor Prediction' (FOV/association) is not required."""
+        _, off_state, a = self._run(sent_moves, monkeypatch, anchor_enabled=False)
+        _, on_state, b = self._run(sent_moves, monkeypatch, anchor_enabled=True)
+        assert a == b                                               # same aim lead either way
+        assert len(off_state.anchor) == 0                           # the FOV layer's bank stayed idle
+        assert off_state.aim_anchor.samples >= 6
+
+    def test_mode_disabled_means_no_lead(self, sent_moves, monkeypatch):
+        _, _, off = self._run(sent_moves, monkeypatch, prediction_enabled=False)
+        _, state, led = self._run(sent_moves, monkeypatch, anchor_mode="disabled")
+        assert led == off
+        assert state.aim_anchor.samples == 0
+
+    def test_a_stationary_target_gets_no_lead(self, sent_moves, monkeypatch):
+        _, _, off = self._run(sent_moves, monkeypatch, step=0.0, prediction_enabled=False)
+        _, _, led = self._run(sent_moves, monkeypatch, step=0.0)
+        assert led == off
+
+    def test_the_first_frames_of_a_lock_have_no_lead(self, sent_moves, monkeypatch):
+        """Acquisition guard: the snap onto a fresh target must not read as target velocity."""
+        _, _, off = self._run(sent_moves, monkeypatch, frames=3, prediction_enabled=False)
+        _, _, led = self._run(sent_moves, monkeypatch, frames=3)
+        assert led == off
+
+    def test_other_methods_never_touch_the_anchor_track(self, sent_moves, monkeypatch):
+        for method in ("velocity", "ema", "rolling"):
+            _, state, _ = self._run(sent_moves, monkeypatch, prediction_method=method)
+            assert state.aim_anchor.samples == 0, method
+
+    def test_default_method_is_still_velocity(self, sent_moves, monkeypatch):
+        """No prediction_method set at all -> Velocity, bit-identical to an explicit 'velocity'."""
+        _, _, explicit = self._run(sent_moves, monkeypatch, prediction_method="velocity")
+        cfg = dict(prediction_enabled=True, prediction_horizon_ms=self.HORIZON_MS,
+                   prediction_max_velocity=5000.0, prediction_adaptive_lead=False)
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+        for name in ("_predictor", "_ema_predictor", "_rolling_predictor", "_kalman"):
+            monkeypatch.setattr(aiming_mod, name, None)
+        clock = {"t": 0.0}
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: clock["t"])
+        config = _make_config(**cfg)
+        assert not hasattr(config, "prediction_method")
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        dxs = []
+        for i in range(25):
+            clock["t"] = i / self.FPS
+            cx = 400.0 + self.STEP * i
+            sent_moves.clear()
+            process_aiming(config, [[cx - 20, 480.0, cx + 20, 560.0]], 500, 520, pid_x, pid_y,
+                           "sendinput", state, current_time=1000.0 + i / self.FPS, confidences=[0.9])
+            dxs.append(sent_moves[0][0] if sent_moves else None)
+        assert dxs == explicit
+        assert state.aim_anchor.samples == 0
+
+    def test_switching_away_or_turning_prediction_off_resets_the_track(self, sent_moves, monkeypatch):
+        from core.ai_aiming import process_aiming
+        from core.inference import PIDController
+
+        config, state, _ = self._run(sent_moves, monkeypatch)
+        assert state.aim_anchor.samples >= 6
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        box = [[640.0, 480.0, 680.0, 560.0]]
+        config.prediction_method = "velocity"
+        process_aiming(config, box, 500, 520, pid_x, pid_y, "sendinput", state,
+                       current_time=1001.0, confidences=[0.9])
+        assert state.aim_anchor.samples == 0
+        config.prediction_method = "anchor"
+        process_aiming(config, box, 500, 520, pid_x, pid_y, "sendinput", state,
+                       current_time=1001.1, confidences=[0.9])
+        assert state.aim_anchor.samples >= 1
+        config.prediction_enabled = False
+        process_aiming(config, box, 500, 520, pid_x, pid_y, "sendinput", state,
+                       current_time=1001.2, confidences=[0.9])
+        assert state.aim_anchor.samples == 0
+
+    def test_anchor_reset_clears_the_aim_track(self, sent_moves, monkeypatch):
+        """ai_loop's genuine-target-loss branch calls anchor_reset(): the aim-lead track must go too."""
+        from core.ai_loop_utils import anchor_reset
+        config, state, _ = self._run(sent_moves, monkeypatch)
+        assert state.aim_anchor.samples >= 6
+        anchor_reset(config, state)
+        assert state.aim_anchor.samples == 0 and state.aim_anchor_params_t == 0.0
+
+    def test_camera_drift_is_not_read_as_target_velocity(self, sent_moves, monkeypatch):
+        """The track is fed the compensated box: apparent motion that is entirely camera drift
+        gives no lead (the same guarantee the Velocity predictor has)."""
+        from core.ai_aiming import process_aiming
+        from core.ai_loop_state import LoopState
+        from core.inference import PIDController
+        import core.ai_aiming as aiming_mod
+
+        for name in ("_predictor", "_ema_predictor", "_rolling_predictor", "_kalman"):
+            monkeypatch.setattr(aiming_mod, name, None)
+        clock = {"t": 0.0}
+        monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: clock["t"])
+        config = _make_config(prediction_enabled=True, prediction_horizon_ms=self.HORIZON_MS,
+                              prediction_max_velocity=5000.0, prediction_method="anchor",
+                              prediction_adaptive_lead=False, cam_motion_comp_enabled=True,
+                              **self.ANCHOR_TUNING)
+        state = LoopState()
+        pid_x, pid_y = PIDController(1, 0, 0), PIDController(1, 0, 0)
+        dxs = []
+        for i in range(25):
+            clock["t"] = i / self.FPS
+            state.cam_drift_x = self.STEP * i                        # the whole apparent shift is camera drift
+            cx = 400.0 + self.STEP * i
+            sent_moves.clear()
+            process_aiming(config, [[cx - 20, 480.0, cx + 20, 560.0]], 500, 520, pid_x, pid_y,
+                           "sendinput", state, current_time=1000.0 + i / self.FPS, confidences=[0.9])
+            dxs.append(sent_moves[0][0] if sent_moves else None)
+        # Compensated position is flat at x=400 -> no velocity -> dx is the raw correction the
+        # crosshair needs right now (the target is at 400 + STEP*24 against a crosshair at 500).
+        assert dxs[-1] == pytest.approx(400.0 + self.STEP * 24 - 500.0, abs=1.0)
+
+    def test_the_predicted_point_is_published_for_the_marker(self, sent_moves, monkeypatch):
+        config, _, _ = self._run(sent_moves, monkeypatch)
+        assert config.aim_prediction_active is True
+        assert config.aim_predicted_x > 400.0 + self.STEP * 24          # led ahead of the raw point

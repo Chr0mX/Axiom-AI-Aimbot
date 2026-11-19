@@ -106,8 +106,40 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "fov_min_size_pct": {"type": "float", "min": 1, "max": 100},
         "fov_min_size_duration": {"type": "float", "min": 0.0, "max": 10.0},
         # FOV Shrinking / Advanced FOV / Target Acquisition & Tracking (inference_page.py)
-        "fov_shrink_mode": {"type": "choice", "choices": ["fixed", "adaptive", "dynamic"]},
+        "fov_shrink_mode": {"type": "choice", "choices": ["fixed", "adaptive", "dynamic", "anchor"]},
+        # Anchor FOV (inference_page.py's Anchor FOV groups; core/anchor_fov.py)
+        "afov_source": {"type": "choice", "choices": ["detection", "tracker", "manual"]},
+        "afov_position": {"type": "choice", "choices": ["center", "top", "bottom", "custom"]},
+        "afov_offset_x": {"type": "int", "min": -1000, "max": 1000},
+        "afov_offset_y": {"type": "int", "min": -1000, "max": 1000},
+        "afov_manual_x": {"type": "int", "min": -4096, "max": 4096},
+        "afov_manual_y": {"type": "int", "min": -4096, "max": 4096},
+        "afov_follow_speed": {"type": "float", "min": 1, "max": 100},
+        "afov_smoothing": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "afov_max_speed": {"type": "int", "min": 0, "max": 50000},
+        "afov_predict_enabled": {"type": "bool"},
+        "afov_predict_strength": {"type": "float", "scale": 100.0, "min": 0, "max": 200},
+        "afov_predict_time_ms": {"type": "int", "min": 0, "max": 500},
+        "afov_lost_behavior": {"type": "choice", "choices": ["hold", "return", "search"]},
+        "afov_lost_delay_ms": {"type": "int", "min": 0, "max": 5000},
+        "afov_reacquire": {"type": "choice", "choices": ["smooth", "fast"]},
+        "afov_radius": {"type": "int", "min": 1, "max": 2000},
+        "afov_min_radius": {"type": "int", "min": 1, "max": 2000},
+        "afov_max_radius": {"type": "int", "min": 1, "max": 2000},
+        "afov_dynamic_radius": {"type": "bool"},
         "fov_dynamic_safeguards": {"type": "bool"},
+        # Anchor Prediction (inference_page.py's Anchor Prediction group; core/anchor_prediction.py)
+        "anchor_enabled": {"type": "bool"},
+        "anchor_mode": {"type": "choice", "choices": ["disabled", "linear", "velocity_accel", "smoothed", "adaptive"]},
+        "anchor_horizon_ms": {"type": "float", "min": 20, "max": 500},
+        "anchor_strength": {"type": "float", "scale": 100.0, "min": 0, "max": 150},
+        "anchor_velocity_smoothing": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "anchor_accel_comp": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "anchor_confidence_threshold": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "anchor_history_len": {"type": "int", "min": 4, "max": 12},
+        "anchor_max_distance_pct": {"type": "float", "min": 0, "max": 100},
+        "anchor_fov_influence_adaptive": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "anchor_fov_influence_dynamic": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
         "fov_expand_delay_ms": {"type": "int", "min": 0, "max": 2000},
         "fov_recovery_duration_ms": {"type": "int", "min": 0, "max": 3000},
         "fov_retention_enabled": {"type": "bool"},
@@ -147,7 +179,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # is left to the client, same precedent as ndi_source_name/
         # ndi_force_reconnect: it already has both values in hand, so no
         # server-side "decide" logic is needed for a plain two-key POST.
-        "mouse_move_method": {"type": "choice", "choices": ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]},
+        "mouse_move_method": {"type": "choice", "choices": ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox", "vigem_network"]},
         "mouse_click_method": {"type": "str"},
         "aim_start_delay_ms": {"type": "int", "min": 0, "max": 1000},
         "pid_unsafe_mode": {"type": "bool"},
@@ -198,7 +230,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "prediction_horizon_ms": {"type": "float", "min": 5, "max": 50},
         "prediction_max_velocity": {"type": "float", "min": 300, "max": 3000},
         "prediction_history_len": {"type": "int", "min": 2, "max": 6},
-        "prediction_method": {"type": "choice", "choices": ["velocity", "ema", "rolling"]},
+        "prediction_method": {"type": "choice", "choices": ["velocity", "ema", "rolling", "anchor"]},
         "prediction_lead_frames": {"type": "float", "min": 1, "max": 10},
         "prediction_adaptive_lead": {"type": "bool"},
         "prediction_capture_timestamps": {"type": "bool"},
@@ -265,6 +297,17 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "makcu_lock_physical_move": {"type": "bool"},
         "makcu_mouse_spread_enabled": {"type": "bool"},
         "makcu_mouse_spread": {"type": "int", "min": 0, "max": 100},
+        # ViGEm Network
+        "vigem_net_host": {"type": "str"},
+        "vigem_net_port": {"type": "int", "min": 1, "max": 65535},
+        "vigem_net_token": {"type": "str"},
+        "vigem_net_sensitivity": {"type": "float", "min": 0.1, "max": 10.0},
+        "vigem_net_input_deadzone": {"type": "float", "min": 0.0, "max": 0.5},
+        "vigem_net_game_deadzone": {"type": "float", "min": 0.0, "max": 0.5},
+        "vigem_net_release_ms": {"type": "int", "min": 10, "max": 500},
+        # Remote mouse buttons: pushed back by GamepadEnhancer on the ViGEm Network connection above
+        "remote_btn_enabled": {"type": "bool"},
+        "remote_aim_button": {"type": "choice", "choices": ["off", "lmb", "rmb", "mmb", "side1", "side2"]},
     },
     "visuals": {
         "show_fov": {"type": "bool"},
@@ -305,6 +348,8 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "status_panel_gpu_voltage": {"type": "bool"},
         "status_panel_gpu_interval_ms": {"type": "int", "min": 250, "max": 5000},
         "show_aim_prediction_marker": {"type": "bool"},
+        "show_anchor_debug": {"type": "bool"},
+        "show_stick_gauge": {"type": "bool"},
         "show_crosshair": {"type": "bool"},
         "crosshair_style": {"type": "choice", "choices": ["dot", "cross"]},
         "crosshair_size": {"type": "int", "min": 1, "max": 20},
@@ -341,7 +386,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # pages both had a control bound to the same Config field.
         "mouse_click_method": {
             "type": "choice",
-            "choices": ["mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox"],
+            "choices": ["mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox", "vigem_network"],
         },
         "auto_fire_delay": {"type": "float", "min": 0.0, "max": 2.0},
         "auto_fire_interval": {"type": "float", "min": 0.01, "max": 1.0},
@@ -465,6 +510,13 @@ def get_tab_settings(config, tab: str) -> dict:
         # retention / tracking cards here only apply while it is on (same
         # visibility rule as inference_page.py's _updateTrackingVisibility()).
         result["sticky_lock_enabled"] = bool(getattr(config, "sticky_lock_enabled", False))
+        # Read-only extra: the aim-lead Prediction Method (Aim tab) can be Anchor, which shares the
+        # Anchor Prediction tuning cards shown on this tab (see inference_page._updateAnchorVisibility).
+        # Method-based, not aim_uses_anchor(): with the mode on Disabled the Mode card must stay
+        # reachable or it could never be switched back on.
+        result["aim_uses_anchor"] = bool(
+            getattr(config, "prediction_enabled", False)
+            and str(getattr(config, "prediction_method", "velocity")) == "anchor")
 
     if tab == "keys":
         # Read-only extras — these three drive the Keys & HW panel's own

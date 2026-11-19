@@ -1337,3 +1337,108 @@ class TestFovTrackingFields:
         config = _config(fov_retention_pct=100.0, reacquire_radius_px=150)
         res = wcs.apply_tab_settings(config, "inference", {field: val})
         assert res["ok"] is True and getattr(config, field) == want
+
+
+class TestAnchorPredictionSettings:
+    ANCHOR_KEYS = ("anchor_enabled", "anchor_mode", "anchor_horizon_ms", "anchor_strength",
+                   "anchor_velocity_smoothing", "anchor_accel_comp", "anchor_confidence_threshold",
+                   "anchor_history_len", "anchor_max_distance_pct", "anchor_fov_influence_adaptive",
+                   "anchor_fov_influence_dynamic")
+
+    def test_every_schema_field_is_a_real_persisted_config_field(self):
+        from unittest.mock import patch
+        with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+            from core.config import Config, _FIELD_MAP
+            c = Config()
+        for k in self.ANCHOR_KEYS:
+            assert k in wcs._SCHEMA["inference"] and hasattr(c, k) and k in _FIELD_MAP
+        assert "show_anchor_debug" in wcs._SCHEMA["visuals"] and "show_anchor_debug" in _FIELD_MAP
+
+    def test_round_trip_uses_percent_display_units_for_fractions(self):
+        config = _config(anchor_enabled=False, anchor_mode="adaptive", anchor_horizon_ms=100.0, anchor_strength=1.0,
+                         anchor_velocity_smoothing=0.4, anchor_accel_comp=0.35, anchor_confidence_threshold=0.35,
+                         anchor_history_len=6, anchor_max_distance_pct=25.0, anchor_fov_influence_adaptive=0.5,
+                         anchor_fov_influence_dynamic=0.5)
+        shown = wcs.get_tab_settings(config, "inference")
+        assert shown["anchor_strength"] == pytest.approx(100.0) and shown["anchor_accel_comp"] == pytest.approx(35.0)
+        assert shown["anchor_fov_influence_dynamic"] == pytest.approx(50.0) and shown["anchor_mode"] == "adaptive"
+        result = wcs.apply_tab_settings(config, "inference", {
+            "anchor_enabled": True, "anchor_mode": "Velocity_Accel", "anchor_horizon_ms": 250,
+            "anchor_strength": 80, "anchor_fov_influence_adaptive": 30, "anchor_history_len": 9})
+        assert result["ok"] is True
+        assert config.anchor_enabled is True and config.anchor_mode == "velocity_accel"
+        assert config.anchor_horizon_ms == 250 and config.anchor_strength == pytest.approx(0.8)
+        assert config.anchor_fov_influence_adaptive == pytest.approx(0.3) and config.anchor_history_len == 9
+
+    def test_bad_values_are_rejected_atomically_and_out_of_range_is_clamped(self):
+        config = _config(anchor_mode="adaptive", anchor_strength=1.0, anchor_history_len=6)
+        bad = wcs.apply_tab_settings(config, "inference", {"anchor_strength": 50, "anchor_mode": "turbo"})
+        assert bad["ok"] is False and bad["field"] == "anchor_mode"
+        assert config.anchor_strength == 1.0                           # nothing written
+        ok = wcs.apply_tab_settings(config, "inference", {"anchor_strength": 9999, "anchor_history_len": 99})
+        assert ok["ok"] is True and config.anchor_strength == pytest.approx(1.5) and config.anchor_history_len == 12
+
+    def test_debug_toggle_lives_on_the_visuals_tab(self):
+        config = _config(show_anchor_debug=False)
+        assert wcs.apply_tab_settings(config, "visuals", {"show_anchor_debug": True})["ok"] is True
+        assert config.show_anchor_debug is True
+
+
+class TestAnchorAimLeadSettings:
+    """Prediction Method 'anchor' on the Aim tab + the read-only extra the Inference tab uses to
+    show the shared Anchor tuning cards (client: updateAnchorVisibility() / d.aim_uses_anchor)."""
+
+    def test_anchor_is_an_accepted_prediction_method(self):
+        assert "anchor" in wcs._SCHEMA["aim"]["prediction_method"]["choices"]
+        config = _config(prediction_method="velocity")
+        assert wcs.apply_tab_settings(config, "aim", {"prediction_method": "Anchor"})["ok"] is True
+        assert config.prediction_method == "anchor"
+        bad = wcs.apply_tab_settings(config, "aim", {"prediction_method": "psychic"})
+        assert bad["ok"] is False and config.prediction_method == "anchor"
+
+    @pytest.mark.parametrize("enabled,method,mode,want", [
+        (True, "anchor", "adaptive", True),
+        (True, "anchor", "disabled", True),        # method-based: the Mode card must stay reachable
+        (True, "velocity", "adaptive", False),
+        (False, "anchor", "adaptive", False),
+    ])
+    def test_inference_tab_extra_follows_the_aim_method(self, enabled, method, mode, want):
+        config = _config(prediction_enabled=enabled, prediction_method=method, anchor_mode=mode)
+        assert wcs.get_tab_settings(config, "inference")["aim_uses_anchor"] is want
+
+    def test_extra_defaults_to_false_on_a_bare_config(self):
+        assert wcs.get_tab_settings(_config(), "inference")["aim_uses_anchor"] is False
+
+
+class TestAnchorFovSettings:
+    KEYS = ("afov_source", "afov_position", "afov_offset_x", "afov_offset_y", "afov_manual_x", "afov_manual_y",
+            "afov_follow_speed", "afov_smoothing", "afov_max_speed", "afov_predict_enabled",
+            "afov_predict_strength", "afov_predict_time_ms", "afov_lost_behavior", "afov_lost_delay_ms",
+            "afov_reacquire", "afov_radius", "afov_min_radius", "afov_max_radius", "afov_dynamic_radius")
+
+    def test_every_schema_field_is_a_real_persisted_config_field(self):
+        from unittest.mock import patch
+        with patch("core.config._get_screen_size", return_value=(1920, 1080)):
+            from core.config import Config, _FIELD_MAP
+            c = Config()
+        for k in self.KEYS:
+            assert k in wcs._SCHEMA["inference"] and hasattr(c, k) and k in _FIELD_MAP
+        assert "anchor" in wcs._SCHEMA["inference"]["fov_shrink_mode"]["choices"]
+
+    def test_round_trip_and_percent_units(self):
+        config = _config(afov_smoothing=0.3, afov_predict_strength=1.0, afov_source="detection",
+                         afov_lost_behavior="hold", afov_radius=100, fov_shrink_mode="adaptive")
+        shown = wcs.get_tab_settings(config, "inference")
+        assert shown["afov_smoothing"] == pytest.approx(30.0) and shown["afov_predict_strength"] == pytest.approx(100.0)
+        res = wcs.apply_tab_settings(config, "inference", {
+            "fov_shrink_mode": "Anchor", "afov_source": "tracker", "afov_smoothing": 60,
+            "afov_lost_behavior": "search", "afov_radius": 140})
+        assert res["ok"] is True
+        assert config.fov_shrink_mode == "anchor" and config.afov_source == "tracker"
+        assert config.afov_smoothing == pytest.approx(0.6) and config.afov_lost_behavior == "search"
+        assert config.afov_radius == 140
+
+    def test_bad_values_are_rejected_atomically(self):
+        config = _config(afov_source="detection", afov_radius=100)
+        bad = wcs.apply_tab_settings(config, "inference", {"afov_radius": 120, "afov_source": "psychic"})
+        assert bad["ok"] is False and bad["field"] == "afov_source" and config.afov_radius == 100

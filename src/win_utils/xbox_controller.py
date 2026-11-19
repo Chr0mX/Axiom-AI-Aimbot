@@ -12,11 +12,9 @@ Principle:
 from __future__ import annotations
 
 import os
-import sys
 import time
 import threading
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

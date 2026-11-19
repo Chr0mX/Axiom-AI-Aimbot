@@ -11,7 +11,6 @@ importing this module already exercises (see test_module_importable_
 without_windows_deps below).
 """
 
-import os
 import sys
 import threading
 import types

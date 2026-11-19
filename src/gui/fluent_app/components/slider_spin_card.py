@@ -1,7 +1,7 @@
 # slider_spin_card.py
 """可重用的滑桿+數字輸入卡片組件"""
 
-from typing import Callable, Optional, Union
+from typing import Callable, Optional
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QWidget
 from qfluentwidgets import SettingCard, FluentIconBase, BodyLabel

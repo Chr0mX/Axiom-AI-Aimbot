@@ -1,7 +1,6 @@
 # model_page.py
 """Model Page — model selection, inference backend, and model inspector."""
 
-import glob
 import json
 import os
 import subprocess

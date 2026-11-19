@@ -47,12 +47,6 @@ class ButtonsStreamFrame:
     mask: int      # u16: bit0=L,1=R,2=M,3=S1,4=S2
 
 
-@dataclass
-class DeviceType:
-    name: str      # "mouse", "keyboard", "none"
-    code: int      # 2=mouse, 1=keyboard, 0=none
-
-
 AnyFrame = Union[StatusResponse, DataResponse, MouseStreamFrame, ButtonsStreamFrame]
 
 # Stream CMD codes that need specialised parsing

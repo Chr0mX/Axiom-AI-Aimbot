@@ -7,25 +7,17 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 from win_utils import send_mouse_move
 
 from .ai_loop_state import LoopState
+from .ai_loop_utils import anchor_on_match, anchor_ref_box
 from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .aim_paths import adaptive_lead_s, ema_step
+from .anchor_prediction import predict_aim_point
 from .target_predictor import EmaPredictor, RollingVelocityPredictor, VelocityPredictor
-from .target_tracking import edge_ratio, lost_timeout_s, select_target
+from .target_tracking import box_iou, edge_ratio, lost_timeout_s, select_target
 
 if TYPE_CHECKING:
     from .config import Config
-
-def _box_iou(a: List[float], b: List[float]) -> float:
-    """Intersection over Union for two [x1, y1, x2, y2] boxes."""
-    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
-    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
-    inter = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
-    if inter == 0.0:
-        return 0.0
-    return inter / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
-
 
 # Module-level singleton — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
@@ -103,6 +95,32 @@ def _reset_unused_predictors(method: str) -> None:
         _ema_predictor.reset()
     if method != "rolling" and _rolling_predictor is not None:
         _rolling_predictor.reset()
+
+
+# How often the aim-lead anchor track re-reads the shared anchor_* settings (seconds).
+_ANCHOR_AIM_PARAMS_REFRESH_S = 0.25
+
+
+def _anchor_aim_lead(config: Config, state: LoopState, box, comp_dx: float, comp_dy: float,
+                     aim_x: float, aim_y: float, now_t: float, horizon_s: float,
+                     det_conf: float):
+    """Prediction Method 'anchor': lead the (already compensated) aim point with the
+    Anchor estimator. ``box`` is the locked box in raw screen coordinates; it is shifted
+    by the same camera-drift / own-mouse compensation the aim point carries
+    (``comp_dx/comp_dy``) so our own correction never reads as target velocity. Uses the
+    aim-lead horizon, not ``anchor_horizon_ms`` (that one is the FOV layer's)."""
+    track = state.aim_anchor
+    # 0.0 = never refreshed (fresh state / after anchor_reset): load the config right away
+    # instead of relying on the clock already being past the refresh interval.
+    if (state.aim_anchor_params_t == 0.0
+            or now_t - state.aim_anchor_params_t >= _ANCHOR_AIM_PARAMS_REFRESH_S
+            or state.aim_anchor_params_t > now_t):
+        track.params.update_from(config)
+        state.aim_anchor_params_t = now_t
+    if track.params.mode == 'disabled':          # shared mode switch: Disabled = no lead
+        return aim_x, aim_y
+    shifted = (box[0] + comp_dx, box[1] + comp_dy, box[2] + comp_dx, box[3] + comp_dy)
+    return predict_aim_point(track, now_t, shifted, aim_x, aim_y, horizon_s, det_conf)
 
 
 def calculate_aim_target(
@@ -309,7 +327,7 @@ def process_aiming(
             selected, _continued = select_target(
                 valid_targets, locked_box=state.locked_box, tracker=state.tracker,
                 config=config, now=current_time, iou_thresh=iou_thresh, norm=_fov_ref * 0.5,
-                class_of=class_of)
+                class_of=class_of, ref_box=anchor_ref_box(config, state, current_time))
             if selected is None:
                 return False
         else:
@@ -333,7 +351,7 @@ def process_aiming(
         # suppression right when it's needed. Reset the gate's timestamp
         # whenever the selected box isn't a continuation of the previous one.
         _iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
-        if _prev_locked_box is None or _box_iou(_prev_locked_box, selected_box) < _iou_thresh:
+        if _prev_locked_box is None or box_iou(_prev_locked_box, selected_box) < _iou_thresh:
             state.aim_y_last_target_t = 0.0
             # Same "is this genuinely a new target" edge as above — arms the
             # acquisition-phase guard below (state.lock_acquired_t) exactly
@@ -344,12 +362,14 @@ def process_aiming(
         _fw = float(getattr(config, 'fov_effective_size', 0) or getattr(config, 'fov_size', 222))
         _fh = float(getattr(config, 'fov_effective_height', 0) or getattr(config, 'fov_height', _fw) or _fw)
         _same = _continued or (_prev_locked_box is not None
-                               and _box_iou(_prev_locked_box, selected_box) >= _iou_thresh)
+                               and box_iou(_prev_locked_box, selected_box) >= _iou_thresh)
         state.tracker.on_match(
             current_time, selected_box, _conf,
             edge_ratio=edge_ratio(selected_box, crosshair_x, crosshair_y, _fw, _fh,
                                   bool(getattr(config, 'fov_circle_filter_enabled', False))),
             same_target=_same)
+        anchor_on_match(config, state, selected_box, _conf, current_time,
+                        crosshair_x, crosshair_y, _fw, _fh)
         if class_of is not None:
             _cid = class_of(selected_box)
             if _cid is not None or not _same:
@@ -423,7 +443,7 @@ def process_aiming(
         # feeling permanently a step behind.
         if getattr(config, 'prediction_enabled', False):
             method = str(getattr(config, 'prediction_method', 'velocity') or 'velocity')
-            if method not in ('velocity', 'ema', 'rolling'):
+            if method not in ('velocity', 'ema', 'rolling', 'anchor'):
                 method = 'velocity'
             if _in_acquisition:
                 _reset_unused_predictors('')
@@ -431,6 +451,8 @@ def process_aiming(
                     _get_predictor(config).reset()
                 elif method == 'ema':
                     _get_ema_predictor().reset()
+                elif method == 'anchor':
+                    state.aim_anchor.reset()
                 else:
                     _get_rolling_predictor().reset()
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
@@ -447,11 +469,19 @@ def process_aiming(
             elif method == 'rolling':
                 lead_frames = float(getattr(config, 'prediction_lead_frames', 3.0) or 3.0)
                 pred_x, pred_y = _get_rolling_predictor().update(pred_x, pred_y, now_t, lead_frames)
+            elif method == 'anchor':
+                pred_x, pred_y = _anchor_aim_lead(
+                    config, state, selected_box, pred_x - target_x, pred_y - target_y,
+                    pred_x, pred_y, now_t, horizon_s, _conf)
             else:
                 pred_x, pred_y = _get_predictor(config).update(pred_x, pred_y, now_t, horizon_s)
             _reset_unused_predictors(method)
+            if method != 'anchor' and state.aim_anchor.samples:
+                state.aim_anchor.reset()
         else:
             _reset_unused_predictors('')
+            if state.aim_anchor.samples:
+                state.aim_anchor.reset()
 
         # --- Kalman filter aim-point smoothing (optional) ---
         if getattr(config, 'kalman_enabled', False):

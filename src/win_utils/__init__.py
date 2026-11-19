@@ -60,7 +60,7 @@ from .makcu_mouse import (
     send_mouse_move_makcu,
     send_mouse_click_makcu,
     connect_makcu,
-    connect_makcu_udp,
+    connect_makcu_udp,  # noqa: F401  (public re-export)
     disconnect_makcu,
     is_makcu_connected,
 )
@@ -70,13 +70,23 @@ from .xbox_controller import (
     XboxController,
     xbox_controller,
     send_mouse_move_xbox,
-    send_mouse_click_xbox,
+    send_mouse_click_xbox,  # noqa: F401  (public re-export)
     connect_xbox,
     disconnect_xbox,
     is_xbox_connected,
     is_xbox_available,
     set_xbox_sensitivity,
     set_xbox_deadzone,
+)
+
+# Mouse move - ViGEm Network (remote virtual Xbox via TCP)
+from .vigem_network import (
+    connect_vigem_network,
+    disconnect_vigem_network,
+    is_vigem_network_connected,
+    send_mouse_move_vigem_network,
+    send_mouse_click_vigem_network,
+    send_vigem_network_button,
 )
 
 # Mouse click
@@ -87,7 +97,7 @@ from .mouse_click import (
     send_mouse_click,
     send_mouse_button,
 )
-from .arduino_mouse import send_mouse_click_arduino
+from .arduino_mouse import send_mouse_click_arduino  # noqa: F401  (public re-export)
 
 # Key detection
 from .key_utils import is_key_pressed, set_device_hotkeys
@@ -105,7 +115,7 @@ from .gamepad_input import (
 # Administrator privileges
 from .admin import (
     is_admin,
-    request_admin_privileges,
+    request_admin_privileges,  # noqa: F401  (public re-export)
     check_and_request_admin,
 )
 
@@ -147,6 +157,8 @@ def send_mouse_move(dx, dy, method="mouse_event"):
         send_mouse_move_makcu(dx, dy)
     elif method == "xbox":
         send_mouse_move_xbox(dx, dy)
+    elif method == "vigem_network":
+        send_mouse_move_vigem_network(dx, dy)
     else:
         # 默認使用 mouse_event 方式（安全穩定）
         send_mouse_move_mouse_event(dx, dy)
@@ -201,6 +213,14 @@ __all__ = [
     'is_xbox_available',
     'set_xbox_sensitivity',
     'set_xbox_deadzone',
+
+    # ViGEm Network
+    'connect_vigem_network',
+    'disconnect_vigem_network',
+    'is_vigem_network_connected',
+    'send_mouse_move_vigem_network',
+    'send_mouse_click_vigem_network',
+    'send_vigem_network_button',
 
     # 滑鼠點擊
     'send_mouse_click',

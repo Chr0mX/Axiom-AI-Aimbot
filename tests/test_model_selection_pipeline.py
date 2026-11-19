@@ -17,7 +17,6 @@ import sys
 import types
 from unittest.mock import MagicMock
 
-import pytest
 
 
 def _import_session_utils(monkeypatch):

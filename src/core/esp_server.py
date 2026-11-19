@@ -29,6 +29,8 @@ from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from .ai_loop_utils import get_capture_dimensions, get_effective_detect_range_size
+from .anchor_fov import anchor_fov_active, fov_center
+from .anchor_prediction import anchor_active
 from .box_style import aim_marker_thickness, detect_range_thickness, fov_thickness, tracer_thickness
 
 logger = logging.getLogger(__name__)
@@ -198,6 +200,46 @@ def _build_snapshot() -> dict:
         except (TypeError, ValueError):
             aim_predicted = None
 
+    # Anchor Prediction debug overlay: actual/predicted box and centres, velocity, confidence
+    # (shifted like the boxes). Present only while the toggle is on, the feature is active and
+    # a prediction was published.
+    anchor = None
+    snap = getattr(c, "anchor_debug", None)
+    if snap and getattr(c, "show_anchor_debug", False) and anchor_active(c):
+        try:
+            s = [float(v) for v in snap]
+            anchor = {
+                "box": [int(s[0]) + offset_x, int(s[1]) + offset_y, int(s[2]) + offset_x, int(s[3]) + offset_y],
+                "pbox": [int(s[4]) + offset_x, int(s[5]) + offset_y, int(s[6]) + offset_x, int(s[7]) + offset_y],
+                "c": [int(s[8]) + offset_x, int(s[9]) + offset_y],
+                "pc": [int(s[10]) + offset_x, int(s[11]) + offset_y],
+                "v": [round(s[12], 1), round(s[13], 1)],
+                "conf": round(s[14], 3),
+            }
+        except (TypeError, ValueError, IndexError):
+            anchor = None
+
+    # Anchor FOV: the controller's real centre/anchor/prediction (shifted like the boxes), only
+    # while that mode is active. Absent/None for every other mode, so older pages and the
+    # other modes see exactly the previous snapshot.
+    fov_center_pt = None
+    afov = None
+    if anchor_fov_active(c) and getattr(c, "afov_active", False):
+        try:
+            fcx, fcy = fov_center(c)
+            fov_center_pt = {"x": int(round(fcx)) + offset_x, "y": int(round(fcy)) + offset_y}
+            afov = {
+                "lost": bool(getattr(c, "afov_lost", False)),
+                "phase": int(getattr(c, "afov_phase", 0)),
+                "anchor": {"x": int(getattr(c, "afov_anchor_x", fcx)) + offset_x,
+                           "y": int(getattr(c, "afov_anchor_y", fcy)) + offset_y},
+                "pred": ({"x": int(getattr(c, "afov_pred_x", fcx)) + offset_x,
+                          "y": int(getattr(c, "afov_pred_y", fcy)) + offset_y}
+                         if getattr(c, "afov_predict_enabled", False) else None),
+            }
+        except (TypeError, ValueError):
+            fov_center_pt = afov = None
+
     return {
         "t": int(time.monotonic() * 1000),
         # Detection counter (ai_loop bumps it per inference result); lets the page tell new data
@@ -208,6 +250,9 @@ def _build_snapshot() -> dict:
             "x": int(getattr(c, "crosshairX", 0)) + offset_x,
             "y": int(getattr(c, "crosshairY", 0)) + offset_y,
         },
+        # FOV centre when it is not the crosshair (Anchor FOV); null otherwise.
+        "fov_center": fov_center_pt,
+        "afov": afov,
         "settings": {
             # fov_effective_size/_height, not the raw fov_size/fov_height
             # fields — reflects any live shrink from "Reduce FOV on Active
@@ -236,6 +281,9 @@ def _build_snapshot() -> dict:
             "box_corner_length_pct": int(getattr(c, "box_corner_length_pct", 0) or 0),
             "show_detect_range": bool(getattr(c, "show_detect_range", True)),
             "show_aim_prediction_marker": bool(getattr(c, "show_aim_prediction_marker", True)),
+            "show_anchor_debug": bool(getattr(c, "show_anchor_debug", False)) and anchor_active(c),
+            "show_stick_gauge": bool(getattr(c, "show_stick_gauge", True))
+                                and getattr(c, "mouse_move_method", "") == "vigem_network",
             # Line widths (px) of the FOV / Detection Range / Tracer / Predicted Aim Point.
             "fov_line_thickness": fov_thickness(c),
             "detect_range_line_thickness": detect_range_thickness(c),
@@ -264,6 +312,13 @@ def _build_snapshot() -> dict:
         "boxes": _boxes(getattr(c, "latest_all_boxes", [])),
         "confidences": [float(x) for x in (getattr(c, "latest_all_confidences", []) or [])],
         "aim_predicted": aim_predicted,
+        "anchor": anchor,
+        "stick": {
+            "x": float(getattr(c, "vigem_stick_x", 0.0) or 0.0),
+            "y": float(getattr(c, "vigem_stick_y", 0.0) or 0.0),
+            "dz": float(getattr(c, "vigem_net_input_deadzone", 0.0) or 0.0),
+            "game_dz": float(getattr(c, "vigem_net_game_deadzone", 0.0) or 0.0),
+        },
         "locked_box": locked,
         "locked_decaying": bool(getattr(c, "display_locked_box_is_decaying", False)),
         # Lock is held outside the control FOV: tracked, but no aiming this frame.

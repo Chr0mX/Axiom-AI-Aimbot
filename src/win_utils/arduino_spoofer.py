@@ -1,6 +1,5 @@
 import os
 import shutil
-import re
 import glob
 import serial.tools.list_ports
 
@@ -47,7 +46,6 @@ def spoof_arduino_board():
             lines = f.readlines()
             
         new_lines = []
-        spoofed = False
         
         # Spoof target: Logitech G502 HERO
         # VID: 0x046D

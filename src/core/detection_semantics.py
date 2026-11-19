@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Tuple
+from typing import Tuple
+
+from .logging_config import log_throttled
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +210,10 @@ def filter_detections_by_semantic_class(
             if _looks_like_environment_box(bw, bh, conf):
                 continue
         except Exception:
-            pass
+            # A malformed box must not drop the whole frame: keep it, but say so.
+            log_throttled(logger, "semantics.box_geometry", logging.WARNING,
+                          "[Semantic] Could not evaluate a detection box (%r); keeping it", box,
+                          exc_info=True)
 
         out_b.append(box)
         out_c.append(conf)
@@ -297,7 +302,9 @@ def sync_detection_class_names_from_backend(backend, config) -> None:
             try:
                 names = ast.literal_eval(names_raw)
             except Exception:
-                pass
+                log_throttled(logger, "semantics.names_parse", logging.WARNING,
+                              "[Semantic] The model's class-name metadata is not valid JSON or a "
+                              "Python literal; class names are unavailable")
         if names is None:
             return
         if isinstance(names, dict):
@@ -305,4 +312,5 @@ def sync_detection_class_names_from_backend(backend, config) -> None:
         elif isinstance(names, (list, tuple)):
             setattr(config, '_detect_class_names', {i: str(n) for i, n in enumerate(names)})
     except Exception:
-        pass
+        log_throttled(logger, "semantics.names_sync", logging.WARNING,
+                      "[Semantic] Could not read class names from the inference backend", exc_info=True)

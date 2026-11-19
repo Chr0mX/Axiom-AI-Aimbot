@@ -89,6 +89,11 @@ def is_ndi_runtime_installed() -> bool:
     return find_ndi_runtime_dll() is not None
 
 
+# Per-socket-operation timeout (connect / each read), not a cap on the whole download:
+# without one a stalled server hangs the installer forever.
+_DOWNLOAD_TIMEOUT_S = 60
+
+
 def download_file(url: str, destination: Path) -> None:
     log(f"Downloading: {url}")
 
@@ -100,7 +105,7 @@ def download_file(url: str, destination: Path) -> None:
                 "Accept": "*/*",
             },
         )
-        with urllib.request.urlopen(req) as response, open(destination, "wb") as f:
+        with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT_S) as response, open(destination, "wb") as f:
             shutil.copyfileobj(response, f)
     except Exception as first_error:
         warn(f"Direct download failed: {first_error}")

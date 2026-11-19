@@ -76,7 +76,3 @@ vgamepad
 
 # ── Web ESP overlay (optional QR code for the connect URL) ───────────────────
 segno
-
-
-# ── Test ─────────────────────────────────────────────────────────────────────
-pytest

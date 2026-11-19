@@ -35,3 +35,33 @@ def test_legacy_behaviour_preserved():
     assert parse_version("v1.2.3") == (1, 2, 3)
     assert parse_version("1.abc.3") == (1, 0, 3)
     assert parse_version("6.4-beta") == (6, 4, 0)
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/iishong0w0/Axiom-AI-Aimbot/releases/tag/main-6.4",
+    "https://www.github.com/x/y",
+    " https://github.com/x/y ",
+])
+def test_release_urls_on_github_are_safe(url):
+    from core.version_utils import is_safe_release_url
+    assert is_safe_release_url(url) is True
+
+
+@pytest.mark.parametrize("url", [
+    "http://github.com/x/y",                 # not https
+    "file:///C:/Windows/System32/calc.exe",
+    "javascript:alert(1)",
+    "https://evil.example/github.com",
+    "https://github.com.evil.example/x",
+    "https://github.com@evil.example/x",     # userinfo trick: the host is evil.example
+    "https://user:pw@github.com/x",
+    "",
+    None,
+    "//github.com/x",
+])
+def test_other_release_urls_are_rejected(url):
+    from core.version_utils import is_safe_release_url
+    assert is_safe_release_url(url) is False

@@ -125,7 +125,7 @@ class MakcuMouseBinary:
                     timeout=0.3, write_timeout=0.1
                 )
                 time.sleep(0.1)
-            except serial.SerialException as exc:
+            except serial.SerialException:
                 self._serial = None
                 return False
 

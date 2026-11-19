@@ -150,7 +150,7 @@ if _early_backend != "directml":
 # ─────────────────────────────────────────────────────────────────────────────
 
 # 初始化 pywin32 - 必須先導入 pywintypes
-import pywintypes
+import pywintypes  # noqa: F401  (side effect: must load before any other pywin32 module)
 import onnxruntime as ort
 
 # ── CUDA / cuDNN DLL pre-registration ────────────────────────────────────────
@@ -284,8 +284,6 @@ from gui.disclaimer_dialog import DisclaimerDialog
 from core.app_controller import (
     start_ai_threads,
     stop_ai_threads,
-    pause_ai_inference,
-    resume_ai_inference,
 )
 
 

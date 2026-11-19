@@ -82,6 +82,10 @@ def clamp01(x: float) -> float:
     return 0.0 if x < 0.0 else 1.0 if x > 1.0 else x
 
 
+def clamp(x: float, lo: float, hi: float) -> float:
+    return lo if x < lo else hi if x > hi else x
+
+
 def box_iou(a: Sequence[float], b: Sequence[float]) -> float:
     ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
     ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
@@ -100,6 +104,11 @@ class TargetTracker:
     """Lock lifecycle + smoothed quality signals for one tracked target."""
 
     def __init__(self) -> None:
+        # Monotonic id of the current lock: bumped whenever a brand-new target is
+        # locked (never reused, survives reset()), so per-object state keyed on
+        # it (e.g. anchor prediction history) can never leak between targets.
+        self._lock_seq = 0
+        self.lock_id = 0
         self.reset()
 
     # ── lifecycle ────────────────────────────────────────────────────────
@@ -155,6 +164,8 @@ class TargetTracker:
         has_memory = self.last_center is not None
 
         if not same_target or not has_memory or self.state is TrackState.SEARCHING:
+            self._lock_seq += 1
+            self.lock_id = self._lock_seq
             self.acquired_t = now
             self.conf_ema = float(conf)
             self.hit_ema = 0.5
@@ -389,7 +400,7 @@ def _motion_consistent(boxes, strong, locked_box, tracker: TargetTracker, now: f
 
 
 def find_continuation(boxes, *, locked_box, tracker: TargetTracker, config, now: float,
-                      iou_thresh: float, class_of=None):
+                      iou_thresh: float, class_of=None, ref_box=None):
     """Which of ``boxes`` (if any) is the current/remembered lock?
 
     Returns ``(index | None, ambiguous)``.  Box overlap with ``locked_box``
@@ -398,7 +409,11 @@ def find_continuation(boxes, *, locked_box, tracker: TargetTracker, config, now:
     velocity-extrapolated position -- unless the runner-up is about as close
     (``ambiguous``: don't guess).  ``class_of(box)`` (optional) gives a box's
     class id; a box whose class differs from the locked target's is never a
-    continuation.  Pure and allocation-light: runs once or twice per frame.
+    continuation.  ``ref_box`` (optional, e.g. the anchor-predicted box) is a
+    second overlap reference: a candidate's overlap is the larger of its IoU
+    with ``locked_box`` and with ``ref_box``, so a fast mover that left its old
+    box behind is still recognised; ``None`` (the default) changes nothing.
+    Pure and allocation-light: runs once or twice per frame.
     """
     lc = tracker.locked_class
     if class_of is not None and lc is not None:
@@ -415,6 +430,10 @@ def find_continuation(boxes, *, locked_box, tracker: TargetTracker, config, now:
             if ok is not None and not ok(box):
                 continue
             iou = box_iou(locked_box, box)
+            if ref_box is not None:
+                r_iou = box_iou(ref_box, box)
+                if r_iou > iou:
+                    iou = r_iou
             if iou > 0.0:
                 cands.append((iou, i))
         if cands:
@@ -454,7 +473,7 @@ def build_class_lookup(boxes, class_ids):
 
 
 def select_target(valid_targets, *, locked_box, tracker: TargetTracker, config,
-                  now: float, iou_thresh: float, norm: float, class_of=None):
+                  now: float, iou_thresh: float, norm: float, class_of=None, ref_box=None):
     """Sticky-lock target choice.  ``valid_targets`` is already sorted by
     priority (best first).  Returns ``(item, continued)``:
 
@@ -470,7 +489,7 @@ def select_target(valid_targets, *, locked_box, tracker: TargetTracker, config,
     """
     idx, ambiguous = find_continuation(
         [it[4] for it in valid_targets], locked_box=locked_box, tracker=tracker,
-        config=config, now=now, iou_thresh=iou_thresh, class_of=class_of)
+        config=config, now=now, iou_thresh=iou_thresh, class_of=class_of, ref_box=ref_box)
     if ambiguous:
         return None, False
     cont = valid_targets[idx] if idx is not None else None

@@ -9,10 +9,10 @@ import os
 import json
 from PyQt6.QtGui import QColor
 from dataclasses import dataclass
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Dict, Any
 
 try:
-    from qfluentwidgets import isDarkTheme, themeColor
+    from qfluentwidgets import isDarkTheme
     HAS_FLUENT_WIDGETS = True
 except ImportError:
     HAS_FLUENT_WIDGETS = False
@@ -181,13 +181,13 @@ class ThemeColors:
     PRIMARY = ColorPair.from_config(
         "primary_colors", "primary",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
 
     ACCENT = ColorPair.from_config(
         "primary_colors", "accent",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     # ============================================================
@@ -259,7 +259,7 @@ class ThemeColors:
     TEXT_LINK = ColorPair.from_config(
         "text_colors", "link",
         default_light="#0067C0",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     # ============================================================
@@ -386,6 +386,46 @@ class ThemeColors:
         default_dark=(80, 210, 255, 230)
     )
 
+    # Anchor Prediction debug overlay (show_anchor_debug): the predicted box, its
+    # centre cross, the direction arrow and the readout. Violet so it can't be
+    # mistaken for the actual box, the red aim X or the cyan predicted-aim ring.
+    OVERLAY_ANCHOR_PREDICTED = ColorPairWithAlpha.from_config(
+        "overlay_colors", "anchor_predicted",
+        default_light=(170, 90, 235, 235),
+        default_dark=(190, 120, 255, 235)
+    )
+
+    # Anchor FOV (core/anchor_fov.py): the anchor point, its link to the FOV
+    # centre and the predicted anchor are teal; a lost anchor turns the FOV
+    # and its label amber so "following" vs "lost/holding" reads at a glance.
+    OVERLAY_ANCHOR_FOV = ColorPairWithAlpha.from_config(
+        "overlay_colors", "anchor_fov",
+        default_light=(0, 150, 150, 235),
+        default_dark=(0, 220, 200, 235)
+    )
+    OVERLAY_ANCHOR_FOV_LOST = ColorPairWithAlpha.from_config(
+        "overlay_colors", "anchor_fov_lost",
+        default_light=(220, 120, 0, 235),
+        default_dark=(255, 170, 40, 235)
+    )
+
+    # vigem_network stick gauge (overlay.py's _draw_stick_gauge)
+    OVERLAY_STICK_RING = ColorPairWithAlpha.from_config(
+        "overlay_colors", "stick_ring",
+        default_light=(255, 255, 255, 140),
+        default_dark=(255, 255, 255, 140)
+    )
+    OVERLAY_STICK_DEADZONE = ColorPairWithAlpha.from_config(
+        "overlay_colors", "stick_deadzone",
+        default_light=(255, 200, 0, 170),
+        default_dark=(255, 200, 0, 170)
+    )
+    OVERLAY_STICK_DOT = ColorPairWithAlpha.from_config(
+        "overlay_colors", "stick_dot",
+        default_light=(0, 230, 140, 240),
+        default_dark=(0, 230, 140, 240)
+    )
+
     # ============================================================
     # 狀態面板 (Status Panel) 顏色
     # ============================================================
@@ -497,7 +537,7 @@ class ThemeColors:
     BUTTON_PRIMARY_BG = ColorPair.from_config(
         "button_colors", "primary", "background",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
 
     BUTTON_PRIMARY_TEXT = ColorPair.from_config(
@@ -572,7 +612,7 @@ class ThemeColors:
     SWITCH_ON_BG = ColorPair.from_config(
         "switch_colors", "on", "background",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     SWITCH_ON_THUMB = ColorPair.from_config(
@@ -593,7 +633,7 @@ class ThemeColors:
     SLIDER_FILL = ColorPair.from_config(
         "slider_colors", "fill",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     SLIDER_THUMB = ColorPair.from_config(
@@ -605,7 +645,7 @@ class ThemeColors:
     SLIDER_THUMB_BORDER = ColorPair.from_config(
         "slider_colors", "thumb_border",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     # ============================================================
@@ -659,7 +699,7 @@ class ThemeColors:
     INPUT_BORDER_FOCUS = ColorPair.from_config(
         "input_colors", "border_focus",
         default_light="#0078D4",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     INPUT_TEXT = ColorPair.from_config(
@@ -780,7 +820,7 @@ class ThemeColors:
     TAG_PRIMARY_TEXT = ColorPair.from_config(
         "tag_colors", "primary", "text",
         default_light="#0067C0",
-        default_dark="#4CC2FF"
+        default_dark="#7ea2ff"
     )
     
     TAG_SUCCESS_BG = ColorPair.from_config(
