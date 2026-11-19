@@ -660,6 +660,27 @@ def _draw_detection_overlay(
         except Exception:
             pass
 
+    if (getattr(cfg, 'mouse_move_method', '') == 'vigem_network'
+            and bool(getattr(cfg, 'show_stick_gauge', True))):
+        # vigem_network virtual stick gauge, like overlay.py's _draw_stick_gauge.
+        try:
+            from .stick_gauge import gauge_center, stick_gauge_geometry
+            g = stick_gauge_geometry(
+                getattr(cfg, 'vigem_stick_x', 0.0), getattr(cfg, 'vigem_stick_y', 0.0),
+                getattr(cfg, 'vigem_net_input_deadzone', 0.0),
+                getattr(cfg, 'vigem_net_game_deadzone', 0.0))
+            gx, gy = gauge_center(w, h)
+            gx, gy = int(gx), int(gy)
+            cv2.circle(frame, (gx, gy), int(g["radius"]), _c(200, 200, 200), 2, cv2.LINE_AA)
+            if g["dz_r"] > 0:
+                cv2.circle(frame, (gx, gy), int(g["dz_r"]), _c(255, 200, 0), 1, cv2.LINE_AA)
+            if g["game_dz_r"] > 0:
+                cv2.circle(frame, (gx, gy), int(g["game_dz_r"]), _c(160, 120, 0), 1, cv2.LINE_AA)
+            dot_c = _c(0, 230, 140) if g["deflected"] else _c(90, 130, 110)
+            cv2.circle(frame, (gx + int(g["dot_dx"]), gy + int(g["dot_dy"])), 5, dot_c, -1, cv2.LINE_AA)
+        except Exception:
+            pass
+
     return frame
 
 

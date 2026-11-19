@@ -173,6 +173,13 @@ def _build_status(config) -> dict:
     except Exception:
         makcu_connected = False
 
+    def _vigem_net_connected():
+        try:
+            from win_utils import is_vigem_network_connected
+            return bool(is_vigem_network_connected())
+        except Exception:
+            return False
+
     status = {
         "active": bool(getattr(config, "AimToggle", False)),
         "always_aim": bool(getattr(config, "always_aim", False)),
@@ -197,6 +204,7 @@ def _build_status(config) -> dict:
         "model_load_error": str(getattr(config, "model_load_error", "") or ""),
         "mouse_move_method": str(getattr(config, "mouse_move_method", "")),
         "makcu_connected": makcu_connected,
+        "vigem_network_connected": _vigem_net_connected(),
         # Last loaded/saved preset and config — the Configs tab marks them "Loaded".
         "active_preset_name": str(getattr(config, "active_preset_name", "") or ""),
         "active_config_name": str(getattr(config, "active_config_name", "") or ""),
@@ -448,6 +456,19 @@ def start(
         from .app_controller import disconnect_makcu
         disconnect_makcu(config)
         return {"ok": True, "makcu_connected": False}
+
+    @app.post("/api/control/vigem_network_connect", dependencies=[Depends(_check_token)])
+    def post_vigem_network_connect():
+        from .app_controller import connect_vigem_network
+        res = connect_vigem_network(config)
+        ok = bool(res.get("ok"))
+        return {"ok": ok, "vigem_network_connected": ok, "reason": res.get("reason", "")}
+
+    @app.post("/api/control/vigem_network_disconnect", dependencies=[Depends(_check_token)])
+    def post_vigem_network_disconnect():
+        from .app_controller import disconnect_vigem_network
+        disconnect_vigem_network(config)
+        return {"ok": True, "vigem_network_connected": False}
 
     @app.post("/api/control/ai_start", dependencies=[Depends(_check_token)])
     def post_ai_start():

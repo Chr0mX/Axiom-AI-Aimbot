@@ -892,6 +892,12 @@ def ai_logic_loop(
                         log_throttled(logger, "ai_loop.makcu_aim_btn", logging.WARNING,
                                       "[AI] Reading the MAKCU aim button failed; the device button does "
                                       "not engage aim while this keeps happening", exc_info=True)
+                if getattr(config, 'remote_btn_enabled', False):
+                    # Mouse buttons pushed by GamepadEnhancer on the vigem_network connection
+                    # (0 while that link is down, so a dropped link never leaves aim engaged).
+                    from win_utils.vigem_network import vigem_net_button_held
+                    if vigem_net_button_held(getattr(config, 'remote_aim_button', 'rmb')):
+                        is_aiming = True
                 # Makcu disengage-delay: keep is_aiming True for up to N seconds after release
                 _disengage_delay = float(getattr(config, 'makcu_disengage_delay', 0.0) or 0.0)
                 _raw_is_aiming = is_aiming  # pre-delay-extension value — see _was_aiming[0] below

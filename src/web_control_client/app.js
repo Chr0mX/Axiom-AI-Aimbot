@@ -13,6 +13,7 @@
   var tokenShowBtn = document.getElementById("token-show");
   var alwaysAimToggle = document.getElementById("always-aim-toggle");
   var makcuToggle = document.getElementById("makcu-toggle");
+  var vigemNetToggle = document.getElementById("keys-vigem-net-toggle");
   var aiStartBtn = document.getElementById("ai-start-btn");
   var aiStopBtn = document.getElementById("ai-stop-btn");
   var aiControlReason = document.getElementById("ai-control-reason");
@@ -243,6 +244,7 @@
   // other's if both happen to update in the same applyStatus() call.
   var suppressToggleEcho = false;
   var suppressMakcuToggleEcho = false;
+  var suppressVigemNetToggleEcho = false;
 
   // The model select is populated once from GET /api/models (loadModelList,
   // fetched once on page load — not every poll tick) and the "currently
@@ -1022,6 +1024,11 @@
     document.getElementById("keys-makcu-disengage-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-always-aim-button-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-always-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
+    var isVigemNet = data.mouse_move_method === "vigem_network";
+    ["keys-vigem-net-group", "keys-vigem-net-group-title"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle("hidden", !isVigemNet);
+    });
   }
 
   var vkOptionsLoaded = false;
@@ -2298,6 +2305,11 @@
       makcuToggle.checked = !!s.makcu_connected;
       suppressMakcuToggleEcho = false;
     }
+    if (vigemNetToggle && !vigemNetToggle.disabled) {
+      suppressVigemNetToggleEcho = true;
+      vigemNetToggle.checked = !!s.vigem_network_connected;
+      suppressVigemNetToggleEcho = false;
+    }
 
     if (!modelFormPrefilled && s.model) {
       applyModelSelection(s.model);
@@ -2481,6 +2493,25 @@
         makcuToggle.disabled = false;
       });
   });
+
+  if (vigemNetToggle) {
+    vigemNetToggle.addEventListener("change", function () {
+      if (suppressVigemNetToggleEcho) return;
+      var connecting = vigemNetToggle.checked;
+      var path = connecting ? "/api/control/vigem_network_connect" : "/api/control/vigem_network_disconnect";
+      vigemNetToggle.disabled = true;
+      fetch(path, { method: "POST", headers: authHeaders() })
+        .then(function (res) {
+          if (!res.ok) { vigemNetToggle.checked = !connecting; return; }
+          return res.json();
+        })
+        .then(function (data) {
+          if (data && data.ok === false) vigemNetToggle.checked = false;
+        })
+        .catch(function () { vigemNetToggle.checked = !connecting; })
+        .then(function () { vigemNetToggle.disabled = false; });
+    });
+  }
 
   function runAiControl(path) {
     aiStartBtn.disabled = true;

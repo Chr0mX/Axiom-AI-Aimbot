@@ -1219,6 +1219,7 @@
                   <option value="arduino">arduino</option>
                   <option value="makcu">makcu</option>
                   <option value="xbox">xbox</option>
+                  <option value="vigem_network">vigem_network</option>
                 </select>
               </div>
             </div>
@@ -1958,6 +1959,7 @@
                   <option value="arduino">arduino</option>
                   <option value="makcu">makcu</option>
                   <option value="xbox">xbox</option>
+                  <option value="vigem_network">vigem_network</option>
                 </select>
               </div>
             </div>
@@ -2240,6 +2242,114 @@
             </div>
           </div>
           </section>
+
+          <section class="module">
+          <div class="field-group-title" id="keys-vigem-net-group-title">ViGEm Network</div>
+          <div class="field-group" id="keys-vigem-net-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Connected</div>
+                <div class="field-desc">Connect to the vigem-for-a-game Network API on a remote PC</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="keys-vigem-net-toggle"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Host</div>
+                <div class="field-desc">IP address or hostname of the PC running vigem-for-a-game</div>
+              </div>
+              <div class="field-control">
+                <input type="text" id="keys-vigem_net_host" data-key="vigem_net_host" data-type="str" placeholder="192.168.1.100">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Port</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_port" data-key="vigem_net_port" data-type="number" min="1" max="65535" step="1" placeholder="5555">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Token</div>
+                <div class="field-desc">Authentication token (must match the vigem app's Network API token)</div>
+              </div>
+              <div class="field-control">
+                <input type="password" id="keys-vigem_net_token" data-key="vigem_net_token" data-type="str" placeholder="token">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Sensitivity</div>
+                <div class="field-desc">Stick movement multiplier (higher = faster aiming)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_sensitivity" data-key="vigem_net_sensitivity" data-type="number" min="0.1" max="10" step="0.1">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Input Dead Zone</div>
+                <div class="field-desc">Stick values below this fraction of full travel are ignored (jitter filter)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_input_deadzone" data-key="vigem_net_input_deadzone" data-type="number" min="0" max="0.5" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Game Dead Zone</div>
+                <div class="field-desc">The game's own inner stick dead zone; small corrections are pushed past it (0 = off)</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_game_deadzone" data-key="vigem_net_game_deadzone" data-type="number" min="0" max="0.5" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Stick Release Time (ms)</div>
+                <div class="field-desc">Recenter the stick this long after the last aim move</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="keys-vigem_net_release_ms" data-key="vigem_net_release_ms" data-type="number" min="10" max="500" step="10">
+              </div>
+            </div>
+          </div>
+          </section>
+
+          <section class="module">
+          <div class="field-group-title" id="keys-remote-btn-group-title">Remote Mouse Buttons</div>
+          <div class="field-group" id="keys-remote-btn-group">
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Enabled</div>
+                <div class="field-desc">Receive the GamepadEnhancer PC's mouse buttons over the ViGEm Network connection (same address and token); holding the chosen button engages aim</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="keys-remote_btn_enabled" data-key="remote_btn_enabled" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Aim Button</div>
+                <div class="field-desc">Remote mouse button that activates aiming</div>
+              </div>
+              <div class="field-control">
+                <select id="keys-remote_aim_button" data-key="remote_aim_button" data-type="choice">
+                  <option value="off">Off</option>
+                  <option value="lmb">Left (LMB)</option>
+                  <option value="rmb">Right (RMB)</option>
+                  <option value="mmb">Middle (MMB)</option>
+                  <option value="side1">Side 1</option>
+                  <option value="side2">Side 2</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          </section>
           </div>
         </div>
 
@@ -2380,6 +2490,15 @@
               </div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="vis-show_anchor_debug" data-key="show_anchor_debug" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Stick Gauge</div>
+                <div class="field-desc">Draw a circle showing the virtual stick position and dead zones (vigem_network mouse method only).</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="vis-show_stick_gauge" data-key="show_stick_gauge" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             </div>

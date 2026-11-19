@@ -69,6 +69,7 @@ _SNAPSHOT_EXCLUDED_FIELDS = frozenset({
     'preset_slots',
     'uvc_ffmpeg_path',
     'web_esp_enabled',
+    'vigem_net_token',
 })
 
 # Model paths a snapshot may set must stay inside the app folder (e.g.

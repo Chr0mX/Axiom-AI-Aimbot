@@ -19,7 +19,8 @@ from core.config_manager import (
 )
 
 SECRET_FIELDS = ("web_control_enabled", "web_control_port", "web_control_token",
-                 "preset_slots", "uvc_ffmpeg_path", "web_esp_enabled")
+                 "preset_slots", "uvc_ffmpeg_path", "web_esp_enabled",
+                 "vigem_net_token")      # the vigem_network pairing secret: credential, never travels
 
 
 def _config():

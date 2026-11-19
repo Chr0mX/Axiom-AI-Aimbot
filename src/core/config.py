@@ -266,6 +266,7 @@ _FIELD_MAP = {
     'tracer_from_bottom':         'display.tracer_from_bottom',
     'show_aim_prediction_marker': 'display.show_aim_prediction_marker',
     'show_anchor_debug':          'display.show_anchor_debug',
+    'show_stick_gauge':           'display.show_stick_gauge',
     'box_color_theme':            'display.box_color_theme',
     'chroma_box_speed':           'display.chroma_box_speed',
     'show_status_panel':          'display.status_panel.show',
@@ -320,6 +321,17 @@ _FIELD_MAP = {
     'makcu_mouse_spread':         'hardware.makcu.mouse_spread.percent',
     'xbox_sensitivity':           'hardware.xbox.sensitivity',
     'xbox_deadzone':              'hardware.xbox.deadzone',
+
+    # --- vigem network ---
+    'vigem_net_host':             'hardware.vigem_network.host',
+    'vigem_net_port':             'hardware.vigem_network.port',
+    'vigem_net_token':            'hardware.vigem_network.token',
+    'vigem_net_sensitivity':      'hardware.vigem_network.sensitivity',
+    'vigem_net_input_deadzone':   'hardware.vigem_network.input_deadzone',
+    'vigem_net_game_deadzone':    'hardware.vigem_network.game_deadzone',
+    'vigem_net_release_ms':       'hardware.vigem_network.release_ms',
+    'remote_btn_enabled':         'hardware.remote_buttons.enabled',
+    'remote_aim_button':          'hardware.remote_buttons.aim_button',
 
     # --- ui ---
     'dark_mode':                  'ui.dark_mode',
@@ -723,6 +735,8 @@ class Config:
         # published for it while off — see anchor_debug below.
         self.show_anchor_debug: bool = False
 
+        self.show_stick_gauge: bool = True  # vigem_network stick gauge on the overlays
+
         # Crosshair overlay
         self.show_crosshair: bool = False
         self.crosshair_style: str = "dot"         # "dot" | "cross"
@@ -742,6 +756,22 @@ class Config:
         # Xbox 360 虛擬手把設定
         self.xbox_sensitivity: float = 1.0          # 手把靈敏度 (0.1~5.0)
         self.xbox_deadzone: float = 0.05            # 手把死區 (0.0~0.5)
+
+        # ViGEm Network (remote virtual Xbox via TCP)
+        self.vigem_net_host: str = ""
+        self.vigem_net_port: int = 5555
+        self.vigem_net_token: str = ""
+        self.vigem_net_sensitivity: float = 1.0
+        self.vigem_net_input_deadzone: float = 0.02  # fraction of full stick treated as 0
+        self.vigem_net_game_deadzone: float = 0.0    # game's own inner dead zone to skip past (0 = off)
+        self.vigem_net_release_ms: int = 50          # recenter the stick this long after the last move
+        # Runtime only (not in _FIELD_MAP): stick value last sent, -1..1
+        self.vigem_stick_x: float = 0.0
+        self.vigem_stick_y: float = 0.0
+        # Mouse buttons pushed back by GamepadEnhancer on the vigem_network connection
+        # (win_utils/vigem_network.py): one address/port/token for commands out and clicks in.
+        self.remote_btn_enabled: bool = False
+        self.remote_aim_button: str = "rmb"  # "off", "lmb", "rmb", "mmb", "side1", "side2"
 
         # 檢測設定
         # 偵測節流：
@@ -1606,12 +1636,12 @@ def _validate_tracking(config: Config) -> None:
 def _validate_mouse_method(config: Config) -> None:
     """驗證並修正滑鼠移動方式"""
     # 驗證滑鼠移動方式是否為有效值
-    valid_move_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox')
+    valid_move_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox', 'vigem_network')
     if config.mouse_move_method not in valid_move_methods:
         config.mouse_move_method = 'mouse_event'
-    
+
     # 驗證滑鼠點擊方式是否為有效值
-    valid_click_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox')
+    valid_click_methods = ('mouse_event', 'sendinput', 'ddxoft', 'arduino', 'makcu', 'xbox', 'vigem_network')
     if config.mouse_click_method not in valid_click_methods:
         config.mouse_click_method = 'mouse_event'
 
@@ -1619,6 +1649,19 @@ def _validate_mouse_method(config: Config) -> None:
         config.makcu_aim_button = 'lmb'
     if getattr(config, 'makcu_always_aim_button', 'off') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
         config.makcu_always_aim_button = 'off'
+    for _attr, _default in (('vigem_net_input_deadzone', 0.02), ('vigem_net_game_deadzone', 0.0)):
+        try:
+            _v = float(getattr(config, _attr, _default))
+        except (TypeError, ValueError):
+            _v = _default
+        setattr(config, _attr, max(0.0, min(0.5, _v)) if _v == _v else _default)
+    try:
+        _rel = int(getattr(config, 'vigem_net_release_ms', 50))
+    except (TypeError, ValueError):
+        _rel = 50
+    config.vigem_net_release_ms = max(10, min(500, _rel))
+    if getattr(config, 'remote_aim_button', 'rmb') not in ('off', 'lmb', 'rmb', 'mmb', 'side1', 'side2'):
+        config.remote_aim_button = 'rmb'
     if getattr(config, 'makcu_connection', 'serial') not in ('serial', 'udp'):
         config.makcu_connection = 'serial'
     try:

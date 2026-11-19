@@ -5,6 +5,7 @@ import os
 import re
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QMessageBox,
+    QLineEdit, QSpinBox, QDoubleSpinBox,
 )
 from PyQt6.QtGui import QDesktopServices, QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
@@ -326,7 +327,7 @@ class AimPage(BasePage):
         self.aimPartCard.hBoxLayout.addSpacing(16)
 
         self.mouseMoveCombo = ComboBox()
-        self.mouseMoveCombo.addItems(["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"])
+        self.mouseMoveCombo.addItems(["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox", "vigem_network"])
         self.mouseMoveCombo.setMinimumWidth(150)
         self.mouseMoveCard = SettingCard(
             FluentIcon.FINGERPRINT,
@@ -483,6 +484,88 @@ class AimPage(BasePage):
         )
         self.xboxConnectCard.hBoxLayout.addWidget(self.xboxConnectBtn, 0, Qt.AlignmentFlag.AlignRight)
         self.xboxConnectCard.hBoxLayout.addSpacing(16)
+
+        # === ViGEm Network ===
+        self.vigemNetGroup = SettingCardGroup("ViGEm Network", self.scrollWidget)
+
+        self.vigemHostEdit = QLineEdit()
+        self.vigemHostEdit.setPlaceholderText("192.168.1.100")
+        self.vigemHostEdit.setMinimumWidth(160)
+        self.vigemHostCard = SettingCard(FluentIcon.GLOBE, "Host", "IP or hostname of the PC running vigem-for-a-game", self.vigemNetGroup)
+        self.vigemHostCard.hBoxLayout.addWidget(self.vigemHostEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemHostCard.hBoxLayout.addSpacing(16)
+
+        self.vigemPortSpin = QSpinBox()
+        self.vigemPortSpin.setRange(1, 65535)
+        self.vigemPortSpin.setValue(5555)
+        self.vigemPortSpin.setMinimumWidth(100)
+        self.vigemPortCard = SettingCard(FluentIcon.CONNECT, "Port", "", self.vigemNetGroup)
+        self.vigemPortCard.hBoxLayout.addWidget(self.vigemPortSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemPortCard.hBoxLayout.addSpacing(16)
+
+        self.vigemTokenEdit = QLineEdit()
+        self.vigemTokenEdit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.vigemTokenEdit.setPlaceholderText("token")
+        self.vigemTokenEdit.setMinimumWidth(160)
+        self.vigemTokenCard = SettingCard(FluentIcon.FINGERPRINT, "Token", "Must match vigem app's Network API token", self.vigemNetGroup)
+        self.vigemTokenCard.hBoxLayout.addWidget(self.vigemTokenEdit, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemTokenCard.hBoxLayout.addSpacing(16)
+
+        self.vigemSensitivitySpin = QDoubleSpinBox()
+        self.vigemSensitivitySpin.setRange(0.1, 10.0)
+        self.vigemSensitivitySpin.setSingleStep(0.1)
+        self.vigemSensitivitySpin.setValue(1.0)
+        self.vigemSensitivitySpin.setMinimumWidth(100)
+        self.vigemSensitivityCard = SettingCard(FluentIcon.SPEED_HIGH, "Sensitivity", "Stick movement multiplier", self.vigemNetGroup)
+        self.vigemSensitivityCard.hBoxLayout.addWidget(self.vigemSensitivitySpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemSensitivityCard.hBoxLayout.addSpacing(16)
+
+        self.vigemInputDzSpin = QDoubleSpinBox()
+        self.vigemInputDzSpin.setRange(0.0, 0.5)
+        self.vigemInputDzSpin.setSingleStep(0.01)
+        self.vigemInputDzSpin.setDecimals(2)
+        self.vigemInputDzSpin.setMinimumWidth(100)
+        self.vigemInputDzCard = SettingCard(
+            FluentIcon.REMOVE,
+            t("vigem_input_deadzone", "Input Dead Zone"),
+            t("vigem_input_deadzone_desc", "Stick values below this fraction of full travel are ignored (jitter filter)"),
+            self.vigemNetGroup)
+        self.vigemInputDzCard.hBoxLayout.addWidget(self.vigemInputDzSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemInputDzCard.hBoxLayout.addSpacing(16)
+
+        self.vigemGameDzSpin = QDoubleSpinBox()
+        self.vigemGameDzSpin.setRange(0.0, 0.5)
+        self.vigemGameDzSpin.setSingleStep(0.01)
+        self.vigemGameDzSpin.setDecimals(2)
+        self.vigemGameDzSpin.setMinimumWidth(100)
+        self.vigemGameDzCard = SettingCard(
+            FluentIcon.SKIP_FORWARD,
+            t("vigem_game_deadzone", "Game Dead Zone"),
+            t("vigem_game_deadzone_desc", "The game's own inner stick dead zone; small corrections are pushed past it so they still register (0 = off)"),
+            self.vigemNetGroup)
+        self.vigemGameDzCard.hBoxLayout.addWidget(self.vigemGameDzSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemGameDzCard.hBoxLayout.addSpacing(16)
+
+        self.vigemReleaseSpin = QSpinBox()
+        self.vigemReleaseSpin.setRange(10, 500)
+        self.vigemReleaseSpin.setSuffix(" ms")
+        self.vigemReleaseSpin.setMinimumWidth(100)
+        self.vigemReleaseCard = SettingCard(
+            FluentIcon.HISTORY,
+            t("vigem_release_ms", "Stick Release Time"),
+            t("vigem_release_ms_desc", "Recenter the stick this long after the last aim move, so it never keeps drifting"),
+            self.vigemNetGroup)
+        self.vigemReleaseCard.hBoxLayout.addWidget(self.vigemReleaseSpin, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemReleaseCard.hBoxLayout.addSpacing(16)
+
+        self.vigemConnectBtn = PushButton("Connect")
+        self.vigemConnectBtn.setFixedWidth(120)
+        self.vigemConnectionLabel = BodyLabel("Disconnected")
+        self.vigemConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
+        self.vigemConnectCard = SettingCard(FluentIcon.WIFI, "Connection", "", self.vigemNetGroup)
+        self.vigemConnectCard.hBoxLayout.addWidget(self.vigemConnectionLabel, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemConnectCard.hBoxLayout.addWidget(self.vigemConnectBtn, 0, Qt.AlignmentFlag.AlignRight)
+        self.vigemConnectCard.hBoxLayout.addSpacing(16)
 
         # === PID Parameters ===
         self.pidGroup = SettingCardGroup(t("aim_speed_pid"), self.scrollWidget)
@@ -1062,6 +1145,18 @@ class AimPage(BasePage):
         self.addContent(self.xboxGroup)
         self.xboxGroup.setVisible(False)
 
+        # ViGEm Network
+        self.vigemNetGroup.addSettingCard(self.vigemHostCard)
+        self.vigemNetGroup.addSettingCard(self.vigemPortCard)
+        self.vigemNetGroup.addSettingCard(self.vigemTokenCard)
+        self.vigemNetGroup.addSettingCard(self.vigemSensitivityCard)
+        self.vigemNetGroup.addSettingCard(self.vigemInputDzCard)
+        self.vigemNetGroup.addSettingCard(self.vigemGameDzCard)
+        self.vigemNetGroup.addSettingCard(self.vigemReleaseCard)
+        self.vigemNetGroup.addSettingCard(self.vigemConnectCard)
+        self.addContent(self.vigemNetGroup)
+        self.vigemNetGroup.setVisible(False)
+
         # PID - tabbed X/Y layout
         pivotWidget = QWidget()
         pivotLayout = QHBoxLayout(pivotWidget)
@@ -1272,6 +1367,16 @@ class AimPage(BasePage):
         self.xboxDeadzoneCard.valueChanged.connect(self._onXboxDeadzoneChanged)
         self.xboxConnectBtn.clicked.connect(self._onXboxConnectToggle)
 
+        # ViGEm Network
+        self.vigemHostEdit.editingFinished.connect(self._onVigemHostChanged)
+        self.vigemPortSpin.valueChanged.connect(self._onVigemPortChanged)
+        self.vigemTokenEdit.editingFinished.connect(self._onVigemTokenChanged)
+        self.vigemSensitivitySpin.valueChanged.connect(self._onVigemSensitivityChanged)
+        self.vigemInputDzSpin.valueChanged.connect(lambda v: self._onVigemNumberChanged('vigem_net_input_deadzone', float(v)))
+        self.vigemGameDzSpin.valueChanged.connect(lambda v: self._onVigemNumberChanged('vigem_net_game_deadzone', float(v)))
+        self.vigemReleaseSpin.valueChanged.connect(lambda v: self._onVigemNumberChanged('vigem_net_release_ms', int(v)))
+        self.vigemConnectBtn.clicked.connect(self._onVigemConnectToggle)
+
         # PID
         self.pidUnsafeCard.checkedChanged.connect(self._onPidUnsafeChanged)
         self.pidTimeNormCard.checkedChanged.connect(self._onPidTimeNormChanged)
@@ -1368,7 +1473,7 @@ class AimPage(BasePage):
             self.aimPartCombo.setCurrentIndex(aim_parts.index(part))
             self._updateTargetAreaVisibility(part)
 
-            mouse_methods = ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox"]
+            mouse_methods = ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox", "vigem_network"]
             if self._config.mouse_move_method in mouse_methods:
                 self.mouseMoveCombo.setCurrentIndex(mouse_methods.index(self._config.mouse_move_method))
 
@@ -1395,6 +1500,20 @@ class AimPage(BasePage):
             self.xboxSensitivityCard.setValue(int(round(getattr(self._config, 'xbox_sensitivity', 1.0) * 100)))
             self.xboxDeadzoneCard.setValue(int(round(getattr(self._config, 'xbox_deadzone', 0.05) * 100)))
             self._updateXboxConnectionStatus()
+
+            # ViGEm Network
+            self.vigemHostEdit.setText(str(getattr(self._config, 'vigem_net_host', '') or ''))
+            self.vigemPortSpin.setValue(int(getattr(self._config, 'vigem_net_port', 5555)))
+            self.vigemTokenEdit.setText(str(getattr(self._config, 'vigem_net_token', '') or ''))
+            self.vigemSensitivitySpin.setValue(float(getattr(self._config, 'vigem_net_sensitivity', 1.0)))
+            for _spin, _attr, _default, _conv in (
+                    (self.vigemInputDzSpin, 'vigem_net_input_deadzone', 0.02, float),
+                    (self.vigemGameDzSpin, 'vigem_net_game_deadzone', 0.0, float),
+                    (self.vigemReleaseSpin, 'vigem_net_release_ms', 50, int)):
+                _spin.blockSignals(True)
+                _spin.setValue(_conv(getattr(self._config, _attr, _default)))
+                _spin.blockSignals(False)
+            self._updateVigemConnectionStatus()
 
             # PID — Kp sliders are scaled x200 normally (slider 0–100 → config
             # 0.0–0.5) or x100 with Unsafe Mode on (→ config 0.0–1.0); clamped
@@ -1525,6 +1644,7 @@ class AimPage(BasePage):
     def _updateMethodGroupVisibility(self, method):
         self.arduinoGroup.setVisible(method == "arduino")
         self.xboxGroup.setVisible(method == "xbox")
+        self.vigemNetGroup.setVisible(method == "vigem_network")
 
     # ── General Callbacks ────────────────────────
 
@@ -1566,6 +1686,8 @@ class AimPage(BasePage):
             self._config.mouse_move_method = text
             if text == "makcu":
                 self._config.mouse_click_method = "makcu"
+            if text == "vigem_network":
+                self._config.mouse_click_method = "vigem_network"
             if text == "ddxoft":
                 try:
                     from win_utils import ensure_ddxoft_ready
@@ -1787,6 +1909,60 @@ class AimPage(BasePage):
         except ImportError:
             self.xboxConnectionLabel.setText("vgamepad N/A")
             self.xboxConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
+
+    # ── ViGEm Network Callbacks ────────────────────
+
+    def _onVigemHostChanged(self):
+        if self._config:
+            self._config.vigem_net_host = self.vigemHostEdit.text().strip()
+
+    def _onVigemPortChanged(self, value):
+        if self._config:
+            self._config.vigem_net_port = int(value)
+
+    def _onVigemTokenChanged(self):
+        if self._config:
+            self._config.vigem_net_token = self.vigemTokenEdit.text()
+
+    def _onVigemSensitivityChanged(self, value):
+        if self._config:
+            self._config.vigem_net_sensitivity = float(value)
+
+    def _onVigemNumberChanged(self, attr, value):
+        if self._config:
+            setattr(self._config, attr, value)
+
+    def _onVigemConnectToggle(self):
+        try:
+            from win_utils import is_vigem_network_connected, connect_vigem_network, disconnect_vigem_network
+            if is_vigem_network_connected():
+                disconnect_vigem_network()
+            else:
+                host = str(getattr(self._config, 'vigem_net_host', '') or '').strip()
+                port = int(getattr(self._config, 'vigem_net_port', 5555))
+                token = str(getattr(self._config, 'vigem_net_token', '') or '')
+                if not host:
+                    QMessageBox.warning(self, "ViGEm Network", "Host is not configured.")
+                    return
+                connect_vigem_network(host, port, token, self._config)
+            self._updateVigemConnectionStatus()
+        except ImportError:
+            pass
+
+    def _updateVigemConnectionStatus(self):
+        try:
+            from win_utils import is_vigem_network_connected
+            if is_vigem_network_connected():
+                self.vigemConnectionLabel.setText("Connected")
+                self.vigemConnectionLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()}; font-weight: bold;")
+                self.vigemConnectBtn.setText("Disconnect")
+            else:
+                self.vigemConnectionLabel.setText("Disconnected")
+                self.vigemConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
+                self.vigemConnectBtn.setText("Connect")
+        except ImportError:
+            self.vigemConnectionLabel.setText("N/A")
+            self.vigemConnectionLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()}; font-weight: bold;")
 
     # === PID Callbacks ===
 
@@ -2174,6 +2350,12 @@ class AimPage(BasePage):
         super().retranslateUi()
 
         self.generalGroup.titleLabel.setText(t("general_params"))
+        self.vigemInputDzCard.titleLabel.setText(t("vigem_input_deadzone", "Input Dead Zone"))
+        self.vigemInputDzCard.contentLabel.setText(t("vigem_input_deadzone_desc", "Stick values below this fraction of full travel are ignored (jitter filter)"))
+        self.vigemGameDzCard.titleLabel.setText(t("vigem_game_deadzone", "Game Dead Zone"))
+        self.vigemGameDzCard.contentLabel.setText(t("vigem_game_deadzone_desc", "The game's own inner stick dead zone; small corrections are pushed past it so they still register (0 = off)"))
+        self.vigemReleaseCard.titleLabel.setText(t("vigem_release_ms", "Stick Release Time"))
+        self.vigemReleaseCard.contentLabel.setText(t("vigem_release_ms_desc", "Recenter the stick this long after the last aim move, so it never keeps drifting"))
         self.aimPartCard.titleLabel.setText(t("aim_part"))
         self.mouseMoveCard.titleLabel.setText(t("mouse_move_method"))
         self.aimStartDelayCard.titleLabel.setText(t("aim_start_delay", "Aim Delay"))

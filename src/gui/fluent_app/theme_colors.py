@@ -409,6 +409,23 @@ class ThemeColors:
         default_dark=(255, 170, 40, 235)
     )
 
+    # vigem_network stick gauge (overlay.py's _draw_stick_gauge)
+    OVERLAY_STICK_RING = ColorPairWithAlpha.from_config(
+        "overlay_colors", "stick_ring",
+        default_light=(255, 255, 255, 140),
+        default_dark=(255, 255, 255, 140)
+    )
+    OVERLAY_STICK_DEADZONE = ColorPairWithAlpha.from_config(
+        "overlay_colors", "stick_deadzone",
+        default_light=(255, 200, 0, 170),
+        default_dark=(255, 200, 0, 170)
+    )
+    OVERLAY_STICK_DOT = ColorPairWithAlpha.from_config(
+        "overlay_colors", "stick_dot",
+        default_light=(0, 230, 140, 240),
+        default_dark=(0, 230, 140, 240)
+    )
+
     # ============================================================
     # 狀態面板 (Status Panel) 顏色
     # ============================================================
