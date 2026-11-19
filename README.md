@@ -68,7 +68,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
   - Configurable prediction horizon, history length, and a velocity sanity cap that discards history and resets cleanly on a sudden detection jump (e.g. a new target acquired far from the last one) instead of extrapolating garbage.
   - Optional refinements: capture timestamps, least-squares velocity, a velocity deadzone, and own-mouse compensation; a second overlay marker shows the predicted aim point next to the raw one.
   - Both predictors also reset on true target loss so stale velocity never carries into whatever's acquired next.
-  - **Anchor Prediction** (opt-in) — predicts the locked target's next *box* (not just the aim point) from a time-based fit over its recent history, and uses it to open or tighten the Adaptive/Dynamic FOV ahead of time and to keep a fast target's lock instead of switching to the wrong one. Linear / Velocity + Acceleration / Smoothed / Adaptive modes, with an optional debug overlay. See [docs/ANCHOR_PREDICTION.md](docs/ANCHOR_PREDICTION.md).
+  - **Anchor Prediction** (opt-in) — predicts the locked target's next *box* (not just the aim point) from a time-based fit over its recent history, and uses it to open or tighten the Adaptive/Dynamic FOV ahead of time and to keep a fast target's lock instead of switching to the wrong one. Linear / Velocity + Acceleration / Smoothed / Adaptive modes, with an optional debug overlay. The same estimator is also available as an **Anchor** aim-lead Prediction Method on the Aim page (Velocity / EMA / Rolling / Anchor), which works without the FOV layer's switch and shares its tuning. See [docs/ANCHOR_PREDICTION.md](docs/ANCHOR_PREDICTION.md).
   - Sticky lock with IOU-based target persistence across frames — tolerates a few bad detection frames without dropping the target; the IOU threshold adapts to FOV size.
   - Smart center-mass aim point that adapts to crouching targets.
   - Weighted target-priority modes — distance-only, confidence-only, or a composite of both.
@@ -90,6 +90,7 @@ Found a feature in the code that isn't listed above? Let us know rather than ass
     - **ddxoft**
     - **Arduino Leonardo**
     - **Xbox 360 Virtual Controller**
+    - **ViGEm Network** (a remote PC's virtual Xbox 360 controller over TCP; that PC's mouse buttons can act as the aim trigger on the same connection)
     - **MAKCU** (USB HID, 4 Mbaud, auto-reconnect, hardware button-state reads, Hold/Toggle aim mode with a configurable disengage delay). Connects automatically at startup or when plugged in later. V4 / MAKXD firmware adds a binary protocol, a UDP connection, device keys as hotkeys, physical-move lock while aiming, and mouse spread.
 
 - **Live Capture Preview**
@@ -314,7 +315,7 @@ Use these logs to verify which provider actually ended up active, or whether run
    - **Model Tab** — Select your ONNX model (searchable dropdown, with a cached-TensorRT-engine badge per entry), pick the inference backend (Auto / DirectML / TensorRT / CPU) and precision, view model info and notes, and pick the game profile and HUD model for weapon detection.
    - **Capture Tab** — Choose and configure your screen capture backend (dxcam / MSS / UVC / NDI / UDP), Capture FPS Limit, HUD UDP Stream; live preview panel.
    - **Inference Tab** — FOV size and shape, FOV shrinking (Fixed / Adaptive / Dynamic / Anchor), lock retention, Anchor Prediction, detection range, detection sensitivity and other general parameters, target acquisition/tracking timing, and performance tuning.
-   - **Aim Tab** — Mouse method, FOV, PID tuning, prediction (Velocity/Kalman), smoothing, aim-point fine-tune, Humanization, Y-axis recoil suppression, sticky lock, target priority; Arduino and Xbox 360 controller setup.
+   - **Aim Tab** — Mouse method, FOV, PID tuning, prediction (Velocity / EMA / Rolling / Anchor, Kalman), smoothing, aim-point fine-tune, Humanization, Y-axis recoil suppression, sticky lock, target priority; Arduino and Xbox 360 controller setup.
    - **Trigger Tab** — Configure auto-fire delay, interval, and target priority.
    - **Keys & HW Tab** — Hotkeys for aim, toggle and auto-fire (with a warning if a rebind creates a genuinely confusing conflict), plus MAKCU connection and MAKCU button settings.
    - **Visuals Tab** — Customize overlays (FOV circle, bounding boxes, crosshair, status panel incl. GPU monitoring, chroma visuals, Web ESP).
@@ -374,7 +375,7 @@ Axiom/
 │   │   ├── ai_aiming.py          # Aiming, PID, Y-reduce, humanization dispatch
 │   │   ├── aim_paths.py          # Small aim-math helpers (adaptive lead, output EMA)
 │   │   ├── target_tracking.py    # Lock state machine, time-based tracking signals, IoU/clamp helpers
-│   │   ├── anchor_prediction.py  # Anchor Prediction: predicted target box (feeds the Adaptive/Dynamic FOV)
+│   │   ├── anchor_prediction.py  # Anchor Prediction: predicted target box (feeds the Adaptive/Dynamic FOV and the Anchor aim-lead method)
 │   │   ├── anchor_fov.py         # Anchor FOV mode: FOV centre follows an anchor, independent radius
 │   │   ├── box_style.py          # Box / line thickness rules shared by the overlays
 │   │   ├── auto_fire.py          # Triggerbot logic
@@ -449,6 +450,7 @@ Axiom/
 │       ├── ddxoft_mouse.py       # ddxoft driver integration
 │       ├── gamepad_input.py      # Xbox 360 virtual controller input
 │       ├── xbox_controller.py    # ViGEmBus Xbox 360 emulation
+│       ├── vigem_network.py      # ViGEm Network: remote Xbox controller over TCP, remote mouse buttons as aim trigger
 │       ├── key_utils.py          # Key code helpers
 │       └── vk_codes.py           # Virtual key code table
 ├── requirements-dev.txt          # Test / lint / type-check tools (not needed to run Axiom)

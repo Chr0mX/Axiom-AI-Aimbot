@@ -7,6 +7,10 @@ moment from now, and lets that prediction
 2. help **re-find the lock** when a fast target outruns its last box (fewer wrong
    re-locks / target switches).
 
+The same estimator can also lead the **aim point** itself: **Anchor** is a fourth
+*Prediction Method* on the Aim page (see [Aim-lead method](#aim-lead-method-prediction-method-anchor)
+below), independent of the master switch.
+
 It never replaces the existing tracker, target selection or FOV logic. With
 **Enable Anchor Prediction** off (the default) nothing runs and the app behaves exactly as
 before (this is enforced by a golden test against the original code).
@@ -126,6 +130,42 @@ unchanged. With influence 0 (or Anchor off) the corrections are exactly 0.
 predicted box)`. It can only add matches, never remove them, and is `None` (no change) unless
 the prediction is valid.
 
+## Aim-lead method (Prediction Method: Anchor)
+
+Aim page -> Advanced Aim Tuning -> **Prediction Method** is Velocity / EMA / Rolling / **Anchor**.
+With Anchor the aim point is led by this estimator instead of the single-purpose velocity
+predictors. It is **independent of "Enable Anchor Prediction"** (that switch only governs the FOV /
+lock-association layer above): picking the method is enough, and the `anchor_*` tuning is shared.
+
+* **Own track.** `LoopState.aim_anchor` (one `AnchorTrack`) is fed the locked box shifted by the
+  same camera-drift / own-mouse compensation the aim point already carries
+  (`process_aiming`'s `pred_x - target_x`), so our own correction never reads as target velocity.
+  Time stamps are the same as the other predictors (`prediction_capture_timestamps` when on, else
+  `perf_counter`).
+* **Horizon.** The aim-lead horizon (`prediction_horizon_ms`, ~10 ms, incl. Adaptive Lead) - *not*
+  `anchor_horizon_ms`, which stays the FOV horizon.
+* **Lead.** `predict_aim_point()` takes the predicted box's displacement; the aim point keeps its
+  relative place inside the box (`aim = pcx + (aim_x - cx) * pw / w`), so a head offset follows a
+  box that grows or shrinks. Kalman (if on) still runs after it; the predicted-aim marker and Web ESP
+  marker read the final point unchanged.
+* **Shared tuning:** `anchor_mode` (**Disabled = no lead**), `anchor_strength`,
+  `anchor_velocity_smoothing`, `anchor_accel_comp`, `anchor_confidence_threshold`,
+  `anchor_history_len`, `anchor_max_distance_pct`; `prediction_max_velocity` is the jump gate.
+  `anchor_horizon_ms` and the FOV influences only matter for the FOV layer. The Inference page
+  shows the shared cards while Anchor Prediction is on **or** the method is Anchor.
+* **Safeguards** come with the estimator: stationary dead-zone, noise-gated velocity /
+  acceleration, confidence fade-in, gap coasting (a couple of missed frames keep the lead, a long
+  gap restarts), restart on a teleport above `prediction_max_velocity`.
+* **Acquisition guard.** For the first 24 ms of a lock the track is reset and the frame is treated as a
+  fresh zero-velocity start, exactly like the other predictors. The track is also reset on genuine
+  target loss (`anchor_reset`), when prediction is turned off, and when the method is switched away.
+* **Not selected = no change.** Default stays `velocity`; the other methods and every FOV path are
+  untouched (a stationary target gets exactly zero lead).
+
+Which mode for the aim lead? The shared default `adaptive` smooths the velocity, which suits the FOV
+but lags on rapid acceleration; for the aim lead `linear` / `velocity_accel` respond fastest, while
+`smoothed` / `adaptive` give the steadiest lead (see the benchmark).
+
 ## Settings
 
 Stored under `tracking.anchor.*` (aim-preset eligible) and `display.show_anchor_debug`.
@@ -146,8 +186,9 @@ Stored under `tracking.anchor.*` (aim-preset eligible) and `display.show_anchor_
 | `show_anchor_debug` | off | - |
 
 Qt: Inference page -> **Anchor Prediction**; debug toggle on the Visuals page. Web Control:
-Inference tab and Visuals tab. They are separate from the aim-lead prediction
-(`prediction_*`, ~10 ms, leads the *aim point*); only `prediction_max_velocity` is shared.
+Inference tab and Visuals tab. The FOV layer is separate from the classic aim-lead predictors
+(`prediction_*`, ~10 ms, lead the *aim point*); they share only `prediction_max_velocity` - plus the
+`anchor_*` tuning when the aim-lead method is **Anchor** (previous section).
 
 ## Debug overlay
 
@@ -181,6 +222,25 @@ scenario/mode combinations (e.g. Dynamic zig-zag: total variation 1.97 -> 1.44, 
 Lock stability with two crossing targets (800 vs 300 px/s): wrong re-locks per trial
 1.00 -> 0.00 at 10 and 20 FPS, 1.00 -> 0.03 at 30 FPS, 0.60 -> 0.00 at 60 FPS; holds per trial
 0.48-0.83 -> 0.
+
+Aim-lead methods at the 10 ms aim-lead horizon, 60 FPS, 1 px detector noise (RMSE px of the led aim
+point against the target 10 ms later; baseline = no prediction):
+
+| Scenario | Baseline | Velocity | EMA | Rolling | Anchor linear | Anchor adaptive |
+|---|---|---|---|---|---|---|
+| Stationary | 1.39 | 1.87 | 0.97 | 1.57 | 1.39 | 1.39 |
+| Slow, 60 px/s | 1.46 | 1.87 | 1.30 | 1.57 | 1.50 | 1.45 |
+| Fast, 900 px/s | 9.12 | 1.87 | 15.12 | 1.57 | 1.51 | 1.44 |
+| Accelerating | 22.56 | 1.87 | 37.60 | 1.62 | 1.60 | 3.07 |
+| Sudden reversal | 5.31 | 2.08 | 8.51 | 1.94 | 1.91 | 2.20 |
+| Zig-zag | 4.19 | 1.94 | 6.65 | 1.92 | 1.89 | 3.14 |
+
+At a 10 ms horizon every velocity-based method is limited by detector noise, so accuracy on moving
+targets is on par with Velocity / Rolling (EMA lags). What Anchor adds is **no extra jitter on a
+still target** (RMSE equals the baseline, where Velocity adds ~0.5 px and Rolling ~0.2 px) and the
+gap / restart / confidence safeguards; `adaptive` trades some responsiveness on accelerating and
+zig-zag targets for that steadiness. Cost per frame: ~11 us (`linear`) / ~15 us (`adaptive`) for the
+aim-lead update itself against ~0.5 us for Velocity - about 0.2 % of one core at 144 FPS.
 
 Cost: ~28 us added per detection frame (best of 7; the FOV+tracker step itself is ~6 us), no
 memory retained per frame. That is ~0.4 % of a 144 FPS frame budget.
