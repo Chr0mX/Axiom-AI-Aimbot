@@ -9,6 +9,7 @@ from qfluentwidgets import (
 from ..components.slider_spin_card import SliderDoubleSpinCard
 
 from ..base_page import BasePage
+from ..components.combo_utils import reset_items
 from ..language_manager import t
 
 # Click backends the auto-fire can use (same list as the Web Control Trigger tab; the Aim page
@@ -202,8 +203,5 @@ class TriggerPage(BasePage):
         self.sprayCard.contentLabel.setText(t("auto_fire_spray_desc", "Hold fire while the crosshair is on target, and release when it leaves"))
 
         # 更新 ComboBox 內容
-        current_target = self.fireTargetCombo.currentIndex()
-        self.fireTargetCombo.clear()
-        self.fireTargetCombo.addItems([t("head"), t("body"), t("both")])
-        self.fireTargetCombo.setCurrentIndex(current_target)
+        reset_items(self.fireTargetCombo, [t("head"), t("body"), t("both")])
 

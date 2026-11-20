@@ -372,7 +372,9 @@ class _ManagerBox(QFrame):
                 self._showInfo(t("config_success"), _t(self._i18n["loaded"]))
                 window = self.window()
                 if hasattr(window, '_refreshAllPages'):
-                    window._refreshAllPages()
+                    # Widgets only: a full re-bind would re-probe the live UVC device and re-run NDI
+                    # discovery on the GUI thread just to show a different preset.
+                    window._refreshAllPages(full=False)
             else:
                 self._showInfo(t("config_error"), _t(self._i18n["load_failed"]), False)
         except Exception:

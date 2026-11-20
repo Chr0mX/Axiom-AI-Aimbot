@@ -12,6 +12,7 @@ from qfluentwidgets import (
 from ..components.slider_spin_card import SliderDoubleSpinCard, SliderSpinCard
 
 from ..base_page import BasePage
+from ..components.combo_utils import reset_items
 from ..language_manager import t
 from ..theme_colors import ThemeColors
 
@@ -1516,15 +1517,10 @@ class KeysPage(BasePage):
             (t("aim_mode_hold", "Hold"), "hold"),
             (t("aim_mode_toggle", "Toggle"), "toggle"),
         ]
-        self.makcuAimModeCombo.clear()
-        for label, _ in self._AIM_MODE_OPTIONS:
-            self.makcuAimModeCombo.addItem(label)
-        self.makcuAimModeCombo.setCurrentIndex(current_aim_mode_idx)
+        labels = [label for label, _ in self._AIM_MODE_OPTIONS]
+        reset_items(self.makcuAimModeCombo, labels, index=current_aim_mode_idx)
         # Always Aim Mode reuses the same option list/translations
-        self.makcuAlwaysAimModeCombo.clear()
-        for label, _ in self._AIM_MODE_OPTIONS:
-            self.makcuAlwaysAimModeCombo.addItem(label)
-        self.makcuAlwaysAimModeCombo.setCurrentIndex(current_always_aim_mode_idx)
+        reset_items(self.makcuAlwaysAimModeCombo, labels, index=current_always_aim_mode_idx)
 
         # 刷新按鍵綁定按鈕文字
         self.aimKey1Btn.refreshText()

@@ -717,24 +717,44 @@ class ModelPage(BasePage):
         self._trt_installer_launched = True
 
     def _startRestartCountdown(self) -> None:
+        # A second backend switch restarts the countdown instead of stacking another timer
+        # (two timers meant two restarts), and closing the notice cancels the restart: the
+        # saved setting is kept and simply takes effect on the next launch.
+        self._cancelRestartCountdown()
         self._restartCountdown = 5
         self._restartCountdownBar = InfoBar.info(
             t("restart_required", "Restart Required"),
             f"Restarting in {self._restartCountdown}s…",
             duration=-1, isClosable=True, position=InfoBarPosition.TOP, parent=self,
         )
+        self._restartCountdownBar.closedSignal.connect(self._onRestartBarClosed)
         self._restartTimer = QTimer(self)
         self._restartTimer.timeout.connect(self._onRestartTick)
         self._restartTimer.start(1000)
+
+    def _cancelRestartCountdown(self) -> None:
+        timer = getattr(self, "_restartTimer", None)
+        self._restartTimer = None
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
+        bar = getattr(self, "_restartCountdownBar", None)
+        self._restartCountdownBar = None
+        if bar is not None:
+            try:
+                bar.close()
+            except RuntimeError:        # already deleted
+                pass
+
+    def _onRestartBarClosed(self) -> None:
+        if getattr(self, "_restartCountdown", 0) > 0:
+            self._cancelRestartCountdown()
 
     def _onRestartTick(self) -> None:
         from qfluentwidgets import BodyLabel as _BL
         self._restartCountdown -= 1
         if self._restartCountdown <= 0:
-            self._restartTimer.stop()
-            bar = getattr(self, "_restartCountdownBar", None)
-            if bar:
-                bar.close()
+            self._cancelRestartCountdown()
             self._restartApp()
         else:
             bar = getattr(self, "_restartCountdownBar", None)

@@ -659,8 +659,11 @@ class SetupWizard(QDialog):
                 auto_idx = 1  # DirectML
                 self._config.inference_backend = 'directml'
         else:
-            cur_backend = getattr(self._config, 'inference_backend', 'auto')
-            auto_idx = 1 if cur_backend == "directml" else 0
+            # No NVIDIA GPU was detected: TensorRT cannot run there (and picking it makes the wizard
+            # launch the TensorRT installer on Finish/Skip), so default to DirectML unless the user
+            # had explicitly chosen TensorRT/CUDA before.
+            cur_backend = str(getattr(self._config, 'inference_backend', 'auto')).lower()
+            auto_idx = 0 if cur_backend in ("tensorrt", "cuda") else 1
 
         # Explicitly sync config to the initial selection rather than relying
         # on currentIndexChanged to fire it: Qt only emits that signal when

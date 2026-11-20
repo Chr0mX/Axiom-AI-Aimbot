@@ -17,6 +17,7 @@ from qfluentwidgets import (
     BodyLabel, PushButton, CheckBox,
 )
 from core.aim_coupling import click_method_for_move
+from ..components.combo_utils import reset_items
 from core.config import AIM_START_DELAY_MAX_MS
 
 from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
@@ -25,6 +26,9 @@ from ..base_page import BasePage
 from ..language_manager import t
 from ..theme_colors import ThemeColors
 
+# Measurement noise is the opposite of process noise: a higher value makes the filter trust the
+# detections less, so the point is smoother but slower (it used to share process noise's text).
+_KALMAN_MEAS_NOISE_DESC = "Higher = smoother but slower to react; lower = trusts each detection more"
 _PREDICTION_METHOD_DESC = ("Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; "
                            "tuned under Anchor Prediction on the Inference page)")
 
@@ -1006,7 +1010,7 @@ class AimPage(BasePage):
             t("kalman_meas_noise_label", "Measurement Noise"),
             1, 100,
             format_func=lambda v: f"{v / 100:.2f}",
-            description=t("kalman_noise_desc", "Lower = reacts faster but noisier"),
+            description=t("kalman_meas_noise_desc", _KALMAN_MEAS_NOISE_DESC),
             slider_width=160,
             parent=self.trackingGroup
         )
@@ -1636,14 +1640,15 @@ class AimPage(BasePage):
         return sorted(ports, key=_num, reverse=True)
 
     def _refreshComPorts(self):
-        self.comPortCombo.clear()
-        self.comPortCombo.addItem(t("no_com_port"))
+        # Rebuild without emitting (that would write the first entry) and keep the selection.
+        previous = self.comPortCombo.currentText()
+        items = [t("no_com_port")]
         try:
             import serial.tools.list_ports
-            for port in self._sorted_com_ports(serial.tools.list_ports.comports()):
-                self.comPortCombo.addItem(port.device)
+            items += [port.device for port in self._sorted_com_ports(serial.tools.list_ports.comports())]
         except ImportError:
             pass
+        reset_items(self.comPortCombo, items, text=previous)
 
     def _updateMethodGroupVisibility(self, method):
         self.arduinoGroup.setVisible(method == "arduino")
@@ -2480,7 +2485,7 @@ class AimPage(BasePage):
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
         self.kalmanProcessNoiseCard.contentLabel.setText(t("kalman_noise_desc", "Lower = smoother but slower to react"))
         self.kalmanMeasNoiseCard.titleLabel.setText(t("kalman_meas_noise_label", "Measurement Noise"))
-        self.kalmanMeasNoiseCard.contentLabel.setText(t("kalman_noise_desc", "Lower = reacts faster but noisier"))
+        self.kalmanMeasNoiseCard.contentLabel.setText(t("kalman_meas_noise_desc", _KALMAN_MEAS_NOISE_DESC))
         self.camMotionCompCard.titleLabel.setText(t("cam_motion_comp_enabled", "Camera Motion Compensation"))
         self.camMotionCompCard.contentLabel.setText(t("cam_motion_comp_desc", "Subtract per-frame global scene shift (phase correlation) from aim error to cancel camera shake."))
         self.camMotionCompSizeCard.titleLabel.setText(t("cam_motion_comp_size", "Compensation Resolution"))
@@ -2507,7 +2512,4 @@ class AimPage(BasePage):
         self.targetClassCard.contentLabel.setText(t("aim_target_class_ids_desc",
             "Choose which detected classes count as a valid aim target (e.g. never aim at a teammate class). All checked = no restriction."))
 
-        current_aim = self.aimPartCombo.currentIndex()
-        self.aimPartCombo.clear()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)"), t("custom", "Custom")])
-        self.aimPartCombo.setCurrentIndex(current_aim)
+        reset_items(self.aimPartCombo, [t("head"), t("body"), t("center", "Smart (Center-mass)"), t("custom", "Custom")])

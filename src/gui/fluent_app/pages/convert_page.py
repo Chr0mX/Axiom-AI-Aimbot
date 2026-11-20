@@ -87,6 +87,7 @@ class ConvertPage(BasePage):
         self._project_root = os.path.dirname(_src_dir)
         self._model_dir = os.path.join(self._project_root, "Model")
         self._cache_dir = os.path.join(self._project_root, "trt_cache")
+        self._draftTouched = False
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
@@ -95,6 +96,11 @@ class ConvertPage(BasePage):
     def setConfig(self, config):
         self._config = config
         if config is None:
+            return
+        # Model and precision here are a draft for the next build (the config is only written when
+        # a build succeeds), so once the user has picked something the 1 s sync tick must not put
+        # the saved values back under their hands. It follows the config again after a build.
+        if self._draftTouched:
             return
         self._setPrecision(bool(getattr(config, 'trt_fp16_enabled', True)))
         model_path = getattr(config, 'model_path', '')
@@ -226,6 +232,9 @@ class ConvertPage(BasePage):
 
     def _connectSignals(self):
         self.modelSearchEdit.textChanged.connect(self._onModelSearchChanged)
+        # `activated` fires only for the user's own pick, never for programmatic changes.
+        self.modelCombo.activated.connect(self._markDraftTouched)
+        self.precisionCombo.activated.connect(self._markDraftTouched)
         self.browseBtn.clicked.connect(self._onBrowse)
         self.convertBtn.clicked.connect(self._onConvert)
 
@@ -474,7 +483,11 @@ class ConvertPage(BasePage):
     def _onLogLine(self, line: str):
         self.logView.append(line)
 
+    def _markDraftTouched(self, *_):
+        self._draftTouched = True
+
     def _onConvertFinished(self, success: bool, message: str):
+        self._draftTouched = False
         self.progressBar.setVisible(False)
         self.convertBtn.setEnabled(True)
         self.convertBtn.setText(t("trt_convert", "Convert"))
