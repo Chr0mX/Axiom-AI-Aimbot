@@ -155,6 +155,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "detect_interval": {"type": "float", "scale": 1000.0, "min": 1, "max": 100},
         "min_confidence": {"type": "float", "scale": 100.0, "min": 1, "max": 100},
         "detect_semantic_filter_enabled": {"type": "bool"},
+        # One choice replaces both switches in the UI (core/detect_mode.py); the two persisted fields
+        # stay writable here as API aliases for existing scripts.
+        "detect_mode": {"type": "choice", "choices": ["full", "reduced", "stop"], "derived": "detect_mode"},
         "keep_detecting": {"type": "bool"},
         "idle_detect_enabled": {"type": "bool"},
         "idle_detect_interval": {"type": "float", "scale": 1000.0, "min": 5, "max": 500},
@@ -371,11 +374,8 @@ _SCHEMA: dict[str, dict[str, dict]] = {
     },
     "trigger": {
         "auto_fire_target_part": {"type": "choice", "choices": ["head", "body", "both"]},
-        # always_auto_fire's one-directional coupling (turning it ON also
-        # turns idle_detect_enabled off, mirroring trigger_page.py's
-        # _onAlwaysAutoFireChanged) is left to the client — same "it
-        # already has both values in hand" precedent as ndi_source_name/
-        # ndi_force_reconnect, not a server-side decide function.
+        # always_auto_fire no longer rewrites idle_detect_enabled: ai_loop already ignores the
+        # reduced detection rate while it is on (core/detect_mode.py).
         "always_auto_fire": {"type": "bool"},
         # A second, independently-validated entry for the same
         # mouse_click_method Config field the "aim" tab's schema already
@@ -472,8 +472,19 @@ def _uvc_engine_set(config, value):
     apply_engine(config, value)
 
 
+def _detect_mode_get(config):
+    from .detect_mode import mode_from_config
+    return mode_from_config(config)
+
+
+def _detect_mode_set(config, value):
+    from .detect_mode import apply_mode
+    apply_mode(config, value)
+
+
 _DERIVED = {
     "uvc_engine": (_uvc_engine_get, _uvc_engine_set),
+    "detect_mode": (_detect_mode_get, _detect_mode_set),
 }
 
 
@@ -533,6 +544,9 @@ def get_tab_settings(config, tab: str) -> dict:
         # retention / tracking cards here only apply while it is on (same
         # visibility rule as inference_page.py's _updateTrackingVisibility()).
         result["sticky_lock_enabled"] = bool(getattr(config, "sticky_lock_enabled", False))
+        # Read-only extra: the reduced rate cannot apply while Always Aim / Always Auto-Fire is on.
+        from .detect_mode import reduced_rate_ignored
+        result["reduced_rate_ignored"] = bool(reduced_rate_ignored(config))
         # Read-only extra: the aim-lead Prediction Method (Aim tab) can be Anchor, which shares the
         # Anchor Prediction tuning cards shown on this tab (see inference_page._updateAnchorVisibility).
         # Method-based, not aim_uses_anchor(): with the mode on Disabled the Mode card must stay

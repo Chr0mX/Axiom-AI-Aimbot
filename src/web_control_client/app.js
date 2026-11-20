@@ -686,6 +686,7 @@
         if (tab === "inference") {
           updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
           updateAnchorVisibility();
+          updateDetectModeVisibility();
           updateWeaponDetectVisibility(data.second_inference_mode);
         }
         if (tab === "aim") {
@@ -745,6 +746,7 @@
         if (tab === "inference" && (key === "afov_source" || key === "afov_predict_enabled" || key === "afov_lost_behavior" || key === "afov_dynamic_radius")) updateAnchorFovVisibility();
         if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
+        if (tab === "inference" && key === "detect_mode") updateDetectModeVisibility();
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
         if (tab === "visuals" && key === "box_full_rect") updateBoxStyleVisibility();
@@ -756,17 +758,8 @@
         if (tab === "keys" && (key === "makcu_connection" || key === "makcu_device_hotkeys" || key === "makcu_mouse_spread_enabled")) {
           updateKeysVisibility(lastSettings.keys || {});
         }
-        // One-directional coupling, mirroring trigger_page.py's
-        // _onAlwaysAutoFireChanged(): turning Always Auto-Fire ON also
-        // disables Keep Detecting While Idle — turning it back off does
-        // NOT re-enable idle detect (Qt doesn't either). idle_detect_enabled
-        // lives on the "inference" tab's own schema, so this is a second,
-        // independent POST to a different tab's route, not a same-tab
-        // coupled body — same "client already has both values in hand"
-        // precedent as every other coupled write in this file.
-        if (tab === "trigger" && key === "always_auto_fire" && value === true) {
-          pushTabSetting("inference", "idle_detect_enabled", false);
-        }
+        // Always Auto-Fire no longer rewrites the saved "When Not Aiming" choice: the loop already
+        // ignores the reduced rate while it is on (core/detect_mode.py), and the Inference tab shows a note.
       });
     });
   }
@@ -843,6 +836,18 @@
     var fovMode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode || "adaptive";
     show("inf-anchor-infl-adaptive-card", on && fov && fovMode === "adaptive");
     show("inf-anchor-infl-dynamic-card", on && fov && fovMode === "dynamic");
+  }
+
+  // The reduced-speed interval only matters for "Reduced speed"; the note says when it cannot apply
+  // (server extra reduced_rate_ignored = Always Aim / Always Auto-Fire on), mirroring inference_page.py.
+  function updateDetectModeVisibility() {
+    var d = lastSettings.inference || {};
+    var sel = document.getElementById("inf-detect_mode");
+    var mode = sel ? sel.value : d.detect_mode;
+    var card = document.getElementById("inf-idle-interval-card");
+    if (card) card.classList.toggle("hidden", mode !== "reduced");
+    var note = document.getElementById("inf-detect-mode-note");
+    if (note) note.classList.toggle("hidden", !(mode === "reduced" && d.reduced_rate_ignored));
   }
 
   function updateWeaponDetectVisibility(mode) {

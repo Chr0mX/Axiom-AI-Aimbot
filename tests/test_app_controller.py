@@ -51,29 +51,17 @@ def test_module_importable_without_windows_deps():
     assert hasattr(app_controller, "list_models")
 
 
-def test_set_always_aim_enables_and_disables_idle_detect():
-    config = _FakeConfig()
-    config.idle_detect_enabled = True
-
-    app_controller.set_always_aim(config, True)
-    assert config.always_aim is True
-    assert config.idle_detect_enabled is False
-
-
-def test_set_always_aim_disable_does_not_touch_idle_detect():
-    """Turning always_aim OFF must not force idle_detect back on.
-
-    Mirrors the original keys_page.py behavior exactly: the coupling is
-    one-directional (enabling always_aim forces idle-detect off so the two
-    "detect when not aiming" mechanisms don't fight each other) — disabling
-    it makes no claim about what idle-detect should be, so it's left alone.
-    """
-    config = _FakeConfig()
-    config.idle_detect_enabled = False
-
-    app_controller.set_always_aim(config, False)
-    assert config.always_aim is False
-    assert config.idle_detect_enabled is False  # unchanged
+def test_set_always_aim_no_longer_rewrites_the_idle_choice():
+    """It used to force idle_detect_enabled off and never restore it, discarding the user's own
+    "When Not Aiming" choice. ai_loop already ignores the reduced rate under Always Aim, so the
+    saved choice stays exactly as the user left it, in both directions."""
+    for idle in (True, False):
+        config = _FakeConfig()
+        config.idle_detect_enabled = idle
+        app_controller.set_always_aim(config, True)
+        assert config.always_aim is True and config.idle_detect_enabled is idle
+        app_controller.set_always_aim(config, False)
+        assert config.always_aim is False and config.idle_detect_enabled is idle
 
 
 def test_set_always_aim_coerces_truthy_values():
@@ -109,10 +97,8 @@ def test_set_always_aim_is_reentrant_under_concurrent_calls():
 
     assert not errors
     assert not any(th.is_alive() for th in threads)
-    # Whichever call landed last, the coupling invariant must still hold:
-    # always_aim True implies idle_detect_enabled False.
-    if config.always_aim:
-        assert config.idle_detect_enabled is False
+    # Whichever call landed last, the saved idle choice is untouched.
+    assert config.idle_detect_enabled is True
 
 
 class TestConnectMakcu:

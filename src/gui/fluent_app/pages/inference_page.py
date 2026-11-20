@@ -3,6 +3,7 @@
 
 from PyQt6.QtCore import Qt
 from core.config import EXTERNAL_CAPTURE_METHODS
+from core.detect_mode import MODES as _DETECT_MODES, apply_mode, mode_from_config, reduced_rate_ignored
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon, SettingCard, SegmentedWidget, ComboBox,
@@ -14,6 +15,13 @@ from ..language_manager import t
 
 
 _FOV_MODES = ("fixed", "adaptive", "dynamic", "anchor")
+
+# "When Not Aiming" (core/detect_mode.py): labels in MODES order.
+_DETECT_MODE_LABELS = ("Full speed", "Reduced speed", "Stop detecting")
+_DETECT_MODE_DESC = ("What detection does while the aim key is not held. Full speed: keep detecting. "
+                     "Reduced speed: detect only at the interval below to save resources. "
+                     "Stop detecting: nothing runs until you aim.")
+_DETECT_MODE_IGNORED = "(Reduced speed is ignored while Always Aim or Always Auto-Fire is on.)"
 # "disabled" (the master switch covers it) and "linear" (= Velocity with Acceleration 0) are retired;
 # config.migrate_anchor_settings() turns old values into these on load.
 _ANCHOR_MODES = ("velocity_accel", "smoothed", "adaptive")
@@ -125,10 +133,8 @@ class InferencePage(BasePage):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self._config and hasattr(self, 'idleDetectEnableCard'):
-            self.idleDetectEnableCard.setChecked(
-                getattr(self._config, 'idle_detect_enabled', True)
-            )
+        if self._config and hasattr(self, 'detectModeCombo'):
+            self._syncDetectModeCombo()
 
     # ──────────────────────────────────────────────
     # Widget initialisation
@@ -418,12 +424,19 @@ class InferencePage(BasePage):
             parent=self.generalGroup
         )
 
-        self.idleDetectEnableCard = SwitchSettingCard(
+        # One choice instead of the former idle switch + the web-only keep-detecting switch
+        # (core/detect_mode.py): full speed / reduced speed / stop while the aim key is not held.
+        self.detectModeCombo = ComboBox()
+        self.detectModeCombo.addItems(_DETECT_MODE_LABELS)
+        self.detectModeCombo.setMinimumWidth(170)
+        self.detectModeCard = SettingCard(
             FluentIcon.SPEED_MEDIUM,
-            t("idle_detect_enabled"),
-            "",
-            parent=self.generalGroup
+            t("detect_mode", "When Not Aiming"),
+            t("detect_mode_desc", _DETECT_MODE_DESC),
+            self.generalGroup
         )
+        self.detectModeCard.hBoxLayout.addWidget(self.detectModeCombo, 0)
+        self.detectModeCard.hBoxLayout.addSpacing(16)
 
         self.idleDetectIntervalCard = SliderSpinCard(
             FluentIcon.SPEED_MEDIUM,
@@ -540,7 +553,7 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.detectIntervalCard)
         self.generalGroup.addSettingCard(self.confidenceCard)
         self.generalGroup.addSettingCard(self.semanticFilterCard)
-        self.generalGroup.addSettingCard(self.idleDetectEnableCard)
+        self.generalGroup.addSettingCard(self.detectModeCard)
         self.generalGroup.addSettingCard(self.idleDetectIntervalCard)
         self.generalGroup.addSettingCard(self.singleTargetCard)
         self.generalGroup.addSettingCard(self.secondInferCard)
@@ -604,7 +617,7 @@ class InferencePage(BasePage):
         self.detectIntervalCard.valueChanged.connect(self._onDetectIntervalChanged)
         self.confidenceCard.valueChanged.connect(self._onConfidenceChanged)
         self.semanticFilterCard.checkedChanged.connect(self._onSemanticFilterChanged)
-        self.idleDetectEnableCard.checkedChanged.connect(self._onIdleDetectEnableChanged)
+        self.detectModeCombo.currentIndexChanged.connect(self._onDetectModeChanged)
         self.idleDetectIntervalCard.valueChanged.connect(self._onIdleDetectIntervalChanged)
         self.singleTargetCard.checkedChanged.connect(self._onSingleTargetChanged)
 
@@ -675,7 +688,7 @@ class InferencePage(BasePage):
             self.confidenceCard.setValue(confidence_pct)
             self.semanticFilterCard.setChecked(bool(getattr(self._config, 'detect_semantic_filter_enabled', False)))
 
-            self.idleDetectEnableCard.setChecked(getattr(self._config, 'idle_detect_enabled', True))
+            self._syncDetectModeCombo()
             idle_ms = int(round(getattr(self._config, 'idle_detect_interval', 0.05) * 1000))
             self.idleDetectIntervalCard.setValue(max(5, min(500, idle_ms)))
             self.singleTargetCard.setChecked(getattr(self._config, 'single_target_mode', False))
@@ -896,9 +909,23 @@ class InferencePage(BasePage):
         if self._config:
             self._config.detect_semantic_filter_enabled = bool(checked)
 
-    def _onIdleDetectEnableChanged(self, checked):
-        if self._config:
-            self._config.idle_detect_enabled = checked
+    def _syncDetectModeCombo(self):
+        """Show the saved choice (no write) and the card that only the reduced rate needs."""
+        if not self._config:
+            return
+        mode = mode_from_config(self._config)
+        self.detectModeCombo.blockSignals(True)
+        self.detectModeCombo.setCurrentIndex(_DETECT_MODES.index(mode))
+        self.detectModeCombo.blockSignals(False)
+        self.idleDetectIntervalCard.setVisible(mode == 'reduced')
+        # The reduced rate cannot apply under Always Aim / Always Auto-Fire: say so, don't rewrite it.
+        note = _DETECT_MODE_IGNORED if reduced_rate_ignored(self._config) else ""
+        self.detectModeCard.contentLabel.setText(t("detect_mode_desc", _DETECT_MODE_DESC) + (" " + note if note else ""))
+
+    def _onDetectModeChanged(self, index):
+        if self._config and not self._isLoadingConfig and 0 <= index < len(_DETECT_MODES):
+            apply_mode(self._config, _DETECT_MODES[index])
+            self._syncDetectModeCombo()
 
     def _onIdleDetectIntervalChanged(self, value):
         if self._config:
@@ -1007,7 +1034,11 @@ class InferencePage(BasePage):
         self.confidenceCard.titleLabel.setText(t("min_confidence"))
         self.semanticFilterCard.titleLabel.setText(t("semantic_filter_enabled", "Semantic FP Filter"))
         self.semanticFilterCard.contentLabel.setText(t("semantic_filter_desc", "Discard trees, vehicles, and HUD elements by class name and geometry"))
-        self.idleDetectEnableCard.titleLabel.setText(t("idle_detect_enabled"))
+        self.detectModeCard.titleLabel.setText(t("detect_mode", "When Not Aiming"))
+        for i, (key, default) in enumerate(zip(("detect_mode_full", "detect_mode_reduced", "detect_mode_stop"),
+                                               _DETECT_MODE_LABELS)):
+            self.detectModeCombo.setItemText(i, t(key, default))
+        self._syncDetectModeCombo()
         self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
         self.secondInferCard.titleLabel.setText(t("weapon_detection_method", "Weapon Detection Method"))

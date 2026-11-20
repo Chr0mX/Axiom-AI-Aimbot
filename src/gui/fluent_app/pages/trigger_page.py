@@ -158,9 +158,8 @@ class TriggerPage(BasePage):
     def _onAlwaysAutoFireChanged(self, checked):
         if self._config:
             self._config.always_auto_fire = checked
-            # 啟用持續自動射擊時，自動關閉 idle detect
-            if checked:
-                self._config.idle_detect_enabled = False
+            # ai_loop already ignores the reduced detection rate while this is on, so the saved
+            # "When Not Aiming" choice is left alone (it used to be overwritten and never restored).
 
     def _onMouseClickChanged(self, text):
         if self._config:

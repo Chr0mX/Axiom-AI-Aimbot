@@ -17,9 +17,8 @@ PyQt6, and never touches a QWidget. A Qt slot and a web API route handler
 are both expected to call the *same* function here rather than duplicating
 "decide what to do" logic on each side — see CLAUDE.md's Web Control section
 for the split this was extracted from (e.g. keys_page.py's
-`_onAlwaysAimChanged` used to inline both the `always_aim`/
-`idle_detect_enabled` decision and the widget refresh in one method; the
-decision half now lives here as `set_always_aim()`).
+`_onAlwaysAimChanged` used to inline the `always_aim` write and the widget
+refresh in one method; the write now lives here as `set_always_aim()`).
 
 Threading model
 ---------------
@@ -364,25 +363,17 @@ def start_ai_threads(
 # ---------------------------------------------------------------------------
 
 def set_always_aim(config: "Config", enabled: bool) -> None:
-    """Enable/disable `always_aim`, with its coupled `idle_detect_enabled` reset.
+    """Enable/disable `always_aim` (callable from a Qt slot or a web route alike).
 
-    Extracted from keys_page.py's `_onAlwaysAimChanged`, which used to
-    inline this same two-field write directly in a Qt slot alongside a
-    widget-visibility refresh. The coupling — turning always_aim on also
-    turns idle_detect_enabled off — is application logic, not GUI logic: a
-    web-issued toggle needs the identical side effect, so it has to live
-    here rather than staying trapped inside a Qt-only method.
-
-    This was the first multi-field Config command exposed to a caller
-    outside the GUI thread (request_model_change() below is the second),
-    so it's one of the two that actually need `_multi_field_lock` — a
-    single-field `setattr` elsewhere in this codebase relies on the GIL
-    for atomicity and doesn't take a lock at all.
+    It used to also force `idle_detect_enabled` off and never restore it, silently
+    discarding the user's own "When Not Aiming" choice. That coupling is not needed:
+    ai_loop already ignores the reduced detection rate while Always Aim is active
+    (core/detect_mode.py), so now this is a plain write. It still takes
+    `_multi_field_lock` so a concurrent multi-field command (request_model_change)
+    never observes a half-applied state.
     """
     with _multi_field_lock:
         config.always_aim = bool(enabled)
-        if enabled:
-            config.idle_detect_enabled = False
 
 
 # ---------------------------------------------------------------------------

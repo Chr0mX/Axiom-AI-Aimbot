@@ -1045,27 +1045,21 @@
                 </label>
               </div>
             </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Keep Detecting</div></div>
+            <div class="field-card" id="inf-detect-mode-card">
+              <div class="field-info">
+                <div class="field-title">When Not Aiming</div>
+                <div class="field-desc">What detection does while the aim key is not held. Full speed: keep detecting. Reduced speed: detect only at the interval below to save resources. Stop detecting: nothing runs until you aim. <span id="inf-detect-mode-note" class="hidden">(Reduced speed is ignored while Always Aim or Always Auto-Fire is on.)</span></div>
+              </div>
               <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="inf-keep_detecting" data-key="keep_detecting" data-type="bool">
-                  <span class="slider"></span>
-                </label>
+                <select id="inf-detect_mode" data-key="detect_mode" data-type="choice">
+                  <option value="full">Full speed</option>
+                  <option value="reduced">Reduced speed</option>
+                  <option value="stop">Stop detecting</option>
+                </select>
               </div>
             </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Idle Detect Enabled</div></div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="inf-idle_detect_enabled" data-key="idle_detect_enabled" data-type="bool">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Idle Detect Interval</div></div>
+            <div class="field-card" id="inf-idle-interval-card">
+              <div class="field-info"><div class="field-title">Reduced-Speed Interval</div><div class="field-desc">Time between detections while not aiming.</div></div>
               <div class="field-control">
                 <input type="number" id="inf-idle_detect_interval" data-key="idle_detect_interval" data-type="number" min="5" max="500" step="1">
                 <span class="field-slider-value">ms</span>
