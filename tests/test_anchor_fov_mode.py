@@ -24,10 +24,10 @@ def cfg(**kw):
     c = SimpleNamespace(
         fov_shrink_mode="anchor", fov_size=200, fov_height=200, crosshairX=320, crosshairY=320,
         afov_source="detection", afov_position="center", afov_offset_x=0, afov_offset_y=0,
-        afov_manual_x=0, afov_manual_y=0, afov_follow_speed=12.0, afov_smoothing=0.0,
-        afov_max_speed=0, afov_predict_enabled=False, afov_predict_strength=1.0,
+        afov_follow_speed=12.0, afov_smoothing=0.0,
+        afov_max_speed=0, afov_predict_enabled=False,
         afov_predict_time_ms=100, afov_lost_behavior="hold", afov_lost_delay_ms=150,
-        afov_reacquire="smooth", afov_radius=100, afov_min_radius=50, afov_max_radius=300,
+        afov_reacquire="smooth", afov_max_radius=300,
         afov_dynamic_radius=False, fov_circle_filter_enabled=False)
     for k, v in kw.items():
         setattr(c, k, v)
@@ -294,10 +294,11 @@ def test_position_setting_changes_where_the_fov_settles():
 
 
 def test_manual_source_is_never_lost_and_clamps_to_the_region():
-    c, s = cfg(afov_source="manual", afov_manual_x=100, afov_manual_y=-50), new_state()
+    # Manual = crosshair + the same X/Y offset pair every other source adds to its anchor point
+    c, s = cfg(afov_source="manual", afov_offset_x=100, afov_offset_y=-50), new_state()
     out = run(c, s, seq(288, lambda i, t: ([], None)))
     assert out[-1][:2] == pytest.approx((420, 270), abs=0.5) and not s.afov.lost
-    c, s = cfg(afov_source="manual", afov_manual_x=4000, afov_manual_y=4000), new_state()
+    c, s = cfg(afov_source="manual", afov_offset_x=4000, afov_offset_y=4000), new_state()
     out = run(c, s, seq(288, lambda i, t: ([], None)))
     assert out[-1][0] <= 640 and out[-1][1] <= 640
 
@@ -320,12 +321,20 @@ def test_tracker_source_follows_the_tracker_and_survives_short_gaps():
 
 
 # radius ──────────────────────────────────────────────────────────────────────
-def test_radius_is_independent_of_position_and_clamped():
-    c, s = cfg(afov_radius=500, afov_min_radius=50, afov_max_radius=120), new_state()
-    out = settle(c, s)
-    assert out[-1][2] == 240                         # clamped to the maximum radius
-    c, s = cfg(afov_radius=10, afov_min_radius=60, afov_max_radius=120), new_state()
-    assert settle(c, s)[-1][2] == 120                # raised to the minimum (2 * 60)
+def test_size_is_the_fov_width_in_every_mode():
+    """The Anchor FOV is FOV Width wide (radius = Width / 2), like every other FOV mode."""
+    for width in (80, 200, 440):
+        c, s = cfg(fov_size=width, fov_height=width), new_state()
+        assert settle(c, s)[-1][2] == width
+
+
+def test_maximum_radius_is_headroom_never_a_cap_on_the_base_size():
+    # a Maximum Radius below the base radius must not shrink the FOV
+    c, s = cfg(fov_size=400, fov_height=400, afov_max_radius=120), new_state()
+    assert settle(c, s)[-1][2] == 400
+    # the hard floor stops a tiny FOV Width from collapsing the radius
+    c, s = cfg(fov_size=10, fov_height=10), new_state()
+    assert settle(c, s)[-1][2] == int(2 * af.MIN_RADIUS_PX)
 
 
 def test_dynamic_radius_widens_for_fast_or_unsure_targets():
@@ -461,11 +470,11 @@ def test_config_defaults_persistence_and_validation(tmp_path):
     assert d["aim"]["fov_anchor"]["source"] == "detection"
     assert "fov_center_x" not in str(d) and "afov_active" not in str(d)      # runtime-only
     c.fov_shrink_mode = "anchor"
-    c.afov_source, c.afov_position, c.afov_radius = "tracker", "top", 140
+    c.afov_source, c.afov_position, c.afov_max_radius = "tracker", "top", 140
     c.afov_predict_enabled, c.afov_lost_behavior = True, "search"
     c2 = Config()
     c2.from_dict(c.to_dict())
-    assert (c2.fov_shrink_mode, c2.afov_source, c2.afov_position, c2.afov_radius) == ("anchor", "tracker", "top", 140)
+    assert (c2.fov_shrink_mode, c2.afov_source, c2.afov_position, c2.afov_max_radius) == ("anchor", "tracker", "top", 140)
     assert c2.afov_predict_enabled is True and c2.afov_lost_behavior == "search"
     # an old config without any of it loads the defaults
     old = Config()
@@ -473,16 +482,16 @@ def test_config_defaults_persistence_and_validation(tmp_path):
     assert old.afov_source == "detection" and old.fov_shrink_mode == "adaptive"
     # garbage is clamped
     bad = Config()
-    bad.afov_source, bad.afov_lost_behavior, bad.afov_min_radius = "zzz", 7, 500
-    bad.afov_max_radius, bad.afov_radius, bad.afov_follow_speed = 100, 9999, float("nan")
+    bad.afov_source, bad.afov_lost_behavior, bad.afov_position = "zzz", 7, "custom"
+    bad.afov_max_radius, bad.afov_follow_speed = 99999, float("nan")
     bad.fov_shrink_mode = "bogus"
     cfgmod.validate_config(bad)
     assert bad.afov_source == "detection" and bad.afov_lost_behavior == "hold"
-    assert bad.afov_min_radius <= bad.afov_radius <= bad.afov_max_radius
+    assert bad.afov_position == "center" and bad.afov_max_radius == 4096
     assert bad.afov_follow_speed == 12.0 and bad.fov_shrink_mode == "adaptive"
 
 
 def test_anchor_settings_are_aim_preset_eligible():
     from core.config_manager import _AIM_PRESET_FIELDS
-    assert {"afov_source", "afov_radius", "afov_lost_behavior", "afov_predict_enabled"} <= set(_AIM_PRESET_FIELDS)
+    assert {"afov_source", "afov_max_radius", "afov_lost_behavior", "afov_predict_enabled"} <= set(_AIM_PRESET_FIELDS)
     assert "fov_center_x" not in _AIM_PRESET_FIELDS

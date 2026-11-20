@@ -51,6 +51,10 @@ from typing import Dict, Optional, Sequence
 from .target_tracking import box_iou, clamp01, edge_ratio
 
 MODES = ('disabled', 'linear', 'velocity_accel', 'smoothed', 'adaptive')
+# What the settings offer and persist. 'disabled' (the master switch / prediction method already
+# turn it off) and 'linear' (= velocity_accel with Acceleration 0) are only still understood by
+# the estimator and migrated on load (config.migrate_anchor_settings()).
+MODES_UI = ('velocity_accel', 'smoothed', 'adaptive')
 
 _CAP = 12                       # ring-buffer capacity (max history_len)
 _MIN_ACCEL_SAMPLES = 4
@@ -98,7 +102,9 @@ _PARAM_DEFAULTS = {
 
 
 def anchor_active(config) -> bool:
-    """The single on/off gate: enabled and a real (non-``disabled``) mode."""
+    """The single on/off gate: ``anchor_enabled``. (A stale ``disabled`` mode still reads as
+    off; it is never stored any more, config.migrate_anchor_settings() turns it into
+    ``anchor_enabled = False`` on load.)"""
     return bool(getattr(config, 'anchor_enabled', False)) and \
         getattr(config, 'anchor_mode', 'adaptive') in MODES[1:]
 
@@ -685,8 +691,8 @@ class FovAdjuster:
 # whether or not "Enable Anchor Prediction" (the FOV / lock-association layer) is on.
 
 def aim_uses_anchor(config) -> bool:
-    """True while the aim-lead Prediction Method is Anchor: prediction is on, the
-    method is ``anchor`` and the shared Anchor mode is not ``disabled``."""
+    """True while the aim-lead Prediction Method is Anchor: prediction is on and the method is
+    ``anchor`` (a stale ``disabled`` mode still reads as off, see anchor_active())."""
     return (bool(getattr(config, 'prediction_enabled', False))
             and getattr(config, 'prediction_method', 'velocity') == 'anchor'
             and getattr(config, 'anchor_mode', 'adaptive') in MODES[1:])

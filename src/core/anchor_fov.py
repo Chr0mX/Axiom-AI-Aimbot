@@ -13,8 +13,8 @@ Responsibilities are kept in separate, small pieces:
                              :func:`resolve_manual_anchor` (they fill one reused
                              :class:`AnchorSample`; nothing is tracked twice --
                              detections and ``TargetTracker`` are the inputs)
-* anchor position         -- :func:`anchor_point` (box centre / top / bottom /
-                             custom + X/Y offsets)
+* anchor position         -- :func:`anchor_point` (box centre / top / bottom
+                             + X/Y offsets)
 * movement prediction     -- :meth:`AnchorFovController._lead` (tracker velocity,
                              confidence weighted, opt-in)
 * position smoothing      -- :meth:`AnchorFovController.step` (input low-pass,
@@ -40,7 +40,7 @@ from typing import Optional, Sequence
 from .target_tracking import TrackState, box_iou, clamp
 
 SOURCES = ('detection', 'tracker', 'manual')
-POSITIONS = ('center', 'top', 'bottom', 'custom')
+POSITIONS = ('center', 'top', 'bottom')
 LOST_MODES = ('hold', 'return', 'search')
 REACQUIRE_MODES = ('smooth', 'fast')
 
@@ -52,6 +52,8 @@ PH_RETURN = 3     # lost: FOV glides back to the crosshair
 PH_SEARCH = 4     # lost: FOV stays and expands so a new anchor can be found
 PHASE_NAMES = ('follow', 'grace', 'hold', 'return', 'search')
 
+MIN_RADIUS_PX = 25.0         # hard floor of the FOV radius (FOV Width 50 px)
+DEFAULT_RADIUS_PX = 100.0
 _MAX_DT_S = 1.0            # a longer gap between frames is a stall, not motion
 _SMOOTH_MAX_S = 0.25       # input low-pass time constant at smoothing == 1
 _RADIUS_TAU_S = 0.20       # radius approaches its target with this time constant
@@ -93,9 +95,9 @@ def _num(config, name: str, default: float) -> float:
 
 class AnchorFovParams:
     """Settings snapshot, refreshed in place each frame (no allocation)."""
-    __slots__ = ('source', 'position', 'off_x', 'off_y', 'manual_x', 'manual_y',
+    __slots__ = ('source', 'position', 'off_x', 'off_y',
                  'follow', 'smoothing', 'max_speed',
-                 'predict', 'strength', 'lead_s',
+                 'predict', 'lead_s',
                  'lost_mode', 'lost_delay_s', 'reacquire',
                  'radius', 'min_radius', 'max_radius', 'dynamic_radius')
 
@@ -116,23 +118,24 @@ class AnchorFovParams:
         self.position = pos if pos in POSITIONS else 'center'
         self.off_x = _num(c, 'afov_offset_x', 0.0)
         self.off_y = _num(c, 'afov_offset_y', 0.0)
-        self.manual_x = _num(c, 'afov_manual_x', 0.0)
-        self.manual_y = _num(c, 'afov_manual_y', 0.0)
         self.follow = clamp(_num(c, 'afov_follow_speed', 12.0), 0.5, 100.0)
         self.smoothing = clamp(_num(c, 'afov_smoothing', 0.3), 0.0, 1.0)
         self.max_speed = max(0.0, _num(c, 'afov_max_speed', 4000.0))      # px/s, 0 = unlimited
         self.predict = bool(getattr(c, 'afov_predict_enabled', False))
-        self.strength = clamp(_num(c, 'afov_predict_strength', 1.0), 0.0, 2.0)
         self.lead_s = clamp(_num(c, 'afov_predict_time_ms', 80.0), 0.0, 500.0) / 1000.0
         lm = str(getattr(c, 'afov_lost_behavior', 'hold'))
         self.lost_mode = lm if lm in LOST_MODES else 'hold'
         self.lost_delay_s = clamp(_num(c, 'afov_lost_delay_ms', 150.0), 0.0, 5000.0) / 1000.0
         rq = str(getattr(c, 'afov_reacquire', 'smooth'))
         self.reacquire = rq if rq in REACQUIRE_MODES else 'smooth'
-        rmin = clamp(_num(c, 'afov_min_radius', 50.0), 1.0, 4096.0)
-        rmax = clamp(_num(c, 'afov_max_radius', 300.0), rmin, 4096.0)
-        self.min_radius, self.max_radius = rmin, rmax
-        self.radius = clamp(_num(c, 'afov_radius', 100.0), rmin, rmax)
+        # The FOV size is the one FOV Width every mode uses: radius = Width / 2 (the aspect still comes
+        # from FOV Height / Width). Maximum Radius is only headroom to grow into (Dynamic Radius,
+        # Search), so it can never cut the base size.
+        rmin = MIN_RADIUS_PX
+        base = clamp(_num(c, 'fov_size', 2.0 * DEFAULT_RADIUS_PX) * 0.5, rmin, 4096.0)
+        self.min_radius = rmin
+        self.radius = base
+        self.max_radius = clamp(_num(c, 'afov_max_radius', 300.0), base, 4096.0)
         self.dynamic_radius = bool(getattr(c, 'afov_dynamic_radius', False))
 
 
@@ -158,8 +161,7 @@ def anchor_point(box: Sequence[float], position: str, off_x: float, off_y: float
     """Anchor coordinates from a bounding box and the configured offsets.
 
     ``center`` is the box centre, ``top``/``bottom`` the middle of the top /
-    bottom edge, ``custom`` the box centre with only the X/Y offsets deciding
-    where the anchor sits.  The offsets (pixels) are added in every case.
+    bottom edge.  The X/Y offsets (pixels) are added in every case.
     """
     x = (float(box[0]) + float(box[2])) * 0.5
     if position == 'top':
@@ -261,9 +263,10 @@ def resolve_tracker_anchor(s: AnchorSample, p: AnchorFovParams, tracker, now: fl
 
 
 def resolve_manual_anchor(s: AnchorSample, p: AnchorFovParams, cross_x: float, cross_y: float) -> None:
-    """Manual source: a fixed point given as an offset from the crosshair."""
+    """Manual source: a fixed point given as the X/Y offset from the crosshair (the same
+    offset pair the other sources add to their anchor point)."""
     s.clear()
-    x, y = cross_x + p.manual_x, cross_y + p.manual_y
+    x, y = cross_x + p.off_x, cross_y + p.off_y
     if math.isfinite(x) and math.isfinite(y):
         s.valid = True
         s.x, s.y = x, y
@@ -312,7 +315,7 @@ class AnchorFovController:
             speed = math.hypot(s.vx, s.vy)
             if speed > _PRED_DEADZONE_PX_S:
                 eff = (speed - _PRED_DEADZONE_PX_S) / speed
-                k = p.lead_s * p.strength * self.pred_gain * eff
+                k = p.lead_s * self.pred_gain * eff
                 lx, ly = s.vx * k, s.vy * k
                 lead = math.hypot(lx, ly)
                 cap = base_r * _PRED_MAX_LEAD_FRAC

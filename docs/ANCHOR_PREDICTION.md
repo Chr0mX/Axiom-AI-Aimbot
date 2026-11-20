@@ -64,11 +64,14 @@ engages for brisk acceleration or a long enough history window.
 
 | Mode | Velocity | Acceleration | Smoothing | Strength |
 |---|---|---|---|---|
-| Disabled | - | - | - | feature off |
-| Linear | raw LSQ | none | none | fixed |
-| Velocity + Acceleration | raw LSQ | x `anchor_accel_comp` (gated) | none | fixed |
+| Velocity (`velocity_accel`) | raw LSQ | x `anchor_accel_comp` (gated; 0 % = velocity only) | none | fixed |
 | Smoothed | EMA | EMA x `anchor_accel_comp` | time constant 20-220 ms from `anchor_velocity_smoothing` | fixed |
 | Adaptive | as Smoothed | as Smoothed | as Smoothed | x (0.3 + 0.7*quality); a large innovation (sudden direction change) also drops the stale history |
+
+Two modes used to exist and are retired as redundant (old files load unchanged, see *Retired options*):
+**Linear** was Velocity with Acceleration 0 (the estimator only used it to zero the acceleration term;
+the output is bit-identical, tested), and **Disabled** duplicated the master switch ("Enable Anchor
+Prediction") and, for the aim-lead method, the Prediction switch and method choice.
 
 `quality = 0.4*confidence + 0.3*stability + 0.3*direction-consistency`, where *stability* is
 the overlap between the new box and the box the previous state **predicted** (so a fast but
@@ -148,7 +151,7 @@ lock-association layer above): picking the method is enough, and the `anchor_*` 
   relative place inside the box (`aim = pcx + (aim_x - cx) * pw / w`), so a head offset follows a
   box that grows or shrinks. Kalman (if on) still runs after it; the predicted-aim marker and Web ESP
   marker read the final point unchanged.
-* **Shared tuning:** `anchor_mode` (**Disabled = no lead**), `anchor_strength`,
+* **Shared tuning:** `anchor_mode`, `anchor_strength`,
   `anchor_velocity_smoothing`, `anchor_accel_comp`, `anchor_confidence_threshold`,
   `anchor_history_len`, `anchor_max_distance_pct`; `prediction_max_velocity` is the jump gate.
   `anchor_horizon_ms` and the FOV influences only matter for the FOV layer. The Inference page
@@ -163,7 +166,7 @@ lock-association layer above): picking the method is enough, and the `anchor_*` 
   untouched (a stationary target gets exactly zero lead).
 
 Which mode for the aim lead? The shared default `adaptive` smooths the velocity, which suits the FOV
-but lags on rapid acceleration; for the aim lead `linear` / `velocity_accel` respond fastest, while
+but lags on rapid acceleration; for the aim lead `velocity_accel` (Velocity) responds fastest, while
 `smoothed` / `adaptive` give the steadiest lead (see the benchmark).
 
 ## Settings
@@ -173,7 +176,7 @@ Stored under `tracking.anchor.*` (aim-preset eligible) and `display.show_anchor_
 | Setting | Default | Range |
 |---|---|---|
 | `anchor_enabled` | off | - |
-| `anchor_mode` | adaptive | disabled / linear / velocity_accel / smoothed / adaptive |
+| `anchor_mode` | adaptive | velocity_accel (Velocity) / smoothed / adaptive |
 | `anchor_horizon_ms` | 100 | 20-500 |
 | `anchor_strength` | 100 % | 0-150 % |
 | `anchor_velocity_smoothing` | 40 % | 0-100 % |
@@ -201,7 +204,7 @@ built while the toggle is on.
 
 Synthetic, seeded; 1 px detector noise; 100 ms horizon; baseline = hold the last box.
 
-| Scenario (RMSE px) | Baseline | Linear | Smoothed | Adaptive |
+| Scenario (RMSE px) | Baseline | Velocity (was Linear) | Smoothed | Adaptive |
 |---|---|---|---|---|
 | Stationary | 0.0 | 1.4 | 1.4 | 1.4 (measurement noise floor, no lead) |
 | Slow, 60 px/s | 6.0 | 5.3 | 5.1 | 5.3 |
@@ -256,3 +259,13 @@ memory retained per frame. That is ~0.4 % of a 144 FPS frame budget.
 * Prediction quality depends on how steady the detector's boxes are; very jittery detections
   lower the confidence and therefore the lead.
 * The Qt pages and overlays are Windows-only and were not rendered in the development sandbox.
+
+## Retired options (migrated on load)
+
+| Retired | Why | On load |
+|---|---|---|
+| mode `linear` | = Velocity with Acceleration 0 | mode `velocity_accel`, `anchor_accel_comp = 0` |
+| mode `disabled` | duplicates the master switch / the Prediction on-off and method choice | `anchor_enabled = False`, mode `adaptive`; an aim-lead method of Anchor becomes Velocity, so "no lead" stays "no lead" |
+
+The Inference page now shows one FOV-influence slider: only the influence of the current shrink mode
+(Adaptive or Dynamic) ever acts, so the other is hidden (both values stay in the file).

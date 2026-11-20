@@ -112,28 +112,27 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "fov_shrink_mode": {"type": "choice", "choices": ["fixed", "adaptive", "dynamic", "anchor"]},
         # Anchor FOV (inference_page.py's Anchor FOV groups; core/anchor_fov.py)
         "afov_source": {"type": "choice", "choices": ["detection", "tracker", "manual"]},
+        # "custom" is still accepted from old scripts and normalised to "center" after the write
+        # (_post_apply); it was the centre with only the offsets deciding, i.e. the same thing.
         "afov_position": {"type": "choice", "choices": ["center", "top", "bottom", "custom"]},
         "afov_offset_x": {"type": "int", "min": -1000, "max": 1000},
         "afov_offset_y": {"type": "int", "min": -1000, "max": 1000},
-        "afov_manual_x": {"type": "int", "min": -4096, "max": 4096},
-        "afov_manual_y": {"type": "int", "min": -4096, "max": 4096},
         "afov_follow_speed": {"type": "float", "min": 1, "max": 100},
         "afov_smoothing": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
         "afov_max_speed": {"type": "int", "min": 0, "max": 50000},
         "afov_predict_enabled": {"type": "bool"},
-        "afov_predict_strength": {"type": "float", "scale": 100.0, "min": 0, "max": 200},
         "afov_predict_time_ms": {"type": "int", "min": 0, "max": 500},
         "afov_lost_behavior": {"type": "choice", "choices": ["hold", "return", "search"]},
         "afov_lost_delay_ms": {"type": "int", "min": 0, "max": 5000},
         "afov_reacquire": {"type": "choice", "choices": ["smooth", "fast"]},
-        "afov_radius": {"type": "int", "min": 1, "max": 2000},
-        "afov_min_radius": {"type": "int", "min": 1, "max": 2000},
         "afov_max_radius": {"type": "int", "min": 1, "max": 2000},
         "afov_dynamic_radius": {"type": "bool"},
         "fov_dynamic_safeguards": {"type": "bool"},
         # Anchor Prediction (inference_page.py's Anchor Prediction group; core/anchor_prediction.py)
         "anchor_enabled": {"type": "bool"},
-        "anchor_mode": {"type": "choice", "choices": ["disabled", "linear", "velocity_accel", "smoothed", "adaptive"]},
+        # "disabled" and "linear" are retired (the master switch / Acceleration 0 cover them); they are
+        # still accepted from old scripts and folded by config.migrate_anchor_settings() in _post_apply.
+        "anchor_mode": {"type": "choice", "choices": ["velocity_accel", "smoothed", "adaptive", "linear", "disabled"]},
         "anchor_horizon_ms": {"type": "float", "min": 20, "max": 500},
         "anchor_strength": {"type": "float", "scale": 100.0, "min": 0, "max": 150},
         "anchor_velocity_smoothing": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
@@ -674,8 +673,18 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
             _DERIVED[schema[field]["derived"]][1](config, coerced)
         else:
             _set_nested(config, schema[field].get("attr", field), coerced)
+    _post_apply(config, to_apply)
 
     return {"ok": True, "applied": get_tab_settings(config, tab)}
+
+
+def _post_apply(config, written: dict) -> None:
+    """Normalise retired values an old script may still send (kept accepted for API compatibility)."""
+    if "anchor_mode" in written:
+        from .config import migrate_anchor_settings
+        migrate_anchor_settings(config)
+    if written.get("afov_position") == "custom":
+        config.afov_position = "center"
 
 
 def gpu_monitor_status(config) -> str:

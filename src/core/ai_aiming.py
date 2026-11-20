@@ -117,7 +117,7 @@ def _anchor_aim_lead(config: Config, state: LoopState, box, comp_dx: float, comp
             or state.aim_anchor_params_t > now_t):
         track.params.update_from(config)
         state.aim_anchor_params_t = now_t
-    if track.params.mode == 'disabled':          # shared mode switch: Disabled = no lead
+    if track.params.mode == 'disabled':          # stale value only: never stored (config.migrate_anchor_settings)
         return aim_x, aim_y
     shifted = (box[0] + comp_dx, box[1] + comp_dy, box[2] + comp_dx, box[3] + comp_dy)
     return predict_aim_point(track, now_t, shifted, aim_x, aim_y, horizon_s, det_conf)

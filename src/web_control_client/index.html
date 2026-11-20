@@ -701,21 +701,20 @@
             <div class="field-card" id="inf-afov-position-card">
               <div class="field-info">
                 <div class="field-title">Anchor Position</div>
-                <div class="field-desc">Where on the box the anchor sits. Custom = box centre, positioned only by the X/Y offsets.</div>
+                <div class="field-desc">Where on the box the anchor sits; fine-tune it with the offsets below.</div>
               </div>
               <div class="field-control">
                 <select id="inf-afov_position" data-key="afov_position" data-type="choice">
                   <option value="center">Bounding Box Centre</option>
                   <option value="top">Top Centre</option>
                   <option value="bottom">Bottom Centre</option>
-                  <option value="custom">Custom Offset</option>
                 </select>
               </div>
             </div>
             <div class="field-card" id="inf-afov-offx-card">
               <div class="field-info">
                 <div class="field-title">Offset X</div>
-                <div class="field-desc">Horizontal shift of the anchor, in pixels.</div>
+                <div class="field-desc">Horizontal shift of the anchor, in pixels. With the Manual source: the distance from the crosshair.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-afov_offset_x" data-key="afov_offset_x" data-type="number" min="-1000" max="1000" step="1">
@@ -725,30 +724,10 @@
             <div class="field-card" id="inf-afov-offy-card">
               <div class="field-info">
                 <div class="field-title">Offset Y</div>
-                <div class="field-desc">Vertical shift of the anchor, in pixels (positive = down).</div>
+                <div class="field-desc">Vertical shift of the anchor, in pixels (positive = down). With the Manual source: the distance from the crosshair.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-afov_offset_y" data-key="afov_offset_y" data-type="number" min="-1000" max="1000" step="1">
-                <span class="field-slider-value">px</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-manx-card">
-              <div class="field-info">
-                <div class="field-title">Manual X</div>
-                <div class="field-desc">Manual source: horizontal distance from the crosshair, in pixels.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_manual_x" data-key="afov_manual_x" data-type="number" min="-4096" max="4096" step="1">
-                <span class="field-slider-value">px</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-many-card">
-              <div class="field-info">
-                <div class="field-title">Manual Y</div>
-                <div class="field-desc">Manual source: vertical distance from the crosshair, in pixels.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_manual_y" data-key="afov_manual_y" data-type="number" min="-4096" max="4096" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -804,16 +783,6 @@
                   <input type="checkbox" id="inf-afov_predict_enabled" data-key="afov_predict_enabled" data-type="bool">
                   <span class="slider"></span>
                 </label>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-predstr-card">
-              <div class="field-info">
-                <div class="field-title">Prediction Strength</div>
-                <div class="field-desc">How much of the estimated velocity is used.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_predict_strength" data-key="afov_predict_strength" data-type="number" min="0" max="200" step="5">
-                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card" id="inf-afov-predtime-card">
@@ -873,30 +842,10 @@
           <section class="module hidden" id="inf-afov-sec-radius">
           <div class="field-group-title">Anchor FOV · FOV</div>
           <div class="field-group">
-            <div class="field-card" id="inf-afov-radius-card">
-              <div class="field-info">
-                <div class="field-title">Radius</div>
-                <div class="field-desc">Default FOV radius (half the width), in pixels. Independent of the anchor position.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_radius" data-key="afov_radius" data-type="number" min="1" max="2000" step="1">
-                <span class="field-slider-value">px</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-minr-card">
-              <div class="field-info">
-                <div class="field-title">Minimum Radius</div>
-                <div class="field-desc">The FOV never gets smaller than this.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_min_radius" data-key="afov_min_radius" data-type="number" min="1" max="2000" step="1">
-                <span class="field-slider-value">px</span>
-              </div>
-            </div>
             <div class="field-card" id="inf-afov-maxr-card">
               <div class="field-info">
                 <div class="field-title">Maximum Radius</div>
-                <div class="field-desc">The FOV never gets larger than this (also the size reached while searching).</div>
+                <div class="field-desc">The most the FOV radius can grow to with Dynamic Radius or Search. The normal size is FOV Width ÷ 2.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-afov_max_radius" data-key="afov_max_radius" data-type="number" min="1" max="2000" step="1">
@@ -936,13 +885,11 @@
             <div class="field-card" id="inf-anchor-mode-card">
               <div class="field-info">
                 <div class="field-title">Prediction Mode</div>
-                <div class="field-desc">Linear: current velocity. Velocity + Acceleration: also uses acceleration. Smoothed: smooths velocity/acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes.</div>
+                <div class="field-desc">Velocity: the current velocity, plus acceleration by the Acceleration setting (0% = velocity only). Smoothed: smooths velocity and acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes.</div>
               </div>
               <div class="field-control">
                 <select id="inf-anchor_mode" data-key="anchor_mode" data-type="choice">
-                  <option value="disabled">Disabled</option>
-                  <option value="linear">Linear</option>
-                  <option value="velocity_accel">Velocity + Acceleration</option>
+                  <option value="velocity_accel">Velocity</option>
                   <option value="smoothed">Smoothed</option>
                   <option value="adaptive">Adaptive</option>
                 </select>
@@ -1001,7 +948,7 @@
             <div class="field-card" id="inf-anchor-history-card">
               <div class="field-info">
                 <div class="field-title">Prediction History Length</div>
-                <div class="field-desc">How many recent detections the motion estimate uses (Velocity + Acceleration needs 4 or more).</div>
+                <div class="field-desc">How many recent detections the motion estimate uses (acceleration needs 4 or more).</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-anchor_history_len" data-key="anchor_history_len" data-type="number" min="4" max="12" step="1">

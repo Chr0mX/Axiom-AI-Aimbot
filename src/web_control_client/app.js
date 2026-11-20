@@ -742,7 +742,7 @@
           updateUvcSubVisibility();
         }
         if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
-        if (tab === "inference" && (key === "afov_source" || key === "afov_predict_enabled")) updateAnchorFovVisibility();
+        if (tab === "inference" && (key === "afov_source" || key === "afov_predict_enabled" || key === "afov_lost_behavior" || key === "afov_dynamic_radius")) updateAnchorFovVisibility();
         if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
@@ -801,8 +801,9 @@
   }
 
   // Mirrors inference_page.py's _updateAnchorFovVisibility(): the Anchor FOV groups appear only
-  // in Anchor mode; Position/Offsets need a box source, Manual X/Y the manual one, the
-  // prediction sliders need prediction on, the Lost Delay needs a lost behaviour.
+  // in Anchor mode; Position needs a box source (Manual is a point from the crosshair; the
+  // offsets apply to every source), the look-ahead time needs prediction on, and Maximum Radius
+  // only matters with Dynamic Radius or the Search behaviour.
   function updateAnchorFovVisibility() {
     var d = lastSettings.inference || {};
     var el = function (id) { return document.getElementById(id); };
@@ -811,15 +812,13 @@
     var anchor = mode === "anchor";
     var src = val("afov_source", "detection");
     var pred = !!val("afov_predict_enabled", false);
+    var dyn = !!val("afov_dynamic_radius", false);
+    var search = val("afov_lost_behavior", "hold") === "search";
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
     ["anchor", "move", "pred", "lost", "radius"].forEach(function (k) { show("inf-afov-sec-" + k, anchor); });
     show("inf-afov-position-card", anchor && src !== "manual");
-    show("inf-afov-offx-card", anchor && src !== "manual");
-    show("inf-afov-offy-card", anchor && src !== "manual");
-    show("inf-afov-manx-card", anchor && src === "manual");
-    show("inf-afov-many-card", anchor && src === "manual");
-    show("inf-afov-predstr-card", anchor && pred);
     show("inf-afov-predtime-card", anchor && pred);
+    show("inf-afov-maxr-card", anchor && (dyn || search));
   }
 
   // Mirrors inference_page.py's _updateAnchorVisibility(): settings appear only while Anchor
@@ -834,19 +833,16 @@
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
     // The estimator tuning is shared with the Aim tab's "Anchor" Prediction Method, which works
     // without the master switch (server extra aim_uses_anchor = prediction on + method anchor);
-    // the horizon and the FOV influences are FOV-only and still need Enable Anchor Prediction.
-    var aimAnchor = !!d.aim_uses_anchor;
-    var shared = on || aimAnchor;
-    var active = on && mode !== "disabled";
-    var sharedActive = shared && mode !== "disabled";
+    // the horizon and the FOV influence are FOV-only and still need the Anchor Prediction switch.
+    var shared = on || !!d.aim_uses_anchor;
     show("inf-anchor-mode-card", shared);
-    show("inf-anchor-horizon-card", active);
-    ["strength", "conf", "history", "maxdist"].forEach(function (k) { show("inf-anchor-" + k + "-card", sharedActive); });
+    show("inf-anchor-horizon-card", on);
+    ["strength", "conf", "history", "maxdist", "accel"].forEach(function (k) { show("inf-anchor-" + k + "-card", shared); });
     show("inf-anchor-smoothing-card", shared && (mode === "smoothed" || mode === "adaptive"));
-    show("inf-anchor-accel-card", sharedActive && mode !== "linear");
+    // Only the influence of the current shrink mode ever acts (Fixed and Anchor FOV have none).
     var fovMode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode || "adaptive";
-    show("inf-anchor-infl-adaptive-card", active && fov && fovMode !== "anchor");
-    show("inf-anchor-infl-dynamic-card", active && fov && fovMode !== "anchor");
+    show("inf-anchor-infl-adaptive-card", on && fov && fovMode === "adaptive");
+    show("inf-anchor-infl-dynamic-card", on && fov && fovMode === "dynamic");
   }
 
   function updateWeaponDetectVisibility(mode) {

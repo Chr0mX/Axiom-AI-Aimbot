@@ -196,19 +196,14 @@ _FIELD_MAP = {
     'afov_position':              'aim.fov_anchor.position',
     'afov_offset_x':              'aim.fov_anchor.offset_x',
     'afov_offset_y':              'aim.fov_anchor.offset_y',
-    'afov_manual_x':              'aim.fov_anchor.manual_x',
-    'afov_manual_y':              'aim.fov_anchor.manual_y',
     'afov_follow_speed':          'aim.fov_anchor.follow_speed',
     'afov_smoothing':             'aim.fov_anchor.smoothing',
     'afov_max_speed':             'aim.fov_anchor.max_speed',
     'afov_predict_enabled':       'aim.fov_anchor.predict.enabled',
-    'afov_predict_strength':      'aim.fov_anchor.predict.strength',
     'afov_predict_time_ms':       'aim.fov_anchor.predict.time_ms',
     'afov_lost_behavior':         'aim.fov_anchor.lost.behavior',
     'afov_lost_delay_ms':         'aim.fov_anchor.lost.delay_ms',
     'afov_reacquire':             'aim.fov_anchor.lost.reacquire',
-    'afov_radius':                'aim.fov_anchor.radius.default',
-    'afov_min_radius':            'aim.fov_anchor.radius.min',
     'afov_max_radius':            'aim.fov_anchor.radius.max',
     'afov_dynamic_radius':        'aim.fov_anchor.radius.dynamic',
     'anchor_enabled':             'tracking.anchor.enabled',
@@ -572,22 +567,19 @@ class Config:
         # Anchor FOV (fov_shrink_mode == 'anchor', core/anchor_fov.py): the FOV centre
         # follows an anchor and its radius is controlled independently of it.
         self.afov_source: str = 'detection'      # 'detection' / 'tracker' / 'manual'
-        self.afov_position: str = 'center'       # 'center' / 'top' / 'bottom' / 'custom'
-        self.afov_offset_x: int = 0              # px added to the anchor point
+        self.afov_position: str = 'center'       # 'center' / 'top' / 'bottom'
+        self.afov_offset_x: int = 0              # px added to the anchor point (manual source: from the crosshair)
         self.afov_offset_y: int = 0
-        self.afov_manual_x: int = 0              # manual source: px from the crosshair
-        self.afov_manual_y: int = 0
         self.afov_follow_speed: float = 12.0     # 1/s approach rate (higher = tighter)
         self.afov_smoothing: float = 0.3         # 0..1 low-pass on the anchor (0 = off)
         self.afov_max_speed: int = 4000          # px/s cap on the FOV centre (0 = unlimited)
         self.afov_predict_enabled: bool = False  # lead the anchor by the tracker's velocity
-        self.afov_predict_strength: float = 1.0
         self.afov_predict_time_ms: int = 80
         self.afov_lost_behavior: str = 'hold'    # 'hold' / 'return' / 'search'
         self.afov_lost_delay_ms: int = 150       # anchor must be gone this long first
         self.afov_reacquire: str = 'smooth'      # 'smooth' / 'fast' (catch-up boost)
-        self.afov_radius: int = 100              # default radius (half the FOV width, px)
-        self.afov_min_radius: int = 50
+        # The Anchor FOV size is FOV Width/Height like every other mode (radius = width / 2);
+        # this is only the growth headroom for Dynamic Radius and Search.
         self.afov_max_radius: int = 300
         self.afov_dynamic_radius: bool = False   # widen with target speed / low confidence
         # Runtime-only (unpersisted): the Anchor FOV controller's real state, published
@@ -1148,6 +1140,20 @@ class Config:
                 except (TypeError, ValueError):
                     pass
 
+        # Retired Anchor options (a one-off fold at load; see migrate_anchor_settings()).
+        if self.afov_position == 'custom':           # was the centre with only the offsets deciding
+            self.afov_position = 'center'
+        def _legacy_num(path):
+            v = _get_path(data, path)
+            return v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+        mx, my = _legacy_num('aim.fov_anchor.manual_x'), _legacy_num('aim.fov_anchor.manual_y')
+        if self.afov_source == 'manual' and (mx or my) and not (self.afov_offset_x or self.afov_offset_y):
+            self.afov_offset_x, self.afov_offset_y = int(mx or 0), int(my or 0)   # manual X/Y = the offset pair
+        strength = _legacy_num('aim.fov_anchor.predict.strength')
+        if strength is not None and strength != 1.0:    # lead = time x strength: fold it into the time
+            self.afov_predict_time_ms = int(max(0, min(500, round(self.afov_predict_time_ms * strength))))
+        migrate_anchor_settings(self)
+
         # Crosshair color: nested [r, g, b], else legacy flat r/g/b.
         # Each channel is parsed on its own and clamped to 0-255; a bad value
         # keeps the current one instead of crashing startup.
@@ -1544,10 +1550,31 @@ def _validate_aim_math(config: Config) -> None:
         0.1, min(5.0, float(getattr(config, 'prediction_ego_motion_scale', 1.0) or 1.0)))
 
 
+def migrate_anchor_settings(config) -> None:
+    """Fold the retired Anchor Box Prediction options into their replacements (idempotent).
+
+    * ``anchor_mode == 'linear'`` is Velocity with the Acceleration slider at 0 (the estimator only
+      used the mode to zero the acceleration term), so it becomes ``velocity_accel`` + accel 0.
+    * ``anchor_mode == 'disabled'`` duplicated the master switch (``anchor_enabled``) and, for the
+      aim-lead method, the Prediction on/off + method choice: it turns the FOV layer off, and an
+      aim-lead method that was Anchor falls back to Velocity so "no lead" stays "no lead".
+    """
+    mode = getattr(config, 'anchor_mode', 'adaptive')
+    if mode == 'linear':
+        config.anchor_mode = 'velocity_accel'
+        config.anchor_accel_comp = 0.0
+    elif mode == 'disabled':
+        config.anchor_enabled = False
+        config.anchor_mode = 'adaptive'
+        if getattr(config, 'prediction_method', 'velocity') == 'anchor':
+            config.prediction_method = 'velocity'
+
+
 def _validate_anchor(config: Config) -> None:
     """Clamp the Anchor Prediction settings."""
-    from .anchor_prediction import MODES
-    if getattr(config, 'anchor_mode', 'adaptive') not in MODES:
+    from .anchor_prediction import MODES_UI
+    migrate_anchor_settings(config)
+    if getattr(config, 'anchor_mode', 'adaptive') not in MODES_UI:
         config.anchor_mode = 'adaptive'
     config.anchor_enabled = bool(getattr(config, 'anchor_enabled', False))
     config.anchor_horizon_ms = max(20.0, min(500.0, _finite(getattr(config, 'anchor_horizon_ms', 100.0), 100.0)))
@@ -1583,23 +1610,14 @@ def _validate_anchor_fov(config: Config) -> None:
     pick('afov_reacquire', REACQUIRE_MODES, 'smooth')
     num('afov_offset_x', 0, -1000, 1000, int)
     num('afov_offset_y', 0, -1000, 1000, int)
-    num('afov_manual_x', 0, -4096, 4096, int)
-    num('afov_manual_y', 0, -4096, 4096, int)
     num('afov_follow_speed', 12.0, 0.5, 100.0)
     num('afov_smoothing', 0.3, 0.0, 1.0)
     num('afov_max_speed', 4000, 0, 50000, int)
-    num('afov_predict_strength', 1.0, 0.0, 2.0)
     num('afov_predict_time_ms', 80, 0, 500, int)
     num('afov_lost_delay_ms', 150, 0, 5000, int)
     config.afov_predict_enabled = bool(getattr(config, 'afov_predict_enabled', False))
     config.afov_dynamic_radius = bool(getattr(config, 'afov_dynamic_radius', False))
-    # min <= default <= max, all sane: the controller relies on it
-    num('afov_min_radius', 50, 1, 4096, int)
     num('afov_max_radius', 300, 1, 4096, int)
-    if config.afov_max_radius < config.afov_min_radius:
-        config.afov_max_radius = config.afov_min_radius
-    num('afov_radius', 100, 1, 4096, int)
-    config.afov_radius = max(config.afov_min_radius, min(config.afov_max_radius, config.afov_radius))
 
 
 def _finite(value, default: float) -> float:

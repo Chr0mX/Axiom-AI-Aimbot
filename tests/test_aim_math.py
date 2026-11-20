@@ -208,5 +208,7 @@ def test_anchor_settings_are_clamped():
         500.0, 0.0, 0.4, 1.0, 0.0, 12, 100.0, 1.0, 0.0)
     low = SimpleNamespace(anchor_horizon_ms=1, anchor_history_len=1, anchor_mode="disabled")
     _validate_anchor(low)
-    assert low.anchor_horizon_ms == 20.0 and low.anchor_history_len == 4 and low.anchor_mode == "disabled"
+    # the retired "disabled" mode is folded into the master switch (config.migrate_anchor_settings)
+    assert low.anchor_horizon_ms == 20.0 and low.anchor_history_len == 4
+    assert low.anchor_mode == "adaptive" and low.anchor_enabled is False
     assert all(math.isfinite(v) for v in vars(cfg).values() if isinstance(v, float))
