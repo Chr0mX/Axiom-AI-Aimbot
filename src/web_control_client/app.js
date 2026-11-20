@@ -646,8 +646,6 @@
     if (value === null || value === undefined) return;
     if (type === "bool") {
       el.checked = !!value;
-    } else if (type === "dshow-toggle") {
-      el.checked = value === "v2";
     } else {
       el.value = value;
       // Keep a paired range slider (see enhanceNumberInputsWithSliders())
@@ -663,7 +661,6 @@
 
   function readGenericValue(el, type) {
     if (type === "bool") return el.checked;
-    if (type === "dshow-toggle") return el.checked ? "v2" : "v1";
     if (type === "number") return parseFloat(el.value);
     return el.value;
   }
@@ -741,7 +738,7 @@
         var value = readGenericValue(el, type);
         pushTabSetting(tab, key, value);
         if (tab === "capture" && key === "screenshot_method") updateCaptureVisibility(value);
-        if (tab === "capture" && (key === "uvc_capture_method" || key === "uvc_dshow_backend" || key === "uvc_ffmpeg_enabled")) {
+        if (tab === "capture" && (key === "uvc_capture_method" || key === "uvc_engine")) {
           updateUvcSubVisibility();
         }
         if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
@@ -1251,13 +1248,18 @@
   function updateUvcSubVisibility() {
     var methodEl = document.getElementById("cap-uvc_capture_method");
     var isDshow = !!(methodEl && methodEl.value === "dshow");
-    var v2El = document.getElementById("cap-uvc_dshow_backend");
-    var isV1 = !(v2El && v2El.checked);
-    var ffEl = document.getElementById("cap-uvc_ffmpeg_enabled");
-    var ffOn = !!(ffEl && ffEl.checked);
-    document.getElementById("cap-uvc-dshow-v2-card").classList.toggle("hidden", !isDshow);
-    document.getElementById("cap-uvc-ffmpeg-enabled-card").classList.toggle("hidden", !(isDshow && isV1));
-    document.getElementById("cap-uvc-ffmpeg-path-card").classList.toggle("hidden", !(isDshow && isV1 && ffOn));
+    var engEl = document.getElementById("cap-uvc_engine");
+    var engine = engEl ? engEl.value : "opencv";
+    document.getElementById("cap-uvc-engine-card").classList.toggle("hidden", !isDshow);
+    document.getElementById("cap-uvc-ffmpeg-path-card").classList.toggle("hidden", !(isDshow && engine === "ffmpeg"));
+    // The native DLL only implements MJPEG and NV12 (as in the Qt page): grey the other formats
+    // out instead of rewriting the saved choice, so leaving the native engine restores it.
+    var fmtEl = document.getElementById("cap-uvc_video_format");
+    if (fmtEl) {
+      Array.prototype.forEach.call(fmtEl.options, function (o) {
+        o.disabled = isDshow && engine === "native" && o.value !== "mjpeg" && o.value !== "nv12";
+      });
+    }
   }
 
   document.getElementById("cap-uvc-resolution-select").addEventListener("change", function (e) {

@@ -32,6 +32,7 @@ from .ai_loop_utils import (
     calculate_detection_region,
     clear_queues,
     compute_effective_fov,
+    cuda_io_binding_effective,
     AMBIGUOUS_LOCK,
     resolve_retained_lock,
     track_retained,
@@ -461,9 +462,9 @@ def ai_logic_loop(
     _io_binding: list = [None]
 
     def _setup_io_binding(m) -> object | None:
-        if not getattr(config, 'cuda_io_binding_enabled', False):
-            return None
         providers = m.get_providers() if hasattr(m, 'get_providers') else []
+        if not cuda_io_binding_effective(config, providers):
+            return None
         if not any('CUDA' in p or 'Tensorrt' in p for p in providers):
             return None
         try:

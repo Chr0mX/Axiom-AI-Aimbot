@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from .anchor_fov import anchor_fov_active
 from .anchor_prediction import anchor_active
+from .config import EXTERNAL_CAPTURE_METHODS
 from .target_tracking import clamp01, edge_ratio as _edge_ratio, find_continuation, lost_timeout_s
 
 if TYPE_CHECKING:
@@ -118,10 +119,27 @@ def aim_start_delay_elapsed(config: Config, aiming_start_time: float, current_ti
     return current_time - aiming_start_time >= delay_s
 
 
+def fov_follow_effective(config: Config) -> bool:
+    """Whether the FOV actually follows the mouse: the setting, unless the capture is an
+    external feed. The saved setting is never rewritten (the GUI only hides its card), so
+    switching back to mss/dxcam restores the user's choice."""
+    return bool(getattr(config, 'fov_follow_mouse', False)) and \
+        str(getattr(config, 'screenshot_method', 'mss')).lower() not in EXTERNAL_CAPTURE_METHODS
+
+
+def cuda_io_binding_effective(config: Config, providers=()) -> bool:
+    """CUDA IO binding on/off for a session using ``providers``: the user's switch, plus
+    always on under TensorRT (the GUI used to force that into the saved config on every
+    load; it is now decided here and the saved value is left alone)."""
+    if getattr(config, 'cuda_io_binding_enabled', False):
+        return True
+    return any('Tensorrt' in str(p) for p in providers)
+
+
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:
     """Update crosshair position"""
 
-    if config.fov_follow_mouse:
+    if fov_follow_effective(config):
         try:
             import win32api
             x, y = win32api.GetCursorPos()

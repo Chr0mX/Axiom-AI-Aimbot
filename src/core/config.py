@@ -1461,6 +1461,10 @@ def _validate_udp_recv_buffer_size(config: Config) -> None:
 
 AIM_START_DELAY_MAX_MS = 1000
 
+# Capture sources that are not the local desktop: the cursor position is meaningless against a
+# UVC / NDI / UDP feed, so "FOV follows mouse" can never apply to them.
+EXTERNAL_CAPTURE_METHODS = ('uvc', 'ndi', 'udp')
+
 
 def _validate_queue_and_confidence(config: Config) -> None:
     """max_queue_size sizes the overlay/auto-fire result queues (main.py):

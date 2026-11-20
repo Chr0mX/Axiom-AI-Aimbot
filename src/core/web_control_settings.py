@@ -73,6 +73,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "capture_fps_limit": {"type": "int", "attr": "screenshot_interval", "reciprocal": True,
                               "min": 10, "max": 1000},
         "uvc_capture_method": {"type": "choice", "choices": ["msmf", "dshow", "any"]},
+        # One choice replaces the two switches below in the UI (core/uvc_engine.py); the two
+        # persisted fields stay writable here as API aliases for existing scripts.
+        "uvc_engine": {"type": "choice", "choices": ["opencv", "native", "ffmpeg"], "derived": "uvc_engine"},
         "uvc_dshow_backend": {"type": "choice", "choices": ["v1", "v2"]},
         "uvc_ffmpeg_enabled": {"type": "bool"},
         "uvc_device_index": {"type": "int"},
@@ -457,6 +460,24 @@ def _set_nested(config, dotted_field: str, value) -> bool:
     return True
 
 
+# Derived fields: one displayed choice that maps onto several persisted fields. A schema entry
+# names its pair here via "derived"; reads call the getter, writes call the setter, and both
+# stay in step with the Qt pages because they share the same pure helper modules.
+def _uvc_engine_get(config):
+    from .uvc_engine import saved_engine
+    return saved_engine(config)
+
+
+def _uvc_engine_set(config, value):
+    from .uvc_engine import apply_engine
+    apply_engine(config, value)
+
+
+_DERIVED = {
+    "uvc_engine": (_uvc_engine_get, _uvc_engine_set),
+}
+
+
 def get_tab_settings(config, tab: str) -> dict:
     """Read every field in _SCHEMA[tab] off config, in display units.
 
@@ -476,7 +497,10 @@ def get_tab_settings(config, tab: str) -> dict:
 
     result: dict = {}
     for field, spec in schema.items():
-        raw = _get_nested(config, spec.get("attr", field))
+        if spec.get("derived"):
+            raw = _DERIVED[spec["derived"]][0](config)
+        else:
+            raw = _get_nested(config, spec.get("attr", field))
         ftype = spec["type"]
         if spec.get("reciprocal") and raw is not None:
             raw = 1.0 / float(raw) if float(raw) > 0 else None
@@ -646,7 +670,10 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
             to_apply[field] = int(round(config_value)) if ftype == "int" else config_value
 
     for field, coerced in to_apply.items():
-        _set_nested(config, schema[field].get("attr", field), coerced)
+        if schema[field].get("derived"):
+            _DERIVED[schema[field]["derived"]][1](config, coerced)
+        else:
+            _set_nested(config, schema[field].get("attr", field), coerced)
 
     return {"ok": True, "applied": get_tab_settings(config, tab)}
 

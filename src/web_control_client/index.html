@@ -267,7 +267,7 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">UVC Capture Method</div>
-                <div class="field-desc">msmf recommended for 1080p60 on Windows 10/11. 'dshow' unlocks the DirectShow Version and FFmpeg options below.</div>
+                <div class="field-desc">msmf recommended for 1080p60 on Windows 10/11. 'dshow' unlocks the DirectShow Engine option below.</div>
               </div>
               <div class="field-control">
                 <select id="cap-uvc_capture_method" data-key="uvc_capture_method" data-type="choice">
@@ -277,28 +277,17 @@
                 </select>
               </div>
             </div>
-            <div class="field-card" id="cap-uvc-dshow-v2-card">
+            <div class="field-card" id="cap-uvc-engine-card">
               <div class="field-info">
-                <div class="field-title">Use Native DirectShow DLL (V2)</div>
-                <div class="field-desc">Off = OpenCV's DirectShow wrapper (V1). On = the native directshow_capture.dll — owns the capture graph directly for lower, OBS-like latency.</div>
+                <div class="field-title">DirectShow Engine</div>
+                <div class="field-desc">OpenCV: the standard wrapper. Native DLL: directshow_capture.dll owns the capture graph for lower, OBS-like latency (MJPEG and NV12 only). FFmpeg: an external ffmpeg.exe subprocess.</div>
               </div>
               <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="cap-uvc_dshow_backend" data-key="uvc_dshow_backend" data-type="dshow-toggle">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-            <div class="field-card" id="cap-uvc-ffmpeg-enabled-card">
-              <div class="field-info">
-                <div class="field-title">Use FFmpeg Subprocess</div>
-                <div class="field-desc">Captures via an external ffmpeg.exe process instead of OpenCV.</div>
-              </div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="cap-uvc_ffmpeg_enabled" data-key="uvc_ffmpeg_enabled" data-type="bool">
-                  <span class="slider"></span>
-                </label>
+                <select id="cap-uvc_engine" data-key="uvc_engine" data-type="choice">
+                  <option value="opencv">OpenCV (default)</option>
+                  <option value="native">Native DLL (v2)</option>
+                  <option value="ffmpeg">FFmpeg subprocess</option>
+                </select>
               </div>
             </div>
             <div class="field-card">

@@ -19,6 +19,16 @@ from ..base_page import BasePage
 from ..language_manager import t
 from ..theme_colors import ThemeColors
 from core.hud_categories import CATEGORY_ORDER, CATEGORY_LABELS, parse_hud_status
+from core.uvc_engine import ENGINES, apply_engine, engine_from_config, saved_engine, video_format_choices
+
+# DirectShow engine choice (core/uvc_engine.py): labels in ENGINES order.
+_UVC_ENGINE_LABELS = ("OpenCV (default)", "Native DLL (v2)", "FFmpeg subprocess")
+_UVC_ENGINE_DESC = (
+    "OpenCV: the standard DirectShow wrapper. Native DLL: directshow_capture.dll owns the "
+    "capture graph for lower, OBS-like latency (MJPEG and NV12 only; the DLL must be present). "
+    "FFmpeg: an external ffmpeg.exe, which fails loudly instead of silently substituting a "
+    "format when OpenCV misreports the negotiated state."
+)
 
 # Apex's own real item-rarity colors — a fixed game-domain palette, not a UI
 # theme element (analogous to crosshair_color_r/g/b or the Web ESP overlay's
@@ -297,43 +307,30 @@ class CapturePage(BasePage):
             "UVC Capture Method",
             "msmf recommended for 1080p60 on Windows 10/11. If negotiation "
             "fails despite the device working fine in other DirectShow apps "
-            "(e.g. OBS), try 'dshow' — it unlocks the DirectShow Version and "
-            "FFmpeg options below. 'any' lets OpenCV auto-pick a backend.",
+            "(e.g. OBS), try 'dshow' — it unlocks the DirectShow Engine "
+            "option below. 'any' lets OpenCV auto-pick a backend.",
             self.uvcGroup
         )
         self.uvcCaptureMethodCard.hBoxLayout.addWidget(self.uvcCaptureMethodCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcCaptureMethodCard.hBoxLayout.addSpacing(16)
 
-        # DirectShow implementation toggle — only meaningful when
-        # uvcCaptureMethodCombo == 'dshow'. V1 is cv2.VideoCapture(CAP_DSHOW);
-        # V2 is the native DirectShow-Capture-DLL, which owns the filter
-        # graph/allocator directly instead of going through OpenCV's generic
-        # (and buffer-control-blind) DirectShow wrapper. See uvc_dshow_backend's
-        # docstring in config.py and the DirectShow Capture DLL roadmap for why.
-        self.uvcDshowV2Card = SwitchSettingCard(
+        # DirectShow engine — only meaningful when uvcCaptureMethodCombo == 'dshow'.
+        # One choice instead of two switches whose illegal combination (V2 + FFmpeg)
+        # had to be patched afterwards: OpenCV's wrapper (V1, default), the native
+        # directshow_capture.dll (V2, owns the graph directly for lower, OBS-like
+        # latency) or an ffmpeg.exe subprocess. Persisted as uvc_dshow_backend +
+        # uvc_ffmpeg_enabled (core/uvc_engine.py maps them).
+        self.uvcEngineCombo = ComboBox()
+        self.uvcEngineCombo.addItems(list(_UVC_ENGINE_LABELS))
+        self.uvcEngineCombo.setMinimumWidth(240)
+        self.uvcEngineCard = SettingCard(
             FluentIcon.SPEED_HIGH,
-            "Use Native DirectShow DLL (V2)",
-            "Off = OpenCV's DirectShow wrapper (V1, default). On = the native "
-            "directshow_capture.dll — owns the capture graph directly for "
-            "lower, OBS-like latency. Supports MJPEG and NV12 (Video Format "
-            "below is restricted to those two while this is on). Requires "
-            "directshow_capture.dll to be present (see FFmpeg Path card's "
-            "location convention).",
-            parent=self.uvcGroup
+            "DirectShow Engine",
+            _UVC_ENGINE_DESC,
+            self.uvcGroup
         )
-
-        # FFmpeg is DirectShow-only (no MSMF demuxer on Windows) and only
-        # makes sense under V1 — V2 already owns the graph directly, so
-        # routing it through an ffmpeg subprocess would defeat the point.
-        self.uvcFfmpegEnabledCard = SwitchSettingCard(
-            FluentIcon.VIDEO,
-            "Use FFmpeg Subprocess",
-            "Captures via an external ffmpeg.exe process instead of OpenCV. "
-            "ffmpeg's dshow demuxer negotiates directly and fails loudly "
-            "instead of silently substituting something else — useful when "
-            "OpenCV's DirectShow wrapper lies about negotiated state.",
-            parent=self.uvcGroup
-        )
+        self.uvcEngineCard.hBoxLayout.addWidget(self.uvcEngineCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uvcEngineCard.hBoxLayout.addSpacing(16)
 
         self.uvcDeviceCombo = ComboBox()
         self.uvcDeviceCombo.setMinimumWidth(260)
@@ -706,8 +703,7 @@ class CapturePage(BasePage):
         self.addContent(self.captureGroup)
 
         self.uvcGroup.addSettingCard(self.uvcCaptureMethodCard)
-        self.uvcGroup.addSettingCard(self.uvcDshowV2Card)
-        self.uvcGroup.addSettingCard(self.uvcFfmpegEnabledCard)
+        self.uvcGroup.addSettingCard(self.uvcEngineCard)
         self.uvcGroup.addSettingCard(self.uvcDeviceCard)
         self.uvcGroup.addSettingCard(self.uvcResolutionCard)
         self.uvcGroup.addSettingCard(self.uvcWidthCard)
@@ -765,8 +761,7 @@ class CapturePage(BasePage):
         self.uvcRefreshResolutionBtn.clicked.connect(self._startUvcProbe)
         self.uvcFpsCombo.currentTextChanged.connect(self._onUvcFpsChanged)
         self.uvcCaptureMethodCombo.currentTextChanged.connect(self._onUvcCaptureMethodChanged)
-        self.uvcDshowV2Card.checkedChanged.connect(self._onUvcDshowV2Changed)
-        self.uvcFfmpegEnabledCard.checkedChanged.connect(self._onUvcFfmpegEnabledChanged)
+        self.uvcEngineCombo.currentIndexChanged.connect(self._onUvcEngineChanged)
         self.uvcVideoFormatCombo.currentTextChanged.connect(self._onUvcVideoFormatChanged)
         self.uvcFfmpegPathEdit.editingFinished.connect(self._onUvcFfmpegPathChanged)
         self.uvcCropModeCombo.currentTextChanged.connect(self._onUvcCropModeChanged)
@@ -826,8 +821,10 @@ class CapturePage(BasePage):
                 self._selectComboData(self.uvcDeviceCombo, _device_index, f"Device {_device_index}")
             _capture_method = str(getattr(self._config, 'uvc_capture_method', 'msmf'))
             self.uvcCaptureMethodCombo.setCurrentText(_capture_method)
-            self.uvcDshowV2Card.setChecked(str(getattr(self._config, 'uvc_dshow_backend', 'v1')).lower() == 'v2')
-            self.uvcFfmpegEnabledCard.setChecked(bool(getattr(self._config, 'uvc_ffmpeg_enabled', False)))
+            _engine = saved_engine(self._config)
+            self.uvcEngineCombo.blockSignals(True)
+            self.uvcEngineCombo.setCurrentIndex(ENGINES.index(_engine))
+            self.uvcEngineCombo.blockSignals(False)
             self.uvcVideoFormatCombo.setCurrentText(str(getattr(self._config, 'uvc_video_format', 'mjpeg')).upper())
             self.uvcFfmpegPathEdit.setText(str(getattr(self._config, 'uvc_ffmpeg_path', '') or ''))
             self.uvcCropModeCombo.setCurrentText(
@@ -1274,20 +1271,10 @@ class CapturePage(BasePage):
         self._startUvcProbeDelayed()
         QTimer.singleShot(700, self._queryUvcHwInfo)
 
-    def _onUvcDshowV2Changed(self, checked):
-        if self._config:
-            self._config.uvc_dshow_backend = 'v2' if checked else 'v1'
-            if checked:
-                # V2 already owns the DirectShow graph directly — routing it
-                # through an ffmpeg subprocess on top would defeat the point.
-                self._config.uvc_ffmpeg_enabled = False
-                self.uvcFfmpegEnabledCard.setChecked(False)
-        self._updateDshowControlsVisibility(self.uvcCaptureMethodCombo.currentText())
-        self._startUvcProbeDelayed()
-
-    def _onUvcFfmpegEnabledChanged(self, checked):
-        if self._config:
-            self._config.uvc_ffmpeg_enabled = bool(checked)
+    def _onUvcEngineChanged(self, index):
+        if self._isLoadingConfig or not self._config:
+            return
+        apply_engine(self._config, ENGINES[index] if 0 <= index < len(ENGINES) else 'opencv')
         self._updateDshowControlsVisibility(self.uvcCaptureMethodCombo.currentText())
         self._startUvcProbeDelayed()
 
@@ -1311,41 +1298,33 @@ class CapturePage(BasePage):
         QTimer.singleShot(700, self._queryUvcHwInfo)
 
     def _updateDshowControlsVisibility(self, capture_method_text: str):
-        # uvcCropModeCard applies to every capture method and stays visible.
-        # The DirectShow-version toggle only makes sense under 'dshow'; the
-        # FFmpeg toggle (and its path override) only under 'dshow' + V1 —
-        # ffmpeg has no MSMF demuxer on Windows, and V2 already owns the
-        # graph directly, so neither MSMF nor V2 exposes it. See
-        # uvc_ffmpeg_enabled's docstring in config.py.
+        # uvcCropModeCard applies to every capture method and stays visible. The engine
+        # choice only exists under 'dshow' (ffmpeg has no MSMF demuxer on Windows, and the
+        # native DLL is DirectShow); the FFmpeg path override only for the FFmpeg engine.
+        # Nothing here writes config: see core/uvc_engine.py.
         is_dshow = str(capture_method_text).strip().lower() == 'dshow'
-        is_v1 = str(getattr(self._config, 'uvc_dshow_backend', 'v1')).lower() == 'v1' if self._config else True
-        ffmpeg_on = bool(getattr(self._config, 'uvc_ffmpeg_enabled', False)) if self._config else False
-
-        self.uvcDshowV2Card.setVisible(is_dshow)
-        self.uvcFfmpegEnabledCard.setVisible(is_dshow and is_v1)
-        self.uvcFfmpegPathCard.setVisible(is_dshow and is_v1 and ffmpeg_on)
-        self._updateVideoFormatOptions(is_v2=(is_dshow and not is_v1))
+        engine = engine_from_config(self._config) if self._config else 'opencv'
+        self.uvcEngineCard.setVisible(is_dshow)
+        self.uvcFfmpegPathCard.setVisible(is_dshow and engine == 'ffmpeg')
+        self._updateVideoFormatOptions(is_v2=(is_dshow and engine == 'native'))
 
     def _updateVideoFormatOptions(self, is_v2: bool):
-        """The native DLL (v2, dshow_capture_native.py) only implements
-        MJPEG/NV12 — restrict the combo's selectable items to those two
-        while v2 is active, so the GUI never offers a format that's silently
-        unsupported by that path (see _resolve_native_dll_pixel_format in
-        screen_capture.py, which would otherwise have to fall back for you).
+        """The native DLL (v2, dshow_capture_native.py) only implements MJPEG/NV12 —
+        restrict the combo's items to those two while it is active, so the GUI never offers
+        a format that path cannot do. The saved ``uvc_video_format`` is never rewritten
+        (core.uvc_engine.effective_video_format() applies the restriction at runtime), so
+        leaving the native engine brings the user's original choice back.
         """
-        items = ["MJPEG", "NV12"] if is_v2 else ["MJPEG", "YUY2", "NV12", "YUV420P"]
+        items = [f.upper() for f in video_format_choices('native' if is_v2 else 'opencv')]
         current_items = [self.uvcVideoFormatCombo.itemText(i) for i in range(self.uvcVideoFormatCombo.count())]
+        wanted = str(getattr(self._config, 'uvc_video_format', 'mjpeg') or 'mjpeg').upper() if self._config else 'MJPEG'
         if current_items == items:
             return  # already matches — avoid signal churn on every visibility refresh
-        current = self.uvcVideoFormatCombo.currentText()
         self.uvcVideoFormatCombo.blockSignals(True)
         self.uvcVideoFormatCombo.clear()
         self.uvcVideoFormatCombo.addItems(items)
-        new_selection = current if current in items else "MJPEG"
-        self.uvcVideoFormatCombo.setCurrentText(new_selection)
+        self.uvcVideoFormatCombo.setCurrentText(wanted if wanted in items else "MJPEG")
         self.uvcVideoFormatCombo.blockSignals(False)
-        if new_selection != current and self._config:
-            self._config.uvc_video_format = new_selection.lower()
 
     def _onUvcPreviewChanged(self, checked):
         if self._config:
@@ -1616,25 +1595,11 @@ class CapturePage(BasePage):
         self.uvcCaptureMethodCard.contentLabel.setText(
             "msmf recommended for 1080p60 on Windows 10/11. If negotiation "
             "fails despite the device working fine in other DirectShow apps "
-            "(e.g. OBS), try 'dshow' — it unlocks the DirectShow Version and "
-            "FFmpeg options below. 'any' lets OpenCV auto-pick a backend."
+            "(e.g. OBS), try 'dshow' — it unlocks the DirectShow Engine "
+            "option below. 'any' lets OpenCV auto-pick a backend."
         )
-        self.uvcDshowV2Card.titleLabel.setText("Use Native DirectShow DLL (V2)")
-        self.uvcDshowV2Card.contentLabel.setText(
-            "Off = OpenCV's DirectShow wrapper (V1, default). On = the native "
-            "directshow_capture.dll — owns the capture graph directly for "
-            "lower, OBS-like latency. Supports MJPEG and NV12 (Video Format "
-            "below is restricted to those two while this is on). Requires "
-            "directshow_capture.dll to be present (see FFmpeg Path card's "
-            "location convention)."
-        )
-        self.uvcFfmpegEnabledCard.titleLabel.setText("Use FFmpeg Subprocess")
-        self.uvcFfmpegEnabledCard.contentLabel.setText(
-            "Captures via an external ffmpeg.exe process instead of OpenCV. "
-            "ffmpeg's dshow demuxer negotiates directly and fails loudly "
-            "instead of silently substituting something else — useful when "
-            "OpenCV's DirectShow wrapper lies about negotiated state."
-        )
+        self.uvcEngineCard.titleLabel.setText("DirectShow Engine")
+        self.uvcEngineCard.contentLabel.setText(_UVC_ENGINE_DESC)
         self.uvcDeviceCard.titleLabel.setText("Device")
         self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
         self.uvcResolutionCard.titleLabel.setText("Resolution")

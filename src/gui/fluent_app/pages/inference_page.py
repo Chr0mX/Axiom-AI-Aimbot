@@ -2,6 +2,7 @@
 """Inference Page - FOV, Detection, General Parameters, Inference Performance"""
 
 from PyQt6.QtCore import Qt
+from core.config import EXTERNAL_CAPTURE_METHODS
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon, SettingCard, SegmentedWidget, ComboBox,
@@ -841,11 +842,11 @@ class InferencePage(BasePage):
         # desktop cursor position is meaningless against any of these feeds,
         # so fov_follow_mouse must be force-disabled for all three, not just
         # uvc/ndi.
-        is_external = method in ('uvc', 'ndi', 'udp')
+        # Only the card is hidden: the saved setting is never rewritten (the runtime ignores it
+        # for external feeds via ai_loop_utils.fov_follow_effective), so switching back to
+        # mss/dxcam restores the user's choice.
+        is_external = method in EXTERNAL_CAPTURE_METHODS
         self.fovFollowCard.setVisible(not is_external)
-        if is_external and self._config:
-            self._config.fov_follow_mouse = False
-            self.fovFollowCard.setChecked(False)
 
     def _updateProviderDependentWidgets(self):
         """Show/hide and auto-configure CUDA IO Binding based on the active ORT provider."""
@@ -855,11 +856,10 @@ class InferencePage(BasePage):
         backend  = str(getattr(self._config, 'inference_backend', '')).lower()
         is_trt   = provider == 'TensorrtExecutionProvider' or backend == 'tensorrt'
         is_cuda  = provider == 'CUDAExecutionProvider'     or backend == 'cuda'
-        hide = not (is_trt or is_cuda)
-        self.cudaIoBindingCard.setVisible(not hide)
-        if is_trt and not bool(getattr(self._config, 'cuda_io_binding_enabled', False)):
-            self._config.cuda_io_binding_enabled = True
-            self.cudaIoBindingCard.setChecked(True)
+        # Under TensorRT IO binding is always on (ai_loop_utils.cuda_io_binding_effective), so the
+        # switch is only meaningful — and only shown — for the plain CUDA provider. The saved
+        # value is never rewritten from here.
+        self.cudaIoBindingCard.setVisible(is_cuda and not is_trt)
 
     # ──────────────────────────────────────────────
     # Callbacks
