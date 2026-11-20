@@ -16,6 +16,7 @@ from qfluentwidgets import (
     SegmentedWidget,
     BodyLabel, PushButton, CheckBox,
 )
+from core.aim_coupling import click_method_for_move
 from core.config import AIM_START_DELAY_MAX_MS
 
 from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
@@ -1685,12 +1686,12 @@ class AimPage(BasePage):
         self.aimPreview.setParams(aim_part, head_h, head_w, body_w, custom_y)
 
     def _onMouseMoveChanged(self, text):
-        if self._config:
+        # Only a user's change counts: while a config/preset is being loaded the combo is set
+        # to the saved value, and the saved click method must not be overwritten by it.
+        if self._config and not self._isLoadingConfig:
             self._config.mouse_move_method = text
-            if text == "makcu":
-                self._config.mouse_click_method = "makcu"
-            if text == "vigem_network":
-                self._config.mouse_click_method = "vigem_network"
+            self._config.mouse_click_method = click_method_for_move(
+                text, getattr(self._config, 'mouse_click_method', 'mouse_event'))
             if text == "ddxoft":
                 try:
                     from win_utils import ensure_ddxoft_ready

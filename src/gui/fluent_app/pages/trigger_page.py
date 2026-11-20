@@ -11,6 +11,10 @@ from ..components.slider_spin_card import SliderDoubleSpinCard
 from ..base_page import BasePage
 from ..language_manager import t
 
+# Click backends the auto-fire can use (same list as the Web Control Trigger tab; the Aim page
+# sets makcu / vigem_network together with the Move Method via core.aim_coupling).
+_CLICK_METHODS = ("mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox", "vigem_network")
+
 
 class TriggerPage(BasePage):
     """自動扳機頁面"""
@@ -56,7 +60,7 @@ class TriggerPage(BasePage):
 
         # 滑鼠點擊方式（自動射擊使用的模擬信號）
         self.mouseClickCombo = ComboBox()
-        self.mouseClickCombo.addItems(["mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox"])
+        self.mouseClickCombo.addItems(list(_CLICK_METHODS))
         self.mouseClickCombo.setMinimumWidth(150)
         self.mouseClickCard = SettingCard(
             FluentIcon.FINGERPRINT,
@@ -133,10 +137,11 @@ class TriggerPage(BasePage):
         self.sprayCard.setChecked(bool(getattr(self._config, 'auto_fire_spray', False)))
 
         # 滑鼠點擊方式
-        click_methods = ["mouse_event", "sendinput", "ddxoft", "arduino", "makcu", "xbox"]
         current_click = getattr(self._config, 'mouse_click_method', 'mouse_event')
-        if current_click in click_methods:
-            self.mouseClickCombo.setCurrentIndex(click_methods.index(current_click))
+        if current_click in _CLICK_METHODS:
+            self.mouseClickCombo.blockSignals(True)
+            self.mouseClickCombo.setCurrentIndex(_CLICK_METHODS.index(current_click))
+            self.mouseClickCombo.blockSignals(False)
 
         # 開鏡延遲 - 使用新組件的 setValue
         self.scopeDelayCard.setValue(self._config.auto_fire_delay)

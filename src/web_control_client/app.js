@@ -964,28 +964,10 @@
       .catch(function () { loadTabSettings("aim"); });
   });
 
-  // mouse_move_method is data-custom — switching to "makcu" must also set
-  // mouse_click_method="makcu", mirroring aim_page.py's
-  // _onMouseMoveChanged(). ensure_ddxoft_ready() and the cross-page
-  // keysInterface visibility refresh the GUI does on this same change have
-  // no remote equivalent — the Keys & HW panel already re-fetches its own
-  // visibility state every time it's activated, so it self-heals without
-  // needing a push from here.
-  document.getElementById("aim-mouse_move_method").addEventListener("change", function (e) {
-    var method = e.target.value;
-    var body = { mouse_move_method: method };
-    if (method === "makcu") body.mouse_click_method = "makcu";
-    fetch("/api/settings/aim", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify(body),
-    })
-      .then(function (res) { return res.ok ? res.json() : null; })
-      .then(function (data) {
-        if (!data || data.ok === false) loadTabSettings("aim");
-      })
-      .catch(function () { loadTabSettings("aim"); });
-  });
+  // mouse_move_method is a plain generic field now: makcu / vigem_network also set the matching
+  // click method server-side (core/aim_coupling.py via web_control_settings._post_apply), the same
+  // rule the Qt Aim page uses, so there is no second POST here to keep in step. The Keys & HW and
+  // Trigger panels re-fetch their own state whenever they are activated.
 
   // ---------------------------------------------------------------------
   // Keys & HW panel — MAKCU-mode visibility, hotkey VK-select population,

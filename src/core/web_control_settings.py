@@ -179,11 +179,8 @@ _SCHEMA: dict[str, dict[str, dict]] = {
     },
     "aim": {
         "aim_part": {"type": "choice", "choices": ["head", "body", "center", "custom"]},
-        # mouse_click_method isn't set generically here when mouse_move_method
-        # becomes "makcu" — that coupling (aim_page.py's _onMouseMoveChanged)
-        # is left to the client, same precedent as ndi_source_name/
-        # ndi_force_reconnect: it already has both values in hand, so no
-        # server-side "decide" logic is needed for a plain two-key POST.
+        # Setting mouse_move_method to makcu / vigem_network also sets mouse_click_method to the same
+        # backend, server-side (core/aim_coupling.py, _post_apply) — the Qt Aim page uses the same rule.
         "mouse_move_method": {"type": "choice", "choices": ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox", "vigem_network"]},
         "mouse_click_method": {"type": "str"},
         "aim_start_delay_ms": {"type": "int", "min": 0, "max": 1000},
@@ -693,7 +690,12 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
 
 
 def _post_apply(config, written: dict) -> None:
-    """Normalise retired values an old script may still send (kept accepted for API compatibility)."""
+    """Side effects every writer shares (so no client has to remember them) and normalisation of
+    retired values an old script may still send (kept accepted for API compatibility)."""
+    if "mouse_move_method" in written and "mouse_click_method" not in written:
+        from .aim_coupling import click_method_for_move
+        config.mouse_click_method = click_method_for_move(
+            str(written["mouse_move_method"]), getattr(config, "mouse_click_method", "mouse_event"))
     if "anchor_mode" in written:
         from .config import migrate_anchor_settings
         migrate_anchor_settings(config)
