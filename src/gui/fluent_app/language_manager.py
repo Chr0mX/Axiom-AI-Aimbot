@@ -33,6 +33,22 @@ LANGUAGE_FILE_MAP = {
 }
 
 
+# The selectable languages, in display order: (GUI code, native name, flag svg under assets/flags).
+# One table for the language dialog and the first-run wizard; each code has a LANGUAGE_FILE_MAP entry above.
+LANGUAGES = [
+    ("English", "English", "us.svg"),
+    ("Chinese", "中文", "tw.svg"),
+    ("Japanese", "日本語", "jp.svg"),
+    ("Korean", "한국어", "kr.svg"),
+    ("German", "Deutsch", "de.svg"),
+    ("French", "Français", "fr.svg"),
+    ("Spanish", "Español", "es.svg"),
+    ("Portuguese", "Português", "br.svg"),
+    ("Russian", "Русский", "ru.svg"),
+    ("Hindi", "हिन्दी", "in.svg"),
+]
+
+
 class LanguageManager(QObject):
     """Bridge between PyQt signals and Core LanguageManager."""
     

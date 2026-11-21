@@ -19,6 +19,7 @@ from ..base_page import BasePage
 from ..language_manager import t
 from ..theme_colors import ThemeColors
 from core.hud_categories import CATEGORY_ORDER, CATEGORY_LABELS, parse_hud_status
+from core.paths import src_dir
 from core.uvc_engine import ENGINES, apply_engine, engine_from_config, saved_engine, video_format_choices
 
 # DirectShow engine choice (core/uvc_engine.py): labels in ENGINES order.
@@ -1210,15 +1211,13 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
                 print(f"[Capture][NDI] Reconnecting to '{selected_name}'...")
 
     def _getEmbeddedPythonExe(self) -> str:
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        python_exe = os.path.join(src_dir, "python", "python.exe")
+        python_exe = os.path.join(src_dir(), "python", "python.exe")
         if os.path.exists(python_exe):
             return python_exe
         return sys.executable
 
     def _runLocalInstallerScript(self, script_name: str, feature_name: str, capture_output: bool = True) -> bool:
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        script_path = os.path.join(src_dir, script_name)
+        script_path = os.path.join(src_dir(), script_name)
         if not os.path.exists(script_path):
             QMessageBox.warning(self, f"{feature_name} install failed", f"Missing installer script:\n{script_path}")
             return False

@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt
 from qfluentwidgets import PrimaryPushButton, PushButton, StrongBodyLabel
 
 from .fluent_app.theme_colors import ThemeColors
+from core.paths import project_root
 
 class DisclaimerDialog(QDialog):
     def __init__(self, parent=None):
@@ -68,9 +69,7 @@ class DisclaimerDialog(QDialog):
 
     def load_disclaimer(self):
         try:
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(os.path.dirname(current_dir))
-            md_path = os.path.join(project_root, "Disclaimer.md")
+            md_path = os.path.join(project_root(), "Disclaimer.md")
             
             if os.path.exists(md_path):
                 with open(md_path, "r", encoding="utf-8") as f:

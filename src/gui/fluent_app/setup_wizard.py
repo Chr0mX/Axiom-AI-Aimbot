@@ -30,21 +30,9 @@ try:
 except ImportError:
     _HAS_FLUENT = False
 
-from .language_manager import getLanguageManager, LANGUAGE_FILE_MAP
+from .language_manager import getLanguageManager, LANGUAGE_FILE_MAP, LANGUAGES as _WIZARD_LANGUAGES
+from core.paths import list_onnx, model_dir as _model_dir, trt_installer_path
 
-# Language list: (code, native_name, flag_svg)
-_WIZARD_LANGUAGES = [
-    ("English",    "English",    "us.svg"),
-    ("Chinese",    "中文",       "tw.svg"),
-    ("Japanese",   "日本語",     "jp.svg"),
-    ("Korean",     "한국어",     "kr.svg"),
-    ("German",     "Deutsch",    "de.svg"),
-    ("French",     "Français",   "fr.svg"),
-    ("Spanish",    "Español",    "es.svg"),
-    ("Portuguese", "Português",  "br.svg"),
-    ("Russian",    "Русский",    "ru.svg"),
-    ("Hindi",      "हिन्दी",       "in.svg"),
-]
 
 _FLAGS_DIR = os.path.join(
     os.path.dirname(__file__), "assets", "flags")
@@ -724,18 +712,10 @@ class SetupWizard(QDialog):
         self._model_section.setVisible(idx == 0)
 
     def _refreshModelCombo(self) -> None:
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__)))))  # fluent_app→gui→src→project root
-        model_dir = os.path.join(project_root, "Model")
+        model_dir = _model_dir()
         self._combo_model.blockSignals(True)
         self._combo_model.clear()
-        try:
-            files = sorted(
-                f for f in os.listdir(model_dir)
-                if f.lower().endswith(".onnx")
-            ) if os.path.isdir(model_dir) else []
-        except OSError:
-            files = []
+        files = list_onnx(model_dir)
         if files:
             for f in files:
                 self._combo_model.addItem(f, f"Model/{f}")
@@ -823,11 +803,7 @@ class SetupWizard(QDialog):
             except Exception:
                 trt_ready = False
             if not trt_ready:
-                # setup_wizard.py lives at src/gui/fluent_app/ → up 4 = project root
-                # (fluent_app→gui→src→project root; matches _refreshModelCombo() above)
-                project_root = os.path.dirname(os.path.dirname(os.path.dirname(
-                    os.path.dirname(os.path.abspath(__file__)))))
-                bat = os.path.join(project_root, "Install TensorRT.bat")
+                bat = trt_installer_path()
                 if os.path.exists(bat):
                     import subprocess
                     subprocess.Popen([bat], shell=True)

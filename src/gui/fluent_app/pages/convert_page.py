@@ -12,6 +12,7 @@ from qfluentwidgets import (
     TextEdit, IndeterminateProgressBar, InfoBar, InfoBarPosition, SearchLineEdit,
 )
 
+from core.paths import list_onnx, project_root, src_dir
 from ..base_page import BasePage
 from ..language_manager import t
 
@@ -80,11 +81,8 @@ class ConvertPage(BasePage):
         # docstring.
         self._remote_conversion_active = False
         self._all_model_files = []  # master (name, abs_path) list; modelSearchEdit filters a view of this
-        # repo root: .../src/gui/fluent_app/pages/convert_page.py → up 4 → src → up 1 → root
-        _src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__)))))
-        self._src_dir = _src_dir
-        self._project_root = os.path.dirname(_src_dir)
+        self._src_dir = src_dir()
+        self._project_root = project_root()
         self._model_dir = os.path.join(self._project_root, "Model")
         self._cache_dir = os.path.join(self._project_root, "trt_cache")
         self._draftTouched = False
@@ -242,18 +240,7 @@ class ConvertPage(BasePage):
         """Rebuild the master (name, abs_path) list and show all of them
         (unfiltered) in modelCombo. _onModelSearchChanged() is the only
         thing that narrows it to a subset afterward."""
-        self._all_model_files = []
-        if os.path.isdir(self._model_dir):
-            # Case-insensitive .onnx/.ONNX (glob("*.onnx") misses uppercase
-            # on case-sensitive filesystems).
-            pairs = []
-            for name in os.listdir(self._model_dir):
-                if not name.lower().endswith(".onnx"):
-                    continue
-                full = os.path.join(self._model_dir, name)
-                if os.path.isfile(full):
-                    pairs.append((name, full))
-            self._all_model_files = sorted(pairs, key=lambda pair: pair[0])
+        self._all_model_files = [(name, os.path.join(self._model_dir, name)) for name in list_onnx(self._model_dir)]
         self.modelCombo.clear()
         for name, path in self._all_model_files:
             self.modelCombo.addItem(name, userData=path)

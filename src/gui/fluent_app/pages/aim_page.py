@@ -17,6 +17,7 @@ from qfluentwidgets import (
     BodyLabel, PushButton, CheckBox,
 )
 from core.aim_coupling import click_method_for_move
+from core.paths import src_dir
 from ..components.combo_utils import reset_items
 from core.config import AIM_START_DELAY_MAX_MS
 
@@ -1795,10 +1796,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
 
     def _onOpenGuide(self):
         from PyQt6.QtCore import QUrl
-        guide_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
-            "Arduino_User_Guide.html"
-        )
+        guide_path = os.path.join(src_dir(), "Arduino_User_Guide.html")
         if os.path.exists(guide_path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(guide_path))
 

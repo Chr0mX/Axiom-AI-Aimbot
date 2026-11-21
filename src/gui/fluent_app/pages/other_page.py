@@ -13,6 +13,7 @@ from qfluentwidgets import (
 )
 
 from ..base_page import BasePage
+from core.paths import src_dir
 from ..language_manager import t
 from ..theme_colors import ThemeColors
 from ..components.no_wheel_widgets import NoWheelSpinBox
@@ -725,9 +726,7 @@ pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPo
             self.trtAppdataCard.contentLabel.setStyleSheet(f"color: {ThemeColors.ERROR.get()};")
 
         # Compute DML paths early so status block can use them
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(
-            os.path.dirname(os.path.abspath(__file__)))))
-        embedded_site = os.path.join(src_dir, "python", "Lib", "site-packages")
+        embedded_site = os.path.join(src_dir(), "python", "Lib", "site-packages")
         dml_dll = os.path.join(embedded_site, "onnxruntime", "capi", "DirectML.dll")
         dml_installed = os.path.exists(dml_dll)
 
@@ -773,7 +772,7 @@ pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPo
 
         # System Python — search Windows PATH, skipping the embedded interpreter
         import shutil as _shutil
-        embedded_python_dir = os.path.abspath(os.path.join(src_dir, "python"))
+        embedded_python_dir = os.path.abspath(os.path.join(src_dir(), "python"))
         sys_python = None
         for _name in ("python3", "python"):
             _found = _shutil.which(_name)
@@ -785,7 +784,7 @@ pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPo
             f"color: {ThemeColors.SUCCESS.get()};" if sys_python else f"color: {ThemeColors.ERROR.get()};")
 
         # Internal/Embedded Python (<Axiom>/src/python/python.exe)
-        internal_python = os.path.join(src_dir, "python", "python.exe")
+        internal_python = os.path.join(src_dir(), "python", "python.exe")
         if os.path.exists(internal_python):
             self.trtInternalPythonCard.contentLabel.setText(internal_python)
             self.trtInternalPythonCard.contentLabel.setStyleSheet(f"color: {ThemeColors.SUCCESS.get()};")

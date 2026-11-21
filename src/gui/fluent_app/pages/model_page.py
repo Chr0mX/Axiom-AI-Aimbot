@@ -18,6 +18,7 @@ from qfluentwidgets import (
     InfoBar, InfoBarPosition, SearchLineEdit,
 )
 
+from core.paths import hud_model_dir, list_onnx, model_dir as _model_dir_path, project_root, trt_installer_path
 from ..base_page import BasePage
 from ..language_manager import t
 
@@ -480,16 +481,8 @@ class ModelPage(BasePage):
             return
 
         # Resolve paths on the main thread so the worker only gets an absolute path
-        if not os.path.isabs(model_path):
-            _pages = os.path.dirname(os.path.abspath(__file__))
-            _src   = os.path.dirname(os.path.dirname(os.path.dirname(_pages)))
-            _root  = os.path.dirname(_src)
-            full_onnx = os.path.join(_root, model_path)
-        else:
-            _src   = os.path.dirname(os.path.dirname(os.path.dirname(
-                         os.path.dirname(os.path.abspath(__file__)))))
-            _root  = os.path.dirname(_src)
-            full_onnx = model_path
+        _root = project_root()
+        full_onnx = model_path if os.path.isabs(model_path) else os.path.join(_root, model_path)
 
         # Prefer the cached TensorRT engine for the precision actually in use (the running
         # one when this model is loaded, else the selection) -- never "last in sort order".
@@ -556,18 +549,7 @@ class ModelPage(BasePage):
         active/default model (_loadFromConfig()) do that immediately after
         this runs. _onModelSearchChanged() is the only thing that narrows
         the combo to a subset of self._all_model_files afterward."""
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        project_root = os.path.dirname(src_dir)
-        model_dir = os.path.join(project_root, "Model")
-        self._all_model_files = []
-        if os.path.exists(model_dir):
-            # Case-insensitive .onnx/.ONNX — glob("*.onnx") misses uppercase
-            # extensions on case-sensitive filesystems (Linux CI / some NAS).
-            self._all_model_files = sorted(
-                name for name in os.listdir(model_dir)
-                if name.lower().endswith(".onnx")
-                and os.path.isfile(os.path.join(model_dir, name))
-            )
+        self._all_model_files = list_onnx(_model_dir_path())
         self._model_engine_cached = self._computeEngineCacheStatus(self._all_model_files)
         self.modelCombo.clear()
         for name in self._all_model_files:
@@ -666,23 +648,12 @@ class ModelPage(BasePage):
 
     def _refreshHudModelList(self):
         self.hudModelCombo.clear()
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        project_root = os.path.dirname(src_dir)
-        model_dir = os.path.join(project_root, "Model_Hud")
-        if os.path.exists(model_dir):
-            models = sorted(
-                name for name in os.listdir(model_dir)
-                if name.lower().endswith(".onnx")
-                and os.path.isfile(os.path.join(model_dir, name))
-            )
-            for name in models:
-                self.hudModelCombo.addItem(name)
+        for name in list_onnx(hud_model_dir()):
+            self.hudModelCombo.addItem(name)
 
     def _loadGameJson(self) -> dict:
         """Read game.json from project root. Returns {} on missing/invalid file."""
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        project_root = os.path.dirname(src_dir)
-        game_json_path = os.path.join(project_root, "game.json")
+        game_json_path = os.path.join(project_root(), "game.json")
         try:
             with open(game_json_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -691,9 +662,7 @@ class ModelPage(BasePage):
             return {}
 
     def _openModelFolder(self):
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        project_root = os.path.dirname(src_dir)
-        model_dir = os.path.join(project_root, "Model")
+        model_dir = _model_dir_path()
         if os.path.exists(model_dir):
             os.startfile(model_dir)
 
@@ -718,9 +687,7 @@ class ModelPage(BasePage):
                 for name in os.listdir(trt_libs):
                     if name.lower().startswith("nvinfer") and name.lower().endswith(".dll"):
                         return
-        src_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        project_root = os.path.dirname(src_dir)
-        bat_path = os.path.join(project_root, "Install TensorRT.bat")
+        bat_path = trt_installer_path()
         if not os.path.exists(bat_path):
             InfoBar.warning("TensorRT installer not found", f"Expected: {bat_path}",
                             duration=6000, isClosable=True, position=InfoBarPosition.TOP, parent=self)

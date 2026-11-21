@@ -6,26 +6,12 @@ from qfluentwidgets import (MaskDialogBase, PrimaryPushButton, PushButton,
                             RadioButton, ScrollArea, BodyLabel,
                             SubtitleLabel)
 from ..theme_colors import ThemeColors
-from ..language_manager import t
+from ..language_manager import LANGUAGES, t
 
 
 # Get flags directory
 FLAGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "flags")
 
-# Language data: (code, name, flag_file)
-# Must match files in src/language_data/
-LANGUAGES = [
-    ("English", "English", "us.svg"),
-    ("Chinese", "中文", "tw.svg"),
-    ("Japanese", "日本語", "jp.svg"),
-    ("Korean", "한국어", "kr.svg"),
-    ("German", "Deutsch", "de.svg"),
-    ("French", "Français", "fr.svg"),
-    ("Spanish", "Español", "es.svg"),
-    ("Portuguese", "Português", "br.svg"),
-    ("Russian", "Русский", "ru.svg"),
-    ("Hindi", "हिन्दी", "in.svg"),
-]
 
 
 class LanguageCard(QFrame):

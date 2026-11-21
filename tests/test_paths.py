@@ -86,3 +86,30 @@ def test_save_config_defaults_to_user_dir(tmp_path, monkeypatch):
         assert save_config(Config()) is True
     assert (target / "config.json").is_file()
     assert (target / "state.json").is_file()
+
+
+class TestModelFileHelpers:
+    """list_onnx() is shared by the Model page, the Convert page and the first-run wizard."""
+
+    def test_lists_only_onnx_files_case_insensitively_sorted(self, tmp_path):
+        from core.paths import list_onnx
+        for name in ("b.onnx", "A.ONNX", "c.txt", "d.onnx.bak"):
+            (tmp_path / name).write_text("x")
+        (tmp_path / "sub.onnx").mkdir()                  # a directory is not a model
+        assert list_onnx(str(tmp_path)) == ["A.ONNX", "b.onnx"]
+
+    def test_missing_or_unreadable_directory_is_empty(self, tmp_path):
+        from core.paths import list_onnx
+        assert list_onnx(str(tmp_path / "nope")) == []
+        f = tmp_path / "file"
+        f.write_text("x")
+        assert list_onnx(str(f)) == []
+
+    def test_folders_hang_off_the_project_root(self):
+        import os
+        from core import paths
+        root = paths.project_root()
+        assert paths.model_dir() == os.path.join(root, "Model")
+        assert paths.hud_model_dir() == os.path.join(root, "Model_Hud")
+        assert paths.src_dir() == os.path.join(root, "src")
+        assert paths.trt_installer_path() == os.path.join(root, "Install TensorRT.bat")

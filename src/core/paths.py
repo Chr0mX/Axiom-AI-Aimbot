@@ -42,6 +42,40 @@ def project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+def src_dir() -> str:
+    """<Axiom>/src (embedded Python, installer scripts and the bundled dependencies live there)."""
+    return os.path.join(project_root(), "src")
+
+
+def model_dir() -> str:
+    """<Axiom>/Model: the detection models."""
+    return os.path.join(project_root(), "Model")
+
+
+def hud_model_dir() -> str:
+    """<Axiom>/Model_Hud: the weapon/HUD detector models."""
+    return os.path.join(project_root(), "Model_Hud")
+
+
+def trt_installer_path() -> str:
+    """The launcher that installs TensorRT (it may not exist in every distribution)."""
+    return os.path.join(project_root(), "Install TensorRT.bat")
+
+
+def list_onnx(directory: str) -> list[str]:
+    """Sorted ``*.onnx`` file names in ``directory`` ([] if it is missing or unreadable).
+
+    The extension is matched case-insensitively (``glob("*.onnx")`` misses ``.ONNX`` on case-sensitive
+    filesystems) and only regular files count. Shared by the Model and Convert pages and the first-run
+    wizard, which each had their own copy.
+    """
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    return sorted(n for n in names if n.lower().endswith(".onnx") and os.path.isfile(os.path.join(directory, n)))
+
+
 def user_dir() -> str:
     """The user-data folder, created on first use."""
     path = os.environ.get("AXIOM_USER_DIR") or os.path.join(project_root(), USER_DIR_NAME)
