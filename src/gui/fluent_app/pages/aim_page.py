@@ -47,14 +47,36 @@ _TUNING_TEXT = (
     ("egoMotionCard", "prediction_ego_motion_comp", "Own-Mouse Compensation", "prediction_ego_motion_comp_desc",
      "Don't count the camera turn from our own mouse moves as target motion. Ignored while Camera Motion Compensation is on"),
     ("egoScaleCard", "prediction_ego_motion_scale", "Pixels per Mouse Count", None, ""),
-    ("emaSmoothingCard", "aim_ema_smoothing_enabled", "Output EMA", "aim_ema_smoothing_desc",
-     "Smooth the move step after the PID or the path"),
-    ("emaAmountCard", "aim_ema_smoothing", "EMA Amount", None, ""),
+    ("emaSmoothingCard", "aim_ema_smoothing_enabled", "Aim Step Smoothing", "aim_ema_smoothing_desc",
+     "Smooths each mouse step after the PID. Separate from Estimator Smoothing (Anchor Estimator) and FOV Anchor Smoothing (Inference page)"),
+    ("emaAmountCard", "aim_ema_smoothing", "Step Smoothing Amount", None, ""),
     ("aimXOffsetCard", "aim_x_offset_frac", "Aim X Offset", None, ""),
     ("aimYOffsetCard", "aim_y_offset_frac", "Aim Y Offset", None, ""),
     ("stickyGapCard", "sticky_gap_extrapolate", "Gap Extrapolation", "sticky_gap_extrapolate_desc",
      "Keep aiming along the last velocity for a few missed frames"),
     ("stickyGapFramesCard", "sticky_gap_frames", "Gap Frames", None, ""),
+)
+
+# Lock timing / switching cards, all behind Sticky Target Lock (they used to be on the Inference page):
+# (attribute, title key, English title, English description, icon, min, max, suffix, config field, scale, default).
+# The value is stored as `field = widget / scale`. One table drives construction, load, wiring, visibility
+# and retranslateUi().
+_LOCK_CARDS = (
+    ("lostTimeoutCard", "lost_target_timeout", "Lost Target Timeout",
+     "Longest time without a valid detection before the lock is released and the target forgotten. Aim is held only for Lock Persistence (which is capped by this); the target stays reacquirable until this elapses. Anchor FOV's FOV Lost Delay (Inference page) is separate and only delays the FOV.",
+     "HISTORY", 0, 10000, "ms", "lost_target_timeout_ms", 1, 1500),
+    ("minLockCard", "min_lock_duration", "Minimum Target Lock Duration",
+     "A lock can't be swapped for another target sooner than this after it was acquired. Never delays releasing a target that is really gone.",
+     "PIN", 0, 2000, "ms", "min_lock_duration_ms", 1, 150),
+    ("switchThresholdCard", "target_switch_threshold", "Target Switch Threshold",
+     "How much better (as a % of the priority score) another target must be before it replaces the current one. 100% = never switch while the current target is visible.",
+     "SYNC", 0, 100, "%", "target_switch_threshold", 100, 0.35),
+    ("reacquireRadiusCard", "reacquire_radius", "Reacquisition Radius",
+     "A target reappearing within this distance of where the lost one was last seen (extrapolated by its velocity) is treated as the same target.",
+     "ZOOM_IN", 0, 1000, "px", "reacquire_radius_px", 1, 150),
+    ("trackConfCard", "tracking_confidence", "Tracking Confidence",
+     "Minimum confidence to KEEP an existing lock. A new target still needs Min Confidence (Inference page, General Parameters), so a lock survives brief confidence dips. 0 = same as Min Confidence.",
+     "CERTIFICATE", 0, 100, "%", "tracking_confidence", 100, 0.0),
 )
 
 # "disabled" (the master switch covers it) and "linear" (= Velocity with Acceleration 0) are retired;
@@ -1007,9 +1029,10 @@ class AimPage(BasePage):
 
         self.predictionHistoryCard = SliderLabelCard(
             FluentIcon.HISTORY,
-            t("prediction_history", "History Frames"),
+            t("prediction_history", "Aim Lead History"),
             2, 6,
             format_func=lambda v: str(v),
+            description=t("prediction_history_desc", "How many recent detections the Aim Lead velocity estimate uses. The Anchor method has its own Estimator History."),
             parent=self.trackingGroup
         )
 
@@ -1025,7 +1048,7 @@ class AimPage(BasePage):
             t("lock_persistence", "Lock Persistence"),
             0, 2000,
             format_func=lambda v: f"{v} ms",
-            description=t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS)"),
+            description=t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS). Never longer than Lost Target Timeout."),
             label_width=55,
             parent=self.trackingGroup
         )
@@ -1039,6 +1062,11 @@ class AimPage(BasePage):
             slider_width=160,
             parent=self.trackingGroup
         )
+
+        for _attr, _key, _title, _desc, _icon, _lo, _hi, _suffix, _f, _sc, _d in _LOCK_CARDS:
+            setattr(self, _attr, SliderSpinCard(
+                getattr(FluentIcon, _icon), t(_key, _title), _lo, _hi, suffix=_suffix,
+                description=t(_key + "_desc", _desc), parent=self.trackingGroup))
 
         self.kalmanEnableCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
@@ -1295,7 +1323,11 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.predictionHistoryCard)
         self.trackingGroup.addSettingCard(self.stickyLockCard)
         self.trackingGroup.addSettingCard(self.lockDecayCard)
+        for _attr, *_rest in _LOCK_CARDS:
+            self.trackingGroup.addSettingCard(getattr(self, _attr))
         self.trackingGroup.addSettingCard(self.lockIouCard)
+        self.trackingGroup.addSettingCard(self.stickyGapCard)
+        self.trackingGroup.addSettingCard(self.stickyGapFramesCard)
         self.trackingGroup.addSettingCard(self.kalmanEnableCard)
         self.trackingGroup.addSettingCard(self.kalmanProcessNoiseCard)
         self.trackingGroup.addSettingCard(self.kalmanMeasNoiseCard)
@@ -1353,12 +1385,12 @@ class AimPage(BasePage):
         )
         self.emaSmoothingCard = SwitchSettingCard(
             FluentIcon.SYNC,
-            t("aim_ema_smoothing_enabled", "Output EMA"),
-            t("aim_ema_smoothing_desc", "Smooth the move step after the PID or the path"),
+            t("aim_ema_smoothing_enabled", "Aim Step Smoothing"),
+            t("aim_ema_smoothing_desc", "Smooths each mouse step after the PID. Separate from Estimator Smoothing (Anchor Estimator) and FOV Anchor Smoothing (Inference page)"),
             parent=self.mathGroup,
         )
         self.emaAmountCard = SliderLabelCard(
-            FluentIcon.SYNC, t("aim_ema_smoothing", "EMA Amount"),
+            FluentIcon.SYNC, t("aim_ema_smoothing", "Step Smoothing Amount"),
             1, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
         )
         self.aimXOffsetCard = SliderLabelCard(
@@ -1373,18 +1405,17 @@ class AimPage(BasePage):
             FluentIcon.RINGER,
             t("sticky_gap_extrapolate", "Gap Extrapolation"),
             t("sticky_gap_extrapolate_desc", "Keep aiming along the last velocity for a few missed frames"),
-            parent=self.mathGroup,
+            parent=self.trackingGroup,
         )
         self.stickyGapFramesCard = SliderLabelCard(
             FluentIcon.HISTORY, t("sticky_gap_frames", "Gap Frames"),
-            1, 8, parent=self.mathGroup,
+            1, 8, parent=self.trackingGroup,
         )
         for card in (
             self.predictionMethodCard, self.predictionLeadFramesCard, self.predictionAdaptiveLeadCard,
             self.captureTimestampsCard, self.lsqFitCard, self.velocityDeadzoneCard,
             self.egoMotionCard, self.egoScaleCard,
             self.emaSmoothingCard, self.emaAmountCard, self.aimXOffsetCard, self.aimYOffsetCard,
-            self.stickyGapCard, self.stickyGapFramesCard,
         ):
             self.mathGroup.addSettingCard(card)
         self.addContent(self.mathGroup)
@@ -1454,6 +1485,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             predictionLeadFramesCard captureTimestampsCard lsqFitCard velocityDeadzoneCard egoMotionCard
             egoScaleCard emaSmoothingCard emaAmountCard stickyGapCard stickyGapFramesCard
             anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHistoryCard anchorMaxDistCard
+            lostTimeoutCard minLockCard switchThresholdCard reacquireRadiusCard trackConfCard
             """.split())
 
     def _connectSignals(self):
@@ -1553,18 +1585,21 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
 
         # Anchor Estimator
         self.anchorModeCombo.currentIndexChanged.connect(self._onAnchorModeChanged)
-        self.anchorStrengthCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_strength', v / 100.0))
-        self.anchorSmoothingCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_velocity_smoothing', v / 100.0))
-        self.anchorAccelCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_accel_comp', v / 100.0))
-        self.anchorConfCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_confidence_threshold', v / 100.0))
-        self.anchorHistoryCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_history_len', int(v)))
-        self.anchorMaxDistCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_max_distance_pct', float(v)))
+        self.anchorStrengthCard.valueChanged.connect(lambda v: self._setCfgValue('anchor_strength', v / 100.0))
+        self.anchorSmoothingCard.valueChanged.connect(lambda v: self._setCfgValue('anchor_velocity_smoothing', v / 100.0))
+        self.anchorAccelCard.valueChanged.connect(lambda v: self._setCfgValue('anchor_accel_comp', v / 100.0))
+        self.anchorConfCard.valueChanged.connect(lambda v: self._setCfgValue('anchor_confidence_threshold', v / 100.0))
+        self.anchorHistoryCard.valueChanged.connect(lambda v: self._setCfgValue('anchor_history_len', int(v)))
+        self.anchorMaxDistCard.valueChanged.connect(lambda v: self._setCfgValue('anchor_max_distance_pct', float(v)))
         self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
         self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
         self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
         self.stickyLockCard.checkedChanged.connect(self._onStickyLockChanged)
         self.lockDecayCard.valueChanged.connect(self._onLockDecayChanged)
         self.lockIouCard.valueChanged.connect(self._onLockIouChanged)
+        for _attr, _k, _t, _d, _i, _lo, _hi, _sfx, _f, _sc, _def in _LOCK_CARDS:
+            getattr(self, _attr).valueChanged.connect(
+                lambda v, f=_f, sc=_sc: self._setCfgValue(f, int(v) if sc == 1 else v / sc))
         self.kalmanEnableCard.checkedChanged.connect(self._onKalmanEnableChanged)
         self.kalmanProcessNoiseCard.valueChanged.connect(self._onKalmanProcessNoiseChanged)
         self.kalmanMeasNoiseCard.valueChanged.connect(self._onKalmanMeasNoiseChanged)
@@ -1674,6 +1709,8 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
             self.lockDecayCard.setValue(int(getattr(self._config, 'lock_persistence_ms', 250)))
             self.lockIouCard.setValue(int(round(getattr(self._config, 'lock_iou_threshold', 0.3) * 100)))
+            for _attr, _k, _t, _d, _i, _lo, _hi, _sfx, _f, _sc, _def in _LOCK_CARDS:
+                getattr(self, _attr).setValue(int(round(float(getattr(self._config, _f, _def)) * _sc)))
 
             kalman_on = bool(getattr(self._config, 'kalman_enabled', False))
             self.kalmanEnableCard.setChecked(kalman_on)
@@ -2373,6 +2410,8 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         sticky_on = self.stickyLockCard.isChecked()
         self.lockDecayCard.setVisible(sticky_on)
         self.lockIouCard.setVisible(sticky_on)
+        for _attr, *_rest in _LOCK_CARDS:
+            getattr(self, _attr).setVisible(sticky_on)
         self.stickyGapCard.setVisible(sticky_on)
         self.stickyGapFramesCard.setVisible(sticky_on and self.stickyGapCard.isChecked())
         kalman_on = self.kalmanEnableCard.isChecked()
@@ -2399,7 +2438,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             card.setVisible(shared)
         self.anchorSmoothingCard.setVisible(shared and mode in ('smoothed', 'adaptive'))
 
-    def _setAnchorCfg(self, name, value):
+    def _setCfgValue(self, name, value):
         if self._config and not self._isLoadingConfig:
             setattr(self._config, name, value)
 
@@ -2631,6 +2670,10 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             if desc_key:
                 card.contentLabel.setText(t(desc_key, desc))
         self.targetAreaGroup.titleLabel.setText(t("target_point_tracking", "Target Point Tracking"))
+        for attr, key, title, desc, *_rest in _LOCK_CARDS:
+            card = getattr(self, attr)
+            card.titleLabel.setText(t(key, title))
+            card.contentLabel.setText(t(key + "_desc", desc))
         self.anchorEstGroup.titleLabel.setText(t("anchor_estimator", "Anchor Estimator"))
         for attr, key, title, desc in _ANCHOR_EST_TEXT:
             card = getattr(self, attr)
@@ -2646,11 +2689,12 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Aim Lead Horizon"))
         self.predictionMaxVelCard.titleLabel.setText(t("prediction_max_velocity", "Max Velocity Cap"))
         self.predictionMaxVelCard.contentLabel.setText(t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"))
-        self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "History Frames"))
+        self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "Aim Lead History"))
+        self.predictionHistoryCard.contentLabel.setText(t("prediction_history_desc", "How many recent detections the Aim Lead velocity estimate uses. The Anchor method has its own Estimator History."))
         self.stickyLockCard.titleLabel.setText(t("sticky_lock_enabled", "Sticky Target Lock"))
         self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
         self.lockDecayCard.titleLabel.setText(t("lock_persistence", "Lock Persistence"))
-        self.lockDecayCard.contentLabel.setText(t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS)"))
+        self.lockDecayCard.contentLabel.setText(t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS). Never longer than Lost Target Timeout."))
         self.lockIouCard.titleLabel.setText(t("lock_iou_threshold", "IoU Match Threshold"))
         self.lockIouCard.contentLabel.setText(t("lock_iou_desc", "Minimum overlap required to match the same target across frames"))
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))

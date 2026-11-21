@@ -823,7 +823,7 @@
 
   // Mirrors inference_page.py's _updateFovReduceVisibility()/_updateTrackingVisibility():
   // shrink settings need "Reduce FOV"; Dynamic Safeguards only in Dynamic mode; the
-  // retention cards need Sticky Target Lock too; the tracking cards need Sticky Lock.
+  // retention cards need Sticky Target Lock too (the lock settings themselves are on the Aim tab).
   function updateFovReduceVisibility(enabled) {
     var d = lastSettings.inference || {};
     var el = function (id) { return document.getElementById(id); };
@@ -846,8 +846,7 @@
     show("inf-fov-retention-card", shrink && sticky);
     show("inf-fov-retention-pct-card", shrink && sticky && ret);
     updateAnchorFovVisibility();
-    ["inf-minlock-card", "inf-trackconf-card", "inf-switch-card", "inf-radius-card", "inf-losttimeout-card"]
-      .forEach(function (id) { show(id, sticky); });
+    show("inf-sticky-hint-card", shrink && !sticky);
   }
 
   // Mirrors inference_page.py's _updateAnchorFovVisibility(): the Anchor FOV groups appear only
@@ -981,6 +980,8 @@
     setCard("aim-prediction_history_len", predOn && method !== "anchor");
     setCard("aim-lock_persistence_ms", stickyOn);
     setCard("aim-lock_iou_threshold", stickyOn);
+    ["lost_target_timeout_ms", "min_lock_duration_ms", "target_switch_threshold", "reacquire_radius_px", "tracking_confidence"]
+      .forEach(function (k) { setCard("aim-" + k, stickyOn); });
     setCard("aim-sticky_gap_extrapolate", stickyOn);
     setCard("aim-sticky_gap_frames", stickyOn && on("aim-sticky_gap_extrapolate"));
     setCard("aim-kalman_process_noise", on("aim-kalman_enabled"));

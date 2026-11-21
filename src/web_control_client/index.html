@@ -621,7 +621,7 @@
             <div class="field-card" id="inf-fov-retention-card">
               <div class="field-info">
                 <div class="field-title">Keep Lock Outside Shrunk FOV</div>
-                <div class="field-desc">Keep tracking a locked target that drifts outside the shrunk FOV (no aiming there) instead of dropping it. Needs Sticky Target Lock. Rivals can't take the lock meanwhile.</div>
+                <div class="field-desc">Keep tracking a locked target that drifts outside the shrunk FOV (no aiming there) instead of dropping it. Needs Sticky Target Lock (Aim tab, Target Tracking). Rivals can't take the lock meanwhile.</div>
               </div>
               <div class="field-control">
                 <label class="switch">
@@ -640,54 +640,10 @@
                 <span class="field-slider-value">%</span>
               </div>
             </div>
-            <div class="field-card" id="inf-minlock-card">
+            <div class="field-card" id="inf-sticky-hint-card">
               <div class="field-info">
-                <div class="field-title">Minimum Target Lock Duration</div>
-                <div class="field-desc">A lock can't be swapped for another target sooner than this after it was acquired. Needs Sticky Target Lock. Never delays releasing a target that is really gone.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-min_lock_duration_ms" data-key="min_lock_duration_ms" data-advanced="1" data-type="number" min="0" max="2000" step="10">
-                <span class="field-slider-value">ms</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-trackconf-card">
-              <div class="field-info">
-                <div class="field-title">Tracking Confidence</div>
-                <div class="field-desc">Lower bar for KEEPING a lock (0 = same as Min Confidence). Needs Sticky Target Lock.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-tracking_confidence" data-key="tracking_confidence" data-advanced="1" data-type="number" min="0" max="100" step="1">
-                <span class="field-slider-value">%</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-switch-card">
-              <div class="field-info">
-                <div class="field-title">Target Switch Threshold</div>
-                <div class="field-desc">How much better a rival must score before it replaces the current lock. Needs Sticky Target Lock.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-target_switch_threshold" data-key="target_switch_threshold" data-advanced="1" data-type="number" min="0" max="100" step="1">
-                <span class="field-slider-value">%</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-radius-card">
-              <div class="field-info">
-                <div class="field-title">Reacquisition Radius</div>
-                <div class="field-desc">A lost target is recognised again within this distance of where it was last seen. Needs Sticky Target Lock.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-reacquire_radius_px" data-key="reacquire_radius_px" data-advanced="1" data-type="number" min="0" max="1000" step="5">
-                <span class="field-slider-value">px</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-losttimeout-card">
-              <div class="field-info">
-                <div class="field-title">Lost Target Timeout</div>
-                <div class="field-desc">How long a lost target is remembered for reacquisition. Needs Sticky Target Lock.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-lost_target_timeout_ms" data-key="lost_target_timeout_ms" data-advanced="1" data-type="number" min="0" max="10000" step="50">
-                <span class="field-slider-value">ms</span>
+                <div class="field-title">Needs Sticky Target Lock</div>
+                <div class="field-desc">Keeping a lock outside the shrunk FOV needs Sticky Target Lock - turn it on under Target Tracking on the Aim tab, where the other lock settings are too.</div>
               </div>
             </div>
             <div class="field-card">
@@ -769,8 +725,8 @@
             </div>
             <div class="field-card" id="inf-afov-smooth-card">
               <div class="field-info">
-                <div class="field-title">Smoothing</div>
-                <div class="field-desc">Low-pass on the anchor before the FOV follows it, to remove detection jitter. 0 = off.</div>
+                <div class="field-title">FOV Anchor Smoothing</div>
+                <div class="field-desc">Low-pass on the anchor before the FOV follows it, to remove detection jitter. 0 = off. Separate from Aim Step Smoothing and Estimator Smoothing (Aim tab).</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-afov_smoothing" data-key="afov_smoothing" data-advanced="1" data-type="number" min="0" max="100" step="5">
@@ -818,8 +774,8 @@
             </div>
             <div class="field-card" id="inf-afov-lostdelay-card">
               <div class="field-info">
-                <div class="field-title">Lost Delay</div>
-                <div class="field-desc">The anchor must be gone this long before the behaviour above starts (brief detection gaps are ridden out).</div>
+                <div class="field-title">FOV Lost Delay</div>
+                <div class="field-desc">The anchor must be gone this long before the behaviour above starts (brief detection gaps are ridden out). Only delays the FOV's own reaction - separate from Lock Persistence and Lost Target Timeout (Aim tab).</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-afov_lost_delay_ms" data-key="afov_lost_delay_ms" data-advanced="1" data-type="number" min="0" max="5000" step="10">
@@ -1590,13 +1546,13 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Output EMA</div><div class="field-desc">Smooth the move step after PID or the path</div></div>
+              <div class="field-info"><div class="field-title">Aim Step Smoothing</div><div class="field-desc">Smooths each mouse step after the PID. Separate from Estimator Smoothing (Anchor Estimator) and FOV Anchor Smoothing (Inference tab)</div></div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="aim-aim_ema_smoothing_enabled" data-key="aim_ema_smoothing_enabled" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">EMA Amount</div><div class="field-desc">100% follows the new step; lower values hold on to the previous step</div></div>
+              <div class="field-info"><div class="field-title">Step Smoothing Amount</div><div class="field-desc">100% follows the new step; lower values hold on to the previous step</div></div>
               <div class="field-control">
                 <input type="number" id="aim-aim_ema_smoothing" data-key="aim_ema_smoothing" data-advanced="1" data-type="number" min="1" max="100" step="1">
                 <span class="field-slider-value">%</span>
@@ -1617,18 +1573,6 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Gap Extrapolation</div><div class="field-desc">Keep aiming along the last velocity for a few missed frames</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-sticky_gap_extrapolate" data-key="sticky_gap_extrapolate" data-advanced="1" data-type="bool"><span class="slider"></span></label>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Gap Frames</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-sticky_gap_frames" data-key="sticky_gap_frames" data-advanced="1" data-type="number" min="1" max="8" step="1">
-              </div>
-            </div>
-            <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Max Velocity Cap</div>
                 <div class="field-desc">Velocity spikes above this are treated as detection jumps and reset prediction</div>
@@ -1639,7 +1583,7 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">History Frames</div></div>
+              <div class="field-info"><div class="field-title">Aim Lead History</div><div class="field-desc">How many recent detections the Aim Lead velocity estimate uses. The Anchor method has its own Estimator History.</div></div>
               <div class="field-control">
                 <input type="number" id="aim-prediction_history_len" data-key="prediction_history_len" data-advanced="1" data-type="number" min="2" max="6" step="1">
               </div>
@@ -1659,11 +1603,61 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Lock Persistence</div>
-                <div class="field-desc">How long aim is held after the target is lost before the lock is released (time-based; replaces Lock Decay Frames)</div>
+                <div class="field-desc">How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS). Never longer than Lost Target Timeout.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="aim-lock_persistence_ms" data-key="lock_persistence_ms" data-type="number" min="0" max="2000" step="10">
                 <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Lost Target Timeout</div>
+                <div class="field-desc">Longest time without a valid detection before the lock is released and the target forgotten. Aim is held only for Lock Persistence (which is capped by this); the target stays reacquirable until this elapses. Anchor FOV's FOV Lost Delay (Inference tab) is separate and only delays the FOV.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-lost_target_timeout_ms" data-key="lost_target_timeout_ms" data-advanced="1" data-type="number" min="0" max="10000" step="50">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Minimum Target Lock Duration</div>
+                <div class="field-desc">A lock can't be swapped for another target sooner than this after it was acquired. Never delays releasing a target that is really gone.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-min_lock_duration_ms" data-key="min_lock_duration_ms" data-advanced="1" data-type="number" min="0" max="2000" step="10">
+                <span class="field-slider-value">ms</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Target Switch Threshold</div>
+                <div class="field-desc">How much better (as a % of the priority score) another target must be before it replaces the current one. 100% = never switch while the current target is visible.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-target_switch_threshold" data-key="target_switch_threshold" data-advanced="1" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Reacquisition Radius</div>
+                <div class="field-desc">A target reappearing within this distance of where the lost one was last seen (extrapolated by its velocity) is treated as the same target.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-reacquire_radius_px" data-key="reacquire_radius_px" data-advanced="1" data-type="number" min="0" max="1000" step="5">
+                <span class="field-slider-value">px</span>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info">
+                <div class="field-title">Tracking Confidence</div>
+                <div class="field-desc">Minimum confidence to KEEP an existing lock. A new target still needs Min Confidence (Inference tab, Detection Settings), so a lock survives brief confidence dips. 0 = same as Min Confidence.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-tracking_confidence" data-key="tracking_confidence" data-advanced="1" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card">
@@ -1673,6 +1667,18 @@
               </div>
               <div class="field-control">
                 <input type="number" id="aim-lock_iou_threshold" data-key="lock_iou_threshold" data-advanced="1" data-type="number" min="0.10" max="0.70" step="0.01">
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Gap Extrapolation</div><div class="field-desc">Keep aiming along the last velocity for a few missed frames</div></div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="aim-sticky_gap_extrapolate" data-key="sticky_gap_extrapolate" data-advanced="1" data-type="bool"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card">
+              <div class="field-info"><div class="field-title">Gap Frames</div></div>
+              <div class="field-control">
+                <input type="number" id="aim-sticky_gap_frames" data-key="sticky_gap_frames" data-advanced="1" data-type="number" min="1" max="8" step="1">
               </div>
             </div>
             <div class="field-card">

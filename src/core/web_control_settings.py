@@ -108,7 +108,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "fov_reduce_on_target_enabled": {"type": "bool"},
         "fov_min_size_pct": {"type": "float", "min": 1, "max": 100},
         "fov_min_size_duration": {"type": "float", "min": 0.0, "max": 10.0},
-        # FOV Shrinking / Advanced FOV / Target Acquisition & Tracking (inference_page.py)
+        # FOV Shrinking / Advanced FOV (inference_page.py); the lock timing settings are on the aim tab
         "fov_shrink_mode": {"type": "choice", "choices": ["fixed", "adaptive", "dynamic", "anchor"]},
         # Anchor FOV (inference_page.py's Anchor FOV groups; core/anchor_fov.py)
         "afov_source": {"type": "choice", "choices": ["detection", "tracker", "manual"]},
@@ -139,11 +139,6 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "fov_recovery_duration_ms": {"type": "int", "min": 0, "max": 3000},
         "fov_retention_enabled": {"type": "bool"},
         "fov_retention_pct": {"type": "float", "min": 100, "max": 400},
-        "min_lock_duration_ms": {"type": "int", "min": 0, "max": 2000},
-        "tracking_confidence": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
-        "target_switch_threshold": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
-        "reacquire_radius_px": {"type": "int", "min": 0, "max": 1000},
-        "lost_target_timeout_ms": {"type": "int", "min": 0, "max": 10000},
         "detect_range_size": {"type": "int", "min": 100, "max": 1080},
         "detect_interval": {"type": "float", "scale": 1000.0, "min": 1, "max": 100},
         "min_confidence": {"type": "float", "scale": 100.0, "min": 1, "max": 100},
@@ -252,6 +247,11 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "sticky_lock_enabled": {"type": "bool"},
         "lock_persistence_ms": {"type": "int", "min": 0, "max": 2000},
         "lock_iou_threshold": {"type": "float", "min": 0.10, "max": 0.70},
+        "min_lock_duration_ms": {"type": "int", "min": 0, "max": 2000},
+        "tracking_confidence": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "target_switch_threshold": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "reacquire_radius_px": {"type": "int", "min": 0, "max": 1000},
+        "lost_target_timeout_ms": {"type": "int", "min": 0, "max": 10000},
         "kalman_enabled": {"type": "bool"},
         "kalman_process_noise": {"type": "float", "min": 0.01, "max": 1.0},
         "kalman_measurement_noise": {"type": "float", "min": 0.01, "max": 1.0},
