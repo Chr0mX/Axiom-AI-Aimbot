@@ -127,6 +127,8 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "afov_reacquire": {"type": "choice", "choices": ["smooth", "fast"]},
         "afov_max_radius": {"type": "int", "min": 1, "max": 2000},
         "afov_dynamic_radius": {"type": "bool"},
+        "afov_fit_box_enabled": {"type": "bool"},
+        "afov_fit_padding_pct": {"type": "int", "min": 0, "max": 200},
         "fov_dynamic_safeguards": {"type": "bool"},
         # Anchor Prediction (inference_page.py's Anchor Prediction group; core/anchor_prediction.py)
         "anchor_enabled": {"type": "bool"},

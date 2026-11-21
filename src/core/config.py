@@ -206,6 +206,8 @@ _FIELD_MAP = {
     'afov_reacquire':             'aim.fov_anchor.lost.reacquire',
     'afov_max_radius':            'aim.fov_anchor.radius.max',
     'afov_dynamic_radius':        'aim.fov_anchor.radius.dynamic',
+    'afov_fit_box_enabled':       'aim.fov_anchor.fit_box.enabled',
+    'afov_fit_padding_pct':       'aim.fov_anchor.fit_box.padding_pct',
     'anchor_enabled':             'tracking.anchor.enabled',
     'anchor_mode':                'tracking.anchor.mode',
     'anchor_horizon_ms':          'tracking.anchor.horizon_ms',
@@ -582,6 +584,10 @@ class Config:
         # this is only the growth headroom for Dynamic Radius and Search.
         self.afov_max_radius: int = 300
         self.afov_dynamic_radius: bool = False   # widen with target speed / low confidence
+        # Opt-in: while aim is active and a target is locked, shrink the FOV to the padded
+        # detection box of the anchor (never above FOV Width/Height); released with aim.
+        self.afov_fit_box_enabled: bool = False
+        self.afov_fit_padding_pct: int = 30      # extra room around the box, % (0-200)
         # Runtime-only (unpersisted): the Anchor FOV controller's real state, published
         # every frame while the mode is active so every overlay draws what the filter used.
         self.fov_center_x = None                 # None = FOV centred on the crosshair
@@ -1626,6 +1632,8 @@ def _validate_anchor_fov(config: Config) -> None:
     config.afov_predict_enabled = bool(getattr(config, 'afov_predict_enabled', False))
     config.afov_dynamic_radius = bool(getattr(config, 'afov_dynamic_radius', False))
     num('afov_max_radius', 300, 1, 4096, int)
+    config.afov_fit_box_enabled = bool(getattr(config, 'afov_fit_box_enabled', False))
+    num('afov_fit_padding_pct', 30, 0, 200, int)
 
 
 def _finite(value, default: float) -> float:

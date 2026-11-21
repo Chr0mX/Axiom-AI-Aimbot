@@ -77,6 +77,11 @@ _AFOV_CARDS = (
      "The most the FOV radius can grow to with Dynamic Radius or Search. The normal size is FOV Width \u00f7 2.", (1, 1000, "px", 1)),
     ("afovDynRadiusCard", "afovRadiusGroup", "switch", "afov_dynamic_radius", "afov_dynamic_radius", "Dynamic Radius",
      "Widen the FOV (up to the maximum radius) for fast or low-confidence targets.", None),
+    ("afovFitCard", "afovRadiusGroup", "switch", "afov_fit_box_enabled", "afov_fit_box", "Fit FOV to Target Box While Aiming",
+     "While aim is active and a target is locked, shrink the FOV to the target's detection box (never above FOV Width/Height); "
+     "it grows back to the normal size when aim is released. Needs the Detection or Tracker source.", None),
+    ("afovFitPadCard", "afovRadiusGroup", "slider", "afov_fit_padding_pct", "afov_fit_padding", "Fit Padding",
+     "Extra room around the box, as a percentage of its size, so a moving target stays inside the FOV.", (0, 200, "%", 1)),
 )
 
 # (i18n key, English title, English description) per Anchor Prediction card —
@@ -765,6 +770,10 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
         self.afovPositionCard.setVisible(anchor and not manual)
         self.afovPredTimeCard.setVisible(anchor and pred)
         self.afovMaxRadiusCard.setVisible(anchor and grows)
+        # Fitting needs a box to fit to; Manual has none. The padding only matters while it is on.
+        fit_on = bool(getattr(self._config, 'afov_fit_box_enabled', False))
+        self.afovFitCard.setVisible(anchor and not manual)
+        self.afovFitPadCard.setVisible(anchor and not manual and fit_on)
 
     def _onAfovComboChanged(self, field, values, index):
         if self._config and not self._isLoadingConfig and 0 <= index < len(values):

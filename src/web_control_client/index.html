@@ -884,6 +884,28 @@
                 </label>
               </div>
             </div>
+            <div class="field-card" id="inf-afov-fit-card">
+              <div class="field-info">
+                <div class="field-title">Fit FOV to Target Box While Aiming</div>
+                <div class="field-desc">While aim is active and a target is locked, shrink the FOV to the target's detection box (never above FOV Width/Height); it grows back to the normal size when aim is released. Needs the Detection or Tracker source.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch">
+                  <input type="checkbox" id="inf-afov_fit_box_enabled" data-key="afov_fit_box_enabled" data-type="bool">
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
+            <div class="field-card" id="inf-afov-fitpad-card">
+              <div class="field-info">
+                <div class="field-title">Fit Padding</div>
+                <div class="field-desc">Extra room around the box, as a percentage of its size, so a moving target stays inside the FOV.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="inf-afov_fit_padding_pct" data-key="afov_fit_padding_pct" data-type="number" min="0" max="200" step="1">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
           </div>
           </section>
 

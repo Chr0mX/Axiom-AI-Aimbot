@@ -798,7 +798,7 @@
           updateUvcSubVisibility();
         }
         if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
-        if (tab === "inference" && (key === "afov_source" || key === "afov_predict_enabled" || key === "afov_lost_behavior" || key === "afov_dynamic_radius")) updateAnchorFovVisibility();
+        if (tab === "inference" && (key === "afov_source" || key === "afov_predict_enabled" || key === "afov_lost_behavior" || key === "afov_dynamic_radius" || key === "afov_fit_box_enabled")) updateAnchorFovVisibility();
         if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "capture" && key === "hud_udp_enabled") updateWeaponDetectVisibility();
@@ -869,6 +869,10 @@
     show("inf-afov-position-card", anchor && src !== "manual");
     show("inf-afov-predtime-card", anchor && pred);
     show("inf-afov-maxr-card", anchor && (dyn || search));
+    // Fitting needs a box to fit to (Manual has none); the padding only matters while it is on.
+    var fit = !!val("afov_fit_box_enabled", false);
+    show("inf-afov-fit-card", anchor && src !== "manual");
+    show("inf-afov-fitpad-card", anchor && src !== "manual" && fit);
   }
 
   // Mirrors inference_page.py's _updateAnchorVisibility(): settings appear only while Anchor
