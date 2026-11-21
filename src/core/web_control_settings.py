@@ -129,18 +129,10 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "afov_fit_box_enabled": {"type": "bool"},
         "afov_fit_padding_pct": {"type": "int", "min": 0, "max": 200},
         "fov_dynamic_safeguards": {"type": "bool"},
-        # Anchor Prediction (inference_page.py's Anchor Prediction group; core/anchor_prediction.py)
+        # Anchor Box Prediction (inference_page.py: switch, FOV horizon, FOV influence; the estimator tuning
+        # is on the Aim tab; core/anchor_prediction.py)
         "anchor_enabled": {"type": "bool"},
-        # "disabled" and "linear" are retired (the master switch / Acceleration 0 cover them); they are
-        # still accepted from old scripts and folded by config.migrate_anchor_settings() in _post_apply.
-        "anchor_mode": {"type": "choice", "choices": ["velocity_accel", "smoothed", "adaptive", "linear", "disabled"]},
         "anchor_horizon_ms": {"type": "float", "min": 20, "max": 500},
-        "anchor_strength": {"type": "float", "scale": 100.0, "min": 0, "max": 150},
-        "anchor_velocity_smoothing": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
-        "anchor_accel_comp": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
-        "anchor_confidence_threshold": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
-        "anchor_history_len": {"type": "int", "min": 4, "max": 12},
-        "anchor_max_distance_pct": {"type": "float", "min": 0, "max": 100},
         "anchor_fov_influence_adaptive": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
         "anchor_fov_influence_dynamic": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
         "fov_expand_delay_ms": {"type": "int", "min": 0, "max": 2000},
@@ -234,6 +226,16 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "prediction_max_velocity": {"type": "float", "min": 300, "max": 3000},
         "prediction_history_len": {"type": "int", "min": 2, "max": 6},
         "prediction_method": {"type": "choice", "choices": ["velocity", "ema", "rolling", "anchor"]},
+        # Anchor Estimator (aim_page.py): shared by the Aim Lead "Anchor" method and the Inference tab's Box Prediction.
+        # "disabled" and "linear" are retired (the master switch / Acceleration 0 cover them); they are
+        # still accepted from old scripts and folded by config.migrate_anchor_settings() in _post_apply.
+        "anchor_mode": {"type": "choice", "choices": ["velocity_accel", "smoothed", "adaptive", "linear", "disabled"]},
+        "anchor_strength": {"type": "float", "scale": 100.0, "min": 0, "max": 150},
+        "anchor_velocity_smoothing": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "anchor_accel_comp": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "anchor_confidence_threshold": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "anchor_history_len": {"type": "int", "min": 4, "max": 12},
+        "anchor_max_distance_pct": {"type": "float", "min": 0, "max": 100},
         "prediction_lead_frames": {"type": "float", "min": 1, "max": 10},
         "prediction_adaptive_lead": {"type": "bool"},
         "prediction_capture_timestamps": {"type": "bool"},
@@ -566,13 +568,11 @@ def get_tab_settings(config, tab: str) -> dict:
         # Read-only extra: the reduced rate cannot apply while Always Aim / Always Auto-Fire is on.
         from .detect_mode import reduced_rate_ignored
         result["reduced_rate_ignored"] = bool(reduced_rate_ignored(config))
-        # Read-only extra: the aim-lead Prediction Method (Aim tab) can be Anchor, which shares the
-        # Anchor Prediction tuning cards shown on this tab (see inference_page._updateAnchorVisibility).
-        # Method-based, not aim_uses_anchor(): with the mode on Disabled the Mode card must stay
-        # reachable or it could never be switched back on.
-        result["aim_uses_anchor"] = bool(
-            getattr(config, "prediction_enabled", False)
-            and str(getattr(config, "prediction_method", "velocity")) == "anchor")
+
+    if tab == "aim":
+        # Read-only extra: the Anchor Estimator group is shown while Box Prediction (Inference tab) is on or
+        # the Aim Lead uses the Anchor method (same rule as aim_page._updateAnchorEstimatorVisibility()).
+        result["anchor_enabled"] = bool(getattr(config, "anchor_enabled", False))
 
     if tab == "keys":
         # Read-only extras — these three drive the Keys & HW panel's own

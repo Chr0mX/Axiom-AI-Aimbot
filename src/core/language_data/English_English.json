@@ -617,5 +617,6 @@
   "auto_fire_group": "Auto-Fire",
   "model_empty_hint": "No .onnx models found. Put them in the Model folder (Open Model Folder below), then reopen this page.",
   "full_config_empty_hint": "No saved configs yet. Use Create Config to save your current settings.",
-  "preset_empty_hint": "No saved presets yet. Use Create Preset to save your current aim settings."
+  "preset_empty_hint": "No saved presets yet. Use Create Preset to save your current aim settings.",
+  "anchor_estimator": "Anchor Estimator"
 }

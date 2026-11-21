@@ -897,7 +897,7 @@
             <div class="field-card" id="inf-anchor-enable-card">
               <div class="field-info">
                 <div class="field-title">Enable Box Prediction</div>
-                <div class="field-desc">Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before.</div>
+                <div class="field-desc">Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. This is separate from the Aim Lead (aim point, Aim page); both use the estimator tuned on the Aim page under Anchor Estimator.</div>
               </div>
               <div class="field-control">
                 <label class="switch">
@@ -906,86 +906,20 @@
                 </label>
               </div>
             </div>
-            <div class="field-card" id="inf-anchor-mode-card">
-              <div class="field-info">
-                <div class="field-title">Box Prediction Mode</div>
-                <div class="field-desc">Velocity: the current velocity, plus acceleration by the Acceleration setting (0% = velocity only). Smoothed: smooths velocity and acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes.</div>
-              </div>
-              <div class="field-control">
-                <select id="inf-anchor_mode" data-key="anchor_mode" data-type="choice">
-                  <option value="velocity_accel">Velocity</option>
-                  <option value="smoothed">Smoothed</option>
-                  <option value="adaptive">Adaptive</option>
-                </select>
-              </div>
-            </div>
             <div class="field-card" id="inf-anchor-horizon-card">
               <div class="field-info">
-                <div class="field-title">Box Prediction Horizon</div>
-                <div class="field-desc">How far ahead to predict the box.</div>
+                <div class="field-title">FOV Prediction Horizon</div>
+                <div class="field-desc">How far ahead the FOV / lock layer predicts the box (~100 ms). The Aim Lead has its own, much shorter horizon on the Aim page.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-anchor_horizon_ms" data-key="anchor_horizon_ms" data-type="number" min="20" max="500" step="5">
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
-            <div class="field-card" id="inf-anchor-strength-card">
+            <div class="field-card" id="inf-anchor-hint-card">
               <div class="field-info">
-                <div class="field-title">Box Prediction Strength</div>
-                <div class="field-desc">Scales the whole predicted movement (100% = full).</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-anchor_strength" data-key="anchor_strength" data-advanced="1" data-type="number" min="0" max="150" step="5">
-                <span class="field-slider-value">%</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-anchor-smoothing-card">
-              <div class="field-info">
-                <div class="field-title">Velocity Smoothing</div>
-                <div class="field-desc">Higher = steadier but slower to react (Smoothed / Adaptive modes).</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-anchor_velocity_smoothing" data-key="anchor_velocity_smoothing" data-advanced="1" data-type="number" min="0" max="100" step="5">
-                <span class="field-slider-value">%</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-anchor-accel-card">
-              <div class="field-info">
-                <div class="field-title">Acceleration Compensation</div>
-                <div class="field-desc">How much of the estimated acceleration is applied. 0 = velocity only.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-anchor_accel_comp" data-key="anchor_accel_comp" data-advanced="1" data-type="number" min="0" max="100" step="5">
-                <span class="field-slider-value">%</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-anchor-conf-card">
-              <div class="field-info">
-                <div class="field-title">Confidence Threshold</div>
-                <div class="field-desc">Below this prediction confidence nothing is extrapolated.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-anchor_confidence_threshold" data-key="anchor_confidence_threshold" data-advanced="1" data-type="number" min="0" max="100" step="5">
-                <span class="field-slider-value">%</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-anchor-history-card">
-              <div class="field-info">
-                <div class="field-title">Prediction History Length</div>
-                <div class="field-desc">How many recent detections the motion estimate uses (acceleration needs 4 or more).</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-anchor_history_len" data-key="anchor_history_len" data-advanced="1" data-type="number" min="4" max="12" step="1">
-              </div>
-            </div>
-            <div class="field-card" id="inf-anchor-maxdist-card">
-              <div class="field-info">
-                <div class="field-title">Maximum Prediction Distance</div>
-                <div class="field-desc">Longest predicted movement, as a % of the FOV size. 0 = no limit.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-anchor_max_distance_pct" data-key="anchor_max_distance_pct" data-advanced="1" data-type="number" min="0" max="100" step="1">
-                <span class="field-slider-value">% of FOV</span>
+                <div class="field-title">Estimator Tuning</div>
+                <div class="field-desc">Mode, strength, smoothing, acceleration, confidence, history and the distance limit are set once, on the Aim tab under Anchor Estimator (shared with the Aim Lead Anchor method).</div>
               </div>
             </div>
             <div class="field-card" id="inf-anchor-infl-adaptive-card">
@@ -1793,6 +1727,84 @@
                   <option value="128">128</option>
                   <option value="256">256</option>
                 </select>
+              </div>
+            </div>
+          </div>
+          </section>
+
+          <section class="module hidden" id="aim-anchor-est-sec">
+          <div class="field-group-title">Anchor Estimator</div>
+          <div class="field-group">
+            <div class="field-card" id="aim-anchor-mode-card">
+              <div class="field-info">
+                <div class="field-title">Estimator Mode</div>
+                <div class="field-desc">Velocity: the current velocity, plus acceleration by the Acceleration setting (0% = velocity only). Smoothed: smooths velocity and acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes.</div>
+              </div>
+              <div class="field-control">
+                <select id="aim-anchor_mode" data-key="anchor_mode" data-type="choice">
+                  <option value="velocity_accel">Velocity</option>
+                  <option value="smoothed">Smoothed</option>
+                  <option value="adaptive">Adaptive</option>
+                </select>
+              </div>
+            </div>
+            <div class="field-card" id="aim-anchor-strength-card">
+              <div class="field-info">
+                <div class="field-title">Estimator Strength</div>
+                <div class="field-desc">Scales the whole predicted movement (100% = full).</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-anchor_strength" data-key="anchor_strength" data-advanced="1" data-type="number" min="0" max="150" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="aim-anchor-smoothing-card">
+              <div class="field-info">
+                <div class="field-title">Estimator Smoothing</div>
+                <div class="field-desc">Higher = steadier but slower to react (Smoothed / Adaptive modes). Separate from Aim Step Smoothing and the FOV Anchor Smoothing.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-anchor_velocity_smoothing" data-key="anchor_velocity_smoothing" data-advanced="1" data-type="number" min="0" max="100" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="aim-anchor-accel-card">
+              <div class="field-info">
+                <div class="field-title">Acceleration Compensation</div>
+                <div class="field-desc">How much of the estimated acceleration is applied. 0 = velocity only.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-anchor_accel_comp" data-key="anchor_accel_comp" data-advanced="1" data-type="number" min="0" max="100" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="aim-anchor-conf-card">
+              <div class="field-info">
+                <div class="field-title">Confidence Threshold</div>
+                <div class="field-desc">Below this prediction confidence nothing is extrapolated.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-anchor_confidence_threshold" data-key="anchor_confidence_threshold" data-advanced="1" data-type="number" min="0" max="100" step="5">
+                <span class="field-slider-value">%</span>
+              </div>
+            </div>
+            <div class="field-card" id="aim-anchor-history-card">
+              <div class="field-info">
+                <div class="field-title">Estimator History</div>
+                <div class="field-desc">How many recent detections the motion estimate uses (acceleration needs 4 or more). Separate from the Aim Lead History.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-anchor_history_len" data-key="anchor_history_len" data-advanced="1" data-type="number" min="4" max="12" step="1">
+              </div>
+            </div>
+            <div class="field-card" id="aim-anchor-maxdist-card">
+              <div class="field-info">
+                <div class="field-title">Maximum Prediction Distance</div>
+                <div class="field-desc">Longest predicted movement, as a % of the FOV size. 0 = no limit.</div>
+              </div>
+              <div class="field-control">
+                <input type="number" id="aim-anchor_max_distance_pct" data-key="anchor_max_distance_pct" data-advanced="1" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">% of FOV</span>
               </div>
             </div>
           </div>

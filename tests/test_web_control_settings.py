@@ -1344,6 +1344,8 @@ class TestAnchorPredictionSettings:
                    "anchor_velocity_smoothing", "anchor_accel_comp", "anchor_confidence_threshold",
                    "anchor_history_len", "anchor_max_distance_pct", "anchor_fov_influence_adaptive",
                    "anchor_fov_influence_dynamic")
+    ESTIMATOR_KEYS = ("anchor_mode", "anchor_strength", "anchor_velocity_smoothing", "anchor_accel_comp",
+                      "anchor_confidence_threshold", "anchor_history_len", "anchor_max_distance_pct")
 
     def test_every_schema_field_is_a_real_persisted_config_field(self):
         from unittest.mock import patch
@@ -1351,7 +1353,8 @@ class TestAnchorPredictionSettings:
             from core.config import Config, _FIELD_MAP
             c = Config()
         for k in self.ANCHOR_KEYS:
-            assert k in wcs._SCHEMA["inference"] and hasattr(c, k) and k in _FIELD_MAP
+            tab = "aim" if k in self.ESTIMATOR_KEYS else "inference"     # the estimator tuning is edited on the Aim tab
+            assert k in wcs._SCHEMA[tab] and hasattr(c, k) and k in _FIELD_MAP
         assert "show_anchor_debug" in wcs._SCHEMA["visuals"] and "show_anchor_debug" in _FIELD_MAP
 
     def test_round_trip_uses_percent_display_units_for_fractions(self):
@@ -1359,12 +1362,15 @@ class TestAnchorPredictionSettings:
                          anchor_velocity_smoothing=0.4, anchor_accel_comp=0.35, anchor_confidence_threshold=0.35,
                          anchor_history_len=6, anchor_max_distance_pct=25.0, anchor_fov_influence_adaptive=0.5,
                          anchor_fov_influence_dynamic=0.5)
-        shown = wcs.get_tab_settings(config, "inference")
+        shown = wcs.get_tab_settings(config, "aim")
         assert shown["anchor_strength"] == pytest.approx(100.0) and shown["anchor_accel_comp"] == pytest.approx(35.0)
-        assert shown["anchor_fov_influence_dynamic"] == pytest.approx(50.0) and shown["anchor_mode"] == "adaptive"
+        assert shown["anchor_mode"] == "adaptive"
+        assert wcs.get_tab_settings(config, "inference")["anchor_fov_influence_dynamic"] == pytest.approx(50.0)
+        result = wcs.apply_tab_settings(config, "aim", {
+            "anchor_mode": "Velocity_Accel", "anchor_strength": 80, "anchor_history_len": 9})
+        assert result["ok"] is True
         result = wcs.apply_tab_settings(config, "inference", {
-            "anchor_enabled": True, "anchor_mode": "Velocity_Accel", "anchor_horizon_ms": 250,
-            "anchor_strength": 80, "anchor_fov_influence_adaptive": 30, "anchor_history_len": 9})
+            "anchor_enabled": True, "anchor_horizon_ms": 250, "anchor_fov_influence_adaptive": 30})
         assert result["ok"] is True
         assert config.anchor_enabled is True and config.anchor_mode == "velocity_accel"
         assert config.anchor_horizon_ms == 250 and config.anchor_strength == pytest.approx(0.8)
@@ -1372,10 +1378,10 @@ class TestAnchorPredictionSettings:
 
     def test_bad_values_are_rejected_atomically_and_out_of_range_is_clamped(self):
         config = _config(anchor_mode="adaptive", anchor_strength=1.0, anchor_history_len=6)
-        bad = wcs.apply_tab_settings(config, "inference", {"anchor_strength": 50, "anchor_mode": "turbo"})
+        bad = wcs.apply_tab_settings(config, "aim", {"anchor_strength": 50, "anchor_mode": "turbo"})
         assert bad["ok"] is False and bad["field"] == "anchor_mode"
         assert config.anchor_strength == 1.0                           # nothing written
-        ok = wcs.apply_tab_settings(config, "inference", {"anchor_strength": 9999, "anchor_history_len": 99})
+        ok = wcs.apply_tab_settings(config, "aim", {"anchor_strength": 9999, "anchor_history_len": 99})
         assert ok["ok"] is True and config.anchor_strength == pytest.approx(1.5) and config.anchor_history_len == 12
 
     def test_debug_toggle_lives_on_the_visuals_tab(self):
@@ -1386,7 +1392,7 @@ class TestAnchorPredictionSettings:
 
 class TestAnchorAimLeadSettings:
     """Prediction Method 'anchor' on the Aim tab + the read-only extra the Inference tab uses to
-    show the shared Anchor tuning cards (client: updateAnchorVisibility() / d.aim_uses_anchor)."""
+    show the shared Anchor tuning cards (client: updateAimTuningVisibility() / d.anchor_enabled)."""
 
     def test_anchor_is_an_accepted_prediction_method(self):
         assert "anchor" in wcs._SCHEMA["aim"]["prediction_method"]["choices"]
@@ -1396,18 +1402,30 @@ class TestAnchorAimLeadSettings:
         bad = wcs.apply_tab_settings(config, "aim", {"prediction_method": "psychic"})
         assert bad["ok"] is False and config.prediction_method == "anchor"
 
-    @pytest.mark.parametrize("enabled,method,mode,want", [
-        (True, "anchor", "adaptive", True),
-        (True, "anchor", "disabled", True),        # method-based: the Mode card must stay reachable
-        (True, "velocity", "adaptive", False),
-        (False, "anchor", "adaptive", False),
-    ])
-    def test_inference_tab_extra_follows_the_aim_method(self, enabled, method, mode, want):
-        config = _config(prediction_enabled=enabled, prediction_method=method, anchor_mode=mode)
-        assert wcs.get_tab_settings(config, "inference")["aim_uses_anchor"] is want
+    def test_the_estimator_tuning_lives_on_the_aim_tab_only(self):
+        """Mode/strength/smoothing/accel/confidence/history/max distance are shared by Aim Lead's Anchor method
+        and Box Prediction, and are edited in one place: the Aim tab (Anchor Estimator)."""
+        moved = ("anchor_mode", "anchor_strength", "anchor_velocity_smoothing", "anchor_accel_comp",
+                 "anchor_confidence_threshold", "anchor_history_len", "anchor_max_distance_pct")
+        for k in moved:
+            assert k in wcs._SCHEMA["aim"] and k not in wcs._SCHEMA["inference"], k
+        # the FOV-layer controls stay on the Inference tab
+        for k in ("anchor_enabled", "anchor_horizon_ms", "anchor_fov_influence_adaptive", "anchor_fov_influence_dynamic"):
+            assert k in wcs._SCHEMA["inference"] and k not in wcs._SCHEMA["aim"], k
 
-    def test_extra_defaults_to_false_on_a_bare_config(self):
-        assert wcs.get_tab_settings(_config(), "inference")["aim_uses_anchor"] is False
+    def test_aim_tab_extra_reports_the_box_prediction_switch(self):
+        assert wcs.get_tab_settings(_config(anchor_enabled=True), "aim")["anchor_enabled"] is True
+        assert wcs.get_tab_settings(_config(anchor_enabled=False), "aim")["anchor_enabled"] is False
+        assert wcs.get_tab_settings(_config(), "aim")["anchor_enabled"] is False        # bare config
+
+    def test_the_old_inference_extra_is_gone(self):
+        assert "aim_uses_anchor" not in wcs.get_tab_settings(_config(prediction_enabled=True, prediction_method="anchor"), "inference")
+
+    def test_moved_fields_are_still_written_through_the_aim_route(self):
+        c = _config(anchor_strength=1.0)
+        assert wcs.apply_tab_settings(c, "aim", {"anchor_strength": 80, "anchor_mode": "smoothed"})["ok"] is True
+        assert c.anchor_strength == pytest.approx(0.8) and c.anchor_mode == "smoothed"
+        assert wcs.apply_tab_settings(c, "inference", {"anchor_strength": 80})["reason"] == "unknown_field"
 
 
 class TestAnchorFovSettings:
@@ -1453,9 +1471,9 @@ class TestAnchorFovSettings:
                          prediction_method="anchor")
         assert wcs.apply_tab_settings(config, "inference", {"afov_position": "custom"})["ok"] is True
         assert config.afov_position == "center"
-        assert wcs.apply_tab_settings(config, "inference", {"anchor_mode": "linear"})["ok"] is True
+        assert wcs.apply_tab_settings(config, "aim", {"anchor_mode": "linear"})["ok"] is True
         assert (config.anchor_mode, config.anchor_accel_comp) == ("velocity_accel", 0.0)
-        assert wcs.apply_tab_settings(config, "inference", {"anchor_mode": "disabled"})["ok"] is True
+        assert wcs.apply_tab_settings(config, "aim", {"anchor_mode": "disabled"})["ok"] is True
         assert config.anchor_enabled is False and config.anchor_mode == "adaptive"
         assert config.prediction_method == "velocity"
 

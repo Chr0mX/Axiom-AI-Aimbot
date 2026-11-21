@@ -799,7 +799,7 @@
         }
         if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
         if (tab === "inference" && (key === "afov_source" || key === "afov_lost_behavior" || key === "afov_dynamic_radius" || key === "afov_fit_box_enabled")) updateAnchorFovVisibility();
-        if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
+        if (tab === "inference" && (key === "anchor_enabled" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "capture" && key === "hud_udp_enabled") updateWeaponDetectVisibility();
         if (tab === "inference" && key === "detect_mode") updateDetectModeVisibility();
@@ -873,25 +873,18 @@
     show("inf-afov-fitpad-card", anchor && src !== "manual" && fit);
   }
 
-  // Mirrors inference_page.py's _updateAnchorVisibility(): settings appear only while Anchor
-  // Prediction is on; smoothing/acceleration only where the mode uses them; the FOV-influence
-  // cards only while FOV shrinking is on.
+  // Mirrors inference_page.py's _updateAnchorVisibility(): Anchor Box Prediction shows only what is
+  // FOV-specific, and only while it acts -- the horizon and the estimator hint with the switch, the
+  // influence of the current shrink mode only (Fixed and Anchor FOV have none). The estimator tuning
+  // is on the Aim tab (updateAimTuningVisibility()).
   function updateAnchorVisibility() {
     var d = lastSettings.inference || {};
     var el = function (id) { return document.getElementById(id); };
     var on = el("inf-anchor_enabled") ? el("inf-anchor_enabled").checked : !!d.anchor_enabled;
-    var mode = (el("inf-anchor_mode") || {}).value || d.anchor_mode || "adaptive";
     var fov = el("inf-fov_reduce_on_target_enabled") ? el("inf-fov_reduce_on_target_enabled").checked : !!d.fov_reduce_on_target_enabled;
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
-    // The estimator tuning is shared with the Aim tab's "Anchor" Prediction Method, which works
-    // without the master switch (server extra aim_uses_anchor = prediction on + method anchor);
-    // the horizon and the FOV influence are FOV-only and still need the Anchor Prediction switch.
-    var shared = on || !!d.aim_uses_anchor;
-    show("inf-anchor-mode-card", shared);
     show("inf-anchor-horizon-card", on);
-    ["strength", "conf", "history", "maxdist", "accel"].forEach(function (k) { show("inf-anchor-" + k + "-card", shared); });
-    show("inf-anchor-smoothing-card", shared && (mode === "smoothed" || mode === "adaptive"));
-    // Only the influence of the current shrink mode ever acts (Fixed and Anchor FOV have none).
+    show("inf-anchor-hint-card", on);
     var fovMode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode || "adaptive";
     show("inf-anchor-infl-adaptive-card", on && fov && fovMode === "adaptive");
     show("inf-anchor-infl-dynamic-card", on && fov && fovMode === "dynamic");
@@ -960,7 +953,7 @@
   // tunes is active, mirroring aim_page.py's _updateAimTuningVisibility().
   var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "prediction_ego_motion_comp", "aim_ema_smoothing_enabled",
     "sticky_gap_extrapolate", "sticky_lock_enabled", "kalman_enabled", "cam_motion_comp_enabled", "aim_y_reduce_enabled",
-    "target_priority_mode"];
+    "target_priority_mode", "anchor_mode"];
 
   function updateAimTuningVisibility() {
     function el(id) { return document.getElementById(id); }
@@ -997,6 +990,19 @@
       setCard("aim-" + k, on("aim-aim_y_reduce_enabled"));
     });
     setCard("aim-target_priority_confidence_weight", !!(el("aim-target_priority_mode") && el("aim-target_priority_mode").value === "composite"));
+
+    // Anchor Estimator: shown while Box Prediction (Inference tab, server extra anchor_enabled) or the Aim
+    // Lead with the Anchor method uses it (same rule as aim_page._updateAnchorEstimatorVisibility()).
+    var d = lastSettings.aim || {};
+    var shared = !!d.anchor_enabled || (predOn && method === "anchor");
+    var sec = el("aim-anchor-est-sec");
+    if (sec) sec.classList.toggle("hidden", !shared);
+    var amode = (el("aim-anchor_mode") || {}).value || d.anchor_mode || "adaptive";
+    ["mode", "strength", "accel", "conf", "history", "maxdist"].forEach(function (k) {
+      var c = el("aim-anchor-" + k + "-card"); if (c) c.classList.toggle("hidden", !shared);
+    });
+    var sm = el("aim-anchor-smoothing-card");
+    if (sm) sm.classList.toggle("hidden", !(shared && (amode === "smoothed" || amode === "adaptive")));
   }
 
   function updateHumanizationVisibility() {

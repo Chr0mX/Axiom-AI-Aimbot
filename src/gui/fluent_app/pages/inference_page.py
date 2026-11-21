@@ -22,9 +22,6 @@ _DETECT_MODE_DESC = ("What detection does while the aim key is not held. Full sp
                      "Reduced speed: detect only at the interval below to save resources. "
                      "Stop detecting: nothing runs until you aim.")
 _DETECT_MODE_IGNORED = "(Reduced speed is ignored while Always Aim or Always Auto-Fire is on.)"
-# "disabled" (the master switch covers it) and "linear" (= Velocity with Acceleration 0) are retired;
-# config.migrate_anchor_settings() turns old values into these on load.
-_ANCHOR_MODES = ("velocity_accel", "smoothed", "adaptive")
 
 
 # Anchor FOV (core/anchor_fov.py) cards: one table drives construction, wiring, loading,
@@ -85,23 +82,11 @@ _AFOV_CARDS = (
 # one table used both when the cards are built and by retranslateUi().
 _ANCHOR_TEXT = {
     "anchorEnableCard": ("anchor_enabled", "Enable Box Prediction",
-                         "Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. The tuning below is shared with the Aim page's Anchor prediction method, which works without this switch."),
-    "anchorModeCard": ("anchor_mode", "Box Prediction Mode",
-                       "Velocity: the current velocity, plus acceleration by the Acceleration setting (0% = velocity only). Smoothed: smooths velocity and acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes."),
-    "anchorHorizonCard": ("anchor_horizon", "Box Prediction Horizon",
-                          "How far ahead to predict the box"),
-    "anchorStrengthCard": ("anchor_strength", "Box Prediction Strength",
-                           "Scales the whole predicted movement (100% = full)"),
-    "anchorSmoothingCard": ("anchor_velocity_smoothing", "Velocity Smoothing",
-                            "Higher = steadier but slower to react (Smoothed / Adaptive modes)"),
-    "anchorAccelCard": ("anchor_accel_comp", "Acceleration Compensation",
-                        "How much of the estimated acceleration is applied. 0 = velocity only"),
-    "anchorConfCard": ("anchor_confidence_threshold", "Confidence Threshold",
-                       "Below this prediction confidence nothing is extrapolated"),
-    "anchorHistoryCard": ("anchor_history_len", "Prediction History Length",
-                          "How many recent detections the motion estimate uses (acceleration needs 4 or more)"),
-    "anchorMaxDistCard": ("anchor_max_distance_pct", "Maximum Prediction Distance",
-                          "Longest predicted movement, as a % of the FOV size. 0 = no limit"),
+                         "Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. This is separate from the Aim Lead (aim point, Aim page); both use the estimator tuned on the Aim page under Anchor Estimator."),
+    "anchorHorizonCard": ("anchor_horizon", "FOV Prediction Horizon",
+                          "How far ahead the FOV / lock layer predicts the box (~100 ms). The Aim Lead has its own, much shorter horizon on the Aim page."),
+    "anchorEstHintCard": ("anchor_est_hint", "Estimator Tuning",
+                          "Mode, strength, smoothing, acceleration, confidence, history and the distance limit are set once, on the Aim page under Anchor Estimator (shared with the Aim Lead Anchor method)."),
     "anchorInflAdaptiveCard": ("anchor_fov_influence_adaptive", "Prediction Influence on Adaptive FOV",
                                "How strongly the prediction opens the Adaptive FOV early for a target heading for its edge. 0 = ignore the prediction"),
     "anchorInflDynamicCard": ("anchor_fov_influence_dynamic", "Prediction Influence on Dynamic FOV",
@@ -251,38 +236,11 @@ class InferencePage(BasePage):
 
         self.anchorEnableCard = SwitchSettingCard(
             FluentIcon.ROBOT, _at("anchorEnableCard", 1), _at("anchorEnableCard", 2), parent=self.anchorGroup)
-        self.anchorModeCombo = ComboBox()
-        self.anchorModeCombo.addItems([
-            t("anchor_mode_velocity", "Velocity"),
-            t("anchor_mode_smoothed", "Smoothed"),
-            t("anchor_mode_adaptive", "Adaptive"),
-        ])
-        self.anchorModeCombo.setMinimumWidth(180)
-        self.anchorModeCard = SettingCard(
-            FluentIcon.ROBOT, _at("anchorModeCard", 1), _at("anchorModeCard", 2), self.anchorGroup)
-        self.anchorModeCard.hBoxLayout.addWidget(self.anchorModeCombo, 0)
-        self.anchorModeCard.hBoxLayout.addSpacing(16)
         self.anchorHorizonCard = SliderSpinCard(
             FluentIcon.HISTORY, _at("anchorHorizonCard", 1), 20, 500, suffix="ms",
             description=_at("anchorHorizonCard", 2), parent=self.anchorGroup)
-        self.anchorStrengthCard = SliderSpinCard(
-            FluentIcon.SPEED_HIGH, _at("anchorStrengthCard", 1), 0, 150, suffix="%",
-            description=_at("anchorStrengthCard", 2), parent=self.anchorGroup)
-        self.anchorSmoothingCard = SliderSpinCard(
-            FluentIcon.SYNC, _at("anchorSmoothingCard", 1), 0, 100, suffix="%",
-            description=_at("anchorSmoothingCard", 2), parent=self.anchorGroup)
-        self.anchorAccelCard = SliderSpinCard(
-            FluentIcon.SPEED_HIGH, _at("anchorAccelCard", 1), 0, 100, suffix="%",
-            description=_at("anchorAccelCard", 2), parent=self.anchorGroup)
-        self.anchorConfCard = SliderSpinCard(
-            FluentIcon.CERTIFICATE, _at("anchorConfCard", 1), 0, 100, suffix="%",
-            description=_at("anchorConfCard", 2), parent=self.anchorGroup)
-        self.anchorHistoryCard = SliderSpinCard(
-            FluentIcon.HISTORY, _at("anchorHistoryCard", 1), 4, 12,
-            description=_at("anchorHistoryCard", 2), parent=self.anchorGroup)
-        self.anchorMaxDistCard = SliderSpinCard(
-            FluentIcon.ZOOM, _at("anchorMaxDistCard", 1), 0, 100, suffix="%",
-            description=_at("anchorMaxDistCard", 2), parent=self.anchorGroup)
+        self.anchorEstHintCard = SettingCard(
+            FluentIcon.INFO, _at("anchorEstHintCard", 1), _at("anchorEstHintCard", 2), self.anchorGroup)
         self.anchorInflAdaptiveCard = SliderSpinCard(
             FluentIcon.ZOOM, _at("anchorInflAdaptiveCard", 1), 0, 100, suffix="%",
             description=_at("anchorInflAdaptiveCard", 2), parent=self.anchorGroup)
@@ -532,9 +490,8 @@ class InferencePage(BasePage):
                     group.addSettingCard(getattr(self, attr))
             self.addContent(group)
 
-        for card in (self.anchorEnableCard, self.anchorModeCard, self.anchorHorizonCard, self.anchorStrengthCard,
-                     self.anchorSmoothingCard, self.anchorAccelCard, self.anchorConfCard, self.anchorHistoryCard,
-                     self.anchorMaxDistCard, self.anchorInflAdaptiveCard, self.anchorInflDynamicCard):
+        for card in (self.anchorEnableCard, self.anchorHorizonCard, self.anchorEstHintCard,
+                     self.anchorInflAdaptiveCard, self.anchorInflDynamicCard):
             self.anchorGroup.addSettingCard(card)
         self.addContent(self.anchorGroup)
 
@@ -578,8 +535,7 @@ class InferencePage(BasePage):
         (components/advanced.py). Their values are never touched; the page's own visibility
         rules keep working underneath."""
         self.markAdvancedAttrs(*"""
-anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHistoryCard
-            anchorMaxDistCard anchorInflAdaptiveCard anchorInflDynamicCard
+anchorInflAdaptiveCard anchorInflDynamicCard
             advFovGroup acqTrackGroup inferPerfGroup
             afovSmoothCard afovMaxSpeedCard afovLostDelayCard afovReacquireCard afovDynRadiusCard afovMaxRadiusCard
             """.split())
@@ -606,14 +562,7 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
                 card.valueChanged.connect(
                     lambda v, f=field, sc=scale: self._setCfg(f, (v / sc) if sc != 1 else v))
         self.anchorEnableCard.checkedChanged.connect(self._onAnchorEnableChanged)
-        self.anchorModeCombo.currentIndexChanged.connect(self._onAnchorModeChanged)
         self.anchorHorizonCard.valueChanged.connect(lambda v: self._setCfg('anchor_horizon_ms', float(v)))
-        self.anchorStrengthCard.valueChanged.connect(lambda v: self._setCfg('anchor_strength', v / 100.0))
-        self.anchorSmoothingCard.valueChanged.connect(lambda v: self._setCfg('anchor_velocity_smoothing', v / 100.0))
-        self.anchorAccelCard.valueChanged.connect(lambda v: self._setCfg('anchor_accel_comp', v / 100.0))
-        self.anchorConfCard.valueChanged.connect(lambda v: self._setCfg('anchor_confidence_threshold', v / 100.0))
-        self.anchorHistoryCard.valueChanged.connect(lambda v: self._setCfg('anchor_history_len', int(v)))
-        self.anchorMaxDistCard.valueChanged.connect(lambda v: self._setCfg('anchor_max_distance_pct', float(v)))
         self.anchorInflAdaptiveCard.valueChanged.connect(lambda v: self._setCfg('anchor_fov_influence_adaptive', v / 100.0))
         self.anchorInflDynamicCard.valueChanged.connect(lambda v: self._setCfg('anchor_fov_influence_dynamic', v / 100.0))
         self.fovExpandDelayCard.valueChanged.connect(lambda v: self._setCfg('fov_expand_delay_ms', int(v)))
@@ -672,15 +621,7 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
                     sc = extra[3]
                     card.setValue(int(round(float(val if val is not None else 0) * sc)))
             self.anchorEnableCard.setChecked(bool(getattr(self._config, 'anchor_enabled', False)))
-            amode = str(getattr(self._config, 'anchor_mode', 'adaptive'))
-            self.anchorModeCombo.setCurrentIndex(_ANCHOR_MODES.index(amode) if amode in _ANCHOR_MODES else 2)
             self.anchorHorizonCard.setValue(int(round(float(getattr(self._config, 'anchor_horizon_ms', 100.0)))))
-            self.anchorStrengthCard.setValue(int(round(float(getattr(self._config, 'anchor_strength', 1.0)) * 100)))
-            self.anchorSmoothingCard.setValue(int(round(float(getattr(self._config, 'anchor_velocity_smoothing', 0.4)) * 100)))
-            self.anchorAccelCard.setValue(int(round(float(getattr(self._config, 'anchor_accel_comp', 0.35)) * 100)))
-            self.anchorConfCard.setValue(int(round(float(getattr(self._config, 'anchor_confidence_threshold', 0.35)) * 100)))
-            self.anchorHistoryCard.setValue(int(getattr(self._config, 'anchor_history_len', 6)))
-            self.anchorMaxDistCard.setValue(int(round(float(getattr(self._config, 'anchor_max_distance_pct', 25.0)))))
             self.anchorInflAdaptiveCard.setValue(int(round(float(getattr(self._config, 'anchor_fov_influence_adaptive', 0.5)) * 100)))
             self.anchorInflDynamicCard.setValue(int(round(float(getattr(self._config, 'anchor_fov_influence_dynamic', 0.5)) * 100)))
             self.fovExpandDelayCard.setValue(int(getattr(self._config, 'fov_expand_delay_ms', 200)))
@@ -780,35 +721,22 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
         self._updateAnchorFovVisibility()
 
     def _updateAnchorVisibility(self):
-        """Anchor settings appear only while they act (hidden, not greyed out): the estimator
-        tuning (shared with the Aim page's Anchor prediction method, which works without the
-        master switch) while Anchor Prediction is on or that method is selected; the horizon and
-        the FOV influence only with the master switch; smoothing only where the mode uses it; and
-        only the influence of the current shrink mode (Fixed and Anchor FOV have none)."""
+        """Anchor Box Prediction shows only what is FOV-specific, and only while it acts (hidden,
+        not greyed out): the horizon and the estimator hint with the master switch, and only the
+        influence of the current shrink mode (Fixed and Anchor FOV have none). The estimator
+        tuning itself lives on the Aim page (Anchor Estimator)."""
         if not self._config:
             return
         on = bool(getattr(self._config, 'anchor_enabled', False))
-        mode = str(getattr(self._config, 'anchor_mode', 'adaptive'))
         fov_on = bool(getattr(self._config, 'fov_reduce_on_target_enabled', False))
-        shared = on or (bool(getattr(self._config, 'prediction_enabled', False))
-                        and str(getattr(self._config, 'prediction_method', 'velocity')) == 'anchor')
-        self.anchorModeCard.setVisible(shared)
-        for card in (self.anchorStrengthCard, self.anchorConfCard, self.anchorHistoryCard,
-                     self.anchorMaxDistCard, self.anchorAccelCard):
-            card.setVisible(shared)
         self.anchorHorizonCard.setVisible(on)
-        self.anchorSmoothingCard.setVisible(shared and mode in ('smoothed', 'adaptive'))
+        self.anchorEstHintCard.setVisible(on)
         shrink = str(getattr(self._config, 'fov_shrink_mode', 'adaptive'))
         self.anchorInflAdaptiveCard.setVisible(on and fov_on and shrink == 'adaptive')
         self.anchorInflDynamicCard.setVisible(on and fov_on and shrink == 'dynamic')
 
     def _onAnchorEnableChanged(self, checked):
         self._setCfg('anchor_enabled', bool(checked))
-        self._updateAnchorVisibility()
-
-    def _onAnchorModeChanged(self, index):
-        if self._config and not self._isLoadingConfig and 0 <= index < len(_ANCHOR_MODES):
-            self._config.anchor_mode = _ANCHOR_MODES[index]
         self._updateAnchorVisibility()
 
     def _updateTrackingVisibility(self):
@@ -1004,9 +932,6 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
             card = getattr(self, attr)
             card.titleLabel.setText(t(key, title))
             card.contentLabel.setText(t(key + "_desc", desc))
-        for i, (key, default) in enumerate((("anchor_mode_velocity", "Velocity"),
-                                            ("anchor_mode_smoothed", "Smoothed"), ("anchor_mode_adaptive", "Adaptive"))):
-            self.anchorModeCombo.setItemText(i, t(key, default))
         self.advFovGroup.titleLabel.setText(t("advanced_fov", "Advanced FOV"))
         self.acqTrackGroup.titleLabel.setText(t("target_acq_tracking", "Target Acquisition & Tracking"))
         self.fovModeCard.titleLabel.setText(t("fov_shrink_mode", "Shrink Mode"))

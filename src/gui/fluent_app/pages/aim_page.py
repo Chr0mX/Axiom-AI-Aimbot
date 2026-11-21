@@ -56,8 +56,31 @@ _TUNING_TEXT = (
      "Keep aiming along the last velocity for a few missed frames"),
     ("stickyGapFramesCard", "sticky_gap_frames", "Gap Frames", None, ""),
 )
+
+# "disabled" (the master switch covers it) and "linear" (= Velocity with Acceleration 0) are retired;
+# config.migrate_anchor_settings() turns old values into these on load.
+_ANCHOR_MODES = ("velocity_accel", "smoothed", "adaptive")
+
+# Anchor Estimator cards (shared by Aim Lead's Anchor method and the Inference page's Box Prediction):
+# (attribute, title key, English title, English description) - one table for construction and retranslateUi().
+_ANCHOR_EST_TEXT = (
+    ("anchorModeCard", "anchor_mode", "Estimator Mode",
+     "Velocity: the current velocity, plus acceleration by the Acceleration setting (0% = velocity only). Smoothed: smooths velocity and acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes."),
+    ("anchorStrengthCard", "anchor_strength", "Estimator Strength",
+     "Scales the whole predicted movement (100% = full)"),
+    ("anchorSmoothingCard", "anchor_velocity_smoothing", "Estimator Smoothing",
+     "Higher = steadier but slower to react (Smoothed / Adaptive modes). Separate from Aim Step Smoothing and the FOV Anchor Smoothing."),
+    ("anchorAccelCard", "anchor_accel_comp", "Acceleration Compensation",
+     "How much of the estimated acceleration is applied. 0 = velocity only"),
+    ("anchorConfCard", "anchor_confidence_threshold", "Confidence Threshold",
+     "Below this prediction confidence nothing is extrapolated"),
+    ("anchorHistoryCard", "anchor_history_len", "Estimator History",
+     "How many recent detections the motion estimate uses (acceleration needs 4 or more). Separate from the Aim Lead History."),
+    ("anchorMaxDistCard", "anchor_max_distance_pct", "Maximum Prediction Distance",
+     "Longest predicted movement, as a % of the FOV size. 0 = no limit"),
+)
 _PREDICTION_METHOD_DESC = ("Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; "
-                           "tuned under Anchor Box Prediction on the Inference page)")
+                           "tuned under Anchor Estimator below)")
 
 
 class _AimPointPreview(QWidget):
@@ -1366,6 +1389,39 @@ class AimPage(BasePage):
             self.mathGroup.addSettingCard(card)
         self.addContent(self.mathGroup)
 
+        # Anchor Estimator: the one home for the tuning shared by the Aim Lead "Anchor" method and the
+        # Inference page's Box Prediction (it used to live on the Inference page).
+        self.anchorEstGroup = SettingCardGroup(t("anchor_estimator", "Anchor Estimator"), self.scrollWidget)
+        _est = {a: (k, ti, de) for a, k, ti, de in _ANCHOR_EST_TEXT}
+
+        def _et(attr):
+            k, ti, de = _est[attr]
+            return t(k, ti), t(k + "_desc", de)
+
+        self.anchorModeCombo = ComboBox()
+        self.anchorModeCombo.addItems([
+            t("anchor_mode_velocity", "Velocity"),
+            t("anchor_mode_smoothed", "Smoothed"),
+            t("anchor_mode_adaptive", "Adaptive"),
+        ])
+        self.anchorModeCombo.setMinimumWidth(180)
+        self.anchorModeCard = SettingCard(FluentIcon.ROBOT, *_et("anchorModeCard"), self.anchorEstGroup)
+        self.anchorModeCard.hBoxLayout.addWidget(self.anchorModeCombo, 0)
+        self.anchorModeCard.hBoxLayout.addSpacing(16)
+        for attr, icon, lo, hi, suffix in (
+                ("anchorStrengthCard", FluentIcon.SPEED_HIGH, 0, 150, "%"),
+                ("anchorSmoothingCard", FluentIcon.SYNC, 0, 100, "%"),
+                ("anchorAccelCard", FluentIcon.SPEED_HIGH, 0, 100, "%"),
+                ("anchorConfCard", FluentIcon.CERTIFICATE, 0, 100, "%"),
+                ("anchorHistoryCard", FluentIcon.HISTORY, 4, 12, ""),
+                ("anchorMaxDistCard", FluentIcon.ZOOM, 0, 100, "%")):
+            title, desc = _et(attr)
+            setattr(self, attr, SliderSpinCard(icon, title, lo, hi, suffix=suffix, description=desc, parent=self.anchorEstGroup))
+        for card in (self.anchorModeCard, self.anchorStrengthCard, self.anchorSmoothingCard, self.anchorAccelCard,
+                     self.anchorConfCard, self.anchorHistoryCard, self.anchorMaxDistCard):
+            self.anchorEstGroup.addSettingCard(card)
+        self.addContent(self.anchorEstGroup)
+
         # Target Area (shared aim-point geometry + auto-fire hit zone)
         self.targetAreaGroup.addSettingCard(self.aimPreview)
         self.targetAreaGroup.addSettingCard(self.customYCard)
@@ -1397,6 +1453,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             camMotionCompSizeCard headWidthCard headHeightCard bodyWidthCard adaptiveRatioRefHCard crouchAspectCard
             predictionLeadFramesCard captureTimestampsCard lsqFitCard velocityDeadzoneCard egoMotionCard
             egoScaleCard emaSmoothingCard emaAmountCard stickyGapCard stickyGapFramesCard
+            anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHistoryCard anchorMaxDistCard
             """.split())
 
     def _connectSignals(self):
@@ -1493,6 +1550,15 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.aimYOffsetCard.valueChanged.connect(self._onAimMathChanged)
         self.stickyGapCard.checkedChanged.connect(self._onAimMathChanged)
         self.stickyGapFramesCard.valueChanged.connect(self._onAimMathChanged)
+
+        # Anchor Estimator
+        self.anchorModeCombo.currentIndexChanged.connect(self._onAnchorModeChanged)
+        self.anchorStrengthCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_strength', v / 100.0))
+        self.anchorSmoothingCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_velocity_smoothing', v / 100.0))
+        self.anchorAccelCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_accel_comp', v / 100.0))
+        self.anchorConfCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_confidence_threshold', v / 100.0))
+        self.anchorHistoryCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_history_len', int(v)))
+        self.anchorMaxDistCard.valueChanged.connect(lambda v: self._setAnchorCfg('anchor_max_distance_pct', float(v)))
         self.predictionHorizonCard.valueChanged.connect(self._onPredictionHorizonChanged)
         self.predictionMaxVelCard.valueChanged.connect(self._onPredictionMaxVelChanged)
         self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
@@ -1637,6 +1703,14 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             self.aimYOffsetCard.setValue(int(round(float(getattr(self._config, 'aim_y_offset_frac', 0.0)) * 100)))
             self.stickyGapCard.setChecked(bool(getattr(self._config, 'sticky_gap_extrapolate', False)))
             self.stickyGapFramesCard.setValue(int(getattr(self._config, 'sticky_gap_frames', 3)))
+            amode = str(getattr(self._config, 'anchor_mode', 'adaptive'))
+            self.anchorModeCombo.setCurrentIndex(_ANCHOR_MODES.index(amode) if amode in _ANCHOR_MODES else 2)
+            self.anchorStrengthCard.setValue(int(round(float(getattr(self._config, 'anchor_strength', 1.0)) * 100)))
+            self.anchorSmoothingCard.setValue(int(round(float(getattr(self._config, 'anchor_velocity_smoothing', 0.4)) * 100)))
+            self.anchorAccelCard.setValue(int(round(float(getattr(self._config, 'anchor_accel_comp', 0.35)) * 100)))
+            self.anchorConfCard.setValue(int(round(float(getattr(self._config, 'anchor_confidence_threshold', 0.35)) * 100)))
+            self.anchorHistoryCard.setValue(int(getattr(self._config, 'anchor_history_len', 6)))
+            self.anchorMaxDistCard.setValue(int(round(float(getattr(self._config, 'anchor_max_distance_pct', 25.0)))))
             self._updateAimTuningVisibility()
 
             # Target Area
@@ -2278,7 +2352,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.predictionMethodCard.setVisible(pred_on)
         # Rolling uses a frame lead; Velocity/EMA/Anchor use the time horizon, which
         # Adaptive Lead stretches (ai_aiming skips it for Rolling). Anchor's own tuning
-        # (mode, strength, smoothing, ...) is the Anchor Prediction group on the Inference page.
+        # (mode, strength, smoothing, ...) is the Anchor Estimator group below.
         self.predictionLeadFramesCard.setVisible(pred_on and method == "Rolling")
         self.predictionAdaptiveLeadCard.setVisible(pred_on and method != "Rolling")
         # Rolling uses a frame count, so timestamps don't apply to it; the
@@ -2310,6 +2384,29 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
                      self.pidYReduceSettleCard, self.pidYReduceVelCard):
             card.setVisible(y_on)
         self.targetPriorityWeightCard.setVisible(self.targetPriorityModeCombo.currentText() == "Composite")
+        self._updateAnchorEstimatorVisibility(pred_on, method)
+
+    def _updateAnchorEstimatorVisibility(self, pred_on, method):
+        """The estimator tuning shows while something uses it: Box Prediction (Inference page, read from
+        config) or the Aim Lead with the Anchor method. Hidden, never greyed; values are kept."""
+        box_on = bool(getattr(self._config, 'anchor_enabled', False)) if self._config else False
+        shared = box_on or (pred_on and method == "Anchor")
+        self.anchorEstGroup.setVisible(shared)
+        idx = self.anchorModeCombo.currentIndex()
+        mode = _ANCHOR_MODES[idx] if 0 <= idx < len(_ANCHOR_MODES) else 'adaptive'
+        for card in (self.anchorModeCard, self.anchorStrengthCard, self.anchorAccelCard, self.anchorConfCard,
+                     self.anchorHistoryCard, self.anchorMaxDistCard):
+            card.setVisible(shared)
+        self.anchorSmoothingCard.setVisible(shared and mode in ('smoothed', 'adaptive'))
+
+    def _setAnchorCfg(self, name, value):
+        if self._config and not self._isLoadingConfig:
+            setattr(self._config, name, value)
+
+    def _onAnchorModeChanged(self, index):
+        if self._config and not self._isLoadingConfig and 0 <= index < len(_ANCHOR_MODES):
+            self._config.anchor_mode = _ANCHOR_MODES[index]
+        self._updateAimTuningVisibility()
 
     def _onPredictionEnableChanged(self, checked):
         if self._config:
@@ -2534,6 +2631,14 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             if desc_key:
                 card.contentLabel.setText(t(desc_key, desc))
         self.targetAreaGroup.titleLabel.setText(t("target_point_tracking", "Target Point Tracking"))
+        self.anchorEstGroup.titleLabel.setText(t("anchor_estimator", "Anchor Estimator"))
+        for attr, key, title, desc in _ANCHOR_EST_TEXT:
+            card = getattr(self, attr)
+            card.titleLabel.setText(t(key, title))
+            card.contentLabel.setText(t(key + "_desc", desc))
+        for i, (key, default) in enumerate((("anchor_mode_velocity", "Velocity"),
+                                            ("anchor_mode_smoothed", "Smoothed"), ("anchor_mode_adaptive", "Adaptive"))):
+            self.anchorModeCombo.setItemText(i, t(key, default))
         self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Aim Lead Method"))
         self.predictionMethodCard.contentLabel.setText(t("prediction_method_desc", _PREDICTION_METHOD_DESC))
         self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Aim Lead"))
