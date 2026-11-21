@@ -154,8 +154,10 @@ lock-association layer above): picking the method is enough, and the `anchor_*` 
 * **Shared tuning:** `anchor_mode`, `anchor_strength`,
   `anchor_velocity_smoothing`, `anchor_accel_comp`, `anchor_confidence_threshold`,
   `anchor_history_len`, `anchor_max_distance_pct`; `prediction_max_velocity` is the jump gate.
-  `anchor_horizon_ms` and the FOV influences only matter for the FOV layer. The Inference page
-  shows the shared cards while Anchor Prediction is on **or** the method is Anchor.
+  `anchor_horizon_ms` and the FOV influences only matter for the FOV layer. The shared tuning lives in
+  one place, the **Anchor Estimator** group on the Aim page (Aim tab in Web Control), shown while Anchor
+  Prediction is on **or** the method is Anchor; the Inference page keeps only the FOV-layer controls
+  and a pointer to it.
 * **Safeguards** come with the estimator: stationary dead-zone, noise-gated velocity /
   acceleration, confidence fade-in, gap coasting (a couple of missed frames keep the lead, a long
   gap restarts), restart on a teleport above `prediction_max_velocity`.
@@ -188,8 +190,12 @@ Stored under `tracking.anchor.*` (aim-preset eligible) and `display.show_anchor_
 | `anchor_fov_influence_dynamic` | 50 % | 0-100 % |
 | `show_anchor_debug` | off | - |
 
-Qt: Inference page -> **Anchor Prediction**; debug toggle on the Visuals page. Web Control:
-Inference tab and Visuals tab. The FOV layer is separate from the classic aim-lead predictors
+Qt: Inference page -> **Anchor Box Prediction** (Enable Box Prediction, **FOV Prediction Horizon**, the FOV
+influence of the current shrink mode) and Aim page -> **Anchor Estimator** (mode, strength, smoothing,
+acceleration, confidence, history, maximum distance); debug toggle on the Visuals page. Web Control: the
+same split between the Inference and Aim tabs, plus the Visuals tab. Names: the aim-lead history is
+**Aim Lead History**, the estimator's is **Estimator History**; **Aim Step Smoothing** (mouse step),
+**Estimator Smoothing** and **FOV Anchor Smoothing** (Anchor FOV) are three different layers. The FOV layer is separate from the classic aim-lead predictors
 (`prediction_*`, ~10 ms, lead the *aim point*); they share only `prediction_max_velocity` - plus the
 `anchor_*` tuning when the aim-lead method is **Anchor** (previous section).
 

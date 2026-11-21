@@ -1068,6 +1068,17 @@ class AimPage(BasePage):
                 getattr(FluentIcon, _icon), t(_key, _title), _lo, _hi, suffix=_suffix,
                 description=t(_key + "_desc", _desc), parent=self.trackingGroup))
 
+        self.stickyGapCard = SwitchSettingCard(
+            FluentIcon.RINGER,
+            t("sticky_gap_extrapolate", "Gap Extrapolation"),
+            t("sticky_gap_extrapolate_desc", "Keep aiming along the last velocity for a few missed frames"),
+            parent=self.trackingGroup,
+        )
+        self.stickyGapFramesCard = SliderLabelCard(
+            FluentIcon.HISTORY, t("sticky_gap_frames", "Gap Frames"),
+            1, 8, parent=self.trackingGroup,
+        )
+
         self.kalmanEnableCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("kalman_enabled_label", "Kalman Filter"),
@@ -1400,16 +1411,6 @@ class AimPage(BasePage):
         self.aimYOffsetCard = SliderLabelCard(
             FluentIcon.MOVE, t("aim_y_offset_frac", "Aim Y Offset"),
             -100, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
-        )
-        self.stickyGapCard = SwitchSettingCard(
-            FluentIcon.RINGER,
-            t("sticky_gap_extrapolate", "Gap Extrapolation"),
-            t("sticky_gap_extrapolate_desc", "Keep aiming along the last velocity for a few missed frames"),
-            parent=self.trackingGroup,
-        )
-        self.stickyGapFramesCard = SliderLabelCard(
-            FluentIcon.HISTORY, t("sticky_gap_frames", "Gap Frames"),
-            1, 8, parent=self.trackingGroup,
         )
         for card in (
             self.predictionMethodCard, self.predictionLeadFramesCard, self.predictionAdaptiveLeadCard,

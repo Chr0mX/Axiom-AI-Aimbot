@@ -92,3 +92,24 @@ def test_web_order_follows_the_plan():
              "sticky_gap_extrapolate", "sticky_gap_frames"]
     pos = [html.index('id="aim-%s"' % f) for f in order]
     assert pos == sorted(pos)
+
+
+@pytest.mark.parametrize("page", [AIM_PAGE, INFERENCE_PAGE], ids=lambda p: p.name)
+def test_cards_are_built_before_they_are_added_to_a_group(page):
+    """Moving a card between groups once added `self.stickyGapCard` to a group before the line that builds it,
+    which raises AttributeError when the page is constructed (Qt can't run here, so check the source order)."""
+    tree = ast.parse(page.read_text(encoding="utf-8"))
+    for fn in (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)):
+        assigned = {}
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Assign):
+                for t in node.targets:
+                    if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == "self":
+                        assigned.setdefault(t.attr, node.lineno)
+        for node in ast.walk(fn):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("addSettingCard", "addContent")):
+                for a in node.args:
+                    if isinstance(a, ast.Attribute) and isinstance(a.value, ast.Name) and a.value.id == "self" \
+                            and a.attr in assigned:
+                        assert assigned[a.attr] < node.lineno, (page.name, fn.name, a.attr, node.lineno)
