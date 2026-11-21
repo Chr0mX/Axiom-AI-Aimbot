@@ -71,6 +71,9 @@ html, body {
 #cfg-toggle.faded {
   opacity: 0;
 }
+@media (pointer: coarse) {                 /* touch screens: a finger-sized settings button */
+  #cfg-toggle { width: 44px; height: 44px; font-size: 20px; }
+}
 
 /* ── Settings panel ───────────────────────────────────────────── */
 #cfg-panel {
@@ -86,6 +89,8 @@ html, body {
   z-index: 20;
   display: none;
   user-select: none;
+  max-height: calc(100vh - 80px);          /* never taller than the screen: scroll inside instead */
+  overflow-y: auto;
 }
 #cfg-panel.open { display: block; }
 
@@ -93,8 +98,13 @@ html, body {
   font-size: 13px;
   font-weight: bold;
   color: var(--accent);
-  margin-bottom: 10px;
+  margin-bottom: 4px;
   letter-spacing: 0.04em;
+}
+.cfg-note {
+  font-size: 10px;
+  color: var(--ink-faint, rgba(255, 255, 255, 0.5));
+  margin-bottom: 10px;
 }
 
 .cfg-section {

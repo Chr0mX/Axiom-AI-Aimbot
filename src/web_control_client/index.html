@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=20">
+  <link rel="stylesheet" href="styles.css?v=21">
 </head>
 <body>
   <div class="app">
@@ -109,24 +109,24 @@
           <div class="card-title">Quick Presets</div>
           <div class="field-group">
             <div class="row">
-              <select id="preset-slot-0" data-slot="0"><option value="">— unassigned —</option></select>
-              <button id="preset-slot-load-0" data-slot="0" disabled>Load</button>
+              <select id="preset-slot-0" data-slot="0" aria-label="Quick preset 1"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-0" data-slot="0" aria-label="Load quick preset 1" disabled>Load</button>
             </div>
             <div class="row">
-              <select id="preset-slot-1" data-slot="1"><option value="">— unassigned —</option></select>
-              <button id="preset-slot-load-1" data-slot="1" disabled>Load</button>
+              <select id="preset-slot-1" data-slot="1" aria-label="Quick preset 2"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-1" data-slot="1" aria-label="Load quick preset 2" disabled>Load</button>
             </div>
             <div class="row">
-              <select id="preset-slot-2" data-slot="2"><option value="">— unassigned —</option></select>
-              <button id="preset-slot-load-2" data-slot="2" disabled>Load</button>
+              <select id="preset-slot-2" data-slot="2" aria-label="Quick preset 3"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-2" data-slot="2" aria-label="Load quick preset 3" disabled>Load</button>
             </div>
             <div class="row">
-              <select id="preset-slot-3" data-slot="3"><option value="">— unassigned —</option></select>
-              <button id="preset-slot-load-3" data-slot="3" disabled>Load</button>
+              <select id="preset-slot-3" data-slot="3" aria-label="Quick preset 4"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-3" data-slot="3" aria-label="Load quick preset 4" disabled>Load</button>
             </div>
             <div class="row">
-              <select id="preset-slot-4" data-slot="4"><option value="">— unassigned —</option></select>
-              <button id="preset-slot-load-4" data-slot="4" disabled>Load</button>
+              <select id="preset-slot-4" data-slot="4" aria-label="Quick preset 5"><option value="">— unassigned —</option></select>
+              <button id="preset-slot-load-4" data-slot="4" aria-label="Load quick preset 5" disabled>Load</button>
             </div>
           </div>
           <div class="hint">Pick a preset per slot, then <b>Load</b> for an instant swap — no confirmation prompt.</div>
@@ -139,14 +139,14 @@
 
           <div class="deck" data-label="Active model">
           <div class="field-group">
-            <input type="text" id="model-search-input" placeholder="Search models…">
+            <input type="text" id="model-search-input" placeholder="Search models…" aria-label="Search models">
             <div class="row model-select-row">
-              <select id="model-select"></select>
+              <select id="model-select" aria-label="Model"></select>
               <select id="model-precision-select" title="TensorRT precision for this model">
                 <option value="fp32">FP32</option>
                 <option value="fp16">FP16</option>
               </select>
-              <select id="backend-select">
+              <select id="backend-select" aria-label="Inference backend">
                 <option value="auto">Auto</option>
                 <option value="tensorrt">TensorRT</option>
                 <option value="directml">DirectML</option>
@@ -176,7 +176,7 @@
           </div>
 
           <div class="field-card stacked">
-            <div class="row" style="justify-content: space-between;">
+            <div class="row row-split">
               <div class="field-title">Model Notes</div>
               <button id="model-notes-edit-btn">Edit</button>
             </div>
@@ -1576,7 +1576,7 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Aim Lead</div>
-                <div class="field-desc">Extrapolate target position forward by the prediction horizon.</div>
+                <div class="field-desc">Aim slightly ahead of a moving target: extrapolates its position forward by the Aim Lead Horizon.</div>
               </div>
               <div class="field-control">
                 <label class="switch">
@@ -1964,14 +1964,14 @@
           <div class="deck" data-label="Aim &amp; device">
           <div class="row control-row">
             <label class="switch">
-              <input type="checkbox" id="always-aim-toggle">
+              <input type="checkbox" id="always-aim-toggle" aria-label="Always Aim">
               <span class="slider"></span>
             </label>
             <div class="control-label">Always Aim</div>
           </div>
           <div class="row control-row">
             <label class="switch">
-              <input type="checkbox" id="makcu-toggle">
+              <input type="checkbox" id="makcu-toggle" aria-label="MAKCU connected">
               <span class="slider"></span>
             </label>
             <div class="control-label">MAKCU Connect</div>
@@ -2727,7 +2727,7 @@
               </div>
             </div>
             <div class="field-card stacked" id="vis-web-esp-connect-card">
-              <div class="row" style="justify-content: space-between;">
+              <div class="row row-split">
                 <div class="field-title">Connect</div>
                 <button id="vis-web-esp-open-btn">Open</button>
               </div>
@@ -2746,14 +2746,14 @@
           <section class="module">
           <div class="field-group-title">Config (full settings snapshot)</div>
           <div class="field-card stacked">
-            <div class="row" style="justify-content: space-between;">
+            <div class="row row-split">
               <div class="field-title">Configs</div>
               <button id="full-configs-refresh-btn">Refresh</button>
             </div>
             <select id="full-configs-select" class="config-listbox" size="8"></select>
           </div>
 
-          <div class="row control-row" style="flex-wrap: wrap;">
+          <div class="row control-row row-wrap">
             <button id="full-configs-create-btn">Create</button>
             <button id="full-configs-load-btn">Load</button>
             <button id="full-configs-save-btn">Save</button>
@@ -2771,14 +2771,14 @@
           <section class="module">
           <div class="field-group-title">Preset (aim-only settings)</div>
           <div class="field-card stacked">
-            <div class="row" style="justify-content: space-between;">
+            <div class="row row-split">
               <div class="field-title">Presets</div>
               <button id="configs-refresh-btn">Refresh</button>
             </div>
             <select id="configs-select" class="config-listbox" size="8"></select>
           </div>
 
-          <div class="row control-row" style="flex-wrap: wrap;">
+          <div class="row control-row row-wrap">
             <button id="configs-create-btn">Create</button>
             <button id="configs-load-btn">Load</button>
             <button id="configs-save-btn">Save</button>
@@ -2920,6 +2920,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>

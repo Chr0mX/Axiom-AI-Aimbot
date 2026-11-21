@@ -21,7 +21,7 @@
 :root {
   /* Sentinel: app.js only builds the custom dropdowns when this exact
      stylesheet version loaded (see enhanceSelects()). */
-  --axiom-css: 20;
+  --axiom-css: 21;
   color-scheme: dark;
 
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
@@ -223,6 +223,8 @@ body:not(.show-advanced) .main .field-card[data-advanced] { display: none !impor
 
 .row { display: flex; gap: 8px; align-items: center; }
 .control-row { align-items: center; }
+.row-split { justify-content: space-between; }
+.row-wrap { flex-wrap: wrap; }
 .control-label { color: var(--ink-soft); }
 
 /* ---------------------------------------------------------------------
@@ -898,3 +900,12 @@ body.searching .field-group.collapsed { display: flex; }
 /* LAN speed test result block (Other tab) */
 .speed-result { white-space: pre-line; font-variant-numeric: tabular-nums; color: var(--ink); }
 .speed-result[hidden] { display: none; }
+
+/* Touch screens: every control gets a finger-sized hit area (WCAG 2.5.5 / platform guidance ~40-44px)
+   without changing how the page looks with a mouse. */
+@media (pointer: coarse) {
+  button, .tab, select, input[type="number"], input[type="text"], input[type="password"], input[type="search"], .dd-trigger {
+    min-height: 40px;
+  }
+  .switch::after { content: ""; position: absolute; inset: -9px -4px; }     /* wider tap area than the 22px track */
+}

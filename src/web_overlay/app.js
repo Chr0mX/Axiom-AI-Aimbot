@@ -58,7 +58,8 @@
     try { return Object.assign({}, CFG_DEFAULTS, JSON.parse(localStorage.getItem(LS_CFG) || "{}")); }
     catch { return Object.assign({}, CFG_DEFAULTS); }
   }
-  function saveCfg() { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); }
+  // Storage can be blocked (private window, site data off): the HUD must keep working without it.
+  function saveCfg() { try { localStorage.setItem(LS_CFG, JSON.stringify(cfg)); } catch {} }
 
   let cfg = loadCfg();
 
@@ -70,7 +71,7 @@
     if (typeof p.y === "number") hudY = p.y;
   } catch {}
 
-  function savePos() { localStorage.setItem(LS_POS, JSON.stringify({ x: hudX, y: hudY })); }
+  function savePos() { try { localStorage.setItem(LS_POS, JSON.stringify({ x: hudX, y: hudY })); } catch {} }
 
   // Last drawn HUD bounding box (for drag hit-test)
   let hudRect = { x: 0, y: 0, w: 0, h: 0 };

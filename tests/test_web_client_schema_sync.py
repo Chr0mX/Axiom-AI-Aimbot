@@ -115,3 +115,58 @@ def test_percent_round_trip_stores_the_fraction():
     assert res["ok"] and cfg.head_width_ratio == pytest.approx(0.45)
     res = wcs.apply_tab_settings(cfg, "aim", {"head_width_ratio": 5})          # below the app's 10 % minimum
     assert cfg.head_width_ratio == pytest.approx(0.10)
+
+
+def test_every_control_outside_a_field_card_has_an_accessible_name():
+    """Controls inside a .field-card are named at runtime from the card's title (initUiEnhancements); every
+    other interactive control — sidebar, decks, toolbars — must carry its own name in the markup."""
+    from html.parser import HTMLParser
+
+    problems = []
+
+    class Scan(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack, self.labels_for, self.controls, self.btn_text = [], set(), [], []
+            self.open_btn = None
+
+        def handle_starttag(self, tag, attrs):
+            a = dict(attrs)
+            in_card = any(t == "div" and "field-card" in (c or "") for t, c in self.stack)
+            if tag == "label" and a.get("for"):
+                self.labels_for.add(a["for"])
+            if tag in ("input", "select", "textarea", "button") and a.get("type") not in ("hidden", "file", "radio"):
+                self.controls.append((tag, a, in_card))
+                if tag == "button":
+                    self.open_btn = len(self.controls) - 1
+                    self.btn_text.append("")
+            if tag not in ("input", "br", "img", "meta", "link"):
+                self.stack.append((tag, a.get("class")))
+
+        def handle_endtag(self, tag):
+            if tag == "button":
+                self.open_btn = None
+            for i in range(len(self.stack) - 1, -1, -1):
+                if self.stack[i][0] == tag:
+                    del self.stack[i:]
+                    break
+
+        def handle_data(self, data):
+            if self.open_btn is not None:
+                self.btn_text[-1] += data
+
+    scan = Scan()
+    scan.feed(HTML)
+    btn_i = 0
+    for tag, a, in_card in scan.controls:
+        text = ""
+        if tag == "button":
+            text = scan.btn_text[btn_i].strip()
+            btn_i += 1
+        if in_card or a.get("data-key"):
+            continue
+        named = a.get("aria-label") or a.get("aria-labelledby") or a.get("title") or a.get("placeholder") or text \
+            or a.get("id") in scan.labels_for
+        if not named:
+            problems.append((tag, a.get("id") or a.get("name")))
+    assert not problems, problems

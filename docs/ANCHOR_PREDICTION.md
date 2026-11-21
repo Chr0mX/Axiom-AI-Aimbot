@@ -8,11 +8,11 @@ moment from now, and lets that prediction
    re-locks / target switches).
 
 The same estimator can also lead the **aim point** itself: **Anchor** is a fourth
-*Prediction Method* on the Aim page (see [Aim-lead method](#aim-lead-method-prediction-method-anchor)
+*Aim Lead Method* on the Aim page (see [Aim-lead method](#aim-lead-method-aim-lead-method-anchor)
 below), independent of the master switch.
 
 It never replaces the existing tracker, target selection or FOV logic. With
-**Enable Anchor Prediction** off (the default) nothing runs and the app behaves exactly as
+**Enable Box Prediction** off (the default) nothing runs and the app behaves exactly as
 before (this is enforced by a golden test against the original code).
 
 Code: `src/core/anchor_prediction.py` (pure Python, no numpy/Qt). Hooks live in
@@ -133,11 +133,11 @@ unchanged. With influence 0 (or Anchor off) the corrections are exactly 0.
 predicted box)`. It can only add matches, never remove them, and is `None` (no change) unless
 the prediction is valid.
 
-## Aim-lead method (Prediction Method: Anchor)
+## Aim-lead method (Aim Lead Method: Anchor)
 
-Aim page -> Advanced Aim Tuning -> **Prediction Method** is Velocity / EMA / Rolling / **Anchor**.
+Aim page -> Advanced Aim Tuning -> **Aim Lead Method** is Velocity / EMA / Rolling / **Anchor**.
 With Anchor the aim point is led by this estimator instead of the single-purpose velocity
-predictors. It is **independent of "Enable Anchor Prediction"** (that switch only governs the FOV /
+predictors. It is **independent of "Enable Box Prediction"** (that switch only governs the FOV /
 lock-association layer above): picking the method is enough, and the `anchor_*` tuning is shared.
 
 * **Own track.** `LoopState.aim_anchor` (one `AnchorTrack`) is fed the locked box shifted by the
