@@ -220,7 +220,6 @@ _FIELD_MAP = {
     'sticky_gap_extrapolate':     'tracking.sticky_lock.gap_extrapolate',
     'sticky_gap_frames':          'tracking.sticky_lock.gap_frames',
     'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
-    'lock_decay_frames':          'tracking.sticky_lock.decay_frames',
     'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
     'lock_persistence_ms':        'tracking.sticky_lock.persistence_ms',
     'lost_target_timeout_ms':     'tracking.sticky_lock.lost_timeout_ms',
@@ -952,10 +951,9 @@ class Config:
 
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
-        self.lock_decay_frames: int = 15
         self.lock_iou_threshold: float = 0.3
-        # Time-based tracking (replaces counting frames; lock_decay_frames is
-        # kept only so old files load, and is converted in from_dict()).
+        # Time-based tracking (replaces counting frames). The old `tracking.sticky_lock.decay_frames`
+        # key is only read as a migration source in from_dict() and is no longer written.
         self.lock_persistence_ms: int = 250       # grace period: aim state held across missed detections
         self.lost_target_timeout_ms: int = 1500   # unseen this long -> lock released, target forgotten
         self.min_lock_duration_ms: int = 150      # a lock can't be switched away from sooner than this

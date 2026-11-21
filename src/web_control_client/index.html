@@ -169,7 +169,7 @@
 
           <div class="modules">
           <section class="module">
-            <div class="field-group-title module-title-only">Model Details</div>
+            <div class="field-group-title">Model Details</div>
           <div class="field-card stacked">
             <div class="field-title">Model Info</div>
             <div class="field-readonly" id="model-info-text">—</div>
@@ -499,11 +499,11 @@
 
           <div class="modules">
           <section class="module">
-          <div class="field-group-title">FOV &amp; Detect Range</div>
+          <div class="field-group-title">FOV &amp; Detection Range</div>
           <div class="field-group">
             <div class="micro-grid" data-cols="2" data-kind="pair">
             <div class="field-card">
-              <div class="field-info"><div class="field-title">FOV Size</div></div>
+              <div class="field-info"><div class="field-title">FOV Width</div></div>
               <div class="field-control">
                 <input type="number" id="inf-fov_size" data-key="fov_size" data-type="number" min="50" max="500" step="1">
                 <span class="field-slider-value">px</span>
@@ -555,7 +555,7 @@
             <div class="field-card" id="inf-fov-min-size-card">
               <div class="field-info">
                 <div class="field-title">FOV Min Size</div>
-                <div class="field-desc">How much to shrink the FOV to, as a % of FOV Size/Height, while a target is locked.</div>
+                <div class="field-desc">How much to shrink the FOV to, as a % of FOV Width/Height, while a target is locked.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-fov_min_size_pct" data-key="fov_min_size_pct" data-type="number" min="1" max="100" step="1">
@@ -633,7 +633,7 @@
             <div class="field-card" id="inf-fov-retention-pct-card">
               <div class="field-info">
                 <div class="field-title">Retention FOV Size</div>
-                <div class="field-desc">How far outside the shrunk FOV a lock is kept, as % of FOV Size/Height. 100% = the full original FOV.</div>
+                <div class="field-desc">How far outside the shrunk FOV a lock is kept, as % of FOV Width/Height. 100% = the full original FOV.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-fov_retention_pct" data-key="fov_retention_pct" data-advanced="1" data-type="number" min="100" max="400" step="5">
@@ -692,7 +692,7 @@
             </div>
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">Detect Range Size</div>
+                <div class="field-title">Detection Range</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-detect_range_size" data-key="detect_range_size" data-type="number" min="100" max="1080" step="1">
@@ -703,7 +703,7 @@
           </section>
 
           <section class="module hidden" id="inf-afov-sec-anchor">
-          <div class="field-group-title">Anchor FOV · Anchor</div>
+          <div class="field-group-title">Anchor FOV: Anchor</div>
           <div class="field-group">
             <div class="field-card" id="inf-afov-source-card">
               <div class="field-info">
@@ -755,7 +755,7 @@
           </section>
 
           <section class="module hidden" id="inf-afov-sec-move">
-          <div class="field-group-title">Anchor FOV · Movement</div>
+          <div class="field-group-title">Anchor FOV: Movement</div>
           <div class="field-group">
             <div class="field-card" id="inf-afov-follow-card">
               <div class="field-info">
@@ -791,11 +791,11 @@
           </section>
 
           <section class="module hidden" id="inf-afov-sec-pred">
-          <div class="field-group-title">Anchor FOV · Prediction</div>
+          <div class="field-group-title">Anchor FOV: Look-ahead</div>
           <div class="field-group">
             <div class="field-card" id="inf-afov-pred-card">
               <div class="field-info">
-                <div class="field-title">Enable Prediction</div>
+                <div class="field-title">Enable Look-ahead</div>
                 <div class="field-desc">Lead the anchor by the tracker's velocity so the FOV arrives where the target is going. Off by default; fades out by itself when confidence drops.</div>
               </div>
               <div class="field-control">
@@ -807,7 +807,7 @@
             </div>
             <div class="field-card" id="inf-afov-predtime-card">
               <div class="field-info">
-                <div class="field-title">Prediction Time</div>
+                <div class="field-title">Look-ahead Time</div>
                 <div class="field-desc">How far ahead to look.</div>
               </div>
               <div class="field-control">
@@ -819,7 +819,7 @@
           </section>
 
           <section class="module hidden" id="inf-afov-sec-lost">
-          <div class="field-group-title">Anchor FOV · Lost Anchor</div>
+          <div class="field-group-title">Anchor FOV: Lost Anchor</div>
           <div class="field-group">
             <div class="field-card" id="inf-afov-lostmode-card">
               <div class="field-info">
@@ -860,7 +860,7 @@
           </section>
 
           <section class="module hidden" id="inf-afov-sec-radius">
-          <div class="field-group-title">Anchor FOV · FOV</div>
+          <div class="field-group-title">Anchor FOV: Size</div>
           <div class="field-group">
             <div class="field-card" id="inf-afov-maxr-card">
               <div class="field-info">
@@ -888,11 +888,11 @@
           </section>
 
           <section class="module">
-          <div class="field-group-title">Anchor Prediction</div>
+          <div class="field-group-title">Anchor Box Prediction</div>
           <div class="field-group">
             <div class="field-card" id="inf-anchor-enable-card">
               <div class="field-info">
-                <div class="field-title">Enable Anchor Prediction</div>
+                <div class="field-title">Enable Box Prediction</div>
                 <div class="field-desc">Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before.</div>
               </div>
               <div class="field-control">
@@ -904,7 +904,7 @@
             </div>
             <div class="field-card" id="inf-anchor-mode-card">
               <div class="field-info">
-                <div class="field-title">Prediction Mode</div>
+                <div class="field-title">Box Prediction Mode</div>
                 <div class="field-desc">Velocity: the current velocity, plus acceleration by the Acceleration setting (0% = velocity only). Smoothed: smooths velocity and acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes.</div>
               </div>
               <div class="field-control">
@@ -917,7 +917,7 @@
             </div>
             <div class="field-card" id="inf-anchor-horizon-card">
               <div class="field-info">
-                <div class="field-title">Prediction Horizon</div>
+                <div class="field-title">Box Prediction Horizon</div>
                 <div class="field-desc">How far ahead to predict the box.</div>
               </div>
               <div class="field-control">
@@ -927,7 +927,7 @@
             </div>
             <div class="field-card" id="inf-anchor-strength-card">
               <div class="field-info">
-                <div class="field-title">Prediction Strength</div>
+                <div class="field-title">Box Prediction Strength</div>
                 <div class="field-desc">Scales the whole predicted movement (100% = full).</div>
               </div>
               <div class="field-control">
@@ -1036,10 +1036,10 @@
           </section>
 
           <section class="module">
-          <div class="field-group-title">General Parameters</div>
+          <div class="field-group-title">Detection Settings</div>
           <div class="field-group">
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Detect Interval</div></div>
+              <div class="field-info"><div class="field-title">Inference Interval</div></div>
               <div class="field-control">
                 <input type="number" id="inf-detect_interval" data-key="detect_interval" data-type="number" min="1" max="100" step="1">
                 <span class="field-slider-value">ms</span>
@@ -1330,7 +1330,7 @@
           <div class="field-group">
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">Humanization</div>
+                <div class="field-title">Enable Humanization</div>
                 <div class="field-desc">Perturb the final mouse output to look less robotic. Operates only on dx/dy — never touches detection or PID state.</div>
               </div>
               <div class="field-control">
@@ -1575,7 +1575,7 @@
           <div class="field-group">
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">Velocity Prediction</div>
+                <div class="field-title">Aim Lead</div>
                 <div class="field-desc">Extrapolate target position forward by the prediction horizon.</div>
               </div>
               <div class="field-control">
@@ -1586,7 +1586,7 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Prediction Horizon</div></div>
+              <div class="field-info"><div class="field-title">Aim Lead Horizon</div></div>
               <div class="field-control">
                 <input type="number" id="aim-prediction_horizon_ms" data-key="prediction_horizon_ms" data-type="number" min="5" max="50" step="1">
                 <span class="field-slider-value">ms</span>
@@ -1594,8 +1594,8 @@
             </div>
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">Prediction Method</div>
-                <div class="field-desc">Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; tuned under Anchor Prediction on the Inference tab)</div>
+                <div class="field-title">Aim Lead Method</div>
+                <div class="field-desc">Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; tuned under Anchor Box Prediction on the Inference tab)</div>
               </div>
               <div class="field-control">
                 <select id="aim-prediction_method" data-key="prediction_method" data-type="choice">
@@ -2447,8 +2447,8 @@
             </div>
             <div class="field-card" id="vis-anchor-debug-card">
               <div class="field-info">
-                <div class="field-title">Anchor Prediction Debug</div>
-                <div class="field-desc">Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Prediction on the Inference page).</div>
+                <div class="field-title">Anchor Box Debug</div>
+                <div class="field-desc">Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Box Prediction on the Inference page).</div>
               </div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="vis-show_anchor_debug" data-key="show_anchor_debug" data-type="bool"><span class="slider"></span></label>

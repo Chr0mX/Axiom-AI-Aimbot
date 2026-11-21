@@ -14,7 +14,7 @@ from qfluentwidgets import (
     CardWidget,
     SettingCardGroup,
     FluentIcon,
-    ComboBox, PrimaryPushButton, PushButton, SettingCard,
+    ComboBox, PushButton, SettingCard,
     InfoBar, InfoBarPosition, SearchLineEdit,
 )
 
@@ -258,7 +258,7 @@ class ModelPage(BasePage):
         self.inferenceBackendCard.hBoxLayout.addWidget(self.inferenceBackendCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.inferenceBackendCard.hBoxLayout.addSpacing(16)
 
-        self.openModelFolderBtn = PrimaryPushButton(t("open_model_folder"))
+        self.openModelFolderBtn = PushButton(t("open_model_folder"))
         self.openModelFolderCard = SettingCard(
             FluentIcon.FOLDER,
             t("open_model_folder"),
@@ -605,6 +605,14 @@ class ModelPage(BasePage):
         as modelCard's subtitle — toggling the fixed height back and forth
         the way SettingCard's own constructor would for content="" vs. a
         real string."""
+        if not self._all_model_files:
+            # Empty state: say what to do instead of showing an empty drop-down.
+            self.modelCard.contentLabel.setText(t(
+                "model_empty_hint",
+                "No .onnx models found. Put them in the Model folder (Open Model Folder below), then reopen this page."))
+            self.modelCard.contentLabel.show()
+            self.modelCard.setFixedHeight(70)
+            return
         if self._isTensorRtActive():
             precision = "FP16" if bool(getattr(self._config, "trt_fp16_enabled", False)) else "FP32"
             self.modelCard.contentLabel.setText(t(

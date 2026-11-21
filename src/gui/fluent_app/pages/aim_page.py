@@ -19,6 +19,7 @@ from qfluentwidgets import (
 from core.aim_coupling import click_method_for_move
 from core.paths import src_dir
 from ..components.combo_utils import reset_items
+from ..components.notify import notify
 from core.config import AIM_START_DELAY_MAX_MS
 
 from ..components.slider_spin_card import SliderLabelCard, SliderSpinCard
@@ -56,7 +57,7 @@ _TUNING_TEXT = (
     ("stickyGapFramesCard", "sticky_gap_frames", "Gap Frames", None, ""),
 )
 _PREDICTION_METHOD_DESC = ("Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; "
-                           "tuned under Anchor Prediction on the Inference page)")
+                           "tuned under Anchor Box Prediction on the Inference page)")
 
 
 class _AimPointPreview(QWidget):
@@ -755,7 +756,7 @@ class AimPage(BasePage):
 
         self.humanizationEnableCard = SwitchSettingCard(
             FluentIcon.PEOPLE,
-            t("humanization_enabled", "Humanization"),
+            t("humanization_enabled", "Enable Humanization"),
             t("humanization_desc", "Perturb the final mouse output to look less robotic. Operates only on dx/dy — never touches detection or PID state."),
             parent=self.humanizationGroup
         )
@@ -957,14 +958,14 @@ class AimPage(BasePage):
 
         self.predictionEnableCard = SwitchSettingCard(
             FluentIcon.RINGER,
-            t("prediction_enabled", "Velocity Prediction"),
-            t("prediction_desc", "Extrapolate target position forward by the prediction horizon."),
+            t("prediction_enabled", "Aim Lead"),
+            t("prediction_desc", "Aim slightly ahead of a moving target: extrapolates its position forward by the Aim Lead Horizon."),
             parent=self.trackingGroup
         )
 
         self.predictionHorizonCard = SliderLabelCard(
             FluentIcon.HISTORY,
-            t("prediction_horizon", "Prediction Horizon"),
+            t("prediction_horizon", "Aim Lead Horizon"),
             5, 50,
             format_func=lambda v: f"{v} ms",
             label_width=55,
@@ -1285,7 +1286,7 @@ class AimPage(BasePage):
         self.predictionMethodCombo.setMinimumWidth(130)
         self.predictionMethodCard = SettingCard(
             FluentIcon.HISTORY,
-            t("prediction_method", "Prediction Method"),
+            t("prediction_method", "Aim Lead Method"),
             t("prediction_method_desc", _PREDICTION_METHOD_DESC),
             self.mathGroup,
         )
@@ -1777,11 +1778,11 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             else:
                 com_port = self.comPortCombo.currentText()
                 if not com_port or com_port == t("no_com_port"):
-                    QMessageBox.warning(self, t("config_error"), t("no_com_port"))
+                    notify(self, "warning", t("config_error"), t("no_com_port"))
                     return
                 self._startArduinoConnect(com_port)
         except ImportError:
-            QMessageBox.warning(self, t("config_error"), "pyserial not installed.\npip install pyserial")
+            notify(self, "warning", t("config_error"), "pyserial not installed.\npip install pyserial")
 
     def _startArduinoConnect(self, com_port: str) -> None:
         """Run connect_arduino() on a background thread instead of blocking
@@ -1798,7 +1799,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
     def _onArduinoConnectFinished(self, ok: bool, com_port: str) -> None:
         self.arduinoConnectBtn.setEnabled(True)
         if not ok:
-            QMessageBox.warning(self, t("config_error"),
+            notify(self, "warning", t("config_error"),
                                 f"Arduino {t('disconnected')}: {com_port}")
         self._updateArduinoConnectionStatus()
 
@@ -1836,15 +1837,15 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
                 from win_utils.arduino_spoofer import spoof_arduino_board
                 success, boards_path = spoof_arduino_board()
                 if success:
-                    QMessageBox.information(self, t("spoof_success_title"),
+                    notify(self, "success", t("spoof_success_title"),
                                             t("spoof_success_msg").replace("\\n", "\n"))
                 else:
-                    QMessageBox.warning(self, t("spoof_error_title"),
+                    notify(self, "warning", t("spoof_error_title"),
                                         f"Spoof operation returned unsuccessful.\nFile: {boards_path}")
             except FileNotFoundError as e:
-                QMessageBox.warning(self, t("spoof_error_title"), str(e))
+                notify(self, "warning", t("spoof_error_title"), str(e))
             except Exception as e:
-                QMessageBox.critical(self, t("spoof_error_title"), f"Error: {e}")
+                notify(self, "error", t("spoof_error_title"), f"Error: {e}")
 
     def _onVerifySpoof(self):
         try:
@@ -1854,11 +1855,11 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
                 specific_port = self._config.arduino_com_port
             is_spoofed, message = verify_spoof(specific_port)
             if is_spoofed:
-                QMessageBox.information(self, t("verify_success_title"), message)
+                notify(self, "success", t("verify_success_title"), message)
             else:
-                QMessageBox.warning(self, t("verify_fail_title"), message)
+                notify(self, "warning", t("verify_fail_title"), message)
         except Exception as e:
-            QMessageBox.critical(self, t("verify_fail_title"), f"Error: {e}")
+            notify(self, "error", t("verify_fail_title"), f"Error: {e}")
 
     def _onTestHeart(self):
         import math as _math
@@ -1874,11 +1875,11 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             if not arduino_mouse.is_connected():
                 com_port = self._config.arduino_com_port if self._config else ""
                 if not com_port:
-                    QMessageBox.warning(self, t("test_heart_confirm_title"),
+                    notify(self, "warning", t("test_heart_confirm_title"),
                                         "Arduino not connected. Please set COM port first.")
                     return
                 if not arduino_mouse.connect(com_port):
-                    QMessageBox.warning(self, t("test_heart_confirm_title"),
+                    notify(self, "warning", t("test_heart_confirm_title"),
                                         f"Failed to connect to {com_port}.")
                     return
 
@@ -1934,7 +1935,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
                 connect_xbox()
             self._updateXboxConnectionStatus()
         except ImportError:
-            QMessageBox.warning(self, t("config_error"),
+            notify(self, "warning", t("config_error"),
                                  "vgamepad not installed.\npip install vgamepad\nInstall ViGEmBus driver.")
 
     def _updateXboxConnectionStatus(self):
@@ -1991,7 +1992,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
                 port = int(getattr(self._config, 'vigem_net_port', 5555))
                 token = str(getattr(self._config, 'vigem_net_token', '') or '')
                 if not host:
-                    QMessageBox.warning(self, "ViGEm Network", "Host is not configured.")
+                    notify(self, "warning", "ViGEm Network", "Host is not configured.")
                     return
                 connect_vigem_network(host, port, token, self._config)
             self._updateVigemConnectionStatus()
@@ -2479,7 +2480,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.pidYReduceVelCard.titleLabel.setText("Y Velocity Restore")
 
         self.humanizationGroup.titleLabel.setText(t("humanization", "Humanization"))
-        self.humanizationEnableCard.titleLabel.setText(t("humanization_enabled", "Humanization"))
+        self.humanizationEnableCard.titleLabel.setText(t("humanization_enabled", "Enable Humanization"))
         self.humanizationEnableCard.contentLabel.setText(t("humanization_desc", "Perturb the final mouse output to look less robotic. Operates only on dx/dy — never touches detection or PID state."))
         self.humanizationIntensityCard.titleLabel.setText(t("humanization_intensity", "Intensity"))
         self.humanizationIntensityCard.contentLabel.setText(t("humanization_intensity_desc", "0% = robotic precision, 100% = fully human-like. Scales every effect below."))
@@ -2533,11 +2534,11 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             if desc_key:
                 card.contentLabel.setText(t(desc_key, desc))
         self.targetAreaGroup.titleLabel.setText(t("target_point_tracking", "Target Point Tracking"))
-        self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Prediction Method"))
+        self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Aim Lead Method"))
         self.predictionMethodCard.contentLabel.setText(t("prediction_method_desc", _PREDICTION_METHOD_DESC))
-        self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
-        self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Extrapolate target position forward by the prediction horizon."))
-        self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Prediction Horizon"))
+        self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Aim Lead"))
+        self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Aim slightly ahead of a moving target: extrapolates its position forward by the Aim Lead Horizon."))
+        self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Aim Lead Horizon"))
         self.predictionMaxVelCard.titleLabel.setText(t("prediction_max_velocity", "Max Velocity Cap"))
         self.predictionMaxVelCard.contentLabel.setText(t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"))
         self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "History Frames"))

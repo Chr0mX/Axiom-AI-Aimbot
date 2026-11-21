@@ -458,7 +458,7 @@ class KeysPage(BasePage):
         self.toggleKeyCard.hBoxLayout.addSpacing(16)
 
         # === 自動射擊按鍵 ===
-        self.fireKeysGroup = SettingCardGroup(t("keys_and_auto_fire"), self.scrollWidget)
+        self.fireKeysGroup = SettingCardGroup(t("auto_fire_keys_group", "Auto-Fire Keys"), self.scrollWidget)
 
         # 自動射擊鍵 1
         self.fireKey1Btn = KeyBindButton()
@@ -1470,7 +1470,7 @@ makcuBaudCard makcuDeviceHotkeysCard makcuMoveLockCard makcuSpreadEnableCard mak
 
         # 群組標題
         self.aimKeysGroup.titleLabel.setText(t("aim_activation", "Aim Activation"))
-        self.fireKeysGroup.titleLabel.setText(t("keys_and_auto_fire"))
+        self.fireKeysGroup.titleLabel.setText(t("auto_fire_keys_group", "Auto-Fire Keys"))
         self.makcuConnGroup.titleLabel.setText(t("makcu_connection_group", "MAKCU Connection"))
         self.makcuKeysGroup.titleLabel.setText(t("makcu_keys_group", "MAKCU Keys"))
 

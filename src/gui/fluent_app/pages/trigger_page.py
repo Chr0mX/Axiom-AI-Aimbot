@@ -36,7 +36,7 @@ class TriggerPage(BasePage):
         """初始化所有控制項"""
 
         # === 自動射擊設定 ===
-        self.fireGroup = SettingCardGroup(t("keys_and_auto_fire"), self.scrollWidget)
+        self.fireGroup = SettingCardGroup(t("auto_fire_group", "Auto-Fire"), self.scrollWidget)
 
         # 自動射擊目標
         self.fireTargetCombo = ComboBox()
@@ -191,7 +191,7 @@ class TriggerPage(BasePage):
         super().retranslateUi()
 
         # 群組標題
-        self.fireGroup.titleLabel.setText(t("keys_and_auto_fire"))
+        self.fireGroup.titleLabel.setText(t("auto_fire_group", "Auto-Fire"))
 
         # 自動射擊設定
         self.fireTargetCard.titleLabel.setText(t("auto_fire_target"))

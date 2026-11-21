@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     FluentIcon, PrimaryPushButton, PushButton,
-    ListWidget, TitleLabel, InfoBar, InfoBarPosition, isDarkTheme,
+    ListWidget, TitleLabel, CaptionLabel, InfoBar, InfoBarPosition, isDarkTheme,
     qconfig
 )
 
@@ -48,6 +48,7 @@ _CONFIG_I18N = dict(
     delete_failed=("full_config_delete_failed", "Failed to delete config"),
     rename_failed=("full_config_rename_failed", "Failed to rename config"),
     diff_will_change="full_config_diff_will_change",
+    empty=("full_config_empty_hint", "No saved configs yet. Use Create Config to save your current settings."),
 )
 
 _PRESET_I18N = dict(
@@ -70,6 +71,7 @@ _PRESET_I18N = dict(
     delete_failed=("config_delete_failed", "Failed to delete preset"),
     rename_failed=("config_rename_failed", "Failed to rename preset"),
     diff_will_change="preset_diff_will_change",
+    empty=("preset_empty_hint", "No saved presets yet. Use Create Preset to save your current aim settings."),
 )
 
 
@@ -120,6 +122,9 @@ class _ManagerBox(QFrame):
 
         self.configList = ListWidget()
         self.configList.setMinimumHeight(280)
+        # Empty state: say how to get a first entry instead of showing a blank list.
+        self.emptyHint = CaptionLabel(_t(self._i18n["empty"]))
+        self.emptyHint.setWordWrap(True)
 
         self.rightPanel = QFrame()
         self.rightLayout = QVBoxLayout(self.rightPanel)
@@ -157,6 +162,7 @@ class _ManagerBox(QFrame):
     def _initLayout(self):
         self.leftLayout.addWidget(self.listTitle)
         self.leftLayout.addWidget(self.configList, 1)
+        self.leftLayout.addWidget(self.emptyHint)
 
         self.rightLayout.addWidget(self.buttonTitle)
         self.rightLayout.addWidget(self.createBtn)
@@ -296,6 +302,7 @@ class _ManagerBox(QFrame):
         if self._configManager:
             for name in self._configManager.get_config_list():
                 self.configList.addItem(name)
+        self.emptyHint.setVisible(self.configList.count() == 0)
 
     def _getSelectedConfig(self) -> str:
         item = self.configList.currentItem()
@@ -475,6 +482,7 @@ class _ManagerBox(QFrame):
 
     def retranslateUi(self):
         self.listTitle.setText(_t(self._i18n["list_title"]))
+        self.emptyHint.setText(_t(self._i18n["empty"]))
         self.buttonTitle.setText(_t(self._i18n["box_title"]))
         self.createBtn.setText(_t(self._i18n["create"]))
         self.loadBtn.setText(_t(self._i18n["load"]))

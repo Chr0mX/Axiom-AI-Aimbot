@@ -59,7 +59,7 @@ class VisualsPage(BasePage):
         """Initializes all controls"""
 
         # === Display Settings ===
-        self.displayGroup = SettingCardGroup(t("tab_display"), self.scrollWidget)
+        self.displayGroup = SettingCardGroup(t("display_group", "Display"), self.scrollWidget)
 
         # === Status Panel Settings ===
         self.statusPanelGroup = SettingCardGroup(t("status_panel_settings", "Status Panel"), self.scrollWidget)
@@ -174,9 +174,9 @@ class VisualsPage(BasePage):
         # Anchor Prediction debug overlay (predicted box, centres, direction, velocity, confidence)
         self.showAnchorDebugCard = SwitchSettingCard(
             FluentIcon.CERTIFICATE,
-            t("show_anchor_debug", "Anchor Prediction Debug"),
+            t("show_anchor_debug", "Anchor Box Debug"),
             t("show_anchor_debug_hint",
-              "Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Prediction on the Inference page)"),
+              "Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Box Prediction on the Inference page)"),
             parent=self.displayGroup
         )
 
@@ -985,7 +985,7 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         super().retranslateUi()
 
         # Group titles
-        self.displayGroup.titleLabel.setText(t("tab_display"))
+        self.displayGroup.titleLabel.setText(t("display_group", "Display"))
         self.statusPanelGroup.titleLabel.setText(t("status_panel_settings", "Status Panel"))
 
         # Display settings
@@ -1014,9 +1014,9 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         self.showAimPredictionCard.titleLabel.setText(t("show_aim_prediction_marker", "Predicted Aim Point"))
         self.showAimPredictionCard.contentLabel.setText(t("show_aim_prediction_marker_hint",
             "Draw a second marker at the locked target's post-prediction point (only while Target Tracking's prediction or Kalman is on)"))
-        self.showAnchorDebugCard.titleLabel.setText(t("show_anchor_debug", "Anchor Prediction Debug"))
+        self.showAnchorDebugCard.titleLabel.setText(t("show_anchor_debug", "Anchor Box Debug"))
         self.showAnchorDebugCard.contentLabel.setText(t("show_anchor_debug_hint",
-            "Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Prediction on the Inference page)"))
+            "Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Box Prediction on the Inference page)"))
         self.showStickGaugeCard.titleLabel.setText(t("show_stick_gauge", "Stick Gauge"))
         self.showStickGaugeCard.contentLabel.setText(t("show_stick_gauge_hint",
             "Draw a circle showing the virtual stick position and dead zones (only with the vigem_network mouse method)"))

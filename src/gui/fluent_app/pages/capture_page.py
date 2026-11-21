@@ -15,6 +15,7 @@ from qfluentwidgets import (
     CaptionLabel, SwitchButton, LineEdit, CardWidget,
 )
 from ..components.slider_spin_card import SliderSpinCard
+from ..components.notify import notify
 from ..base_page import BasePage
 from ..language_manager import t
 from ..theme_colors import ThemeColors
@@ -362,25 +363,6 @@ class CapturePage(BasePage):
         self.uvcResolutionCard.hBoxLayout.addWidget(self.uvcResolutionCombo, 0, Qt.AlignmentFlag.AlignRight)
         self.uvcResolutionCard.hBoxLayout.addSpacing(16)
 
-        self.uvcWidthCard = SliderSpinCard(
-            FluentIcon.FULL_SCREEN,
-            "UVC Width",
-            320, 7680,
-            suffix="px",
-            description="",
-            parent=self.uvcGroup
-        )
-        self.uvcHeightCard = SliderSpinCard(
-            FluentIcon.FULL_SCREEN,
-            "UVC Height",
-            240, 4320,
-            suffix="px",
-            description="",
-            parent=self.uvcGroup
-        )
-        self.uvcWidthCard.setVisible(False)
-        self.uvcHeightCard.setVisible(False)
-
         self.uvcFpsCombo = ComboBox()
         self.uvcFpsCombo.addItems(["30", "60", "120", "144", "165", "240"])
         self.uvcFpsCombo.setCurrentText("60")
@@ -714,8 +696,6 @@ class CapturePage(BasePage):
         self.uvcGroup.addSettingCard(self.uvcEngineCard)
         self.uvcGroup.addSettingCard(self.uvcDeviceCard)
         self.uvcGroup.addSettingCard(self.uvcResolutionCard)
-        self.uvcGroup.addSettingCard(self.uvcWidthCard)
-        self.uvcGroup.addSettingCard(self.uvcHeightCard)
         self.uvcGroup.addSettingCard(self.uvcFpsCard)
         self.uvcGroup.addSettingCard(self.uvcVideoFormatCard)
         self.uvcGroup.addSettingCard(self.uvcCropModeCard)
@@ -1219,7 +1199,7 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
     def _runLocalInstallerScript(self, script_name: str, feature_name: str, capture_output: bool = True) -> bool:
         script_path = os.path.join(src_dir(), script_name)
         if not os.path.exists(script_path):
-            QMessageBox.warning(self, f"{feature_name} install failed", f"Missing installer script:\n{script_path}")
+            notify(self, "error", f"{feature_name} install failed", f"Missing installer script:\n{script_path}")
             return False
         python_exe = self._getEmbeddedPythonExe()
         install_cmd = [python_exe, script_path]
@@ -1264,8 +1244,8 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
             self._refreshNdiSources()
         self._updateCaptureControlsVisibility(text)
         main_window = self.window()
-        if main_window and hasattr(main_window, 'updateVisualsVisibilityForScreenshotMethod'):
-            main_window.updateVisualsVisibilityForScreenshotMethod(text)
+        if main_window and hasattr(main_window, 'updatePreviewPanelVisibility'):
+            main_window.updatePreviewPanelVisibility()
 
     def _onScreenshotIntervalChanged(self, value):
         if self._config:
@@ -1645,8 +1625,6 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
         self.uvcDeviceCard.contentLabel.setText("Select the UVC capture device")
         self.uvcResolutionCard.titleLabel.setText("Resolution")
         self.uvcResolutionCard.contentLabel.setText("Auto-detect supported resolutions")
-        self.uvcWidthCard.titleLabel.setText("UVC Width")
-        self.uvcHeightCard.titleLabel.setText("UVC Height")
         self.uvcFpsCard.titleLabel.setText("FPS")  # type: ignore[attr-defined]
         self.uvcVideoFormatCard.titleLabel.setText("Video Format")
         self.uvcVideoFormatCard.contentLabel.setText(

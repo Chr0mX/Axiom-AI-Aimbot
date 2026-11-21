@@ -438,24 +438,13 @@ class AxiomWindow(FluentWindow):
         self._applyThemeStyles()
 
         # 確保參數管理頁的左右面板在配置更新後立即重繪磨砂樣式
-        if hasattr(self, 'configInterface') and hasattr(self.configInterface, '_applyPanelStyles'):
+        if hasattr(self, 'configInterface'):
             self.configInterface._applyPanelStyles()
 
         if hasattr(self, 'previewPanel'):
             self.previewPanel.setConfig(config)
-        self.updateVisualsVisibilityForScreenshotMethod(
-            getattr(config, 'screenshot_method', 'mss')
-        )
-
-    def updateVisualsVisibilityForScreenshotMethod(self, screenshot_method: str):
-        """Kept as the entry point capture_page.py calls on a screenshot-method
-        change; the Visuals tab itself is no longer hidden in UVC mode — its
-        detection-box settings (FOV/boxes/confidence/tracer-line/box color
-        theme) are read by the same _draw_detection_overlay() the UVC preview
-        uses (screen_capture.py), so they still apply there. Only the
-        Crosshair section is exclusive to the in-game overlay and simply has
-        no visible effect while on UVC — not worth hiding the whole page over.
-        """
+        # (The Visuals page is not hidden for UVC/NDI/UDP: its detection-box settings are also drawn
+        # by screen_capture._draw_detection_overlay() into the preview.)
         self.updatePreviewPanelVisibility()
 
     def updatePreviewPanelVisibility(self) -> None:
@@ -845,21 +834,9 @@ class AxiomWindow(FluentWindow):
             if sa.viewport():
                 sa.viewport().setStyleSheet("background-color: transparent;")
 
-        # --- 6. 刷新各頁自定義面板樣式（例如參數頁左右面板） ---
-        pages = [
-            getattr(self, 'displayInterface', None),
-            getattr(self, 'modelInterface', None),
-            getattr(self, 'captureInterface', None),
-            getattr(self, 'inferenceInterface', None),
-            getattr(self, 'aimInterface', None),
-            getattr(self, 'triggerInterface', None),
-            getattr(self, 'keysInterface', None),
-            getattr(self, 'configInterface', None),
-            getattr(self, 'otherInterface', None)
-        ]
-        for page in pages:
-            if page is not None and hasattr(page, '_applyPanelStyles'):
-                page._applyPanelStyles()
+        # --- 6. 刷新參數頁（Configs）左右面板樣式 ---
+        if hasattr(self, 'configInterface'):
+            self.configInterface._applyPanelStyles()
 
         # --- 7. 按鈕、下拉框、輸入框、分段控件等子控件半透明 ---
         from qfluentwidgets import (PushButton as _PB, PrimaryPushButton as _PPB,

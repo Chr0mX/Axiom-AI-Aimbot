@@ -1109,6 +1109,13 @@ class TestTrackingSettings:
         c.from_dict({'tracking': {'sticky_lock': {'decay_frames': 30, 'persistence_ms': 120}}})
         assert c.lock_persistence_ms == 120          # explicit new value wins
 
+    def test_legacy_decay_frames_is_read_but_never_written_back(self):
+        c = _make_config()
+        c.from_dict({'tracking': {'sticky_lock': {'decay_frames': 30}}})
+        sticky = c.to_dict()['tracking']['sticky_lock']
+        assert 'decay_frames' not in sticky and sticky['persistence_ms'] == 500
+        assert not hasattr(c, 'lock_decay_frames')
+
     def test_validation_clamps(self):
         from core.config import validate_config
         c = _make_config()

@@ -646,7 +646,6 @@
       range.max = max;
       range.step = numberInput.getAttribute("step") || "1";
       range.value = numberInput.value || min;
-      range.className = "field-slider";
       updateRangeFill(range);
 
       // Inserted as a plain sibling inside the number input's own
@@ -3524,10 +3523,6 @@
       var d = card.querySelector(".field-desc");
       if (!t && !d) return card.textContent.toLowerCase();
       return ((t ? t.textContent : "") + " " + (d ? d.textContent : "")).toLowerCase();
-    }
-    function cardVisible(card) {
-      return !card.classList.contains("hidden") && !card.classList.contains("search-hidden")
-        && !(card.closest(".hidden"));
     }
     function deckText(deck) {
       var parts = [deck.getAttribute("data-label") || ""];

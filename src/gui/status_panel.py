@@ -116,10 +116,6 @@ class FluentColors:
             return ThemeColors.ERROR.qcolor()
         return QColor(255, 59, 48) if not isDarkTheme() else QColor(255, 69, 58)
          
-# Create a global instance for attribute access
-_fluent_colors_instance = FluentColors()
-FluentColors.SUCCESS = _fluent_colors_instance.get_success_color()
-FluentColors.ERROR = _fluent_colors_instance.get_error_color()
 
 class StatusIndicator(QWidget):
     """A simple dot status indicator"""

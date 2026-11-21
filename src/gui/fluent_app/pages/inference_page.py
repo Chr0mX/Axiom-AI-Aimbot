@@ -33,9 +33,9 @@ _ANCHOR_MODES = ("velocity_accel", "smoothed", "adaptive")
 _AFOV_GROUPS = (
     ("afovAnchorGroup", "afov_group_anchor", "Anchor FOV: Anchor"),
     ("afovMoveGroup", "afov_group_move", "Anchor FOV: Movement"),
-    ("afovPredGroup", "afov_group_pred", "Anchor FOV: Prediction"),
+    ("afovPredGroup", "afov_group_pred", "Anchor FOV: Look-ahead"),
     ("afovLostGroup", "afov_group_lost", "Anchor FOV: Lost Anchor"),
-    ("afovRadiusGroup", "afov_group_radius", "Anchor FOV: FOV"),
+    ("afovRadiusGroup", "afov_group_radius", "Anchor FOV: Size"),
 )
 _AFOV_CARDS = (
     # attr, group, kind, config field, i18n key, title, description, extra
@@ -58,10 +58,10 @@ _AFOV_CARDS = (
      "Low-pass on the anchor before the FOV follows it, to remove detection jitter. 0 = off.", (0, 100, "%", 100)),
     ("afovMaxSpeedCard", "afovMoveGroup", "slider", "afov_max_speed", "afov_max_speed", "Maximum Movement Speed",
      "Fastest the FOV centre may travel, in pixels per second (0 = unlimited).", (0, 20000, "px/s", 1)),
-    ("afovPredictCard", "afovPredGroup", "switch", "afov_predict_enabled", "afov_predict_enabled", "Enable Prediction",
+    ("afovPredictCard", "afovPredGroup", "switch", "afov_predict_enabled", "afov_predict_enabled", "Enable Look-ahead",
      "Lead the anchor by the tracker's velocity so the FOV arrives where the target is going. Off by default; fades out by itself when confidence drops.",
      None),
-    ("afovPredTimeCard", "afovPredGroup", "slider", "afov_predict_time_ms", "afov_predict_time", "Prediction Time",
+    ("afovPredTimeCard", "afovPredGroup", "slider", "afov_predict_time_ms", "afov_predict_time", "Look-ahead Time",
      "How far ahead to look.", (0, 500, "ms", 1)),
     ("afovLostCard", "afovLostGroup", "combo", "afov_lost_behavior", "afov_lost_behavior", "Lost Target Behaviour",
      "Hold: keep the last FOV position. Return to Centre: glide back to the crosshair. Search: stay and expand the FOV so a new anchor can be found.",
@@ -82,13 +82,13 @@ _AFOV_CARDS = (
 # (i18n key, English title, English description) per Anchor Prediction card —
 # one table used both when the cards are built and by retranslateUi().
 _ANCHOR_TEXT = {
-    "anchorEnableCard": ("anchor_enabled", "Enable Anchor Prediction",
+    "anchorEnableCard": ("anchor_enabled", "Enable Box Prediction",
                          "Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. The tuning below is shared with the Aim page's Anchor prediction method, which works without this switch."),
-    "anchorModeCard": ("anchor_mode", "Prediction Mode",
+    "anchorModeCard": ("anchor_mode", "Box Prediction Mode",
                        "Velocity: the current velocity, plus acceleration by the Acceleration setting (0% = velocity only). Smoothed: smooths velocity and acceleration to cut jitter. Adaptive: smoothed, and the lead follows confidence, stability and direction changes."),
-    "anchorHorizonCard": ("anchor_horizon", "Prediction Horizon",
+    "anchorHorizonCard": ("anchor_horizon", "Box Prediction Horizon",
                           "How far ahead to predict the box"),
-    "anchorStrengthCard": ("anchor_strength", "Prediction Strength",
+    "anchorStrengthCard": ("anchor_strength", "Box Prediction Strength",
                            "Scales the whole predicted movement (100% = full)"),
     "anchorSmoothingCard": ("anchor_velocity_smoothing", "Velocity Smoothing",
                             "Higher = steadier but slower to react (Smoothed / Adaptive modes)"),
@@ -225,7 +225,7 @@ class InferencePage(BasePage):
             t("fov_min_size_pct", "FOV Min Size"),
             1, 100,
             suffix="%",
-            description=t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Size/Height, while a target is locked"),
+            description=t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Width/Height, while a target is locked"),
             parent=self.fovShrinkGroup
         )
 
@@ -241,7 +241,7 @@ class InferencePage(BasePage):
         )
 
         # --- Anchor Prediction (core/anchor_prediction.py) ---
-        self.anchorGroup = SettingCardGroup(t("anchor_prediction", "Anchor Prediction"), self.scrollWidget)
+        self.anchorGroup = SettingCardGroup(t("anchor_prediction", "Anchor Box Prediction"), self.scrollWidget)
 
         def _at(attr, field):
             return t(_ANCHOR_TEXT[attr][0], _ANCHOR_TEXT[attr][1]) if field == 1 else \
@@ -289,7 +289,6 @@ class InferencePage(BasePage):
             description=_at("anchorInflDynamicCard", 2), parent=self.anchorGroup)
 
         # --- Anchor FOV (core/anchor_fov.py): built from _AFOV_GROUPS / _AFOV_CARDS ---
-        self._afovCombos = {}
         for gattr, gkey, gtitle in _AFOV_GROUPS:
             setattr(self, gattr, SettingCardGroup(t(gkey, gtitle), self.scrollWidget))
         for attr, gattr, kind, field, key, title, desc, extra in _AFOV_CARDS:
@@ -302,7 +301,6 @@ class InferencePage(BasePage):
                 card.hBoxLayout.addWidget(combo, 0)
                 card.hBoxLayout.addSpacing(16)
                 card.combo = combo
-                self._afovCombos[field] = (combo, [v for v, _k, _d in extra])
             elif kind == 'switch':
                 card = SwitchSettingCard(FluentIcon.ZOOM, t(key, title), t(key + "_desc", desc), parent=group)
             else:
@@ -336,7 +334,7 @@ class InferencePage(BasePage):
             FluentIcon.ZOOM,
             t("fov_retention_pct", "Retention FOV Size"),
             100, 400, suffix="%",
-            description=t("fov_retention_pct_desc", "How far outside the shrunk FOV a lock is kept, as % of FOV Size/Height. 100% = the full original FOV."),
+            description=t("fov_retention_pct_desc", "How far outside the shrunk FOV a lock is kept, as % of FOV Width/Height. 100% = the full original FOV."),
             parent=self.advFovGroup
         )
         self.minLockCard = SliderSpinCard(
@@ -398,8 +396,8 @@ class InferencePage(BasePage):
                    self.switchThresholdCard, self.reacquireRadiusCard, self.lostTimeoutCard, self.stickyHintCard):
             _tip(_c, _c.contentLabel.text())
 
-        # === General Parameters ===
-        self.generalGroup = SettingCardGroup(t("general_params"), self.scrollWidget)
+        # === Detection Settings ===
+        self.generalGroup = SettingCardGroup(t("inference_general_params", "Detection Settings"), self.scrollWidget)
 
         self.detectIntervalCard = SliderSpinCard(
             FluentIcon.SPEED_HIGH,
@@ -979,7 +977,7 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
         super().retranslateUi()
 
         self.fovGroup.titleLabel.setText(t("fov_and_detect_range"))
-        self.generalGroup.titleLabel.setText(t("general_params"))
+        self.generalGroup.titleLabel.setText(t("inference_general_params", "Detection Settings"))
         self.inferPerfGroup.titleLabel.setText(t("inference_performance", "Inference Performance"))
 
         self.fovCard.titleLabel.setText(t("fov_size"))
@@ -990,14 +988,14 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
         self.fovReduceEnableCard.titleLabel.setText(t("fov_reduce_on_target", "Reduce FOV on Active Target"))
         self.fovReduceEnableCard.contentLabel.setText(t("fov_reduce_on_target_desc", "Temporarily shrink the FOV while a target is locked, so a random target near the edge of the FOV can't steal the lock mid-engagement."))
         self.fovMinSizeCard.titleLabel.setText(t("fov_min_size_pct", "FOV Min Size"))
-        self.fovMinSizeCard.contentLabel.setText(t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Size/Height, while a target is locked"))
+        self.fovMinSizeCard.contentLabel.setText(t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Width/Height, while a target is locked"))
         self.fovMinSizeDurationCard.titleLabel.setText(t("fov_min_size_duration", "FOV Min Size Duration"))
         self.fovMinSizeDurationCard.contentLabel.setText(t("fov_min_size_duration_desc", "How long it takes the FOV to gradually shrink down to FOV Min Size after a target is acquired, then holds there for the rest of the engagement (0 = shrinks instantly)"))
         self.detectRangeCard.titleLabel.setText(t("detect_range_size"))
         self.detectRangeCard.contentLabel.setText(t("detect_range_note"))
 
         self.fovShrinkGroup.titleLabel.setText(t("fov_shrinking", "FOV Shrinking"))
-        self.anchorGroup.titleLabel.setText(t("anchor_prediction", "Anchor Prediction"))
+        self.anchorGroup.titleLabel.setText(t("anchor_prediction", "Anchor Box Prediction"))
         for attr, (key, title, desc) in _ANCHOR_TEXT.items():
             card = getattr(self, attr)
             card.titleLabel.setText(t(key, title))
@@ -1012,7 +1010,7 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
         self.fovRetentionCard.titleLabel.setText(t("fov_retention", "Keep Lock Outside Shrunk FOV"))
         self.fovRetentionCard.contentLabel.setText(t("fov_retention_desc", "Keep tracking a locked target that drifts outside the shrunk FOV (no aiming there) instead of dropping it. Needs Sticky Target Lock. Rivals can't take the lock meanwhile."))
         self.fovRetentionPctCard.titleLabel.setText(t("fov_retention_pct", "Retention FOV Size"))
-        self.fovRetentionPctCard.contentLabel.setText(t("fov_retention_pct_desc", "How far outside the shrunk FOV a lock is kept, as % of FOV Size/Height. 100% = the full original FOV."))
+        self.fovRetentionPctCard.contentLabel.setText(t("fov_retention_pct_desc", "How far outside the shrunk FOV a lock is kept, as % of FOV Width/Height. 100% = the full original FOV."))
         self.fovDynSafeCard.titleLabel.setText(t("fov_dynamic_safeguards", "Dynamic Safeguards"))
         self.fovDynSafeCard.contentLabel.setText(t("fov_dynamic_safeguards_desc", "Dynamic mode only. Never shrink past what the target's distance from the FOV edge allows, and don't trust speed/direction until the lock has settled (about 0.5 s)."))
         for gattr, gkey, gtitle in _AFOV_GROUPS:
