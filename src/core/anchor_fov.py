@@ -88,6 +88,17 @@ def fov_center(config) -> tuple:
     return float(getattr(config, 'crosshairX', 0)), float(getattr(config, 'crosshairY', 0))
 
 
+def look_ahead_ms(config) -> float:
+    """The FOV look-ahead in ms (0 = off): the one setting that replaced the old enable switch."""
+    v = getattr(config, 'afov_predict_time_ms', 0)
+    return clamp(float(v), 0.0, 500.0) if _finite(v) else 0.0
+
+
+def predict_active(config) -> bool:
+    """True when the Anchor FOV leads its anchor by the tracker velocity (look-ahead > 0)."""
+    return look_ahead_ms(config) > 0.0
+
+
 def _finite(v) -> bool:
     return isinstance(v, (int, float)) and math.isfinite(v)
 
@@ -128,8 +139,8 @@ class AnchorFovParams:
         self.follow = clamp(_num(c, 'afov_follow_speed', 12.0), 0.5, 100.0)
         self.smoothing = clamp(_num(c, 'afov_smoothing', 0.3), 0.0, 1.0)
         self.max_speed = max(0.0, _num(c, 'afov_max_speed', 4000.0))      # px/s, 0 = unlimited
-        self.predict = bool(getattr(c, 'afov_predict_enabled', False))
-        self.lead_s = clamp(_num(c, 'afov_predict_time_ms', 80.0), 0.0, 500.0) / 1000.0
+        self.lead_s = look_ahead_ms(c) / 1000.0
+        self.predict = self.lead_s > 0.0           # look-ahead 0 = off
         lm = str(getattr(c, 'afov_lost_behavior', 'hold'))
         self.lost_mode = lm if lm in LOST_MODES else 'hold'
         self.lost_delay_s = clamp(_num(c, 'afov_lost_delay_ms', 150.0), 0.0, 5000.0) / 1000.0

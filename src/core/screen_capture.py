@@ -16,7 +16,7 @@ import cv2
 import mss
 import numpy as np
 
-from .anchor_fov import anchor_fov_active, fov_center
+from .anchor_fov import anchor_fov_active, fov_center, predict_active
 from .logging_config import log_throttled
 from .box_style import (
     aim_marker_thickness, box_thickness, corner_length, detect_range_thickness, fov_thickness,
@@ -494,7 +494,7 @@ def _draw_detection_overlay(
             acol = _c(200, 220, 0)
             cv2.line(frame, (fcx, fcy), (ax, ay), acol, 1, cv2.LINE_AA)
             cv2.circle(frame, (ax, ay), 4, acol, -1, cv2.LINE_AA)
-            if bool(getattr(cfg, 'afov_predict_enabled', False)):
+            if predict_active(cfg):
                 px = int(getattr(cfg, 'afov_pred_x', ax)); py = int(getattr(cfg, 'afov_pred_y', ay))
                 cv2.line(frame, (px - 6, py), (px + 6, py), acol, 1, cv2.LINE_AA)
                 cv2.line(frame, (px, py - 6), (px, py + 6), acol, 1, cv2.LINE_AA)

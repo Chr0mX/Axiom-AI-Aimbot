@@ -367,13 +367,13 @@ class TestLineWidthsAndPredictedPoint:
     def test_anchor_fov_snapshot_carries_the_controllers_real_state(self):
         on = dict(fov_shrink_mode="anchor", afov_active=True, fov_center_x=410.4, fov_center_y=250.6,
                   afov_lost=False, afov_phase=0, afov_anchor_x=420.0, afov_anchor_y=240.0,
-                  afov_pred_x=440.0, afov_pred_y=240.0, afov_predict_enabled=True)
+                  afov_pred_x=440.0, afov_pred_y=240.0, afov_predict_time_ms=100)
         s = self._snap(**on)
         assert s["fov_center"] == {"x": 410, "y": 251}
         assert s["afov"]["anchor"] == {"x": 420, "y": 240} and s["afov"]["pred"] == {"x": 440, "y": 240}
         assert s["afov"]["lost"] is False
         # prediction off -> no predicted point; lost is reported with its phase
-        s = self._snap(**{**on, "afov_predict_enabled": False, "afov_lost": True, "afov_phase": 4})
+        s = self._snap(**{**on, "afov_predict_time_ms": 0, "afov_lost": True, "afov_phase": 4})
         assert s["afov"]["pred"] is None and s["afov"]["lost"] is True and s["afov"]["phase"] == 4
 
     def test_anchor_fov_keys_are_null_for_every_other_mode(self):

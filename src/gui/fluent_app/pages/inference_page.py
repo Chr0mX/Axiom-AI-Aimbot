@@ -33,7 +33,6 @@ _ANCHOR_MODES = ("velocity_accel", "smoothed", "adaptive")
 _AFOV_GROUPS = (
     ("afovAnchorGroup", "afov_group_anchor", "Anchor FOV: Anchor"),
     ("afovMoveGroup", "afov_group_move", "Anchor FOV: Movement"),
-    ("afovPredGroup", "afov_group_pred", "Anchor FOV: Look-ahead"),
     ("afovLostGroup", "afov_group_lost", "Anchor FOV: Lost Anchor"),
     ("afovRadiusGroup", "afov_group_radius", "Anchor FOV: Size"),
 )
@@ -58,11 +57,9 @@ _AFOV_CARDS = (
      "Low-pass on the anchor before the FOV follows it, to remove detection jitter. 0 = off.", (0, 100, "%", 100)),
     ("afovMaxSpeedCard", "afovMoveGroup", "slider", "afov_max_speed", "afov_max_speed", "Maximum Movement Speed",
      "Fastest the FOV centre may travel, in pixels per second (0 = unlimited).", (0, 20000, "px/s", 1)),
-    ("afovPredictCard", "afovPredGroup", "switch", "afov_predict_enabled", "afov_predict_enabled", "Enable Look-ahead",
-     "Lead the anchor by the tracker's velocity so the FOV arrives where the target is going. Off by default; fades out by itself when confidence drops.",
-     None),
-    ("afovPredTimeCard", "afovPredGroup", "slider", "afov_predict_time_ms", "afov_predict_time", "Look-ahead Time",
-     "How far ahead to look.", (0, 500, "ms", 1)),
+    ("afovPredTimeCard", "afovMoveGroup", "slider", "afov_predict_time_ms", "afov_predict_time", "FOV Look-ahead",
+     "Lead the anchor by the tracker's velocity so the FOV arrives where the target is going (the aim point has its own Aim Lead). "
+     "0 = off; fades out by itself when confidence drops.", (0, 500, "ms", 1)),
     ("afovLostCard", "afovLostGroup", "combo", "afov_lost_behavior", "afov_lost_behavior", "Lost Target Behaviour",
      "Hold: keep the last FOV position. Return to Centre: glide back to the crosshair. Search: stay and expand the FOV so a new anchor can be found.",
      (("hold", "afov_lost_hold", "Hold"), ("return", "afov_lost_return", "Return to Centre"),
@@ -760,7 +757,6 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
             return
         anchor = str(getattr(self._config, 'fov_shrink_mode', 'adaptive')) == 'anchor'
         manual = str(getattr(self._config, 'afov_source', 'detection')) == 'manual'
-        pred = bool(getattr(self._config, 'afov_predict_enabled', False))
         grows = bool(getattr(self._config, 'afov_dynamic_radius', False)) or \
             str(getattr(self._config, 'afov_lost_behavior', 'hold')) == 'search'
         for gattr, _k, _t in _AFOV_GROUPS:
@@ -768,7 +764,6 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
         # Manual is a point from the crosshair, so a box position means nothing; the offsets
         # apply to every source. Maximum Radius is only headroom for Dynamic Radius / Search.
         self.afovPositionCard.setVisible(anchor and not manual)
-        self.afovPredTimeCard.setVisible(anchor and pred)
         self.afovMaxRadiusCard.setVisible(anchor and grows)
         # Fitting needs a box to fit to; Manual has none. The padding only matters while it is on.
         fit_on = bool(getattr(self._config, 'afov_fit_box_enabled', False))

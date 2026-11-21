@@ -29,7 +29,7 @@ from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
 from .ai_loop_utils import get_capture_dimensions, get_effective_detect_range_size
-from .anchor_fov import anchor_fov_active, fov_center
+from .anchor_fov import anchor_fov_active, fov_center, predict_active
 from .anchor_prediction import anchor_active
 from .box_style import aim_marker_thickness, detect_range_thickness, fov_thickness, tracer_thickness
 
@@ -235,7 +235,7 @@ def _build_snapshot() -> dict:
                            "y": int(getattr(c, "afov_anchor_y", fcy)) + offset_y},
                 "pred": ({"x": int(getattr(c, "afov_pred_x", fcx)) + offset_x,
                           "y": int(getattr(c, "afov_pred_y", fcy)) + offset_y}
-                         if getattr(c, "afov_predict_enabled", False) else None),
+                         if predict_active(c) else None),
             }
         except (TypeError, ValueError):
             fov_center_pt = afov = None

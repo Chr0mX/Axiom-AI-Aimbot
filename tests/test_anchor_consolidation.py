@@ -176,3 +176,35 @@ class TestAnchorFovSize:
         assert self.params(fov_size=4).radius == af.MIN_RADIUS_PX
         assert self.params(fov_size=float("nan")).radius == af.DEFAULT_RADIUS_PX
         assert math.isfinite(self.params(fov_size=None).radius)
+
+
+# ── FOV look-ahead: one slider (0 = off) instead of a switch plus a time ─────────
+class TestLookAheadMerge:
+    @pytest.mark.parametrize("predict,want", [
+        ({"enabled": False, "time_ms": 120}, 0),                 # off stays off
+        ({"enabled": True, "time_ms": 120}, 120),                # on keeps the tuned time
+        ({"enabled": True}, 80),                                 # on without a time = the old default time
+        ({"enabled": False}, 0),
+        ({"enabled": True, "time_ms": 80, "strength": 1.5}, 120),   # strength fold still applies first
+    ])
+    def test_legacy_files_fold_into_the_time(self, predict, want):
+        assert load({"aim": {"fov_anchor": {"predict": predict}}}).afov_predict_time_ms == want
+
+    def test_new_files_have_no_switch_and_keep_their_time(self):
+        c = new_config()
+        c.afov_predict_time_ms = 90
+        d = c.to_dict()["aim"]["fov_anchor"]["predict"]
+        assert d == {"time_ms": 90}
+        assert load(c.to_dict()).afov_predict_time_ms == 90        # no 'enabled' key -> nothing is zeroed
+
+    def test_default_is_off_and_the_switch_is_gone(self):
+        c = new_config()
+        assert c.afov_predict_time_ms == 0 and not hasattr(c, "afov_predict_enabled")
+        assert af.predict_active(c) is False
+
+    def test_params_follow_the_time(self):
+        p = af.AnchorFovParams()
+        p.load(NS(fov_size=200, fov_height=200, afov_predict_time_ms=150))
+        assert p.predict is True and p.lead_s == pytest.approx(0.15)
+        p.load(NS(fov_size=200, fov_height=200, afov_predict_time_ms=0))
+        assert p.predict is False

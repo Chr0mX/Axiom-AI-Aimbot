@@ -787,28 +787,10 @@
                 <span class="field-slider-value">px/s</span>
               </div>
             </div>
-          </div>
-          </section>
-
-          <section class="module hidden" id="inf-afov-sec-pred">
-          <div class="field-group-title">Anchor FOV: Look-ahead</div>
-          <div class="field-group">
-            <div class="field-card" id="inf-afov-pred-card">
-              <div class="field-info">
-                <div class="field-title">Enable Look-ahead</div>
-                <div class="field-desc">Lead the anchor by the tracker's velocity so the FOV arrives where the target is going. Off by default; fades out by itself when confidence drops.</div>
-              </div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="inf-afov_predict_enabled" data-key="afov_predict_enabled" data-type="bool">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
             <div class="field-card" id="inf-afov-predtime-card">
               <div class="field-info">
-                <div class="field-title">Look-ahead Time</div>
-                <div class="field-desc">How far ahead to look.</div>
+                <div class="field-title">FOV Look-ahead</div>
+                <div class="field-desc">Lead the anchor by the tracker's velocity so the FOV arrives where the target is going (the aim point has its own Aim Lead). 0 = off; fades out by itself when confidence drops.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="inf-afov_predict_time_ms" data-key="afov_predict_time_ms" data-type="number" min="0" max="500" step="5">

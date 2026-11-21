@@ -199,7 +199,6 @@ _FIELD_MAP = {
     'afov_follow_speed':          'aim.fov_anchor.follow_speed',
     'afov_smoothing':             'aim.fov_anchor.smoothing',
     'afov_max_speed':             'aim.fov_anchor.max_speed',
-    'afov_predict_enabled':       'aim.fov_anchor.predict.enabled',
     'afov_predict_time_ms':       'aim.fov_anchor.predict.time_ms',
     'afov_lost_behavior':         'aim.fov_anchor.lost.behavior',
     'afov_lost_delay_ms':         'aim.fov_anchor.lost.delay_ms',
@@ -575,8 +574,7 @@ class Config:
         self.afov_follow_speed: float = 12.0     # 1/s approach rate (higher = tighter)
         self.afov_smoothing: float = 0.3         # 0..1 low-pass on the anchor (0 = off)
         self.afov_max_speed: int = 4000          # px/s cap on the FOV centre (0 = unlimited)
-        self.afov_predict_enabled: bool = False  # lead the anchor by the tracker's velocity
-        self.afov_predict_time_ms: int = 80
+        self.afov_predict_time_ms: int = 0       # FOV look-ahead: lead the anchor by the tracker's velocity (0 = off)
         self.afov_lost_behavior: str = 'hold'    # 'hold' / 'return' / 'search'
         self.afov_lost_delay_ms: int = 150       # anchor must be gone this long first
         self.afov_reacquire: str = 'smooth'      # 'smooth' / 'fast' (catch-up boost)
@@ -1161,6 +1159,13 @@ class Config:
         strength = _legacy_num('aim.fov_anchor.predict.strength')
         if strength is not None and strength != 1.0:    # lead = time x strength: fold it into the time
             self.afov_predict_time_ms = int(max(0, min(500, round(self.afov_predict_time_ms * strength))))
+        # The look-ahead used to be a switch plus a time: off (or absent) now means time 0.
+        legacy_on = _get_path(data, 'aim.fov_anchor.predict.enabled')
+        if legacy_on is not _MISSING:
+            if not legacy_on:
+                self.afov_predict_time_ms = 0
+            elif _get_path(data, 'aim.fov_anchor.predict.time_ms') is _MISSING:
+                self.afov_predict_time_ms = 80            # the old default time that "on" implied
         migrate_anchor_settings(self)
 
         # Crosshair color: nested [r, g, b], else legacy flat r/g/b.
@@ -1627,9 +1632,8 @@ def _validate_anchor_fov(config: Config) -> None:
     num('afov_follow_speed', 12.0, 0.5, 100.0)
     num('afov_smoothing', 0.3, 0.0, 1.0)
     num('afov_max_speed', 4000, 0, 50000, int)
-    num('afov_predict_time_ms', 80, 0, 500, int)
+    num('afov_predict_time_ms', 0, 0, 500, int)
     num('afov_lost_delay_ms', 150, 0, 5000, int)
-    config.afov_predict_enabled = bool(getattr(config, 'afov_predict_enabled', False))
     config.afov_dynamic_radius = bool(getattr(config, 'afov_dynamic_radius', False))
     num('afov_max_radius', 300, 1, 4096, int)
     config.afov_fit_box_enabled = bool(getattr(config, 'afov_fit_box_enabled', False))

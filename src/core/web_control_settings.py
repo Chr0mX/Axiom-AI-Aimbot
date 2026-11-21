@@ -120,7 +120,6 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "afov_follow_speed": {"type": "float", "min": 1, "max": 100},
         "afov_smoothing": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
         "afov_max_speed": {"type": "int", "min": 0, "max": 50000},
-        "afov_predict_enabled": {"type": "bool"},
         "afov_predict_time_ms": {"type": "int", "min": 0, "max": 500},
         "afov_lost_behavior": {"type": "choice", "choices": ["hold", "return", "search"]},
         "afov_lost_delay_ms": {"type": "int", "min": 0, "max": 5000},

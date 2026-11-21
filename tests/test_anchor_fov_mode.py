@@ -25,8 +25,8 @@ def cfg(**kw):
         fov_shrink_mode="anchor", fov_size=200, fov_height=200, crosshairX=320, crosshairY=320,
         afov_source="detection", afov_position="center", afov_offset_x=0, afov_offset_y=0,
         afov_follow_speed=12.0, afov_smoothing=0.0,
-        afov_max_speed=0, afov_predict_enabled=False,
-        afov_predict_time_ms=100, afov_lost_behavior="hold", afov_lost_delay_ms=150,
+        afov_max_speed=0,
+        afov_predict_time_ms=0, afov_lost_behavior="hold", afov_lost_delay_ms=150,
         afov_reacquire="smooth", afov_max_radius=300,
         afov_dynamic_radius=False, fov_circle_filter_enabled=False)
     for k, v in kw.items():
@@ -146,16 +146,16 @@ def _moving_with_tracker(c, fps=144.0, n=144, v=300.0, conf=0.9):
 
 def test_prediction_anticipates_movement_and_is_off_by_default():
     base, _ = _moving_with_tracker(cfg())
-    pred, st = _moving_with_tracker(cfg(afov_predict_enabled=True, afov_predict_time_ms=150))
+    pred, st = _moving_with_tracker(cfg(afov_predict_time_ms=150))
     assert pred[-1][0] > base[-1][0] + 5                 # leads the un-predicted FOV
     assert pred[-1][0] - base[-1][0] < 100 * 0.9 + 1     # lead capped by the radius
     assert st.afov.pred_gain > 0.9
-    assert cfg().afov_predict_enabled is False
+    assert af.predict_active(cfg()) is False and af.predict_active(cfg(afov_predict_time_ms=150)) is True
 
 
 def test_prediction_fades_when_tracking_is_unreliable():
-    good, _ = _moving_with_tracker(cfg(afov_predict_enabled=True), conf=0.9)
-    shaky, st = _moving_with_tracker(cfg(afov_predict_enabled=True), conf=0.2)
+    good, _ = _moving_with_tracker(cfg(afov_predict_time_ms=100), conf=0.9)
+    shaky, st = _moving_with_tracker(cfg(afov_predict_time_ms=100), conf=0.2)
     off, _ = _moving_with_tracker(cfg())
     assert st.afov.pred_gain < 0.05
     assert abs(shaky[-1][0] - off[-1][0]) < 1.0          # low confidence -> no lead
@@ -163,7 +163,7 @@ def test_prediction_fades_when_tracking_is_unreliable():
 
 
 def test_prediction_gain_never_snaps():
-    c = cfg(afov_predict_enabled=True)
+    c = cfg(afov_predict_time_ms=100)
     s = new_state()
     gains = []
     for i in range(200):
@@ -428,7 +428,7 @@ def test_clear_is_a_no_op_for_other_modes():
 
 
 def test_published_state_is_the_controllers_real_state():
-    c = cfg(afov_predict_enabled=True)
+    c = cfg(afov_predict_time_ms=100)
     out, st = _moving_with_tracker(c)
     ctrl = st.afov
     assert (c.fov_center_x, c.fov_center_y) == (ctrl.cx, ctrl.cy)
@@ -464,18 +464,18 @@ def test_config_defaults_persistence_and_validation(tmp_path):
     from core import config as cfgmod
     Config = _new_config
     c = Config()
-    assert c.fov_shrink_mode == "adaptive" and c.afov_predict_enabled is False
+    assert c.fov_shrink_mode == "adaptive" and c.afov_predict_time_ms == 0
     assert c.afov_lost_behavior == "hold" and c.fov_center_x is None
     d = c.to_dict()
     assert d["aim"]["fov_anchor"]["source"] == "detection"
     assert "fov_center_x" not in str(d) and "afov_active" not in str(d)      # runtime-only
     c.fov_shrink_mode = "anchor"
     c.afov_source, c.afov_position, c.afov_max_radius = "tracker", "top", 140
-    c.afov_predict_enabled, c.afov_lost_behavior = True, "search"
+    c.afov_predict_time_ms, c.afov_lost_behavior = 120, "search"
     c2 = Config()
     c2.from_dict(c.to_dict())
     assert (c2.fov_shrink_mode, c2.afov_source, c2.afov_position, c2.afov_max_radius) == ("anchor", "tracker", "top", 140)
-    assert c2.afov_predict_enabled is True and c2.afov_lost_behavior == "search"
+    assert c2.afov_predict_time_ms == 120 and c2.afov_lost_behavior == "search"
     # an old config without any of it loads the defaults
     old = Config()
     old.from_dict({"aim": {"fov_size": 250}})
@@ -493,5 +493,5 @@ def test_config_defaults_persistence_and_validation(tmp_path):
 
 def test_anchor_settings_are_aim_preset_eligible():
     from core.config_manager import _AIM_PRESET_FIELDS
-    assert {"afov_source", "afov_max_radius", "afov_lost_behavior", "afov_predict_enabled"} <= set(_AIM_PRESET_FIELDS)
+    assert {"afov_source", "afov_max_radius", "afov_lost_behavior", "afov_predict_time_ms"} <= set(_AIM_PRESET_FIELDS)
     assert "fov_center_x" not in _AIM_PRESET_FIELDS

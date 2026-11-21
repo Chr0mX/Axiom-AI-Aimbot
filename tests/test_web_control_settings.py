@@ -1412,7 +1412,7 @@ class TestAnchorAimLeadSettings:
 
 class TestAnchorFovSettings:
     KEYS = ("afov_source", "afov_position", "afov_offset_x", "afov_offset_y",
-            "afov_follow_speed", "afov_smoothing", "afov_max_speed", "afov_predict_enabled",
+            "afov_follow_speed", "afov_smoothing", "afov_max_speed",
             "afov_predict_time_ms", "afov_lost_behavior", "afov_lost_delay_ms",
             "afov_reacquire", "afov_max_radius", "afov_dynamic_radius")
     RETIRED = ("afov_manual_x", "afov_manual_y", "afov_predict_strength", "afov_radius", "afov_min_radius")
