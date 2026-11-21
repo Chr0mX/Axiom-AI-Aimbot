@@ -334,6 +334,7 @@ _FIELD_MAP = {
     'acrylic_window_alpha':       'ui.acrylic_window_alpha',
     'acrylic_element_alpha':      'ui.acrylic_element_alpha',
     'show_console':               'ui.show_console',
+    'show_advanced_settings':     'ui.show_advanced_settings',
 
     # --- ocr / 2nd inference ---
     'second_inference_mode':      'weapon_detection.mode',
@@ -882,6 +883,10 @@ class Config:
 
         # 主題設定
         self.dark_mode: bool = False  # 深色主題
+        # Global "Show advanced settings" switch (Qt pages + Web Control). Hides cards only — every
+        # hidden setting keeps its value. Fresh installs start without them; a config.json written
+        # before the switch existed loads as True (load_config) so nobody's view changes.
+        self.show_advanced_settings: bool = False
 
         # Acrylic 毛玻璃效果專用設置
         self.enable_acrylic: bool = True
@@ -1377,6 +1382,11 @@ def load_config(config_instance: Config, filepath: Optional[str] = None) -> bool
 
         data = _migrate_config(data)
         config_instance.from_dict(data)
+        if _get_path(data, 'ui.show_advanced_settings') is _MISSING and data:
+            # An existing file from before the switch existed: keep everything visible, as it was.
+            # (Only here, not in from_dict(): presets and snapshots also go through from_dict and
+            # must never flip the user's own view.)
+            config_instance.show_advanced_settings = True
 
         # One-time app state lives in state.json (overrides any legacy inline values).
         load_state(config_instance, _state_path_for(filepath))

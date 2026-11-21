@@ -70,6 +70,7 @@ _SNAPSHOT_EXCLUDED_FIELDS = frozenset({
     'uvc_ffmpeg_path',
     'web_esp_enabled',
     'vigem_net_token',
+    'show_advanced_settings',      # a UI preference: loading someone's snapshot must not flip your view
 })
 
 # Model paths a snapshot may set must stay inside the app folder (e.g.
