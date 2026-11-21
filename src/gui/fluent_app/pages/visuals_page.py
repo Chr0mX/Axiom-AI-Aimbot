@@ -45,6 +45,8 @@ class VisualsPage(BasePage):
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
+        self._markAdvancedCards()
+        self.addAdvancedSwitch()
 
     def setConfig(self, config):
         """Sets Config instance and loads values"""
@@ -492,6 +494,16 @@ class VisualsPage(BasePage):
         self.addContent(self.webEspGroup)
 
         self.scrollLayout.addStretch(1)
+
+    def _markAdvancedCards(self):
+        """Fine-tuning cards that only show with the global "Show advanced settings" switch
+        (components/advanced.py). Their values are never touched; the page's own visibility
+        rules keep working underneath."""
+        self.markAdvancedAttrs(*"""
+fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThicknessCard
+            boxThicknessCard boxCornerLengthCard chromaSpeedCard gpuSensorsCard gpuIntervalCard windowAlphaCard
+            webEspHttpPortCard webEspWsPortCard webEspFpsCard
+            """.split())
 
     def _connectSignals(self):
         """Connects signals"""

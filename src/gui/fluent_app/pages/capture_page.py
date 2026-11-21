@@ -213,6 +213,8 @@ class CapturePage(BasePage):
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
+        self._markAdvancedCards()
+        self.addAdvancedSwitch()
 
     def setConfig(self, config):
         """Full load: widgets plus device work (UVC probe, NDI discovery)."""
@@ -752,6 +754,15 @@ class CapturePage(BasePage):
     # ──────────────────────────────────────────────
     # Signal connections
     # ──────────────────────────────────────────────
+
+    def _markAdvancedCards(self):
+        """Fine-tuning cards that only show with the global "Show advanced settings" switch
+        (components/advanced.py). Their values are never touched; the page's own visibility
+        rules keep working underneath."""
+        self.markAdvancedAttrs(*"""
+uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
+            previewCropCard uvcAlwaysOnTopCard previewFpsCapCard ocrFpsCard
+            """.split())
 
     def _connectSignals(self):
         self.screenshotMethodCombo.currentTextChanged.connect(self._onScreenshotMethodChanged)

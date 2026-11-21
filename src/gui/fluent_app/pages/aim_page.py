@@ -310,6 +310,8 @@ class AimPage(BasePage):
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
+        self._markAdvancedCards()
+        self.addAdvancedSwitch()
 
     def setConfig(self, config):
         """Sets Config instance and loads values"""
@@ -1352,6 +1354,23 @@ class AimPage(BasePage):
         self.addContent(self.targetAreaGroup)
 
         self.scrollLayout.addStretch(1)
+
+    def _markAdvancedCards(self):
+        """Fine-tuning cards that only show with the global "Show advanced settings" switch
+        (components/advanced.py). Their values are never touched; the page's own visibility
+        rules keep working underneath."""
+        self.markAdvancedAttrs(*"""
+pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduceFloorCard
+            pidYReduceRampCard pidYReduceSettleCard pidYReduceVelCard
+            humanizationJitterBaseCard humanizationJitterScaleCard humanizationMicroJitterIdleCard
+            humanizationMotionVariationRangeCard humanizationSpeedShapingLowCard humanizationSpeedShapingHighCard
+            humanizationSpeedShapingLowFactorCard humanizationStutterProbCard humanizationStutterMinCard
+            humanizationStutterMaxCard humanizationReactionSkipProbCard humanizationResetCard
+            predictionMaxVelCard predictionHistoryCard lockIouCard kalmanProcessNoiseCard kalmanMeasNoiseCard
+            camMotionCompSizeCard headWidthCard headHeightCard bodyWidthCard adaptiveRatioRefHCard crouchAspectCard
+            predictionLeadFramesCard captureTimestampsCard lsqFitCard velocityDeadzoneCard egoMotionCard
+            egoScaleCard emaSmoothingCard emaAmountCard stickyGapCard stickyGapFramesCard
+            """.split())
 
     def _connectSignals(self):
         """Connect signals"""

@@ -321,6 +321,8 @@ class KeysPage(BasePage):
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
+        self._markAdvancedCards()
+        self.addAdvancedSwitch()
 
         # Aim-status poll timer (50 ms)
         self._aimStatusTimer = QTimer(self)
@@ -776,6 +778,14 @@ class KeysPage(BasePage):
     # ──────────────────────────────────────────────
     # Signal connections
     # ──────────────────────────────────────────────
+
+    def _markAdvancedCards(self):
+        """Fine-tuning cards that only show with the global "Show advanced settings" switch
+        (components/advanced.py). Their values are never touched; the page's own visibility
+        rules keep working underneath."""
+        self.markAdvancedAttrs(*"""
+makcuBaudCard makcuDeviceHotkeysCard makcuMoveLockCard makcuSpreadEnableCard makcuSpreadCard
+            """.split())
 
     def _connectSignals(self):
         """連接信號"""

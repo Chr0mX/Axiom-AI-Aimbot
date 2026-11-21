@@ -3,7 +3,6 @@ carried by a snapshot or preset."""
 import json
 from unittest.mock import patch
 
-import pytest
 
 from core import config as cfgmod
 from core.config import _FIELD_MAP

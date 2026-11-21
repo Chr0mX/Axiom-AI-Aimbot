@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=19">
+  <link rel="stylesheet" href="styles.css?v=20">
 </head>
 <body>
   <div class="app">
@@ -46,6 +46,19 @@
             <button id="token-show" type="button" title="Show/hide token" aria-label="Show or hide token" aria-pressed="false">👁</button>
           </div>
           <div class="hint">Find or regenerate this under the app's <b>Other</b> page → <b>Remote Control</b>. Stored only in this browser.</div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="card-title">View</div>
+          <div class="field-card sidebar-switch">
+            <div class="field-info">
+              <div class="field-title">Show advanced settings</div>
+              <div class="field-desc">Also show fine-tuning options. Hidden options keep their values. Same switch as in the app.</div>
+            </div>
+            <div class="field-control">
+              <label class="switch"><input type="checkbox" id="adv-toggle" aria-label="Show advanced settings"><span class="slider"></span></label>
+            </div>
+          </div>
         </div>
 
         <div class="sidebar-section">
@@ -283,7 +296,7 @@
                 <div class="field-desc">OpenCV: the standard wrapper. Native DLL: directshow_capture.dll owns the capture graph for lower, OBS-like latency (MJPEG and NV12 only). FFmpeg: an external ffmpeg.exe subprocess.</div>
               </div>
               <div class="field-control">
-                <select id="cap-uvc_engine" data-key="uvc_engine" data-type="choice">
+                <select id="cap-uvc_engine" data-key="uvc_engine" data-advanced="1" data-type="choice">
                   <option value="opencv">OpenCV (default)</option>
                   <option value="native">Native DLL (v2)</option>
                   <option value="ffmpeg">FFmpeg subprocess</option>
@@ -335,13 +348,13 @@
                 <div class="field-desc">Dynamic crops to the live Detection Range every frame. Fixed freezes a centered crop at capture-start.</div>
               </div>
               <div class="field-control">
-                <select id="cap-uvc_crop_mode" data-key="uvc_crop_mode" data-type="choice">
+                <select id="cap-uvc_crop_mode" data-key="uvc_crop_mode" data-advanced="1" data-type="choice">
                   <option value="dynamic">dynamic</option>
                   <option value="fixed">fixed</option>
                 </select>
               </div>
             </div>
-            <div class="field-card" id="cap-uvc-ffmpeg-path-card">
+            <div class="field-card" id="cap-uvc-ffmpeg-path-card" data-advanced="1">
               <div class="field-info">
                 <div class="field-title">FFmpeg Path</div>
                 <div class="field-desc">Set in the desktop app (Capture page). It names a program Axiom runs, so it can't be changed remotely.</div>
@@ -438,7 +451,7 @@
               </div>
               <div class="field-control">
                 <label class="switch">
-                  <input type="checkbox" id="cap-hud_udp_enabled" data-key="hud_udp_enabled" data-type="bool">
+                  <input type="checkbox" id="cap-hud_udp_enabled" data-key="hud_udp_enabled" data-advanced="1" data-type="bool">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -449,7 +462,7 @@
                 <div class="field-desc">Default 5601 — must differ from the main stream port.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="cap-hud_udp_bind_port" data-key="hud_udp_bind_port" data-type="number" min="1" max="65535" step="1">
+                <input type="number" id="cap-hud_udp_bind_port" data-key="hud_udp_bind_port" data-advanced="1" data-type="number" min="1" max="65535" step="1">
               </div>
             </div>
             <div class="field-card">
@@ -458,7 +471,7 @@
                 <div class="field-desc">OCR / HUD ONNX scan rate (1–10).</div>
               </div>
               <div class="field-control">
-                <input type="number" id="cap-second_inference_fps" data-key="second_inference_fps" data-type="number" min="1" max="10" step="1">
+                <input type="number" id="cap-second_inference_fps" data-key="second_inference_fps" data-advanced="1" data-type="number" min="1" max="10" step="1">
                 <span class="field-slider-value">fps</span>
               </div>
             </div>
@@ -584,7 +597,7 @@
                 <div class="field-desc">After the lock is released, wait this long before the FOV starts growing back.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-fov_expand_delay_ms" data-key="fov_expand_delay_ms" data-type="number" min="0" max="2000" step="10">
+                <input type="number" id="inf-fov_expand_delay_ms" data-key="fov_expand_delay_ms" data-advanced="1" data-type="number" min="0" max="2000" step="10">
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
@@ -594,7 +607,7 @@
                 <div class="field-desc">How long the FOV takes to grow from its minimum back to full size (0 = instant).</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-fov_recovery_duration_ms" data-key="fov_recovery_duration_ms" data-type="number" min="0" max="3000" step="10">
+                <input type="number" id="inf-fov_recovery_duration_ms" data-key="fov_recovery_duration_ms" data-advanced="1" data-type="number" min="0" max="3000" step="10">
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
@@ -605,7 +618,7 @@
               </div>
               <div class="field-control">
                 <label class="switch">
-                  <input type="checkbox" id="inf-fov_retention_enabled" data-key="fov_retention_enabled" data-type="bool">
+                  <input type="checkbox" id="inf-fov_retention_enabled" data-key="fov_retention_enabled" data-advanced="1" data-type="bool">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -616,7 +629,7 @@
                 <div class="field-desc">How far outside the shrunk FOV a lock is kept, as % of FOV Size/Height. 100% = the full original FOV.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-fov_retention_pct" data-key="fov_retention_pct" data-type="number" min="100" max="400" step="5">
+                <input type="number" id="inf-fov_retention_pct" data-key="fov_retention_pct" data-advanced="1" data-type="number" min="100" max="400" step="5">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -626,7 +639,7 @@
                 <div class="field-desc">A lock can't be swapped for another target sooner than this after it was acquired. Needs Sticky Target Lock. Never delays releasing a target that is really gone.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-min_lock_duration_ms" data-key="min_lock_duration_ms" data-type="number" min="0" max="2000" step="10">
+                <input type="number" id="inf-min_lock_duration_ms" data-key="min_lock_duration_ms" data-advanced="1" data-type="number" min="0" max="2000" step="10">
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
@@ -636,7 +649,7 @@
                 <div class="field-desc">Lower bar for KEEPING a lock (0 = same as Min Confidence). Needs Sticky Target Lock.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-tracking_confidence" data-key="tracking_confidence" data-type="number" min="0" max="100" step="1">
+                <input type="number" id="inf-tracking_confidence" data-key="tracking_confidence" data-advanced="1" data-type="number" min="0" max="100" step="1">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -646,7 +659,7 @@
                 <div class="field-desc">How much better a rival must score before it replaces the current lock. Needs Sticky Target Lock.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-target_switch_threshold" data-key="target_switch_threshold" data-type="number" min="0" max="100" step="1">
+                <input type="number" id="inf-target_switch_threshold" data-key="target_switch_threshold" data-advanced="1" data-type="number" min="0" max="100" step="1">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -656,7 +669,7 @@
                 <div class="field-desc">A lost target is recognised again within this distance of where it was last seen. Needs Sticky Target Lock.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-reacquire_radius_px" data-key="reacquire_radius_px" data-type="number" min="0" max="1000" step="5">
+                <input type="number" id="inf-reacquire_radius_px" data-key="reacquire_radius_px" data-advanced="1" data-type="number" min="0" max="1000" step="5">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -666,7 +679,7 @@
                 <div class="field-desc">How long a lost target is remembered for reacquisition. Needs Sticky Target Lock.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-lost_target_timeout_ms" data-key="lost_target_timeout_ms" data-type="number" min="0" max="10000" step="50">
+                <input type="number" id="inf-lost_target_timeout_ms" data-key="lost_target_timeout_ms" data-advanced="1" data-type="number" min="0" max="10000" step="50">
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
@@ -753,7 +766,7 @@
                 <div class="field-desc">Low-pass on the anchor before the FOV follows it, to remove detection jitter. 0 = off.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-afov_smoothing" data-key="afov_smoothing" data-type="number" min="0" max="100" step="5">
+                <input type="number" id="inf-afov_smoothing" data-key="afov_smoothing" data-advanced="1" data-type="number" min="0" max="100" step="5">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -763,7 +776,7 @@
                 <div class="field-desc">Fastest the FOV centre may travel, in pixels per second (0 = unlimited).</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-afov_max_speed" data-key="afov_max_speed" data-type="number" min="0" max="50000" step="50">
+                <input type="number" id="inf-afov_max_speed" data-key="afov_max_speed" data-advanced="1" data-type="number" min="0" max="50000" step="50">
                 <span class="field-slider-value">px/s</span>
               </div>
             </div>
@@ -820,7 +833,7 @@
                 <div class="field-desc">The anchor must be gone this long before the behaviour above starts (brief detection gaps are ridden out).</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-afov_lost_delay_ms" data-key="afov_lost_delay_ms" data-type="number" min="0" max="5000" step="10">
+                <input type="number" id="inf-afov_lost_delay_ms" data-key="afov_lost_delay_ms" data-advanced="1" data-type="number" min="0" max="5000" step="10">
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
@@ -830,7 +843,7 @@
                 <div class="field-desc">Smooth: glide to the new anchor at the normal speed. Fast: catch up quickly (still continuous, never a jump).</div>
               </div>
               <div class="field-control">
-                <select id="inf-afov_reacquire" data-key="afov_reacquire" data-type="choice">
+                <select id="inf-afov_reacquire" data-key="afov_reacquire" data-advanced="1" data-type="choice">
                   <option value="smooth">Smooth</option>
                   <option value="fast">Fast Catch-up</option>
                 </select>
@@ -848,7 +861,7 @@
                 <div class="field-desc">The most the FOV radius can grow to with Dynamic Radius or Search. The normal size is FOV Width ÷ 2.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-afov_max_radius" data-key="afov_max_radius" data-type="number" min="1" max="2000" step="1">
+                <input type="number" id="inf-afov_max_radius" data-key="afov_max_radius" data-advanced="1" data-type="number" min="1" max="2000" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -859,7 +872,7 @@
               </div>
               <div class="field-control">
                 <label class="switch">
-                  <input type="checkbox" id="inf-afov_dynamic_radius" data-key="afov_dynamic_radius" data-type="bool">
+                  <input type="checkbox" id="inf-afov_dynamic_radius" data-key="afov_dynamic_radius" data-advanced="1" data-type="bool">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -911,7 +924,7 @@
                 <div class="field-desc">Scales the whole predicted movement (100% = full).</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-anchor_strength" data-key="anchor_strength" data-type="number" min="0" max="150" step="5">
+                <input type="number" id="inf-anchor_strength" data-key="anchor_strength" data-advanced="1" data-type="number" min="0" max="150" step="5">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -921,7 +934,7 @@
                 <div class="field-desc">Higher = steadier but slower to react (Smoothed / Adaptive modes).</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-anchor_velocity_smoothing" data-key="anchor_velocity_smoothing" data-type="number" min="0" max="100" step="5">
+                <input type="number" id="inf-anchor_velocity_smoothing" data-key="anchor_velocity_smoothing" data-advanced="1" data-type="number" min="0" max="100" step="5">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -931,7 +944,7 @@
                 <div class="field-desc">How much of the estimated acceleration is applied. 0 = velocity only.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-anchor_accel_comp" data-key="anchor_accel_comp" data-type="number" min="0" max="100" step="5">
+                <input type="number" id="inf-anchor_accel_comp" data-key="anchor_accel_comp" data-advanced="1" data-type="number" min="0" max="100" step="5">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -941,7 +954,7 @@
                 <div class="field-desc">Below this prediction confidence nothing is extrapolated.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-anchor_confidence_threshold" data-key="anchor_confidence_threshold" data-type="number" min="0" max="100" step="5">
+                <input type="number" id="inf-anchor_confidence_threshold" data-key="anchor_confidence_threshold" data-advanced="1" data-type="number" min="0" max="100" step="5">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -951,7 +964,7 @@
                 <div class="field-desc">How many recent detections the motion estimate uses (acceleration needs 4 or more).</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-anchor_history_len" data-key="anchor_history_len" data-type="number" min="4" max="12" step="1">
+                <input type="number" id="inf-anchor_history_len" data-key="anchor_history_len" data-advanced="1" data-type="number" min="4" max="12" step="1">
               </div>
             </div>
             <div class="field-card" id="inf-anchor-maxdist-card">
@@ -960,7 +973,7 @@
                 <div class="field-desc">Longest predicted movement, as a % of the FOV size. 0 = no limit.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-anchor_max_distance_pct" data-key="anchor_max_distance_pct" data-type="number" min="0" max="100" step="1">
+                <input type="number" id="inf-anchor_max_distance_pct" data-key="anchor_max_distance_pct" data-advanced="1" data-type="number" min="0" max="100" step="1">
                 <span class="field-slider-value">% of FOV</span>
               </div>
             </div>
@@ -970,7 +983,7 @@
                 <div class="field-desc">How strongly the prediction opens the Adaptive FOV early for a target heading for its edge. 0 = ignore the prediction.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-anchor_fov_influence_adaptive" data-key="anchor_fov_influence_adaptive" data-type="number" min="0" max="100" step="5">
+                <input type="number" id="inf-anchor_fov_influence_adaptive" data-key="anchor_fov_influence_adaptive" data-advanced="1" data-type="number" min="0" max="100" step="5">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -980,7 +993,7 @@
                 <div class="field-desc">How strongly the predicted speed/direction change feeds the Dynamic FOV. 0 = ignore the prediction.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-anchor_fov_influence_dynamic" data-key="anchor_fov_influence_dynamic" data-type="number" min="0" max="100" step="5">
+                <input type="number" id="inf-anchor_fov_influence_dynamic" data-key="anchor_fov_influence_dynamic" data-advanced="1" data-type="number" min="0" max="100" step="5">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -1087,7 +1100,7 @@
               </div>
               <div class="field-control">
                 <label class="switch">
-                  <input type="checkbox" id="inf-cuda_io_binding_enabled" data-key="cuda_io_binding_enabled" data-type="bool">
+                  <input type="checkbox" id="inf-cuda_io_binding_enabled" data-key="cuda_io_binding_enabled" data-advanced="1" data-type="bool">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -1099,7 +1112,7 @@
               </div>
               <div class="field-control">
                 <label class="switch">
-                  <input type="checkbox" id="inf-frame_skip_enabled" data-key="frame_skip_enabled" data-type="bool">
+                  <input type="checkbox" id="inf-frame_skip_enabled" data-key="frame_skip_enabled" data-advanced="1" data-type="bool">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -1110,7 +1123,7 @@
                 <div class="field-desc">Avg pixel diff below this value triggers skip (higher = more skipping).</div>
               </div>
               <div class="field-control">
-                <input type="number" id="inf-frame_skip_threshold" data-key="frame_skip_threshold" data-type="number" min="0.5" max="10" step="0.1">
+                <input type="number" id="inf-frame_skip_threshold" data-key="frame_skip_threshold" data-advanced="1" data-type="number" min="0.5" max="10" step="0.1">
               </div>
             </div>
           </div>
@@ -1176,7 +1189,7 @@
               </div>
               <div class="field-control">
                 <label class="switch">
-                  <input type="checkbox" id="aim-pid_unsafe_mode" data-key="pid_unsafe_mode" data-type="bool" data-custom="1">
+                  <input type="checkbox" id="aim-pid_unsafe_mode" data-key="pid_unsafe_mode" data-advanced="1" data-type="bool" data-custom="1">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -1188,7 +1201,7 @@
               </div>
               <div class="field-control">
                 <label class="switch">
-                  <input type="checkbox" id="aim-pid_time_normalize" data-key="pid_time_normalize" data-type="bool">
+                  <input type="checkbox" id="aim-pid_time_normalize" data-key="pid_time_normalize" data-advanced="1" data-type="bool">
                   <span class="slider"></span>
                 </label>
               </div>
@@ -1237,7 +1250,7 @@
                 <div class="field-desc">Hard cap on PID output per frame, both axes (0 = off)</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-max_move_per_frame_px" data-key="max_move_per_frame_px" data-type="number" min="0" max="500" step="1">
+                <input type="number" id="aim-max_move_per_frame_px" data-key="max_move_per_frame_px" data-advanced="1" data-type="number" min="0" max="500" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -1259,7 +1272,7 @@
             <div class="field-card">
               <div class="field-info"><div class="field-title">Y-Axis Reset Delay</div></div>
               <div class="field-control">
-                <input type="number" id="aim-aim_y_reduce_delay" data-key="aim_y_reduce_delay" data-type="number" min="0" max="5" step="0.01">
+                <input type="number" id="aim-aim_y_reduce_delay" data-key="aim_y_reduce_delay" data-advanced="1" data-type="number" min="0" max="5" step="0.01">
                 <span class="field-slider-value">s</span>
               </div>
             </div>
@@ -1269,7 +1282,7 @@
                 <div class="field-desc">Min Y multiplier after ramp — 0.00 = full cut, 1.00 = no suppression</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-aim_y_reduce_floor" data-key="aim_y_reduce_floor" data-type="number" min="0" max="1" step="0.01">
+                <input type="number" id="aim-aim_y_reduce_floor" data-key="aim_y_reduce_floor" data-advanced="1" data-type="number" min="0" max="1" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1278,7 +1291,7 @@
                 <div class="field-desc">Time to fade 1.0 → floor after delay (0 = instant cut)</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-aim_y_reduce_ramp" data-key="aim_y_reduce_ramp" data-type="number" min="0" max="2" step="0.01">
+                <input type="number" id="aim-aim_y_reduce_ramp" data-key="aim_y_reduce_ramp" data-advanced="1" data-type="number" min="0" max="2" step="0.01">
                 <span class="field-slider-value">s</span>
               </div>
             </div>
@@ -1288,7 +1301,7 @@
                 <div class="field-desc">Skip suppression while vertical error &gt; this (0 = off)</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-aim_y_reduce_settle_px" data-key="aim_y_reduce_settle_px" data-type="number" min="0" max="50" step="1">
+                <input type="number" id="aim-aim_y_reduce_settle_px" data-key="aim_y_reduce_settle_px" data-advanced="1" data-type="number" min="0" max="50" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -1298,7 +1311,7 @@
                 <div class="field-desc">Restore full Y tracking if target moves vertically faster than this (0 = off)</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-aim_y_vel_restore_px_s" data-key="aim_y_vel_restore_px_s" data-type="number" min="0" max="500" step="1">
+                <input type="number" id="aim-aim_y_vel_restore_px_s" data-key="aim_y_vel_restore_px_s" data-advanced="1" data-type="number" min="0" max="500" step="1">
                 <span class="field-slider-value">px/s</span>
               </div>
             </div>
@@ -1349,7 +1362,7 @@
                   <div class="field-desc">Minimum jitter amplitude added every frame, in pixels.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-jitter-base" data-key="humanization.micro_jitter_base" data-type="number" min="0" max="2" step="0.01">
+                  <input type="number" id="aim-humanization-jitter-base" data-key="humanization.micro_jitter_base" data-advanced="1" data-type="number" min="0" max="2" step="0.01">
                   <span class="field-slider-value">px</span>
                 </div>
               </div>
@@ -1359,7 +1372,7 @@
                   <div class="field-desc">Extra jitter added per pixel of movement, as a fraction of movement size.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-jitter-scale" data-key="humanization.micro_jitter_scale" data-type="number" min="0" max="0.2" step="0.001">
+                  <input type="number" id="aim-humanization-jitter-scale" data-key="humanization.micro_jitter_scale" data-advanced="1" data-type="number" min="0" max="0.2" step="0.001">
                 </div>
               </div>
               <div class="field-card">
@@ -1369,7 +1382,7 @@
                 </div>
                 <div class="field-control">
                   <label class="switch">
-                    <input type="checkbox" id="aim-humanization-micro-jitter-idle-enabled" data-key="humanization.micro_jitter_idle_enabled" data-type="bool">
+                    <input type="checkbox" id="aim-humanization-micro-jitter-idle-enabled" data-key="humanization.micro_jitter_idle_enabled" data-advanced="1" data-type="bool">
                     <span class="slider"></span>
                   </label>
                 </div>
@@ -1394,7 +1407,7 @@
                   <div class="field-desc">Random output-scale range applied each frame (mean-preserving).</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-motion-variation-range" data-key="humanization.motion_variation_range" data-type="number" min="0" max="0.2" step="0.001">
+                  <input type="number" id="aim-humanization-motion-variation-range" data-key="humanization.motion_variation_range" data-advanced="1" data-type="number" min="0" max="0.2" step="0.001">
                 </div>
               </div>
             </div>
@@ -1417,7 +1430,7 @@
                   <div class="field-desc">Movements below this size are compressed by the Low-Speed Factor.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-speed-shaping-low" data-key="humanization.speed_shaping_low" data-type="number" min="0" max="20" step="0.1">
+                  <input type="number" id="aim-humanization-speed-shaping-low" data-key="humanization.speed_shaping_low" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
                   <span class="field-slider-value">px</span>
                 </div>
               </div>
@@ -1427,7 +1440,7 @@
                   <div class="field-desc">Movements above this size pass through unmodified.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-speed-shaping-high" data-key="humanization.speed_shaping_high" data-type="number" min="0" max="50" step="0.1">
+                  <input type="number" id="aim-humanization-speed-shaping-high" data-key="humanization.speed_shaping_high" data-advanced="1" data-type="number" min="0" max="50" step="0.1">
                   <span class="field-slider-value">px</span>
                 </div>
               </div>
@@ -1437,7 +1450,7 @@
                   <div class="field-desc">Magnitude scale applied to movements below the Fine-Control Threshold.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-speed-shaping-low-factor" data-key="humanization.speed_shaping_low_factor" data-type="number" min="0" max="1" step="0.01">
+                  <input type="number" id="aim-humanization-speed-shaping-low-factor" data-key="humanization.speed_shaping_low_factor" data-advanced="1" data-type="number" min="0" max="1" step="0.01">
                 </div>
               </div>
             </div>
@@ -1460,7 +1473,7 @@
                   <div class="field-desc">Probability per frame of a brief magnitude reduction.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-stutter-prob" data-key="humanization.micro_stutter_prob" data-type="number" min="0" max="0.2" step="0.001">
+                  <input type="number" id="aim-humanization-stutter-prob" data-key="humanization.micro_stutter_prob" data-advanced="1" data-type="number" min="0" max="0.2" step="0.001">
                 </div>
               </div>
               <div class="field-card">
@@ -1469,7 +1482,7 @@
                   <div class="field-desc">Lower bound of the stutter magnitude factor.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-stutter-min" data-key="humanization.micro_stutter_min" data-type="number" min="0" max="1" step="0.01">
+                  <input type="number" id="aim-humanization-stutter-min" data-key="humanization.micro_stutter_min" data-advanced="1" data-type="number" min="0" max="1" step="0.01">
                 </div>
               </div>
               <div class="field-card">
@@ -1478,7 +1491,7 @@
                   <div class="field-desc">Upper bound of the stutter magnitude factor.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-stutter-max" data-key="humanization.micro_stutter_max" data-type="number" min="0" max="1" step="0.01">
+                  <input type="number" id="aim-humanization-stutter-max" data-key="humanization.micro_stutter_max" data-advanced="1" data-type="number" min="0" max="1" step="0.01">
                 </div>
               </div>
             </div>
@@ -1501,7 +1514,7 @@
                   <div class="field-desc">Probability per frame of skipping the mouse injection entirely.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-reaction-skip-prob" data-key="humanization.reaction_skip_prob" data-type="number" min="0" max="0.1" step="0.001">
+                  <input type="number" id="aim-humanization-reaction-skip-prob" data-key="humanization.reaction_skip_prob" data-advanced="1" data-type="number" min="0" max="0.1" step="0.001">
                 </div>
               </div>
             </div>
@@ -1584,7 +1597,7 @@
             <div class="field-card">
               <div class="field-info"><div class="field-title">Rolling Lead</div><div class="field-desc">Frames ahead for the rolling predictor</div></div>
               <div class="field-control">
-                <input type="number" id="aim-prediction_lead_frames" data-key="prediction_lead_frames" data-type="number" min="1" max="10" step="0.5">
+                <input type="number" id="aim-prediction_lead_frames" data-key="prediction_lead_frames" data-advanced="1" data-type="number" min="1" max="10" step="0.5">
               </div>
             </div>
             <div class="micro-grid" data-cols="2" data-kind="toggles">
@@ -1597,45 +1610,45 @@
             <div class="field-card">
               <div class="field-info"><div class="field-title">Capture Timestamps</div><div class="field-desc">Time each sample by when its frame was captured, not when it was processed</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-prediction_capture_timestamps" data-key="prediction_capture_timestamps" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="aim-prediction_capture_timestamps" data-key="prediction_capture_timestamps" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Least-Squares Velocity</div><div class="field-desc">Fit the speed through every point in the history, not just the oldest and newest</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-prediction_lsq_fit" data-key="prediction_lsq_fit" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="aim-prediction_lsq_fit" data-key="prediction_lsq_fit" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Velocity Deadzone</div><div class="field-desc">Speeds at or below this give no lead; 0 is off</div></div>
               <div class="field-control">
-                <input type="number" id="aim-prediction_velocity_deadzone_px_s" data-key="prediction_velocity_deadzone_px_s" data-type="number" min="0" max="300" step="1">
+                <input type="number" id="aim-prediction_velocity_deadzone_px_s" data-key="prediction_velocity_deadzone_px_s" data-advanced="1" data-type="number" min="0" max="300" step="1">
                 <span class="field-slider-value">px/s</span>
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Own-Mouse Compensation</div><div class="field-desc">Don't count the camera turn from our own mouse moves as target motion. Ignored while Camera Motion Compensation is on</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-prediction_ego_motion_comp" data-key="prediction_ego_motion_comp" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="aim-prediction_ego_motion_comp" data-key="prediction_ego_motion_comp" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Pixels per Mouse Count</div><div class="field-desc">Screen pixels one mouse count turns the camera by</div></div>
               <div class="field-control">
-                <input type="number" id="aim-prediction_ego_motion_scale" data-key="prediction_ego_motion_scale" data-type="number" min="0.1" max="5" step="0.01">
+                <input type="number" id="aim-prediction_ego_motion_scale" data-key="prediction_ego_motion_scale" data-advanced="1" data-type="number" min="0.1" max="5" step="0.01">
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Output EMA</div><div class="field-desc">Smooth the move step after PID or the path</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-aim_ema_smoothing_enabled" data-key="aim_ema_smoothing_enabled" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="aim-aim_ema_smoothing_enabled" data-key="aim_ema_smoothing_enabled" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">EMA Amount</div><div class="field-desc">1 follows the new step, lower holds the previous step</div></div>
               <div class="field-control">
-                <input type="number" id="aim-aim_ema_smoothing" data-key="aim_ema_smoothing" data-type="number" min="0.01" max="1" step="0.01">
+                <input type="number" id="aim-aim_ema_smoothing" data-key="aim_ema_smoothing" data-advanced="1" data-type="number" min="0.01" max="1" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1653,13 +1666,13 @@
             <div class="field-card">
               <div class="field-info"><div class="field-title">Gap Extrapolation</div><div class="field-desc">Keep aiming along the last velocity for a few missed frames</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-sticky_gap_extrapolate" data-key="sticky_gap_extrapolate" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="aim-sticky_gap_extrapolate" data-key="sticky_gap_extrapolate" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Gap Frames</div></div>
               <div class="field-control">
-                <input type="number" id="aim-sticky_gap_frames" data-key="sticky_gap_frames" data-type="number" min="1" max="8" step="1">
+                <input type="number" id="aim-sticky_gap_frames" data-key="sticky_gap_frames" data-advanced="1" data-type="number" min="1" max="8" step="1">
               </div>
             </div>
             <div class="field-card">
@@ -1668,14 +1681,14 @@
                 <div class="field-desc">Velocity spikes above this are treated as detection jumps and reset prediction</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-prediction_max_velocity" data-key="prediction_max_velocity" data-type="number" min="300" max="3000" step="10">
+                <input type="number" id="aim-prediction_max_velocity" data-key="prediction_max_velocity" data-advanced="1" data-type="number" min="300" max="3000" step="10">
                 <span class="field-slider-value">px/s</span>
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">History Frames</div></div>
               <div class="field-control">
-                <input type="number" id="aim-prediction_history_len" data-key="prediction_history_len" data-type="number" min="2" max="6" step="1">
+                <input type="number" id="aim-prediction_history_len" data-key="prediction_history_len" data-advanced="1" data-type="number" min="2" max="6" step="1">
               </div>
             </div>
             <div class="field-card">
@@ -1706,7 +1719,7 @@
                 <div class="field-desc">Minimum overlap required to match the same target across frames</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-lock_iou_threshold" data-key="lock_iou_threshold" data-type="number" min="0.10" max="0.70" step="0.01">
+                <input type="number" id="aim-lock_iou_threshold" data-key="lock_iou_threshold" data-advanced="1" data-type="number" min="0.10" max="0.70" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1727,7 +1740,7 @@
                 <div class="field-desc">Lower = smoother but slower to react</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-kalman_process_noise" data-key="kalman_process_noise" data-type="number" min="0.01" max="1" step="0.01">
+                <input type="number" id="aim-kalman_process_noise" data-key="kalman_process_noise" data-advanced="1" data-type="number" min="0.01" max="1" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1736,7 +1749,7 @@
                 <div class="field-desc">Lower = reacts faster but noisier</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-kalman_measurement_noise" data-key="kalman_measurement_noise" data-type="number" min="0.01" max="1" step="0.01">
+                <input type="number" id="aim-kalman_measurement_noise" data-key="kalman_measurement_noise" data-advanced="1" data-type="number" min="0.01" max="1" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1757,7 +1770,7 @@
                 <div class="field-desc">128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)</div>
               </div>
               <div class="field-control">
-                <select id="aim-cam_motion_comp_size" data-key="cam_motion_comp_size" data-type="choice">
+                <select id="aim-cam_motion_comp_size" data-key="cam_motion_comp_size" data-advanced="1" data-type="choice">
                   <option value="128">128</option>
                   <option value="256">256</option>
                 </select>
@@ -1782,7 +1795,7 @@
             <div class="field-card">
               <div class="field-info"><div class="field-title">Head Width Ratio</div></div>
               <div class="field-control">
-                <input type="number" id="aim-head_width_ratio" data-key="head_width_ratio" data-type="number" min="0.10" max="1" step="0.01">
+                <input type="number" id="aim-head_width_ratio" data-key="head_width_ratio" data-advanced="1" data-type="number" min="0.10" max="1" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1791,13 +1804,13 @@
                 <div class="field-desc">Body Height = 100% − Head Height</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-head_height_ratio" data-key="head_height_ratio" data-type="number" min="0.10" max="1" step="0.01">
+                <input type="number" id="aim-head_height_ratio" data-key="head_height_ratio" data-advanced="1" data-type="number" min="0.10" max="1" step="0.01">
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Body Width Ratio</div></div>
               <div class="field-control">
-                <input type="number" id="aim-body_width_ratio" data-key="body_width_ratio" data-type="number" min="0.10" max="1" step="0.01">
+                <input type="number" id="aim-body_width_ratio" data-key="body_width_ratio" data-advanced="1" data-type="number" min="0.10" max="1" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1818,7 +1831,7 @@
                 <div class="field-desc">Box height (px) where head ratio is nominal.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-aim_adaptive_ratio_ref_h" data-key="aim_adaptive_ratio_ref_h" data-type="number" min="20" max="200" step="1">
+                <input type="number" id="aim-aim_adaptive_ratio_ref_h" data-key="aim_adaptive_ratio_ref_h" data-advanced="1" data-type="number" min="20" max="200" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -1840,7 +1853,7 @@
                 <div class="field-desc">box_w / box_h above which player is treated as crouching. Default 1.2×.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-aim_crouch_aspect_threshold" data-key="aim_crouch_aspect_threshold" data-type="number" min="0.80" max="2.00" step="0.01">
+                <input type="number" id="aim-aim_crouch_aspect_threshold" data-key="aim_crouch_aspect_threshold" data-advanced="1" data-type="number" min="0.80" max="2.00" step="0.01">
               </div>
             </div>
           </div>
@@ -2038,7 +2051,7 @@
             <div class="field-card" id="keys-makcu-baud-card">
               <div class="field-info"><div class="field-title">Baud Rate</div></div>
               <div class="field-control">
-                <select id="keys-makcu_baud_rate" data-key="makcu_baud_rate" data-type="choice">
+                <select id="keys-makcu_baud_rate" data-key="makcu_baud_rate" data-advanced="1" data-type="choice">
                   <option value="115200">115200</option>
                   <option value="460800">460800</option>
                   <option value="1000000">1000000</option>
@@ -2140,7 +2153,7 @@
                 <div class="field-desc">Aim, toggle and auto-fire keys also react to the MAKCU's mouse/keyboard (for 2-PC setups; keyboard keys need V4/MAKXD firmware)</div>
               </div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="keys-makcu_device_hotkeys" data-key="makcu_device_hotkeys" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="keys-makcu_device_hotkeys" data-key="makcu_device_hotkeys" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card" id="keys-makcu-move-lock-card">
@@ -2149,7 +2162,7 @@
                 <div class="field-desc">Block your own mouse movement while a target is locked; released automatically if aiming stalls</div>
               </div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="keys-makcu_lock_physical_move" data-key="makcu_lock_physical_move" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="keys-makcu_lock_physical_move" data-key="makcu_lock_physical_move" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card" id="keys-makcu-spread-enable-card">
@@ -2158,7 +2171,7 @@
                 <div class="field-desc">Apply the firmware's own mouse spread live (V4/MAKXD only; not saved to the device)</div>
               </div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="keys-makcu_mouse_spread_enabled" data-key="makcu_mouse_spread_enabled" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="keys-makcu_mouse_spread_enabled" data-key="makcu_mouse_spread_enabled" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             </div>
@@ -2167,7 +2180,7 @@
                 <div class="field-title">Firmware Mouse Spread</div>
               </div>
               <div class="field-control">
-                <input type="number" id="keys-makcu_mouse_spread" data-key="makcu_mouse_spread" data-type="number" min="0" max="100" step="1">
+                <input type="number" id="keys-makcu_mouse_spread" data-key="makcu_mouse_spread" data-advanced="1" data-type="number" min="0" max="100" step="1">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -2320,7 +2333,7 @@
                 <div class="field-desc">Thickness of corner brackets and full boxes. 0 = Auto (1-3 px by confidence)</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-box_line_thickness" data-key="box_line_thickness" data-type="number" min="0" max="10" step="1">
+                <input type="number" id="vis-box_line_thickness" data-key="box_line_thickness" data-advanced="1" data-type="number" min="0" max="10" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -2330,7 +2343,7 @@
                 <div class="field-desc">Bracket arm length as % of the box's shorter side. 0 = Auto (15%, 6-24 px)</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-box_corner_length_pct" data-key="box_corner_length_pct" data-type="number" min="0" max="50" step="1">
+                <input type="number" id="vis-box_corner_length_pct" data-key="box_corner_length_pct" data-advanced="1" data-type="number" min="0" max="50" step="1">
                 <span class="field-slider-value">%</span>
               </div>
             </div>
@@ -2340,7 +2353,7 @@
                 <div class="field-desc">Width of the FOV box or ellipse.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-fov_line_thickness" data-key="fov_line_thickness" data-type="number" min="1" max="10" step="1">
+                <input type="number" id="vis-fov_line_thickness" data-key="fov_line_thickness" data-advanced="1" data-type="number" min="1" max="10" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -2350,7 +2363,7 @@
                 <div class="field-desc">Width of the detection range outline.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-detect_range_line_thickness" data-key="detect_range_line_thickness" data-type="number" min="1" max="10" step="1">
+                <input type="number" id="vis-detect_range_line_thickness" data-key="detect_range_line_thickness" data-advanced="1" data-type="number" min="1" max="10" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -2360,7 +2373,7 @@
                 <div class="field-desc">Width of the line from screen center to each target.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-tracer_line_thickness" data-key="tracer_line_thickness" data-type="number" min="1" max="10" step="1">
+                <input type="number" id="vis-tracer_line_thickness" data-key="tracer_line_thickness" data-advanced="1" data-type="number" min="1" max="10" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -2379,7 +2392,7 @@
                 <div class="field-desc">Width of the predicted aim point circle.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-aim_marker_line_thickness" data-key="aim_marker_line_thickness" data-type="number" min="1" max="10" step="1">
+                <input type="number" id="vis-aim_marker_line_thickness" data-key="aim_marker_line_thickness" data-advanced="1" data-type="number" min="1" max="10" step="1">
                 <span class="field-slider-value">px</span>
               </div>
             </div>
@@ -2455,7 +2468,7 @@
                 <div class="field-desc">Rainbow cycle speed for boxes inside FOV. 0 = off.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-chroma_box_speed" data-key="chroma_box_speed" data-type="number" min="0" max="20" step="1">
+                <input type="number" id="vis-chroma_box_speed" data-key="chroma_box_speed" data-advanced="1" data-type="number" min="0" max="20" step="1">
               </div>
             </div>
           </div>
@@ -2538,62 +2551,62 @@
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Temp</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_temp" data-key="status_panel_gpu_temp" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_temp" data-key="status_panel_gpu_temp" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Hotspot</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_hotspot" data-key="status_panel_gpu_hotspot" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_hotspot" data-key="status_panel_gpu_hotspot" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Usage</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_util" data-key="status_panel_gpu_util" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_util" data-key="status_panel_gpu_util" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU VRAM</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_vram" data-key="status_panel_gpu_vram" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_vram" data-key="status_panel_gpu_vram" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Fan</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_fan" data-key="status_panel_gpu_fan" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_fan" data-key="status_panel_gpu_fan" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Core Clock</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_core_clock" data-key="status_panel_gpu_core_clock" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_core_clock" data-key="status_panel_gpu_core_clock" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Mem Clock</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_mem_clock" data-key="status_panel_gpu_mem_clock" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_mem_clock" data-key="status_panel_gpu_mem_clock" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Power</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_power" data-key="status_panel_gpu_power" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_power" data-key="status_panel_gpu_power" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Voltage</div></div>
               <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_voltage" data-key="status_panel_gpu_voltage" data-type="bool"><span class="slider"></span></label>
+                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_voltage" data-key="status_panel_gpu_voltage" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             </div>
             <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Refresh</div></div>
               <div class="field-control">
-                <input type="number" id="vis-status_panel_gpu_interval_ms" data-key="status_panel_gpu_interval_ms" data-type="number" min="250" max="5000" step="50">
+                <input type="number" id="vis-status_panel_gpu_interval_ms" data-key="status_panel_gpu_interval_ms" data-advanced="1" data-type="number" min="250" max="5000" step="50">
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
@@ -2661,7 +2674,7 @@
             <div class="field-card">
               <div class="field-info"><div class="field-title">Acrylic Window Alpha</div></div>
               <div class="field-control">
-                <input type="number" id="vis-acrylic_window_alpha" data-key="acrylic_window_alpha" data-type="number" min="60" max="255" step="1">
+                <input type="number" id="vis-acrylic_window_alpha" data-key="acrylic_window_alpha" data-advanced="1" data-type="number" min="60" max="255" step="1">
               </div>
             </div>
           </div>
@@ -2685,7 +2698,7 @@
                 <div class="field-desc">Port for the overlay web page.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-web_esp_http_port" data-key="web_esp_http_port" data-type="number" min="1024" max="65535" step="1">
+                <input type="number" id="vis-web_esp_http_port" data-key="web_esp_http_port" data-advanced="1" data-type="number" min="1024" max="65535" step="1">
               </div>
             </div>
             <div class="field-card">
@@ -2694,7 +2707,7 @@
                 <div class="field-desc">Port for the live state stream.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-web_esp_ws_port" data-key="web_esp_ws_port" data-type="number" min="1024" max="65535" step="1">
+                <input type="number" id="vis-web_esp_ws_port" data-key="web_esp_ws_port" data-advanced="1" data-type="number" min="1024" max="65535" step="1">
               </div>
             </div>
             <div class="field-card">
@@ -2703,7 +2716,7 @@
                 <div class="field-desc">Most updates per second sent to the browser overlay. Real data only arrives as fast as detection runs.</div>
               </div>
               <div class="field-control">
-                <input type="number" id="vis-web_esp_fps" data-key="web_esp_fps" data-type="number" min="15" max="240" step="1">
+                <input type="number" id="vis-web_esp_fps" data-key="web_esp_fps" data-advanced="1" data-type="number" min="15" max="240" step="1">
                 <span class="field-slider-value">Hz</span>
               </div>
             </div>
@@ -2901,6 +2914,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>

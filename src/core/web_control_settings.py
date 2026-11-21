@@ -312,6 +312,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "remote_aim_button": {"type": "choice", "choices": ["off", "lmb", "rmb", "mmb", "side1", "side2"]},
     },
     "visuals": {
+        # The global "Show advanced settings" switch (also read from /api/status so the sidebar switch
+        # follows the Qt one live). A UI preference: never part of presets or full-config snapshots.
+        "show_advanced_settings": {"type": "bool"},
         "show_fov": {"type": "bool"},
         "show_boxes": {"type": "bool"},
         "box_full_rect": {"type": "bool"},

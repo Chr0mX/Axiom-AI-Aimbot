@@ -36,6 +36,8 @@ class OtherPage(BasePage):
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
+        self._markAdvancedCards()
+        self.addAdvancedSwitch()
     
     def setConfig(self, config):
         """設定 Config 實例並載入值"""
@@ -349,6 +351,14 @@ class OtherPage(BasePage):
 
         self.scrollLayout.addStretch(1)
     
+    def _markAdvancedCards(self):
+        """Fine-tuning cards that only show with the global "Show advanced settings" switch
+        (components/advanced.py). Their values are never touched; the page's own visibility
+        rules keep working underneath."""
+        self.markAdvancedAttrs(*"""
+pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPortCard
+            """.split())
+
     def _connectSignals(self):
         """連接信號"""
         # Language

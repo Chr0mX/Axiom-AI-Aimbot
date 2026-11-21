@@ -410,6 +410,7 @@ class AxiomWindow(FluentWindow):
         for page in pages:
             if hasattr(page, 'setConfig'):
                 page.setConfig(config)
+        self.applyAdvancedSettings()
         
         # 從配置還原主題設定（無條件強制套用，避免狀態不一致）
         saved_dark = getattr(config, 'dark_mode', False)
@@ -527,6 +528,15 @@ class AxiomWindow(FluentWindow):
             widget.refreshFromConfig()
         elif hasattr(widget, 'setConfig'):
             widget.setConfig(self._config)
+        if hasattr(widget, 'applyAdvanced'):          # the global "Show advanced settings" switch
+            widget.applyAdvanced()
+
+    def applyAdvancedSettings(self) -> None:
+        """The switch changed (here or from Web Control): update every page at once."""
+        for i in range(self.stackedWidget.count()):
+            page = self.stackedWidget.widget(i)
+            if hasattr(page, 'applyAdvanced'):
+                page.applyAdvanced()
 
     def _onPageActivated(self, index):
         """Refreshes just the page becoming visible from the live Config —

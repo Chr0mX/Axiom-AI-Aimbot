@@ -122,6 +122,8 @@ class InferencePage(BasePage):
         self._initWidgets()
         self._initLayout()
         self._connectSignals()
+        self._markAdvancedCards()
+        self.addAdvancedSwitch()
 
     def setConfig(self, config):
         self._config = config
@@ -570,6 +572,17 @@ class InferencePage(BasePage):
     # ──────────────────────────────────────────────
     # Signal connections
     # ──────────────────────────────────────────────
+
+    def _markAdvancedCards(self):
+        """Fine-tuning cards that only show with the global "Show advanced settings" switch
+        (components/advanced.py). Their values are never touched; the page's own visibility
+        rules keep working underneath."""
+        self.markAdvancedAttrs(*"""
+anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHistoryCard
+            anchorMaxDistCard anchorInflAdaptiveCard anchorInflDynamicCard
+            advFovGroup acqTrackGroup inferPerfGroup
+            afovSmoothCard afovMaxSpeedCard afovLostDelayCard afovReacquireCard afovDynRadiusCard afovMaxRadiusCard
+            """.split())
 
     def _connectSignals(self):
         self.fovCard.valueChanged.connect(self._onFovChanged)

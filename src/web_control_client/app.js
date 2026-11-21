@@ -2239,7 +2239,16 @@
     });
   }
 
+  // "Show advanced settings" (sidebar switch, same persisted flag as the Qt app). initAdvancedSettings()
+  // installs the setter; applyStatus() feeds it the server's value on every poll.
+  var advancedOn = true;
+  var advancedPending = false;
+  var setAdvancedFromServer = null;
+
   function applyStatus(s) {
+    if (setAdvancedFromServer && typeof s.show_advanced_settings === "boolean" && !advancedPending) {
+      setAdvancedFromServer(s.show_advanced_settings);
+    }
     applyModelLoadError(s.model_load_error);
     noteModelRuntime(s);
     applyGpu(s.gpu);
@@ -2828,7 +2837,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "19") return;
+    if (cssVer !== "20") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
@@ -3246,6 +3255,68 @@
     stageEl.setAttribute("data-idle", idle);
   }
 
+  // Set once the search box exists; lets the advanced switch re-run the filter.
+  var searchRefresh = null;
+  var ADVANCED_CACHE_KEY = "axiom_show_advanced";
+
+  // "Show advanced settings": cards carrying data-advanced are hidden by CSS (body:not(.show-advanced))
+  // while it is off. Display only — hidden fields keep their values and are still read/synced, exactly
+  // like conditionally hidden ones. The flag itself lives on the host (config show_advanced_settings),
+  // so the Qt app and this page always agree.
+  function initAdvancedSettings() {
+    var toggle = document.getElementById("adv-toggle");
+    // The attribute is written on the control; the card is what hides.
+    Array.prototype.forEach.call(document.querySelectorAll(".main [data-advanced]"), function (el) {
+      if (el.classList.contains("field-card")) return;
+      var card = el.closest(".field-card");
+      if (card) card.setAttribute("data-advanced", "1");
+    });
+    var modules = Array.prototype.slice.call(document.querySelectorAll(".main .module"));
+    var gated = modules.filter(function (m) { return m.querySelector(".field-card[data-advanced]"); });
+
+    function refreshEmptyModules() {
+      gated.forEach(function (m) {
+        // A section whose cards are all advanced would show only its title.
+        var basic = m.querySelector(".field-card:not([data-advanced])");
+        m.classList.toggle("adv-empty", !advancedOn && !basic);
+      });
+    }
+    function setAdvanced(on) {
+      advancedOn = !!on;
+      document.body.classList.toggle("show-advanced", advancedOn);
+      if (toggle) toggle.checked = advancedOn;
+      refreshEmptyModules();
+      if (searchRefresh) searchRefresh();
+      var cached = null;
+      try { cached = window.localStorage; } catch (e) { cached = null; }
+      if (cached) { try { cached.setItem(ADVANCED_CACHE_KEY, advancedOn ? "1" : "0"); } catch (e2) { /* private mode */ } }
+    }
+    // Last known value first (no flash on reload); the first status poll reconfirms it.
+    var last = null;
+    try { last = window.localStorage.getItem(ADVANCED_CACHE_KEY); } catch (e) { last = null; }
+    setAdvanced(last === null ? true : last === "1");
+    setAdvancedFromServer = function (on) {
+      if (document.activeElement === toggle) return;       // never fight the user's own click
+      if (on !== advancedOn) setAdvanced(on);
+    };
+    if (toggle) {
+      toggle.addEventListener("change", function () {
+        var want = toggle.checked;
+        setAdvanced(want);
+        advancedPending = true;
+        api("POST", "/api/settings/visuals", { show_advanced_settings: want })
+          .then(function (data) {
+            if (!data || data.ok === false) throw new Error(data && data.reason ? String(data.reason).replace(/_/g, " ") : "rejected");
+          })
+          .catch(function (err) {
+            setAdvanced(!want);
+            notify("Could not save the advanced settings switch: " + (err && err.message ? err.message : "request failed"), true);
+          })
+          .then(function () { advancedPending = false; });
+      });
+    }
+  }
+
   function initUiEnhancements() {
     var i;
 
@@ -3339,13 +3410,21 @@
       var q = searchInput.value.trim().toLowerCase();
       document.body.classList.toggle("searching", !!q);
       var matches = 0;
+      var advancedMatches = 0;     // hits that are only hidden by the Show advanced settings switch
       Array.prototype.forEach.call(document.querySelectorAll(".main .field-card"), function (card) {
         var hit = !q || cardText(card).indexOf(q) !== -1;
         card.classList.toggle("search-hidden", !hit);
-        if (q && hit && !card.classList.contains("hidden") && !card.closest(".hidden")) matches++;
+        if (q && hit && !card.classList.contains("hidden") && !card.closest(".hidden")) {
+          if (advancedOn || !card.hasAttribute("data-advanced")) matches++;
+          else advancedMatches++;
+        }
       });
       function hasVisibleCard(el) {
-        return el.querySelector(".field-card:not(.search-hidden):not(.hidden)") !== null;
+        var list = el.querySelectorAll(".field-card:not(.search-hidden):not(.hidden)");
+        for (var k = 0; k < list.length; k++) {
+          if (advancedOn || !list[k].hasAttribute("data-advanced")) return true;
+        }
+        return false;
       }
       // Panels are: title, an optional .deck (primary controls) and a
       // .modules wrapper of <section class="module"> blocks, each a group
@@ -3367,14 +3446,21 @@
         });
         panel.classList.toggle("search-hidden", !!q && !anyInPanel);
       });
-      searchCount.textContent = q ? (matches + (matches === 1 ? " setting" : " settings") + " match") : "";
+      var countText = q ? (matches + (matches === 1 ? " setting" : " settings") + " match") : "";
+      if (q && advancedMatches) {
+        countText += " · " + advancedMatches + " more in advanced settings (turn on Show advanced settings)";
+      }
+      searchCount.textContent = countText;
     }
+    searchRefresh = applySearch;
     if (searchInput) {
       searchInput.addEventListener("input", applySearch);
       searchInput.addEventListener("keydown", function (e) {
         if (e.key === "Escape") { searchInput.value = ""; applySearch(); }
       });
     }
+
+    initAdvancedSettings();
 
     // Phones: the sidebar (token/status/presets) is collapsible so settings
     // aren't buried underneath it. Starts collapsed once a token exists.

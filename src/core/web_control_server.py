@@ -195,6 +195,7 @@ def _build_status(config) -> dict:
         # which never matches any of the select's four option values and
         # was leaving the dropdown stuck on its default "Auto".
         "selected_backend": str(getattr(config, "inference_backend", "auto")),
+        "show_advanced_settings": bool(getattr(config, "show_advanced_settings", True)),
         "trt_fp16_enabled": bool(getattr(config, "trt_fp16_enabled", False)),
         # What is actually loaded (vs. the selection above): the Model Info card keys off these.
         "loaded_model": os.path.basename(str(getattr(config, "loaded_model_path", "") or "")),
