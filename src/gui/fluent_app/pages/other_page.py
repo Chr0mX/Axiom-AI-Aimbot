@@ -826,7 +826,7 @@ pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPo
         self.perfGroup.titleLabel.setText(t("performance_settings", "Performance"))
         self.threadPriorityCard.titleLabel.setText(t("thread_priority", "Thread Priority"))
         self.threadPriorityCard.contentLabel.setText(
-            t("thread_priority_desc", "CPU priority for inference, capture and NDI receive threads. Takes effect on next inference start."))
+            t("thread_priority_desc", "CPU priority for inference, capture and preprocess threads. Takes effect on next inference start."))
 
         # 程式控制
         self.showConsoleCard.titleLabel.setText(t("show_console"))
@@ -854,7 +854,8 @@ pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPo
             t("web_control_connect_desc", "Open this URL on the same PC, or on any device on your LAN."))
 
         # TensorRT 環境
-        self.trtGroup.titleLabel.setText(t("trt_env", "TensorRT Environment"))
+        self.trtGroup.titleLabel.setText(t("env_trt", "TensorRT"))
+        self.pyGroup.titleLabel.setText(t("env_python", "Python Path"))
         self.trtStatusCard.titleLabel.setText(t("trt_status", "TensorRT Status"))
         self.trtVersionCard.titleLabel.setText(t("trt_version", "TensorRT Version"))
         self.trtLibsCard.titleLabel.setText(t("trt_libs_path", "TensorRT DLL Path"))

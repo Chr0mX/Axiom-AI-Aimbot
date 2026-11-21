@@ -30,6 +30,31 @@ from ..theme_colors import ThemeColors
 # Measurement noise is the opposite of process noise: a higher value makes the filter trust the
 # detections less, so the point is smoother but slower (it used to share process noise's text).
 _KALMAN_MEAS_NOISE_DESC = "Higher = smoother but slower to react; lower = trusts each detection more"
+
+# Advanced Aim Tuning cards: (attribute, title key, English title, description key | None, English description).
+# One table drives retranslateUi(), so a language switch refreshes every one of them (they used to keep
+# the text of the language the page was built in).
+_TUNING_TEXT = (
+    ("predictionLeadFramesCard", "prediction_lead_frames", "Rolling Lead", None, ""),
+    ("predictionAdaptiveLeadCard", "prediction_adaptive_lead", "Adaptive Lead",
+     "prediction_adaptive_lead_desc", "Stretch the time lead when the mouse is moving slowly"),
+    ("captureTimestampsCard", "prediction_capture_timestamps", "Capture Timestamps",
+     "prediction_capture_timestamps_desc", "Time each sample by when its frame was captured, not when it was processed"),
+    ("lsqFitCard", "prediction_lsq_fit", "Least-Squares Velocity",
+     "prediction_lsq_fit_desc", "Fit the speed through every point in the history, not just the oldest and newest"),
+    ("velocityDeadzoneCard", "prediction_velocity_deadzone", "Velocity Deadzone", None, ""),
+    ("egoMotionCard", "prediction_ego_motion_comp", "Own-Mouse Compensation", "prediction_ego_motion_comp_desc",
+     "Don't count the camera turn from our own mouse moves as target motion. Ignored while Camera Motion Compensation is on"),
+    ("egoScaleCard", "prediction_ego_motion_scale", "Pixels per Mouse Count", None, ""),
+    ("emaSmoothingCard", "aim_ema_smoothing_enabled", "Output EMA", "aim_ema_smoothing_desc",
+     "Smooth the move step after the PID or the path"),
+    ("emaAmountCard", "aim_ema_smoothing", "EMA Amount", None, ""),
+    ("aimXOffsetCard", "aim_x_offset_frac", "Aim X Offset", None, ""),
+    ("aimYOffsetCard", "aim_y_offset_frac", "Aim Y Offset", None, ""),
+    ("stickyGapCard", "sticky_gap_extrapolate", "Gap Extrapolation", "sticky_gap_extrapolate_desc",
+     "Keep aiming along the last velocity for a few missed frames"),
+    ("stickyGapFramesCard", "sticky_gap_frames", "Gap Frames", None, ""),
+)
 _PREDICTION_METHOD_DESC = ("Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; "
                            "tuned under Anchor Prediction on the Inference page)")
 
@@ -2502,6 +2527,12 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
 
         self.trackingGroup.titleLabel.setText(t("target_tracking", "Target Tracking"))
         self.mathGroup.titleLabel.setText(t("aim_tuning_group", "Advanced Aim Tuning"))
+        for attr, title_key, title, desc_key, desc in _TUNING_TEXT:
+            card = getattr(self, attr)
+            card.titleLabel.setText(t(title_key, title))
+            if desc_key:
+                card.contentLabel.setText(t(desc_key, desc))
+        self.targetAreaGroup.titleLabel.setText(t("target_point_tracking", "Target Point Tracking"))
         self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Prediction Method"))
         self.predictionMethodCard.contentLabel.setText(t("prediction_method_desc", _PREDICTION_METHOD_DESC))
         self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Velocity Prediction"))
