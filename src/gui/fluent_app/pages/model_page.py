@@ -441,6 +441,9 @@ class ModelPage(BasePage):
                 self._config.hud_model_path = os.path.join("Model_Hud", self.hudModelCombo.itemText(0))
         self.hudModelCombo.blockSignals(False)
 
+        self._updateHudGroupVisibility()
+        self._applyModelBadges()            # also shows/hides the TensorRT-only precision combo
+
         # Kick off model inspection and load notes after config load
         self._updateModelInfo(self._config.model_path)
         # Reloading the notes card resets it (and drops an unsaved edit), so
@@ -448,6 +451,12 @@ class ModelPage(BasePage):
         notes_model = os.path.basename(self._config.model_path or "")
         if notes_model != self.modelNotesCard._current_model:
             self.modelNotesCard.setModel(notes_model)
+
+    def _updateHudGroupVisibility(self):
+        """The HUD model / game profile only matter to the ONNX weapon detector (Inference page ->
+        Weapon Detection Method = v2_onnx); hidden otherwise, values kept."""
+        mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
+        self.hudModelGroup.setVisible(mode == 'v2_onnx')
 
     # ──────────────────────────────────────────────
     # Model inspector
@@ -599,6 +608,9 @@ class ModelPage(BasePage):
         even opens the dropdown. Hidden entirely when TensorRT isn't the
         active backend, since cache status is irrelevant noise there."""
         trt_active = self._isTensorRtActive()
+        # FP32/FP16 only selects which TensorRT engine is built/loaded; under any other backend it
+        # does nothing, so it is hidden there (the saved choice is kept for when TensorRT is used).
+        self.precisionCombo.setVisible(trt_active)
         for i in range(self.modelCombo.count()):
             if not trt_active:
                 self.modelCombo.setItemIcon(i, None)

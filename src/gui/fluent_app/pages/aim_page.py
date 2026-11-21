@@ -1416,6 +1416,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.maxMovePerFrameCard.valueChanged.connect(
             lambda v: setattr(self._config, 'max_move_per_frame_px', float(v)) if self._config else None)
         self.pidYReduceEnableCard.checkedChanged.connect(lambda checked: self._onPidChanged('aim_y_reduce_enabled', checked, is_bool=True))
+        self.pidYReduceEnableCard.checkedChanged.connect(lambda _c: self._updateAimTuningVisibility())
         self.pidYReduceDelayCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_delay', v))
         self.pidYReduceFloorCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_floor', v))
         self.pidYReduceRampCard.valueChanged.connect(lambda v: self._onPidChanged('aim_y_reduce_ramp', v))
@@ -1585,8 +1586,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             self.kalmanEnableCard.setChecked(kalman_on)
             self.kalmanProcessNoiseCard.setValue(int(round(getattr(self._config, 'kalman_process_noise', 0.01) * 100)))
             self.kalmanMeasNoiseCard.setValue(int(round(getattr(self._config, 'kalman_measurement_noise', 0.1) * 100)))
-            self.kalmanProcessNoiseCard.setEnabled(kalman_on)
-            self.kalmanMeasNoiseCard.setEnabled(kalman_on)
 
             cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
             self.camMotionCompCard.setChecked(cmc_on)
@@ -1594,7 +1593,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             if cmc_size not in ("128", "256"):
                 cmc_size = "128"
             self.camMotionCompSizeSegment.setCurrentItem(cmc_size)
-            self.camMotionCompSizeCard.setEnabled(cmc_on)
 
             method_map = {"velocity": "Velocity", "ema": "EMA", "rolling": "Rolling", "anchor": "Anchor"}
             self.predictionMethodCombo.setCurrentText(method_map.get(
@@ -2216,6 +2214,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
     def _onTargetPriorityModeChanged(self, text):
         if self._config:
             self._config.target_priority_mode = str(text).lower()
+        self._updateAimTuningVisibility()
 
     def _onTargetPriorityWeightChanged(self, value):
         if self._config:
@@ -2266,7 +2265,27 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.egoMotionCard.setVisible(pred_on)
         self.egoScaleCard.setVisible(pred_on and self.egoMotionCard.isChecked())
         self.emaAmountCard.setVisible(self.emaSmoothingCard.isChecked())
-        self.stickyGapFramesCard.setVisible(self.stickyGapCard.isChecked())
+
+        # The rest of the "only while its parent option is on" rules (hidden, values kept; nothing here
+        # writes config): prediction timing, sticky-lock tuning, Kalman noise, camera compensation size,
+        # the Y-recoil detail cards and the composite-only confidence weight.
+        self.predictionHorizonCard.setVisible(pred_on)
+        self.predictionMaxVelCard.setVisible(pred_on)
+        self.predictionHistoryCard.setVisible(pred_on and method != "Anchor")   # Anchor keeps its own history
+        sticky_on = self.stickyLockCard.isChecked()
+        self.lockDecayCard.setVisible(sticky_on)
+        self.lockIouCard.setVisible(sticky_on)
+        self.stickyGapCard.setVisible(sticky_on)
+        self.stickyGapFramesCard.setVisible(sticky_on and self.stickyGapCard.isChecked())
+        kalman_on = self.kalmanEnableCard.isChecked()
+        self.kalmanProcessNoiseCard.setVisible(kalman_on)
+        self.kalmanMeasNoiseCard.setVisible(kalman_on)
+        self.camMotionCompSizeCard.setVisible(self.camMotionCompCard.isChecked())
+        y_on = self.pidYReduceEnableCard.isChecked()
+        for card in (self.pidYReduceDelayCard, self.pidYReduceFloorCard, self.pidYReduceRampCard,
+                     self.pidYReduceSettleCard, self.pidYReduceVelCard):
+            card.setVisible(y_on)
+        self.targetPriorityWeightCard.setVisible(self.targetPriorityModeCombo.currentText() == "Composite")
 
     def _onPredictionEnableChanged(self, checked):
         if self._config:
@@ -2288,6 +2307,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
     def _onStickyLockChanged(self, checked):
         if self._config:
             self._config.sticky_lock_enabled = bool(checked)
+        self._updateAimTuningVisibility()
 
     def _onLockDecayChanged(self, value):
         if self._config:
@@ -2300,8 +2320,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
     def _onKalmanEnableChanged(self, checked):
         if self._config:
             self._config.kalman_enabled = bool(checked)
-        self.kalmanProcessNoiseCard.setEnabled(bool(checked))
-        self.kalmanMeasNoiseCard.setEnabled(bool(checked))
+        self._updateAimTuningVisibility()
 
     def _onKalmanProcessNoiseChanged(self, value):
         if self._config:
@@ -2314,7 +2333,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
     def _onCamMotionCompChanged(self, checked):
         if self._config:
             self._config.cam_motion_comp_enabled = bool(checked)
-        self.camMotionCompSizeCard.setEnabled(bool(checked))
+        self._updateAimTuningVisibility()
 
     def _onCamMotionCompSizeChanged(self, key):
         if self._config:

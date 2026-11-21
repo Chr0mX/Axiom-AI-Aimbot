@@ -415,9 +415,7 @@ pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPo
         self.webControlPortSpin.blockSignals(False)
         self.webControlTokenCard.contentLabel.setText(
             getattr(self._config, 'web_control_token', '') or t("web_control_token_none", "(generated on first enable)"))
-        self.webControlPortCard.setEnabled(web_control_on)
-        self.webControlTokenCard.setEnabled(web_control_on)
-        self.webControlConnectCard.setEnabled(web_control_on)
+        self._updateWebControlVisibility(web_control_on)
         self._refreshWebControlConnect()
 
         # Labels only: the device query (150 ms wait) runs from the 3 s
@@ -469,12 +467,15 @@ pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPo
             window.close()
 
     # === Remote Control (Web Control API) ===
+    def _updateWebControlVisibility(self, enabled: bool):
+        """Port / token / connect only exist while the server is switched on (hidden, values kept)."""
+        for card in (self.webControlPortCard, self.webControlTokenCard, self.webControlConnectCard):
+            card.setVisible(bool(enabled))
+
     def _onWebControlEnableChanged(self, checked):
         if self._config:
             self._config.web_control_enabled = bool(checked)
-        self.webControlPortCard.setEnabled(checked)
-        self.webControlTokenCard.setEnabled(checked)
-        self.webControlConnectCard.setEnabled(checked)
+        self._updateWebControlVisibility(bool(checked))
         try:
             from core import web_control_server
             if checked:
@@ -557,6 +558,11 @@ pyGroup trtLibsCard trtCacheCard trtAppdataCard dmlEmbeddedPathCard webControlPo
             connected = is_makcu_connected()
         except Exception:
             connected = False
+
+        # Hardware details only make sense while a MAKCU is in use (selected as the mouse method) or
+        # connected; with another mouse method and no device the whole group is just noise.
+        move_method = str(getattr(self._config, 'mouse_move_method', '')) if self._config else ''
+        self.makcuHwGroup.setVisible(bool(connected or move_method == 'makcu'))
 
         if connected:
             self.makcuHwStatusCard.contentLabel.setText(t("connected", "Connected"))

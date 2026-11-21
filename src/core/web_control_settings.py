@@ -212,22 +212,22 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "humanization.intensity": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
         "humanization.micro_jitter_enabled": {"type": "bool"},
         "humanization.micro_jitter_base": {"type": "float", "min": 0.0, "max": 2.0},
-        "humanization.micro_jitter_scale": {"type": "float", "min": 0.0, "max": 0.2},
+        "humanization.micro_jitter_scale": {"type": "float", "scale": 100.0, "min": 0.0, "max": 20.0},
         "humanization.micro_jitter_idle_enabled": {"type": "bool"},
         "humanization.motion_variation_enabled": {"type": "bool"},
-        "humanization.motion_variation_range": {"type": "float", "min": 0.0, "max": 0.2},
+        "humanization.motion_variation_range": {"type": "float", "scale": 100.0, "min": 0.0, "max": 20.0},
         "humanization.speed_shaping_enabled": {"type": "bool"},
         "humanization.speed_shaping_low": {"type": "float", "min": 0.0, "max": 20.0},
         "humanization.speed_shaping_high": {"type": "float", "min": 0.0, "max": 50.0},
         "humanization.speed_shaping_low_factor": {"type": "float", "min": 0.0, "max": 1.0},
         "humanization.micro_stutter_enabled": {"type": "bool"},
-        "humanization.micro_stutter_prob": {"type": "float", "min": 0.0, "max": 0.2},
+        "humanization.micro_stutter_prob": {"type": "float", "scale": 100.0, "min": 0.0, "max": 20.0},
         "humanization.micro_stutter_min": {"type": "float", "min": 0.0, "max": 1.0},
         "humanization.micro_stutter_max": {"type": "float", "min": 0.0, "max": 1.0},
         "humanization.reaction_variability_enabled": {"type": "bool"},
-        "humanization.reaction_skip_prob": {"type": "float", "min": 0.0, "max": 0.1},
+        "humanization.reaction_skip_prob": {"type": "float", "scale": 100.0, "min": 0.0, "max": 10.0},
         "target_priority_mode": {"type": "choice", "choices": ["distance", "confidence", "composite"]},
-        "target_priority_confidence_weight": {"type": "float", "min": 0.0, "max": 1.0},
+        "target_priority_confidence_weight": {"type": "float", "scale": 100.0, "min": 0.0, "max": 100.0},
         "prediction_enabled": {"type": "bool"},
         "prediction_horizon_ms": {"type": "float", "min": 5, "max": 50},
         "prediction_max_velocity": {"type": "float", "min": 300, "max": 3000},
@@ -243,9 +243,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "sticky_gap_extrapolate": {"type": "bool"},
         "sticky_gap_frames": {"type": "int", "min": 1, "max": 8},
         "aim_ema_smoothing_enabled": {"type": "bool"},
-        "aim_ema_smoothing": {"type": "float", "min": 0.01, "max": 1.0},
-        "aim_x_offset_frac": {"type": "float", "min": -1.0, "max": 1.0},
-        "aim_y_offset_frac": {"type": "float", "min": -1.0, "max": 1.0},
+        "aim_ema_smoothing": {"type": "float", "scale": 100.0, "min": 1.0, "max": 100.0},
+        "aim_x_offset_frac": {"type": "float", "scale": 100.0, "min": -100.0, "max": 100.0},
+        "aim_y_offset_frac": {"type": "float", "scale": 100.0, "min": -100.0, "max": 100.0},
         "sticky_lock_enabled": {"type": "bool"},
         "lock_persistence_ms": {"type": "int", "min": 0, "max": 2000},
         "lock_iou_threshold": {"type": "float", "min": 0.10, "max": 0.70},
@@ -255,9 +255,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "cam_motion_comp_enabled": {"type": "bool"},
         "cam_motion_comp_size": {"type": "choice", "choices": [128, 256]},
         "aim_custom_y_pct": {"type": "float", "min": 0, "max": 100},
-        "head_width_ratio": {"type": "float", "min": 0.10, "max": 1.0},
-        "head_height_ratio": {"type": "float", "min": 0.10, "max": 1.0},
-        "body_width_ratio": {"type": "float", "min": 0.10, "max": 1.0},
+        "head_width_ratio": {"type": "float", "scale": 100.0, "min": 10.0, "max": 100.0},
+        "head_height_ratio": {"type": "float", "scale": 100.0, "min": 10.0, "max": 100.0},
+        "body_width_ratio": {"type": "float", "scale": 100.0, "min": 10.0, "max": 100.0},
         "aim_adaptive_ratio_enabled": {"type": "bool"},
         "aim_adaptive_ratio_ref_h": {"type": "float", "min": 20, "max": 200},
         "aim_posture_aware_enabled": {"type": "bool"},
@@ -302,7 +302,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         # ViGEm Network
         "vigem_net_host": {"type": "str"},
         "vigem_net_port": {"type": "int", "min": 1, "max": 65535},
-        "vigem_net_token": {"type": "str"},
+        # A credential: write-only over the API (GET never returns it, an empty write keeps the stored one),
+        # so it cannot be read back by anyone who only holds the page / a screenshot of its response.
+        "vigem_net_token": {"type": "str", "write_only": True},
         "vigem_net_sensitivity": {"type": "float", "min": 0.1, "max": 10.0},
         "vigem_net_input_deadzone": {"type": "float", "min": 0.0, "max": 0.5},
         "vigem_net_game_deadzone": {"type": "float", "min": 0.0, "max": 0.5},
@@ -507,6 +509,9 @@ def get_tab_settings(config, tab: str) -> dict:
 
     result: dict = {}
     for field, spec in schema.items():
+        if spec.get("write_only"):
+            result[field] = ""
+            continue
         if spec.get("derived"):
             raw = _DERIVED[spec["derived"]][0](config)
         else:
@@ -519,7 +524,10 @@ def get_tab_settings(config, tab: str) -> dict:
         elif ftype == "bool":
             result[field] = bool(raw)
         elif ftype in ("int", "float"):
-            value = float(raw) * spec.get("scale", 1.0)
+            scale = spec.get("scale", 1.0)
+            value = float(raw) * scale
+            if scale != 1.0:
+                value = round(value, 6)          # 0.3 * 100 must read 30.0, not 30.000000000000004
             result[field] = int(round(value)) if ftype == "int" else value
         else:  # "str" / "choice"
             result[field] = raw
@@ -539,11 +547,21 @@ def get_tab_settings(config, tab: str) -> dict:
         result["ndi_height"] = int(getattr(config, "ndi_height", 0) or 0)
         result["ndi_source_nominal_fps"] = float(getattr(config, "source_nominal_fps", 0.0) or 0.0)
 
+    if tab in ("capture", "model"):
+        # Read-only extra: the Weapon Detection method (owned by the "inference" tab) decides which
+        # weapon-scan / HUD controls these tabs show, exactly like capture_page / model_page do in Qt.
+        result["second_inference_mode"] = str(getattr(config, "second_inference_mode", "off"))
+
     if tab == "inference":
         # Read-only extra: Sticky Target Lock is owned by the "aim" tab but the
         # retention / tracking cards here only apply while it is on (same
         # visibility rule as inference_page.py's _updateTrackingVisibility()).
         result["sticky_lock_enabled"] = bool(getattr(config, "sticky_lock_enabled", False))
+        # Read-only extras mirroring inference_page.py's own visibility rules: Follow Mouse is meaningless
+        # for the external feeds (uvc/ndi/udp), and the IO-binding switch only applies to the plain CUDA provider.
+        result["screenshot_method"] = str(getattr(config, "screenshot_method", "mss"))
+        from .ai_loop_utils import cuda_io_binding_switch_applies
+        result["cuda_io_binding_applies"] = bool(cuda_io_binding_switch_applies(config))
         # Read-only extra: the reduced rate cannot apply while Always Aim / Always Auto-Fire is on.
         from .detect_mode import reduced_rate_ignored
         result["reduced_rate_ignored"] = bool(reduced_rate_ignored(config))
@@ -565,11 +583,19 @@ def get_tab_settings(config, tab: str) -> dict:
         # by the dedicated POST /api/control/always_aim route (its
         # idle_detect_enabled coupling means it must never be a plain
         # generic-schema field — see app_controller.set_always_aim()).
+        result["vigem_net_token_set"] = bool(getattr(config, "vigem_net_token", ""))
         result["mouse_move_method"] = getattr(config, "mouse_move_method", "")
         result["keep_detecting"] = bool(getattr(config, "keep_detecting", False))
         result["always_aim"] = bool(getattr(config, "always_aim", False))
 
     if tab == "visuals":
+        # Read-only extras that decide which options are worth showing (same rules as visuals_page.py):
+        # the stick gauge belongs to the vigem_network mouse method, the anchor overlay to Anchor Box
+        # Prediction, the predicted-aim marker to Prediction / Kalman.
+        result["mouse_move_method"] = str(getattr(config, "mouse_move_method", ""))
+        result["anchor_enabled"] = bool(getattr(config, "anchor_enabled", False))
+        result["prediction_or_kalman"] = bool(
+            getattr(config, "prediction_enabled", False) or getattr(config, "kalman_enabled", False))
         # Read-only extras — web_esp_enabled's canonical write is the
         # dedicated action route (see _SCHEMA["visuals"]'s comment above),
         # but the panel still needs to know the live enabled/running state
@@ -633,6 +659,8 @@ def apply_tab_settings(config, tab: str, updates: dict) -> dict:
             return {"ok": False, "reason": "unknown_field", "field": field}
         ftype = spec["type"]
 
+        if spec.get("write_only") and not str(value):
+            continue                    # an empty write means "leave the stored secret as it is"
         if ftype == "bool":
             parsed = _parse_bool(value)
             if parsed is None:

@@ -156,6 +156,7 @@
               <button id="model-refresh-btn" type="button" title="Reload Model/ listing">Refresh</button>
             </div>
             <div class="hint" id="model-switch-reason"></div>
+            <div class="hint" id="model-pending-hint" hidden>Selection changed — click Switch to apply it.</div>
             <div class="hint" id="model-empty-hint" hidden>No .onnx files found in Model/. Drop models there on the host machine, then click Refresh.</div>
             <div class="hint" id="model-cache-legend" hidden></div>
           </div>
@@ -193,7 +194,7 @@
           </div>
           </section>
 
-          <section class="module">
+          <section class="module hidden" id="model-hud-module">
           <div class="field-group-title">Model HUD Settings</div>
           <div class="field-group">
             <div class="field-card">
@@ -444,7 +445,7 @@
                 <button id="cap-udp-restart-btn">Restart</button>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card hidden" id="cap-hud-udp-enable-card">
               <div class="field-info">
                 <div class="field-title">HUD UDP Stream</div>
                 <div class="field-desc">Read the HUD strip from its own UDP port when the main stream is a center crop that excludes it.</div>
@@ -456,7 +457,7 @@
                 </label>
               </div>
             </div>
-            <div class="field-card" id="cap-hud-udp-port-card">
+            <div class="field-card hidden" id="cap-hud-udp-port-card">
               <div class="field-info">
                 <div class="field-title">HUD UDP Port</div>
                 <div class="field-desc">Default 5601 — must differ from the main stream port.</div>
@@ -465,10 +466,16 @@
                 <input type="number" id="cap-hud_udp_bind_port" data-key="hud_udp_bind_port" data-advanced="1" data-type="number" min="1" max="65535" step="1">
               </div>
             </div>
+          </div>
+          </section>
+
+          <section class="module hidden" id="cap-weapon-module">
+          <div class="field-group-title">Weapon Detection</div>
+          <div class="field-group">
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Weapon Scan FPS</div>
-                <div class="field-desc">OCR / HUD ONNX scan rate (1–10).</div>
+                <div class="field-desc">How often the OCR / HUD scan runs (1–10). Lower values reduce CPU load.</div>
               </div>
               <div class="field-control">
                 <input type="number" id="cap-second_inference_fps" data-key="second_inference_fps" data-advanced="1" data-type="number" min="1" max="10" step="1">
@@ -511,7 +518,7 @@
             </div>
             </div>
             <div class="micro-grid" data-cols="2" data-kind="toggles">
-            <div class="field-card">
+            <div class="field-card" id="inf-follow-mouse-card">
               <div class="field-info"><div class="field-title">Follow Mouse</div></div>
               <div class="field-control">
                 <label class="switch">
@@ -1093,10 +1100,10 @@
           <section class="module">
           <div data-default-collapsed="1" class="field-group-title">Inference Performance</div>
           <div class="field-group">
-            <div class="field-card">
+            <div class="field-card" id="inf-cuda-io-card">
               <div class="field-info">
                 <div class="field-title">CUDA IO Binding</div>
-                <div class="field-desc">Zero-copy GPU inference. Effective only with CUDA or TensorRT backend.</div>
+                <div class="field-desc">Zero-copy GPU inference for the CUDA backend. Always on with TensorRT; not used by other backends.</div>
               </div>
               <div class="field-control">
                 <label class="switch">
@@ -1369,10 +1376,11 @@
               <div class="field-card">
                 <div class="field-info">
                   <div class="field-title">Jitter Scale</div>
-                  <div class="field-desc">Extra jitter added per pixel of movement, as a fraction of movement size.</div>
+                  <div class="field-desc">Extra jitter added per pixel of movement, as a percentage of the movement size.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-jitter-scale" data-key="humanization.micro_jitter_scale" data-advanced="1" data-type="number" min="0" max="0.2" step="0.001">
+                  <input type="number" id="aim-humanization-jitter-scale" data-key="humanization.micro_jitter_scale" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
+                <span class="field-slider-value">%</span>
                 </div>
               </div>
               <div class="field-card">
@@ -1407,7 +1415,8 @@
                   <div class="field-desc">Random output-scale range applied each frame (mean-preserving).</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-motion-variation-range" data-key="humanization.motion_variation_range" data-advanced="1" data-type="number" min="0" max="0.2" step="0.001">
+                  <input type="number" id="aim-humanization-motion-variation-range" data-key="humanization.motion_variation_range" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
+                <span class="field-slider-value">%</span>
                 </div>
               </div>
             </div>
@@ -1473,7 +1482,8 @@
                   <div class="field-desc">Probability per frame of a brief magnitude reduction.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-stutter-prob" data-key="humanization.micro_stutter_prob" data-advanced="1" data-type="number" min="0" max="0.2" step="0.001">
+                  <input type="number" id="aim-humanization-stutter-prob" data-key="humanization.micro_stutter_prob" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
+                <span class="field-slider-value">%</span>
                 </div>
               </div>
               <div class="field-card">
@@ -1514,7 +1524,8 @@
                   <div class="field-desc">Probability per frame of skipping the mouse injection entirely.</div>
                 </div>
                 <div class="field-control">
-                  <input type="number" id="aim-humanization-reaction-skip-prob" data-key="humanization.reaction_skip_prob" data-advanced="1" data-type="number" min="0" max="0.1" step="0.001">
+                  <input type="number" id="aim-humanization-reaction-skip-prob" data-key="humanization.reaction_skip_prob" data-advanced="1" data-type="number" min="0" max="10" step="0.1">
+                <span class="field-slider-value">%</span>
                 </div>
               </div>
             </div>
@@ -1552,7 +1563,8 @@
                 <div class="field-desc">Used in Composite mode only</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-target_priority_confidence_weight" data-key="target_priority_confidence_weight" data-type="number" min="0" max="1" step="0.01">
+                <input type="number" id="aim-target_priority_confidence_weight" data-key="target_priority_confidence_weight" data-type="number" min="0" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
           </div>
@@ -1646,21 +1658,24 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">EMA Amount</div><div class="field-desc">1 follows the new step, lower holds the previous step</div></div>
+              <div class="field-info"><div class="field-title">EMA Amount</div><div class="field-desc">100% follows the new step; lower values hold on to the previous step</div></div>
               <div class="field-control">
-                <input type="number" id="aim-aim_ema_smoothing" data-key="aim_ema_smoothing" data-advanced="1" data-type="number" min="0.01" max="1" step="0.01">
+                <input type="number" id="aim-aim_ema_smoothing" data-key="aim_ema_smoothing" data-advanced="1" data-type="number" min="1" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Aim X Offset</div><div class="field-desc">Fraction of box width. Negative moves the point left</div></div>
+              <div class="field-info"><div class="field-title">Aim X Offset</div><div class="field-desc">Percent of the box width. Negative moves the point left</div></div>
               <div class="field-control">
-                <input type="number" id="aim-aim_x_offset_frac" data-key="aim_x_offset_frac" data-type="number" min="-1" max="1" step="0.01">
+                <input type="number" id="aim-aim_x_offset_frac" data-key="aim_x_offset_frac" data-type="number" min="-100" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Aim Y Offset</div><div class="field-desc">Fraction of box height. Positive moves the point down</div></div>
+              <div class="field-info"><div class="field-title">Aim Y Offset</div><div class="field-desc">Percent of the box height. Positive moves the point down</div></div>
               <div class="field-control">
-                <input type="number" id="aim-aim_y_offset_frac" data-key="aim_y_offset_frac" data-type="number" min="-1" max="1" step="0.01">
+                <input type="number" id="aim-aim_y_offset_frac" data-key="aim_y_offset_frac" data-type="number" min="-100" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card">
@@ -1795,7 +1810,8 @@
             <div class="field-card">
               <div class="field-info"><div class="field-title">Head Width Ratio</div></div>
               <div class="field-control">
-                <input type="number" id="aim-head_width_ratio" data-key="head_width_ratio" data-advanced="1" data-type="number" min="0.10" max="1" step="0.01">
+                <input type="number" id="aim-head_width_ratio" data-key="head_width_ratio" data-advanced="1" data-type="number" min="10" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card">
@@ -1804,13 +1820,15 @@
                 <div class="field-desc">Body Height = 100% − Head Height</div>
               </div>
               <div class="field-control">
-                <input type="number" id="aim-head_height_ratio" data-key="head_height_ratio" data-advanced="1" data-type="number" min="0.10" max="1" step="0.01">
+                <input type="number" id="aim-head_height_ratio" data-key="head_height_ratio" data-advanced="1" data-type="number" min="10" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card">
               <div class="field-info"><div class="field-title">Body Width Ratio</div></div>
               <div class="field-control">
-                <input type="number" id="aim-body_width_ratio" data-key="body_width_ratio" data-advanced="1" data-type="number" min="0.10" max="1" step="0.01">
+                <input type="number" id="aim-body_width_ratio" data-key="body_width_ratio" data-advanced="1" data-type="number" min="10" max="100" step="1">
+                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card">
@@ -1881,7 +1899,7 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Always Auto-Fire</div>
-                <div class="field-desc">Fire continuously without needing to hold an auto-fire key. Turning this on also disables Keep Detecting While Idle.</div>
+                <div class="field-desc">Fire continuously without needing to hold an auto-fire key. While it is on, detection always runs at full speed.</div>
               </div>
               <div class="field-control">
                 <label class="switch">
@@ -2219,7 +2237,7 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Token</div>
-                <div class="field-desc">Authentication token (must match the vigem app's Network API token)</div>
+                <div class="field-desc">Authentication token (must match the vigem app's Network API token). Never shown again once saved — type a new one to replace it.</div>
               </div>
               <div class="field-control">
                 <input type="password" id="keys-vigem_net_token" data-key="vigem_net_token" data-type="str" placeholder="token">
@@ -2418,7 +2436,7 @@
                 <label class="switch"><input type="checkbox" id="vis-show_tracer_line" data-key="show_tracer_line" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="vis-aim-marker-card">
               <div class="field-info">
                 <div class="field-title">Predicted Aim Point</div>
                 <div class="field-desc">Draw a second marker at the locked target's post-prediction/Kalman point.</div>
@@ -2427,7 +2445,7 @@
                 <label class="switch"><input type="checkbox" id="vis-show_aim_prediction_marker" data-key="show_aim_prediction_marker" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="vis-anchor-debug-card">
               <div class="field-info">
                 <div class="field-title">Anchor Prediction Debug</div>
                 <div class="field-desc">Draw the predicted box, current and predicted centre, a direction arrow, velocity and prediction confidence for the locked target (needs Anchor Prediction on the Inference page).</div>
@@ -2436,7 +2454,7 @@
                 <label class="switch"><input type="checkbox" id="vis-show_anchor_debug" data-key="show_anchor_debug" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="vis-stick-gauge-card">
               <div class="field-info">
                 <div class="field-title">Stick Gauge</div>
                 <div class="field-desc">Draw a circle showing the virtual stick position and dead zones (vigem_network mouse method only).</div>
@@ -2555,12 +2573,6 @@
               </div>
             </div>
             <div class="field-card gpu-sensor-card">
-              <div class="field-info"><div class="field-title">GPU Hotspot</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_hotspot" data-key="status_panel_gpu_hotspot" data-advanced="1" data-type="bool"><span class="slider"></span></label>
-              </div>
-            </div>
-            <div class="field-card gpu-sensor-card">
               <div class="field-info"><div class="field-title">GPU Usage</div></div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_util" data-key="status_panel_gpu_util" data-advanced="1" data-type="bool"><span class="slider"></span></label>
@@ -2594,12 +2606,6 @@
               <div class="field-info"><div class="field-title">GPU Power</div></div>
               <div class="field-control">
                 <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_power" data-key="status_panel_gpu_power" data-advanced="1" data-type="bool"><span class="slider"></span></label>
-              </div>
-            </div>
-            <div class="field-card gpu-sensor-card">
-              <div class="field-info"><div class="field-title">GPU Voltage</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="vis-status_panel_gpu_voltage" data-key="status_panel_gpu_voltage" data-advanced="1" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
             </div>
@@ -2671,7 +2677,7 @@
                 <label class="switch"><input type="checkbox" id="vis-enable_acrylic" data-key="enable_acrylic" data-type="bool"><span class="slider"></span></label>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="vis-acrylic-alpha-card">
               <div class="field-info"><div class="field-title">Acrylic Window Alpha</div></div>
               <div class="field-control">
                 <input type="number" id="vis-acrylic_window_alpha" data-key="acrylic_window_alpha" data-advanced="1" data-type="number" min="60" max="255" step="1">
@@ -2692,7 +2698,7 @@
                 <label class="switch"><input type="checkbox" id="vis-web_esp_enabled"><span class="slider"></span></label>
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="vis-web-esp-http-card">
               <div class="field-info">
                 <div class="field-title">HTTP Port</div>
                 <div class="field-desc">Port for the overlay web page.</div>
@@ -2701,7 +2707,7 @@
                 <input type="number" id="vis-web_esp_http_port" data-key="web_esp_http_port" data-advanced="1" data-type="number" min="1024" max="65535" step="1">
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="vis-web-esp-ws-card">
               <div class="field-info">
                 <div class="field-title">WebSocket Port</div>
                 <div class="field-desc">Port for the live state stream.</div>
@@ -2710,7 +2716,7 @@
                 <input type="number" id="vis-web_esp_ws_port" data-key="web_esp_ws_port" data-advanced="1" data-type="number" min="1024" max="65535" step="1">
               </div>
             </div>
-            <div class="field-card">
+            <div class="field-card" id="vis-web-esp-fps-card">
               <div class="field-info">
                 <div class="field-title">Web ESP Update Rate</div>
                 <div class="field-desc">Most updates per second sent to the browser overlay. Real data only arrives as fast as detection runs.</div>
@@ -2720,7 +2726,7 @@
                 <span class="field-slider-value">Hz</span>
               </div>
             </div>
-            <div class="field-card stacked">
+            <div class="field-card stacked" id="vis-web-esp-connect-card">
               <div class="row" style="justify-content: space-between;">
                 <div class="field-title">Connect</div>
                 <button id="vis-web-esp-open-btn">Open</button>

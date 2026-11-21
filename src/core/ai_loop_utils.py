@@ -136,6 +136,18 @@ def cuda_io_binding_effective(config: Config, providers=()) -> bool:
     return any('Tensorrt' in str(p) for p in providers)
 
 
+def cuda_io_binding_switch_applies(config) -> bool:
+    """Whether the "CUDA IO Binding" switch means anything right now: only for the plain CUDA provider.
+    Under TensorRT IO binding is always on (``cuda_io_binding_effective``) and every other provider
+    ignores it, so the Qt Inference page and Web Control show the card only when this is true.
+    Display rule only — it never touches the saved value."""
+    provider = str(getattr(config, 'current_provider', '') or '')
+    backend = str(getattr(config, 'inference_backend', '') or '').lower()
+    is_trt = provider == 'TensorrtExecutionProvider' or backend == 'tensorrt'
+    is_cuda = provider == 'CUDAExecutionProvider' or backend == 'cuda'
+    return is_cuda and not is_trt
+
+
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:
     """Update crosshair position"""
 

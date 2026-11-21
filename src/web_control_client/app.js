@@ -157,6 +157,24 @@
     });
   }
 
+  // One call for an action route: toasts the reason when the request fails or is refused (no more silent
+  // failures) and resolves to the response body, or null on failure.
+  function actionCall(label, method, path, body, okMessage) {
+    return api(method, path, body)
+      .then(function (data) {
+        if (data && data.ok === false) {
+          notify(label + ": " + String(data.reason || "refused").replace(/_/g, " "), true);
+          return null;
+        }
+        if (okMessage) notify(okMessage);
+        return data || {};
+      })
+      .catch(function (err) {
+        notify(label + ": " + (err && err.message ? err.message : "request failed"), true);
+        return null;
+      });
+  }
+
   function authHeaders() {
     return {
       "X-Axiom-Token": getToken(),
@@ -255,6 +273,23 @@
   var modelFormPrefilled = false;
   var modelListLoaded = false;
   var pendingModelSelection = null;
+  // Picks the operator has made in the Model/Precision/Backend selects but not applied yet. The poll
+  // must never overwrite them (they are applied together by Switch); once they equal the server's value,
+  // or Switch resolves one way or another, they sync from the host again — so a change made in the Qt app
+  // shows up here too.
+  var modelStaged = { model: false, precision: false, backend: false };
+  function clearModelStaged() {
+    modelStaged.model = modelStaged.precision = modelStaged.backend = false;
+    updateModelPendingHint();
+  }
+  function updateModelPendingHint() {
+    var el = document.getElementById("model-pending-hint");
+    if (el) el.hidden = !(modelStaged.model || modelStaged.precision || modelStaged.backend);
+  }
+  function stageModelPick(kind) {
+    modelStaged[kind] = true;
+    updateModelPendingHint();
+  }
   var allModelNames = []; // master list — modelSearchInput filters a view of this
   // {basename: already_has_a_cached_.engine} and "is TensorRT the active
   // backend right now" — both come from GET /api/models alongside `models`
@@ -310,8 +345,10 @@
       return opt.value === name;
     });
     if (hasOption) {
-      modelSelect.value = name;
-      refreshModelInfoAndNotes();
+      if (modelSelect.value !== name) {
+        modelSelect.value = name;
+        refreshModelInfoAndNotes();
+      }
     }
     // else: the active model isn't in Model/ anymore (renamed/deleted since
     // it was loaded) — leave the select on its default rather than adding
@@ -355,7 +392,7 @@
         // refresh the ✓/⬇ badges for the newly-active backend), where
         // silently resetting the visible selection back to the first
         // option would look like the switch didn't actually take.
-        var currentSelection = modelListLoaded ? modelSelect.value : "";
+        var currentSelection = modelSelect.options.length ? modelSelect.value : "";
         allModelNames = data.models;
         modelCacheStatus = data.cached || {};
         modelCacheFp16 = data.cached_fp16 || {};
@@ -393,8 +430,7 @@
   var modelRefreshBtn = document.getElementById("model-refresh-btn");
   if (modelRefreshBtn) {
     modelRefreshBtn.addEventListener("click", function () {
-      modelListLoaded = false;
-      loadModelList();
+      loadModelList();          // keeps the current (possibly staged) selection; only the list is reloaded
     });
   }
 
@@ -404,6 +440,8 @@
   function updateModelCacheLegend() {
     var el = document.getElementById("model-cache-legend");
     if (!el) return;
+    var precSel = document.getElementById("model-precision-select");
+    if (precSel) (precSel.closest(".dd") || precSel).classList.toggle("hidden", !modelTrtActive);
     if (modelTrtActive) {
       var precision = selectedModelFp16() ? "FP16" : "FP32";
       el.textContent = "✓ = TensorRT engine already cached  ·  ⬇ = needs a one-time build (1-5 min)  (" + precision + ")";
@@ -496,7 +534,11 @@
       .catch(function () {});
   }
 
-  modelSelect.addEventListener("change", refreshModelInfoAndNotes);
+  modelSelect.addEventListener("change", function () {
+    stageModelPick("model");
+    refreshModelInfoAndNotes();
+  });
+  backendSelect.addEventListener("change", function () { stageModelPick("backend"); });
 
   var modelNotesEditBtn = document.getElementById("model-notes-edit-btn");
   var modelNotesTextarea = document.getElementById("model-notes-text");
@@ -510,19 +552,14 @@
       modelNotesEditBtn.textContent = "Edit";
       var name = modelSelect.value;
       if (!name) return;
-      fetch("/api/model_notes", {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ model: name, text: modelNotesTextarea.value }),
-      }).catch(function () {});
+      actionCall("Could not save notes", "POST", "/api/model_notes", { model: name, text: modelNotesTextarea.value }, "Notes saved");
     }
   });
 
   var openModelFolderBtn = document.getElementById("open-model-folder-btn");
   openModelFolderBtn.addEventListener("click", function () {
     openModelFolderBtn.disabled = true;
-    fetch("/api/control/open_model_folder", { method: "POST", headers: authHeaders() })
-      .catch(function () {})
+    actionCall("Could not open the folder", "POST", "/api/control/open_model_folder", {}, "Opened on the Axiom PC")
       .then(function () { openModelFolderBtn.disabled = false; });
   });
 
@@ -683,19 +720,30 @@
           applyGenericValue(el, type, data[key]);
         });
         if (tab === "capture") updateCaptureVisibility(data.screenshot_method);
+        if (tab === "capture" || tab === "model") noteWeaponMode(data.second_inference_mode);
         if (tab === "inference") {
           updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
           updateAnchorVisibility();
           updateDetectModeVisibility();
           updateWeaponDetectVisibility(data.second_inference_mode);
+          updateInferenceProviderVisibility(data);
         }
         if (tab === "aim") {
           updateHumanizationVisibility();
           updateAimTuningVisibility();
           if (typeof data.pid_unsafe_mode === "boolean") applyPidUnsafeSliderLimits(!!data.pid_unsafe_mode);
         }
-        if (tab === "keys") updateKeysVisibility(data);
-        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); updateLineThicknessVisibility(); updateGpuMonitorVisibility(); }
+        if (tab === "keys") {
+          ensureOption(document.getElementById("keys-makcu_com_port"), data.makcu_com_port);
+          if (data.makcu_com_port && document.activeElement !== document.getElementById("keys-makcu_com_port")) {
+            document.getElementById("keys-makcu_com_port").value = data.makcu_com_port;
+          }
+          var vigemTok = document.getElementById("keys-vigem_net_token");
+          if (vigemTok) vigemTok.placeholder = data.vigem_net_token_set ? "saved — type to replace" : "token";
+          if (!serialPortsLoaded) refreshSerialPorts(false);
+          updateKeysVisibility(data);
+        }
+        if (tab === "visuals") { applyVisualsExtras(data); updateBoxStyleVisibility(); updateVisualsContextVisibility(data); updateGpuMonitorVisibility(); }
         if (tab === "convert" && typeof convertPrecisionSelect !== "undefined" && convertPrecisionSelect
             && document.activeElement !== convertPrecisionSelect && typeof data.trt_fp16_enabled === "boolean") {
           convertPrecisionSelect.value = data.trt_fp16_enabled ? "fp16" : "fp32";
@@ -707,6 +755,14 @@
         // preset load) says why it failed.
         if (!silent && err && err.status !== 401) notify("Could not load " + tab + " settings: " + err.message, true);
       });
+  }
+
+  // A loaded preset/config can touch fields on any tab (and a model/precision change): re-read every
+  // generic-schema tab plus the model list, so the whole client shows the new live config.
+  function resyncAllTabs() {
+    clearModelStaged();
+    GENERIC_SCHEMA_TABS.forEach(function (t) { loadTabSettings(t, true); });
+    loadModelList();
   }
 
   function pushTabSetting(tab, key, value) {
@@ -746,16 +802,18 @@
         if (tab === "inference" && (key === "afov_source" || key === "afov_predict_enabled" || key === "afov_lost_behavior" || key === "afov_dynamic_radius")) updateAnchorFovVisibility();
         if (tab === "inference" && (key === "anchor_enabled" || key === "anchor_mode" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
+        if (tab === "capture" && key === "hud_udp_enabled") updateWeaponDetectVisibility();
         if (tab === "inference" && key === "detect_mode") updateDetectModeVisibility();
         if (tab === "aim" && HUMANIZATION_TOGGLE_KEYS.indexOf(key) !== -1) updateHumanizationVisibility();
         if (tab === "aim" && AIM_TUNING_TOGGLE_KEYS.indexOf(key) !== -1) updateAimTuningVisibility();
         if (tab === "visuals" && key === "box_full_rect") updateBoxStyleVisibility();
         if (tab === "visuals" && LINE_THICKNESS_TOGGLE_KEYS.indexOf(key) !== -1) updateLineThicknessVisibility();
         if (tab === "visuals" && key === "status_panel_show_gpu") updateGpuMonitorVisibility();
+        if (tab === "visuals" && key === "enable_acrylic") updateVisualsContextVisibility();
         if (tab === "visuals" && (key === "web_esp_http_port" || key === "web_esp_ws_port")) {
           scheduleWebEspRestart();
         }
-        if (tab === "keys" && (key === "makcu_connection" || key === "makcu_device_hotkeys" || key === "makcu_mouse_spread_enabled")) {
+        if (tab === "keys" && (key === "makcu_connection" || key === "makcu_device_hotkeys" || key === "makcu_mouse_spread_enabled" || key === "remote_btn_enabled")) {
           updateKeysVisibility(lastSettings.keys || {});
         }
         // Always Auto-Fire no longer rewrites the saved "When Not Aiming" choice: the loop already
@@ -850,9 +908,37 @@
     if (note) note.classList.toggle("hidden", !(mode === "reduced" && d.reduced_rate_ignored));
   }
 
+  // Same display rules as inference_page.py: the cursor-follow FOV is meaningless for the external feeds
+  // (uvc/ndi/udp), and the IO-binding switch only applies to the plain CUDA provider. Display only — the
+  // saved values are untouched (the loop derives the effective ones).
+  function updateInferenceProviderVisibility(data) {
+    var follow = document.getElementById("inf-follow-mouse-card");
+    var external = ["uvc", "ndi", "udp"].indexOf(String(data.screenshot_method || "").toLowerCase()) !== -1;
+    if (follow) follow.classList.toggle("hidden", external);
+    var cuda = document.getElementById("inf-cuda-io-card");
+    if (cuda) cuda.classList.toggle("hidden", !data.cuda_io_binding_applies);
+  }
+
+  // Weapon Detection method (Inference tab) -> what the other tabs show. Mirrors the Qt pages:
+  // off = nothing weapon-related; OCR = scan rate + ROI; ONNX = + threshold, HUD model, HUD UDP stream.
+  var weaponMode = "off";
+  function noteWeaponMode(mode) {
+    if (typeof mode === "string") weaponMode = mode;
+    updateWeaponDetectVisibility();
+  }
   function updateWeaponDetectVisibility(mode) {
-    var card = document.getElementById("inf-hud-confidence-card");
-    if (card) card.classList.toggle("hidden", mode !== "v2_onnx");
+    if (typeof mode === "string") weaponMode = mode;
+    var onnx = weaponMode === "v2_onnx", active = onnx || weaponMode === "v1_ocr";
+    function toggle(id, show) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle("hidden", !show);
+    }
+    var hudUdp = document.getElementById("cap-hud_udp_enabled");
+    toggle("inf-hud-confidence-card", onnx);
+    toggle("cap-weapon-module", active);
+    toggle("cap-hud-udp-enable-card", onnx);
+    toggle("cap-hud-udp-port-card", onnx && !!(hudUdp && hudUdp.checked));
+    toggle("model-hud-module", onnx);
   }
 
   // ---------------------------------------------------------------------
@@ -871,7 +957,9 @@
 
   // Advanced Aim Tuning: each sub-setting is shown only while the option it
   // tunes is active, mirroring aim_page.py's _updateAimTuningVisibility().
-  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "prediction_ego_motion_comp", "aim_ema_smoothing_enabled", "sticky_gap_extrapolate"];
+  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "prediction_ego_motion_comp", "aim_ema_smoothing_enabled",
+    "sticky_gap_extrapolate", "sticky_lock_enabled", "kalman_enabled", "cam_motion_comp_enabled", "aim_y_reduce_enabled",
+    "target_priority_mode"];
 
   function updateAimTuningVisibility() {
     function el(id) { return document.getElementById(id); }
@@ -891,7 +979,23 @@
     setCard("aim-prediction_ego_motion_comp", predOn);
     setCard("aim-prediction_ego_motion_scale", predOn && !!(el("aim-prediction_ego_motion_comp") && el("aim-prediction_ego_motion_comp").checked));
     setCard("aim-aim_ema_smoothing", !!(el("aim-aim_ema_smoothing_enabled") && el("aim-aim_ema_smoothing_enabled").checked));
-    setCard("aim-sticky_gap_frames", !!(el("aim-sticky_gap_extrapolate") && el("aim-sticky_gap_extrapolate").checked));
+    // Same parent -> child rules as aim_page.py (display only; hidden options keep their values).
+    function on(id) { return !!(el(id) && el(id).checked); }
+    var stickyOn = on("aim-sticky_lock_enabled");
+    setCard("aim-prediction_horizon_ms", predOn);
+    setCard("aim-prediction_max_velocity", predOn);
+    setCard("aim-prediction_history_len", predOn && method !== "anchor");
+    setCard("aim-lock_persistence_ms", stickyOn);
+    setCard("aim-lock_iou_threshold", stickyOn);
+    setCard("aim-sticky_gap_extrapolate", stickyOn);
+    setCard("aim-sticky_gap_frames", stickyOn && on("aim-sticky_gap_extrapolate"));
+    setCard("aim-kalman_process_noise", on("aim-kalman_enabled"));
+    setCard("aim-kalman_measurement_noise", on("aim-kalman_enabled"));
+    setCard("aim-cam_motion_comp_size", on("aim-cam_motion_comp_enabled"));
+    ["aim_y_reduce_delay", "aim_y_reduce_floor", "aim_y_reduce_ramp", "aim_y_reduce_settle_px", "aim_y_vel_restore_px_s"].forEach(function (k) {
+      setCard("aim-" + k, on("aim-aim_y_reduce_enabled"));
+    });
+    setCard("aim-target_priority_confidence_weight", !!(el("aim-target_priority_mode") && el("aim-target_priority_mode").value === "composite"));
   }
 
   function updateHumanizationVisibility() {
@@ -911,8 +1015,7 @@
   document.getElementById("aim-humanization-reset-btn").addEventListener("click", function () {
     var btn = document.getElementById("aim-humanization-reset-btn");
     btn.disabled = true;
-    fetch("/api/control/humanization_reset", { method: "POST", headers: authHeaders() })
-      .catch(function () {})
+    actionCall("Could not reset humanization", "POST", "/api/control/humanization_reset", {}, "Humanization reset to defaults")
       .then(function () {
         loadTabSettings("aim"); // re-pull the fresh HumanizationConfig() defaults
         btn.disabled = false;
@@ -1012,10 +1115,15 @@
     document.getElementById("keys-makcu-always-aim-button-card").classList.toggle("hidden", hideForAlwaysAim);
     document.getElementById("keys-makcu-always-aim-mode-card").classList.toggle("hidden", hideForAlwaysAim);
     var isVigemNet = data.mouse_move_method === "vigem_network";
-    ["keys-vigem-net-group", "keys-vigem-net-group-title"].forEach(function (id) {
+    ["keys-vigem-net-group", "keys-vigem-net-group-title", "keys-remote-btn-group", "keys-remote-btn-group-title"].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) el.classList.toggle("hidden", !isVigemNet);
     });
+    // The remote aim button only matters once receiving is switched on (live DOM wins over the last fetch).
+    var remoteEl = document.getElementById("keys-remote_btn_enabled");
+    var remoteOn = remoteEl ? remoteEl.checked : !!data.remote_btn_enabled;
+    var remoteCard = document.getElementById("keys-remote_aim_button");
+    if (remoteCard && remoteCard.closest(".field-card")) remoteCard.closest(".field-card").classList.toggle("hidden", !remoteOn);
   }
 
   var vkOptionsLoaded = false;
@@ -1044,35 +1152,31 @@
       .catch(function () {});
   }
 
-  document.getElementById("keys-makcu-port-refresh-btn").addEventListener("click", function () {
+  // COM ports: the saved port is always an option (even before the list is read or if the device is
+  // unplugged), then the live list is merged in. Read once when the Keys tab first loads, and by Refresh.
+  var serialPortsLoaded = false;
+  function refreshSerialPorts(userInitiated) {
     var btn = document.getElementById("keys-makcu-port-refresh-btn");
-    btn.disabled = true;
-    fetch("/api/serial_ports", { headers: authHeaders() })
-      .then(function (res) { return res.ok ? res.json() : null; })
+    if (btn) btn.disabled = true;
+    return api("GET", "/api/serial_ports")
       .then(function (data) {
-        if (!data || data.ok === false) return;
+        if (!data || data.ok === false) throw new Error("no port list");
+        serialPortsLoaded = true;
         var select = document.getElementById("keys-makcu_com_port");
-        var current = select.value;
+        var current = select.value || ((lastSettings.keys || {}).makcu_com_port || "");
         select.innerHTML = "";
-        (data.ports || []).forEach(function (port) {
-          var opt = document.createElement("option");
-          opt.value = port;
-          opt.textContent = port;
-          select.appendChild(opt);
-        });
-        if (current) {
-          var has = Array.prototype.some.call(select.options, function (o) { return o.value === current; });
-          if (!has) {
-            var opt2 = document.createElement("option");
-            opt2.value = current;
-            opt2.textContent = current;
-            select.appendChild(opt2);
-          }
-          select.value = current;
-        }
+        (data.ports || []).forEach(function (port) { ensureOption(select, port); });
+        ensureOption(select, current);
+        if (current) select.value = current;
+        if (userInitiated) notify((data.ports || []).length ? "Ports refreshed" : "No serial ports found");
       })
-      .catch(function () {})
-      .then(function () { btn.disabled = false; });
+      .catch(function (err) {
+        if (userInitiated) notify("Could not list serial ports: " + (err && err.message ? err.message : "request failed"), true);
+      })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
+  document.getElementById("keys-makcu-port-refresh-btn").addEventListener("click", function () {
+    refreshSerialPorts(true);
   });
 
   // ---------------------------------------------------------------------
@@ -1090,43 +1194,35 @@
     }
   }
 
+  // Sets a select from the host's value without fighting the operator: a focused (open) select is left
+  // alone, and the option list is only rebuilt when it actually changed.
+  function syncSelect(select, value, label) {
+    if (!select || value === undefined || value === null || value === "") return;
+    if (document.activeElement === select) return;
+    ensureOption(select, value, label);
+    if (select.value !== String(value)) select.value = String(value);
+  }
+
   function applyCaptureExtras(data) {
     document.getElementById("cap-udp-system-ip").textContent = "Stream to: " + (data.system_ip || "—");
 
     var bindSelect = document.getElementById("cap-udp-bind-ip-select");
     var bindOptions = data.bind_ip_options || ["0.0.0.0"];
-    bindSelect.innerHTML = "";
-    bindOptions.forEach(function (ip) {
-      var opt = document.createElement("option");
-      opt.value = ip;
-      opt.textContent = ip;
-      bindSelect.appendChild(opt);
-    });
-    if (data.udp_bind_ip) {
-      ensureOption(bindSelect, data.udp_bind_ip);
-      bindSelect.value = data.udp_bind_ip;
+    var haveOptions = Array.prototype.map.call(bindSelect.options, function (o) { return o.value; });
+    if (document.activeElement !== bindSelect && haveOptions.join("|") !== bindOptions.join("|")) {
+      bindSelect.innerHTML = "";
+      bindOptions.forEach(function (ip) { ensureOption(bindSelect, ip); });
     }
+    syncSelect(bindSelect, data.udp_bind_ip);
 
-    var deviceSelect = document.getElementById("cap-uvc-device-select");
-    ensureOption(deviceSelect, data.uvc_device_index, "Device " + data.uvc_device_index);
-    deviceSelect.value = String(data.uvc_device_index);
+    syncSelect(document.getElementById("cap-uvc-device-select"), data.uvc_device_index, "Device " + data.uvc_device_index);
 
-    var resSelect = document.getElementById("cap-uvc-resolution-select");
     if (data.uvc_width && data.uvc_height) {
-      var resText = data.uvc_width + "x" + data.uvc_height;
-      ensureOption(resSelect, resText);
-      resSelect.value = resText;
+      syncSelect(document.getElementById("cap-uvc-resolution-select"), data.uvc_width + "x" + data.uvc_height);
     }
 
-    var fpsSelect = document.getElementById("cap-uvc-fps-select");
-    ensureOption(fpsSelect, data.uvc_fps);
-    fpsSelect.value = String(data.uvc_fps);
-
-    var ndiSelect = document.getElementById("cap-ndi-source-select");
-    if (data.ndi_source_name) {
-      ensureOption(ndiSelect, data.ndi_source_name);
-      ndiSelect.value = data.ndi_source_name;
-    }
+    syncSelect(document.getElementById("cap-uvc-fps-select"), data.uvc_fps);
+    syncSelect(document.getElementById("cap-ndi-source-select"), data.ndi_source_name);
 
     var hwInfo = document.getElementById("cap-uvc-hw-info");
     if (data.uvc_actual_width && data.uvc_actual_height) {
@@ -1449,11 +1545,34 @@
   ];
   var LINE_THICKNESS_TOGGLE_KEYS = ["show_fov", "show_detect_range", "show_tracer_line", "show_aim_prediction_marker"];
   function updateLineThicknessVisibility() {
+    var predOn = !!((lastSettings.visuals || {}).prediction_or_kalman);
     LINE_THICKNESS_CARDS.forEach(function (pair) {
       var toggle = document.getElementById(pair[0]);
       var card = document.getElementById(pair[1]);
-      if (card) card.classList.toggle("hidden", !(toggle && toggle.checked));
+      var show = !!(toggle && toggle.checked);
+      if (pair[1] === "vis-marker-thickness-card") show = show && predOn;
+      if (card) card.classList.toggle("hidden", !show);
     });
+  }
+
+  // Show an option only while what it draws / configures can exist (same rules as visuals_page.py). Display
+  // only: hidden options keep their values.
+  function updateVisualsContextVisibility(data) {
+    data = data || lastSettings.visuals || {};
+    function setHidden(id, hide) {
+      var el = document.getElementById(id);
+      if (el) el.classList.toggle("hidden", !!hide);
+    }
+    setHidden("vis-stick-gauge-card", data.mouse_move_method !== "vigem_network");
+    setHidden("vis-anchor-debug-card", !data.anchor_enabled);
+    setHidden("vis-aim-marker-card", !data.prediction_or_kalman);
+    var acrylic = document.getElementById("vis-enable_acrylic");
+    setHidden("vis-acrylic-alpha-card", !(acrylic && acrylic.checked));
+    var webOn = !!(document.getElementById("vis-web_esp_enabled") || {}).checked;
+    ["vis-web-esp-http-card", "vis-web-esp-ws-card", "vis-web-esp-fps-card", "vis-web-esp-connect-card"].forEach(function (id) {
+      setHidden(id, !webOn);
+    });
+    updateLineThicknessVisibility();
   }
 
   function updateBoxStyleVisibility() {
@@ -1488,9 +1607,8 @@
     if (webEspRestartTimer) clearTimeout(webEspRestartTimer);
     webEspRestartTimer = setTimeout(function () {
       webEspRestartTimer = null;
-      fetch("/api/control/web_esp_restart", { method: "POST", headers: authHeaders() })
-        .catch(function () {})
-        .then(function () { loadTabSettings("visuals"); });
+      actionCall("Could not restart Web ESP", "POST", "/api/control/web_esp_restart", {})
+        .then(function () { loadTabSettings("visuals", true); });
     }, 600);
   }
 
@@ -1498,20 +1616,12 @@
     if (suppressWebEspToggleEcho) return;
     var enabled = e.target.checked;
     e.target.disabled = true;
-    fetch("/api/control/web_esp_enabled", {
-      method: "POST",
-      headers: authHeaders(),
-      body: JSON.stringify({ enabled: enabled }),
-    })
-      .then(function (res) { return res.ok ? res.json() : null; })
+    actionCall("Could not " + (enabled ? "start" : "stop") + " Web ESP", "POST", "/api/control/web_esp_enabled", { enabled: enabled })
       .then(function (data) {
-        if (!data || data.ok === false) {
-          e.target.checked = !enabled;
-        } else {
-          loadTabSettings("visuals");
-        }
+        if (!data) e.target.checked = !enabled;
+        else loadTabSettings("visuals", true);
+        updateVisualsContextVisibility();
       })
-      .catch(function () { e.target.checked = !enabled; })
       .then(function () { e.target.disabled = false; });
   });
 
@@ -1520,8 +1630,7 @@
   document.getElementById("vis-web-esp-open-btn").addEventListener("click", function () {
     var btn = document.getElementById("vis-web-esp-open-btn");
     btn.disabled = true;
-    fetch("/api/control/web_esp_open", { method: "POST", headers: authHeaders() })
-      .catch(function () {})
+    actionCall("Could not open Web ESP", "POST", "/api/control/web_esp_open", {}, "Opened on the Axiom PC")
       .then(function () { btn.disabled = false; });
   });
 
@@ -1717,7 +1826,7 @@
                 // The just-loaded preset/config can touch fields on any
                 // tab — resync every generic-schema tab so the whole
                 // client reflects the new live config, not just Configs.
-                ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(function (t) { loadTabSettings(t); });
+                resyncAllTabs();
               } else {
                 reasonEl.textContent = (loadData && loadData.reason) || "failed to load";
               }
@@ -1836,8 +1945,7 @@
     document.getElementById(cfg.openFolderBtnId).addEventListener("click", function () {
       var btn = document.getElementById(cfg.openFolderBtnId);
       btn.disabled = true;
-      fetch(cfg.openFolderRoute, { method: "POST", headers: authHeaders() })
-        .catch(function () {})
+      actionCall("Could not open the folder", "POST", cfg.openFolderRoute, {}, "Opened on the Axiom PC")
         .then(function () { btn.disabled = false; });
     });
 
@@ -2003,7 +2111,7 @@
           if (data && data.ok) {
             // Same resync every other successful preset load already does
             // — a preset can touch fields on any generic-schema tab.
-            ["model", "capture", "inference", "aim", "keys", "visuals"].forEach(function (t) { loadTabSettings(t); });
+            resyncAllTabs();
             notify("Loaded preset: " + name);
           } else {
             notify("Could not load preset " + name + (data && data.reason ? " (" + String(data.reason).replace(/_/g, " ") + ")" : ""), true);
@@ -2312,8 +2420,16 @@
       suppressVigemNetToggleEcho = false;
     }
 
-    if (!modelFormPrefilled && s.model) {
-      applyModelSelection(s.model);
+    // A staged pick that now equals the host's value is simply applied; otherwise it is left alone.
+    if (modelStaged.model && s.model && modelSelect.value === s.model) modelStaged.model = false;
+    if (modelStaged.backend && s.selected_backend && backendSelect.value === displayBackend(s.selected_backend)) modelStaged.backend = false;
+    if (modelStaged.precision && typeof s.trt_fp16_enabled === "boolean") {
+      var pSel = document.getElementById("model-precision-select");
+      if (pSel && pSel.value === (s.trt_fp16_enabled ? "fp16" : "fp32")) modelStaged.precision = false;
+    }
+    updateModelPendingHint();
+    if (s.model && !modelStaged.model && !modelSwitchPending && document.activeElement !== modelSelect) {
+      applyModelSelection(s.model);                 // also follows a model change made in the Qt app
       modelFormPrefilled = true;
     }
     // Two guards, both required — without either, the operator picking
@@ -2334,14 +2450,14 @@
     // set/cleared.
     var modelPrecisionSelect = document.getElementById("model-precision-select");
     if (modelPrecisionSelect && typeof s.trt_fp16_enabled === "boolean"
-        && document.activeElement !== modelPrecisionSelect && !modelSwitchPending) {
+        && document.activeElement !== modelPrecisionSelect && !modelStaged.precision && !modelSwitchPending) {
       var precisionValue = s.trt_fp16_enabled ? "fp16" : "fp32";
       if (modelPrecisionSelect.value !== precisionValue) {
         modelPrecisionSelect.value = precisionValue;
         refreshModelOptionLabels();
       }
     }
-    if (s.selected_backend && document.activeElement !== backendSelect && !modelSwitchPending) {
+    if (s.selected_backend && document.activeElement !== backendSelect && !modelStaged.backend && !modelSwitchPending) {
       var backendDisplay = displayBackend(s.selected_backend);
       var hasOption = Array.prototype.some.call(backendSelect.options, function (opt) {
         return opt.value === backendDisplay;
@@ -2588,6 +2704,12 @@
   // resolves one way or another (applied, refused-and-shown, declined, or
   // the restart request itself failed).
   var modelSwitchPending = false;
+  // The switch flow resolved (applied, refused, declined or failed): release the in-flight guard and let
+  // every select resync from the host.
+  function endModelSwitch() {
+    modelSwitchPending = false;
+    clearModelStaged();
+  }
 
   // Confirmed-restart flow for the one reason above that a plain retry
   // can never fix: crossing to/from DirectML needs a real app restart
@@ -2605,7 +2727,7 @@
     );
     if (!confirmed) {
       modelSwitchReason.textContent = "restart declined — model/backend left unchanged";
-      modelSwitchPending = false;
+      endModelSwitch();
       return;
     }
     modelSwitchReason.textContent = "restarting Axiom…";
@@ -2624,7 +2746,7 @@
           modelSwitchReason.textContent = describeModelSwitchReason(data && data.reason);
           // Nothing was actually applied — safe (and correct) to let the
           // next poll resync backendSelect from the still-unchanged config.
-          modelSwitchPending = false;
+          endModelSwitch();
           return;
         }
         modelSwitchReason.textContent = "restarting Axiom — this page reconnects automatically once it's back up";
@@ -2634,7 +2756,7 @@
         // guard now is what lets applyStatus() start reflecting the real,
         // just-confirmed backend instead of fighting it for the remaining
         // few seconds until the process actually restarts.
-        modelSwitchPending = false;
+        endModelSwitch();
       })
       .catch(function () {
         // The process may already be mid-restart by the time this settles
@@ -2642,13 +2764,14 @@
         // loop silently recovers once the new process's server responds
         // again, so there's nothing more to surface here than what's
         // already showing.
-        modelSwitchPending = false;
+        endModelSwitch();
       });
   }
 
   var modelPrecisionSelect = document.getElementById("model-precision-select");
   if (modelPrecisionSelect) {
     modelPrecisionSelect.addEventListener("change", function () {
+      stageModelPick("precision");
       if (convertPrecisionSelect) convertPrecisionSelect.value = modelPrecisionSelect.value;
       refreshModelOptionLabels();
     });
@@ -2695,7 +2818,7 @@
           // and resolved with null — nothing was applied, so it's safe
           // (and necessary — otherwise this would wedge backendSelect's
           // poll-guard permanently true) to release the guard here too.
-          modelSwitchPending = false;
+          endModelSwitch();
           return;
         }
         if (data.ok === false) {
@@ -2739,14 +2862,14 @@
           // pre-switch backend's cache status (or lack of badges at all).
           loadModelList();
         }
-        modelSwitchPending = false;
+        endModelSwitch();
       })
       .catch(function (err) {
         // A thrown exception here means the request never got a response
         // at all (network error, CORS, server unreachable) — distinct
         // from the !res.ok branch above, which did get a response.
         modelSwitchReason.textContent = "request failed (" + (err && err.message ? err.message : "network error") + ")";
-        modelSwitchPending = false;
+        endModelSwitch();
       })
       .then(function () {
         modelSwitchBtn.disabled = false;
@@ -3406,6 +3529,13 @@
       return !card.classList.contains("hidden") && !card.classList.contains("search-hidden")
         && !(card.closest(".hidden"));
     }
+    function deckText(deck) {
+      var parts = [deck.getAttribute("data-label") || ""];
+      Array.prototype.forEach.call(deck.querySelectorAll("button, [title], input[placeholder], .field-title"), function (el) {
+        parts.push(el.textContent || "", el.getAttribute("title") || "", el.getAttribute("placeholder") || "");
+      });
+      return parts.join(" ").toLowerCase();
+    }
     function applySearch() {
       var q = searchInput.value.trim().toLowerCase();
       document.body.classList.toggle("searching", !!q);
@@ -3434,6 +3564,9 @@
         var anyInPanel = false;
         Array.prototype.forEach.call(panel.querySelectorAll(".deck, .module"), function (box) {
           var vis = hasVisibleCard(box);
+          // A deck holds the tab's primary controls (model picker, Start/Stop AI, capture method), which are
+          // not field cards: match them by their label, button captions and tooltips instead of hiding them.
+          if (!vis && q && box.classList.contains("deck") && deckText(box).indexOf(q) !== -1) vis = true;
           box.classList.toggle("search-hidden", !!q && !vis);
           if (vis && !box.closest(".hidden")) anyInPanel = true;
         });

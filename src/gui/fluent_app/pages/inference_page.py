@@ -864,14 +864,11 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
         """Show/hide and auto-configure CUDA IO Binding based on the active ORT provider."""
         if not self._config:
             return
-        provider = getattr(self._config, 'current_provider', '')
-        backend  = str(getattr(self._config, 'inference_backend', '')).lower()
-        is_trt   = provider == 'TensorrtExecutionProvider' or backend == 'tensorrt'
-        is_cuda  = provider == 'CUDAExecutionProvider'     or backend == 'cuda'
+        from core.ai_loop_utils import cuda_io_binding_switch_applies
         # Under TensorRT IO binding is always on (ai_loop_utils.cuda_io_binding_effective), so the
         # switch is only meaningful — and only shown — for the plain CUDA provider. The saved
         # value is never rewritten from here.
-        self.cudaIoBindingCard.setVisible(is_cuda and not is_trt)
+        self.cudaIoBindingCard.setVisible(cuda_io_binding_switch_applies(self._config))
 
     # ──────────────────────────────────────────────
     # Callbacks
@@ -966,9 +963,9 @@ anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHist
         self._updateHudConfidenceVisibility(key)
 
     def _updateHudConfidenceVisibility(self, mode: str):
-        # OCR mode has no numeric detection threshold to tune — only the
-        # ONNX HUD weapon detector uses hud_confidence.
-        self.hudConfidenceCard.setVisible(mode != "v1_ocr")
+        # Only the ONNX HUD weapon detector has a detection threshold (OCR has none, and
+        # "off" runs nothing) — the web client follows the same rule.
+        self.hudConfidenceCard.setVisible(mode == "v2_onnx")
 
     def _onHudConfidenceChanged(self, value: float):
         if self._config:

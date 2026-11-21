@@ -376,6 +376,11 @@ class KeysPage(BasePage):
         # MAKCU connection + keys groups visible only in MAKCU mode
         self.makcuConnGroup.setVisible(is_makcu)
         self.makcuKeysGroup.setVisible(is_makcu)
+        # Remote mouse buttons arrive over the ViGEm Network connection, so the group only exists with that
+        # mouse method (hidden otherwise, the saved choices are kept); the button picker needs the switch on.
+        is_vigem_net = getattr(self._config, 'mouse_move_method', '') == 'vigem_network' if self._config else False
+        self.remoteBtnGroup.setVisible(is_vigem_net)
+        self.remoteAimButtonCard.setVisible(bool(getattr(self._config, 'remote_btn_enabled', False)) if self._config else False)
         # Switching mode changes which slots are reachable, so re-run the
         # conflict scan against the newly-active set.
         self._checkKeyConflicts()
@@ -1367,6 +1372,7 @@ makcuBaudCard makcuDeviceHotkeysCard makcuMoveLockCard makcuSpreadEnableCard mak
         # The vigem_network client reads this flag live and (un)subscribes on its own.
         if self._config:
             self._config.remote_btn_enabled = bool(checked)
+            self._updateMakcuVisibility()
 
     def _onRemoteAimButtonChanged(self, index: int):
         if self._config and 0 <= index < len(self._remoteAimButtons):

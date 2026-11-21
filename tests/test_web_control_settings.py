@@ -1458,3 +1458,32 @@ class TestAnchorFovSettings:
         assert wcs.apply_tab_settings(config, "inference", {"anchor_mode": "disabled"})["ok"] is True
         assert config.anchor_enabled is False and config.anchor_mode == "adaptive"
         assert config.prediction_method == "velocity"
+
+
+class TestWriteOnlySecret:
+    """vigem_net_token is a credential: the API accepts it but never gives it back."""
+
+    @staticmethod
+    def cfg(token="s3cret"):
+        from types import SimpleNamespace as NS
+        return NS(vigem_net_token=token)
+
+    def test_get_never_returns_the_token_only_that_it_is_set(self):
+        from core import web_control_settings as wcs
+        out = wcs.get_tab_settings(self.cfg(), "keys")
+        assert out["vigem_net_token"] == "" and out["vigem_net_token_set"] is True
+        assert "s3cret" not in str(out)
+        assert wcs.get_tab_settings(self.cfg(""), "keys")["vigem_net_token_set"] is False
+
+    def test_a_new_value_replaces_it(self):
+        from core import web_control_settings as wcs
+        c = self.cfg()
+        assert wcs.apply_tab_settings(c, "keys", {"vigem_net_token": "other"})["ok"] is True
+        assert c.vigem_net_token == "other"
+
+    def test_an_empty_write_keeps_the_stored_secret(self):
+        from core import web_control_settings as wcs
+        c = self.cfg()
+        res = wcs.apply_tab_settings(c, "keys", {"vigem_net_token": ""})
+        assert res["ok"] is True and c.vigem_net_token == "s3cret"
+        assert res["applied"]["vigem_net_token"] == ""

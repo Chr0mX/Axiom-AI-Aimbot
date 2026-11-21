@@ -20,11 +20,13 @@ from ..language_manager import t
 class VisualsPage(BasePage):
     """Visual Settings Page"""
 
-    # (core/gpu_monitor.py sensor key, English label)
+    # (core/gpu_monitor.py sensor key, English label). Hotspot and Voltage are not listed: NVML has no
+    # reading for either on GeForce cards (gpu_monitor marks them permanently unsupported), so a switch
+    # for them could never do anything. Their saved values are still kept in the config file.
     _GPU_SENSOR_LABELS = (
-        ("temp", "Temp"), ("hotspot", "Hotspot"), ("util", "Usage"),
+        ("temp", "Temp"), ("util", "Usage"),
         ("vram", "VRAM"), ("fan", "Fan"), ("core_clock", "Core Clock"),
-        ("mem_clock", "Mem Clock"), ("power", "Power"), ("voltage", "Voltage"),
+        ("mem_clock", "Mem Clock"), ("power", "Power"),
     )
 
     def __init__(self, parent=None):
@@ -627,11 +629,8 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         self.webEspEnableCard.setChecked(web_on)
         self.webEspHttpPortSpin.setValue(int(getattr(self._config, 'web_esp_http_port', 8080)))
         self.webEspWsPortSpin.setValue(int(getattr(self._config, 'web_esp_ws_port', 8765)))
-        self.webEspHttpPortCard.setEnabled(web_on)
-        self.webEspWsPortCard.setEnabled(web_on)
         self.webEspFpsCard.setValue(int(getattr(self._config, 'web_esp_fps', 60) or 60))
-        self.webEspFpsCard.setEnabled(web_on)
-        self.webEspConnectCard.setEnabled(web_on)
+        self._updateContextVisibility()
         self._refreshWebEspConnect()
 
     # === Callback Functions ===
@@ -706,7 +705,32 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         self.detectRangeThicknessCard.setVisible(bool(getattr(c, 'show_detect_range', True)))
         self.tracerThicknessCard.setVisible(bool(getattr(c, 'show_tracer_line', False)))
         self.tracerFromBottomCard.setVisible(bool(getattr(c, 'show_tracer_line', False)))
-        self.aimMarkerThicknessCard.setVisible(bool(getattr(c, 'show_aim_prediction_marker', True)))
+        self.aimMarkerThicknessCard.setVisible(bool(getattr(c, 'show_aim_prediction_marker', True))
+                                               and self._predictionOn())
+
+    def _predictionOn(self):
+        c = self._config
+        return bool(c and (getattr(c, 'prediction_enabled', False) or getattr(c, 'kalman_enabled', False)))
+
+    def _updateContextVisibility(self):
+        """Show an option only while what it draws / configures can exist (display only — hidden
+        options keep their values, and nothing here writes config)."""
+        c = self._config
+        if not c:
+            return
+        # Stick gauge draws the virtual stick of the vigem_network mouse method.
+        self.showStickGaugeCard.setVisible(str(getattr(c, 'mouse_move_method', '')) == 'vigem_network')
+        # The anchor overlay needs Anchor Box Prediction; the predicted-aim marker needs Prediction or Kalman
+        # (with both off the predicted point equals the raw one and there is nothing extra to draw).
+        self.showAnchorDebugCard.setVisible(bool(getattr(c, 'anchor_enabled', False)))
+        self.showAimPredictionCard.setVisible(self._predictionOn())
+        self._updateLineThicknessVisibility()
+        # Window transparency only exists with Acrylic on.
+        self.windowAlphaCard.setVisible(bool(getattr(c, 'enable_acrylic', False)))
+        # Web ESP options only matter while the server is enabled.
+        web_on = bool(getattr(c, 'web_esp_enabled', False))
+        for card in (self.webEspHttpPortCard, self.webEspWsPortCard, self.webEspFpsCard, self.webEspConnectCard):
+            card.setVisible(web_on)
 
     def _onBoxThemeChanged(self, text):
         if self._config:
@@ -821,6 +845,7 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
     def _onAcrylicEnabledChanged(self, checked):
         if self._config:
             self._config.enable_acrylic = checked
+            self._updateContextVisibility()
             self._refreshWindowEffect(apply_styles=True)
 
     def _onWindowAlphaChanged(self, value):
@@ -837,10 +862,7 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         checked = bool(checked)
         if self._config:
             self._config.web_esp_enabled = checked
-        self.webEspHttpPortCard.setEnabled(checked)
-        self.webEspWsPortCard.setEnabled(checked)
-        self.webEspFpsCard.setEnabled(checked)
-        self.webEspConnectCard.setEnabled(checked)
+        self._updateContextVisibility()
         # Start/stop the server live so the URL+QR appear immediately.
         try:
             from core import esp_server

@@ -23,6 +23,11 @@ from core.uvc_engine import ENGINES, apply_engine, engine_from_config, saved_eng
 
 # DirectShow engine choice (core/uvc_engine.py): labels in ENGINES order.
 _UVC_ENGINE_LABELS = ("OpenCV (default)", "Native DLL (v2)", "FFmpeg subprocess")
+_PREVIEW_DESC = ("Live view of what Axiom captures (UVC / NDI / UDP). Weapon detection reads its "
+                 "region from this preview, so keep it on while a weapon-detection method is used.")
+_PREVIEW_DESC_NEEDED = ("Off, but weapon detection is on and has no frame to read: turn this on, "
+                        "or give the HUD its own UDP stream.")
+
 _UVC_ENGINE_DESC = (
     "OpenCV: the standard DirectShow wrapper. Native DLL: directshow_capture.dll owns the "
     "capture graph for lower, OBS-like latency (MJPEG and NV12 only; the DLL must be present). "
@@ -589,7 +594,7 @@ class CapturePage(BasePage):
         self.uvcPreviewCard = SwitchSettingCard(
             FluentIcon.VIEW,
             "Capture Preview Window",
-            "",
+            _PREVIEW_DESC,
             parent=self.previewGroup
         )
 
@@ -907,6 +912,7 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
             self.ocrFpsCard.setValue(int(getattr(self._config, 'second_inference_fps', 2)))
 
             self._updateCaptureControlsVisibility(screenshot_method)
+            self._updateWeaponDetectVisibility()
             self._syncRoiLabelSize()
         finally:
             self._isLoadingConfig = False
@@ -941,6 +947,31 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
         if idx != combo.currentIndex():
             combo.setCurrentIndex(idx)
         combo.blockSignals(False)
+
+    def _updateWeaponDetectVisibility(self):
+        """Show only what the chosen weapon-detection method uses (display only, no config writes).
+
+        off      -> no Active Weapon group / ROI preview at all
+        v1_ocr   -> OCR rate, Scan ROI, detected text, ROI preview
+        v2_onnx  -> the above plus the categorized status board and the HUD UDP stream options
+        """
+        cfg = self._config
+        mode = getattr(cfg, 'second_inference_mode', 'off') if cfg else 'off'
+        active = mode in ('v1_ocr', 'v2_onnx')
+        hud_udp = bool(getattr(cfg, 'hud_udp_enabled', False)) if cfg else False
+        self.ocrGroup.setVisible(active)
+        self.ocrRoiFrame.setVisible(active)
+        if not active:
+            self.weaponStatusWidget.setVisible(False)
+        self.hudUdpEnabledCard.setVisible(mode == 'v2_onnx')
+        self.hudUdpPortCard.setVisible(mode == 'v2_onnx' and hud_udp)
+        # Weapon scans read the preview frame; with the preview off (and no dedicated HUD stream) they get nothing.
+        preview_on = bool(getattr(cfg, 'uvc_show_window', True)) if cfg else True
+        starved = active and not preview_on and not (mode == 'v2_onnx' and hud_udp)
+        self.uvcPreviewCard.contentLabel.setText(_PREVIEW_DESC_NEEDED if starved else _PREVIEW_DESC)
+        # The preview's own options only exist while the preview is on (hidden, values kept).
+        for card in (self.previewCropCard, self.uvcAlwaysOnTopCard, self.previewFpsCapCard):
+            card.setVisible(preview_on)
 
     def _syncRoiLabelSize(self):
         mode = getattr(self._config, 'second_inference_mode', 'off') if self._config else 'off'
@@ -1340,6 +1371,7 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
     def _onUvcPreviewChanged(self, checked):
         if self._config:
             self._config.uvc_show_window = bool(checked)
+            self._updateWeaponDetectVisibility()
         method = str(getattr(self._config, 'screenshot_method', '?')) if self._config else '?'
         print(f"[Capture][Preview] Preview window {'ENABLED' if checked else 'DISABLED'} "
               f"(method={method}); applies on next capture re-init (~0.5s).")
@@ -1457,6 +1489,7 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
     def _onHudUdpEnabledChanged(self, checked):
         if self._config:
             self._config.hud_udp_enabled = bool(checked)
+            self._updateWeaponDetectVisibility()
 
     def _onHudUdpPortChanged(self, value):
         if self._isLoadingConfig or not self._config:
@@ -1570,13 +1603,11 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
             return
 
         self.weaponStatusWidget.setVisible(False)
+        if mode != 'v1_ocr':
+            return                                  # off: the whole group is hidden by _updateWeaponDetectVisibility()
         self.ocrResultCard.setVisible(True)
-
-        if mode == 'v1_ocr':
-            from core.ocr_inference import get_ocr_results
-            lines = get_ocr_results()
-        else:
-            return
+        from core.ocr_inference import get_ocr_results
+        lines = get_ocr_results()
         if lines:
             self.ocrResultLabel.setText("\n".join(lines))
         elif self.ocrResultLabel.text() == "Scanning...":
@@ -1679,6 +1710,7 @@ uvcEngineCard uvcCropModeCard uvcFfmpegPathCard hudUdpEnabledCard hudUdpPortCard
         self.udpRefreshBtn.setText(t("refresh"))
         self.previewGroup.titleLabel.setText(t("preview_group", "Preview"))
         self.uvcPreviewCard.titleLabel.setText("Capture Preview Window")
+        self._updateWeaponDetectVisibility()
         self.previewCropCard.titleLabel.setText(t("preview_crop_label"))
         self.previewCropCard.contentLabel.setText(t("preview_crop_desc"))
         self.uvcAlwaysOnTopCard.titleLabel.setText("Always On Top")

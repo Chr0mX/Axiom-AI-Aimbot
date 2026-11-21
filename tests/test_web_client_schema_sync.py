@@ -66,3 +66,52 @@ def test_asset_versions_move_together():
 def test_advanced_cards_hide_by_css_not_by_the_conditional_hidden_class():
     assert "body:not(.show-advanced) .main .field-card[data-advanced]" in CSS
     assert 'classList.toggle("show-advanced"' in JS
+
+
+def test_number_bounds_in_the_page_match_the_schema():
+    """min/max on each number input are the schema's bounds in display units (the server clamps to
+    them, so a different attribute would let the page offer values the host silently changes)."""
+    problems = []
+    for tab, key, tag in CONTROLS:
+        if 'type="number"' not in tag:
+            continue
+        spec = wcs._SCHEMA[tab][key]
+        for attr in ("min", "max"):
+            want = spec.get(attr)
+            got = re.search(rf'\b{attr}="([^"]+)"', tag)
+            if want is None:
+                continue
+            if got is None or abs(float(got.group(1)) - float(want)) > 1e-9:
+                problems.append((tab, key, attr, got.group(1) if got else None, want))
+    assert not problems, problems
+
+
+# Fields the Qt app shows as a percentage (the saved value is a fraction): the page must use the same unit.
+PERCENT_IN_QT = {
+    "aim": ["head_width_ratio", "head_height_ratio", "body_width_ratio", "target_priority_confidence_weight",
+            "aim_ema_smoothing", "aim_x_offset_frac", "aim_y_offset_frac",
+            "humanization.micro_jitter_scale", "humanization.motion_variation_range",
+            "humanization.micro_stutter_prob", "humanization.reaction_skip_prob"],
+}
+
+
+@pytest.mark.parametrize("tab,key", [(t, k) for t, ks in PERCENT_IN_QT.items() for k in ks])
+def test_percent_fields_use_the_apps_unit(tab, key):
+    from types import SimpleNamespace as NS
+    spec = wcs._SCHEMA[tab][key]
+    assert spec["scale"] == 100.0
+    cfg = NS(head_width_ratio=0.07, head_height_ratio=0.07, body_width_ratio=0.07, target_priority_confidence_weight=0.07,
+             aim_ema_smoothing=0.07, aim_x_offset_frac=0.07, aim_y_offset_frac=0.07,
+             humanization=NS(micro_jitter_scale=0.07, motion_variation_range=0.07, micro_stutter_prob=0.07,
+                             reaction_skip_prob=0.07))
+    # 0.07 * 100 must read exactly 7.0, not 7.000000000000001
+    assert wcs.get_tab_settings(cfg, tab)[key] == 7.0
+
+
+def test_percent_round_trip_stores_the_fraction():
+    from types import SimpleNamespace as NS
+    cfg = NS(head_width_ratio=0.3)
+    res = wcs.apply_tab_settings(cfg, "aim", {"head_width_ratio": 45})
+    assert res["ok"] and cfg.head_width_ratio == pytest.approx(0.45)
+    res = wcs.apply_tab_settings(cfg, "aim", {"head_width_ratio": 5})          # below the app's 10 % minimum
+    assert cfg.head_width_ratio == pytest.approx(0.10)
