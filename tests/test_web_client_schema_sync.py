@@ -89,7 +89,8 @@ def test_number_bounds_in_the_page_match_the_schema():
 # Fields the Qt app shows as a percentage (the saved value is a fraction): the page must use the same unit.
 PERCENT_IN_QT = {
     "aim": ["head_width_ratio", "head_height_ratio", "body_width_ratio", "target_priority_confidence_weight",
-            "aim_ema_smoothing", "aim_x_offset_frac", "aim_y_offset_frac"],
+            "aim_ema_smoothing", "aim_x_offset_frac", "aim_y_offset_frac",
+            "humanization.micro_jitter_scale", "humanization.motion_variation_range"],
 }
 
 
@@ -99,7 +100,8 @@ def test_percent_fields_use_the_apps_unit(tab, key):
     spec = wcs._SCHEMA[tab][key]
     assert spec["scale"] == 100.0
     cfg = NS(head_width_ratio=0.07, head_height_ratio=0.07, body_width_ratio=0.07, target_priority_confidence_weight=0.07,
-             aim_ema_smoothing=0.07, aim_x_offset_frac=0.07, aim_y_offset_frac=0.07)
+             aim_ema_smoothing=0.07, aim_x_offset_frac=0.07, aim_y_offset_frac=0.07,
+             humanization=NS(micro_jitter_scale=0.07, motion_variation_range=0.07))
     # 0.07 * 100 must read exactly 7.0, not 7.000000000000001
     assert wcs.get_tab_settings(cfg, tab)[key] == 7.0
 

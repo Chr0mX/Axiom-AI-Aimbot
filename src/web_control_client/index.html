@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=23">
+  <link rel="stylesheet" href="styles.css?v=24">
 </head>
 <body>
   <div class="app">
@@ -1082,6 +1082,26 @@
             <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-jitter-subgroup">
               <div class="field-card">
                 <div class="field-info">
+                  <div class="field-title">Jitter Base</div>
+                  <div class="field-desc">Minimum jitter amplitude added every frame, in pixels.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-jitter-base" data-key="humanization.micro_jitter_base" data-advanced="1" data-type="number" min="0" max="2" step="0.01">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Jitter Scale</div>
+                  <div class="field-desc">Extra jitter added per pixel of movement, as a percentage of the movement size.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-jitter-scale" data-key="humanization.micro_jitter_scale" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
+                  <span class="field-slider-value">%</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
                   <div class="field-title">Apply While Aiming Idle</div>
                   <div class="field-desc">Also apply Micro-Jitter's tremor while the aim key is held but no target is locked.</div>
                 </div>
@@ -1105,6 +1125,18 @@
                 </label>
               </div>
             </div>
+            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-motion-variation-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Variation Range</div>
+                  <div class="field-desc">Random output-scale range applied each frame (mean-preserving).</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-motion-variation-range" data-key="humanization.motion_variation_range" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
+                  <span class="field-slider-value">%</span>
+                </div>
+              </div>
+            </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Speed Shaping</div>
@@ -1115,6 +1147,37 @@
                   <input type="checkbox" id="aim-humanization-speed-shaping-enabled" data-key="humanization.speed_shaping_enabled" data-type="bool">
                   <span class="slider"></span>
                 </label>
+              </div>
+            </div>
+            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-speed-shaping-subgroup">
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Fine-Control Threshold</div>
+                  <div class="field-desc">Movements below this size are compressed by the Low-Speed Factor.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-low" data-key="humanization.speed_shaping_low" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Full-Speed Threshold</div>
+                  <div class="field-desc">Movements above this size pass through unmodified.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-high" data-key="humanization.speed_shaping_high" data-advanced="1" data-type="number" min="0" max="50" step="0.1">
+                  <span class="field-slider-value">px</span>
+                </div>
+              </div>
+              <div class="field-card">
+                <div class="field-info">
+                  <div class="field-title">Low-Speed Factor</div>
+                  <div class="field-desc">Magnitude scale applied to movements below the Fine-Control Threshold.</div>
+                </div>
+                <div class="field-control">
+                  <input type="number" id="aim-humanization-speed-shaping-low-factor" data-key="humanization.speed_shaping_low_factor" data-advanced="1" data-type="number" min="0" max="1" step="0.01">
+                </div>
               </div>
             </div>
             <div class="field-card">
@@ -2583,6 +2646,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=23"></script>
+  <script src="app.js?v=24"></script>
 </body>
 </html>

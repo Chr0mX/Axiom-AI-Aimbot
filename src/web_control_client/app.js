@@ -988,6 +988,8 @@
       document.getElementById(groupId).classList.toggle("hidden", !enabled);
     }
     gate("aim-humanization-micro-jitter-enabled", "aim-humanization-jitter-subgroup");
+    gate("aim-humanization-motion-variation-enabled", "aim-humanization-motion-variation-subgroup");
+    gate("aim-humanization-speed-shaping-enabled", "aim-humanization-speed-shaping-subgroup");
   }
 
   document.getElementById("aim-humanization-reset-btn").addEventListener("click", function () {
@@ -2938,7 +2940,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "23") return;
+    if (cssVer !== "24") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

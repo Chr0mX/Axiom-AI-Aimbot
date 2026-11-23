@@ -32,8 +32,9 @@ class HumanizationConfig:
     -------------
     Each feature can be toggled independently, regardless of intensity.
 
-    Fine-tuning values (jitter base/scale, variation range, speed-shaping thresholds) have no GUI: they are
-    conservative defaults that can still be edited by hand in the ``humanization`` block of config.json.
+    Fine-tuning values (jitter base/scale, variation range, speed-shaping thresholds) are Advanced settings
+    (Aim page / Web Control, shown with "Show advanced settings"); they can also be edited by hand in the
+    ``humanization`` block of config.json.
     """
 
     # ── Master ────────────────────────────────────────────────────────────────

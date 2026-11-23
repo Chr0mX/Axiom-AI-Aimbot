@@ -410,7 +410,7 @@
   "humanization_motion_variation": "Motion Variation",
   "humanization_motion_variation_desc": "Randomize output scale slightly each frame (mean-preserving, no drift).",
   "humanization_reset": "Reset to Defaults",
-  "humanization_reset_desc": "Reset the whole Humanization section — Intensity and every feature toggle — back to default values.",
+  "humanization_reset_desc": "Reset the whole Humanization section — Intensity, every feature toggle and every fine-tuning value — back to default values.",
   "humanization_speed_shaping": "Speed Shaping",
   "humanization_speed_shaping_desc": "Compress small corrections and pass through large movements unmodified, like human fine-motor control.",
   "idle": "Idle",
@@ -571,5 +571,17 @@
   "model_empty_hint": "No .onnx models found. Put them in the Model folder (Open Model Folder below), then reopen this page.",
   "full_config_empty_hint": "No saved configs yet. Use Create Config to save your current settings.",
   "preset_empty_hint": "No saved presets yet. Use Create Preset to save your current aim settings.",
-  "anchor_estimator": "Anchor Estimator"
+  "anchor_estimator": "Anchor Estimator",
+  "humanization_jitter_base": "Jitter Base",
+  "humanization_jitter_base_desc": "Minimum jitter amplitude added every frame, in pixels.",
+  "humanization_jitter_scale": "Jitter Scale",
+  "humanization_jitter_scale_desc": "Extra jitter added per pixel of movement, as % of movement size.",
+  "humanization_motion_variation_range": "Variation Range",
+  "humanization_motion_variation_range_desc": "Random output-scale range applied each frame (mean-preserving).",
+  "humanization_speed_shaping_low": "Fine-Control Threshold",
+  "humanization_speed_shaping_low_desc": "Movements below this size are compressed by the Low-Speed Factor.",
+  "humanization_speed_shaping_high": "Full-Speed Threshold",
+  "humanization_speed_shaping_high_desc": "Movements above this size pass through unmodified.",
+  "humanization_speed_shaping_low_factor": "Low-Speed Factor",
+  "humanization_speed_shaping_low_factor_desc": "Magnitude scale applied to movements below the Fine-Control Threshold."
 }
