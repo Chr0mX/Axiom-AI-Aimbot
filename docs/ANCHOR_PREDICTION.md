@@ -135,13 +135,14 @@ the prediction is valid.
 
 ## Aim-lead method (Aim Lead Method: Anchor)
 
-Aim page -> Advanced Aim Tuning -> **Aim Lead Method** is Velocity / EMA / Rolling / **Anchor**.
+Aim page -> Advanced Aim Tuning -> **Aim Lead Method** is Velocity / **Anchor** (the EMA and Rolling methods were
+removed in the settings cleanup; the benchmark table below still lists them as historical reference).
 With Anchor the aim point is led by this estimator instead of the single-purpose velocity
 predictors. It is **independent of "Enable Box Prediction"** (that switch only governs the FOV /
 lock-association layer above): picking the method is enough, and the `anchor_*` tuning is shared.
 
 * **Own track.** `LoopState.aim_anchor` (one `AnchorTrack`) is fed the locked box shifted by the
-  same camera-drift / own-mouse compensation the aim point already carries
+  same camera-drift compensation the aim point already carries
   (`process_aiming`'s `pred_x - target_x`), so our own correction never reads as target velocity.
   Time stamps are the same as the other predictors (`prediction_capture_timestamps` when on, else
   `perf_counter`).
