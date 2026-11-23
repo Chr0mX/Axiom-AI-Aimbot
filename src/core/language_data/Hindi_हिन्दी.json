@@ -149,7 +149,6 @@
     "wizard_finish": "शुरू करें",
     "wizard_skip": "सेटअप छोड़ें",
     "idle_detect_enabled": "बिना निशाना लगाए पहचान दर घटाएं",
-    "idle_detect_interval": "निष्क्रिय पहचान अंतराल (ms)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
     "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
     "inference_backend": "इन्फरेंस बैकएंड:",

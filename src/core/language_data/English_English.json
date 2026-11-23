@@ -276,7 +276,6 @@
   "status_panel_screenshot_fps": "Capture FPS",
   "status_panel_detection_fps": "Inference FPS",
   "idle_detect_enabled": "Reduce Inference Rate When Not Aiming",
-  "idle_detect_interval": "Idle Inference Interval (ms)",
   "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
   "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
   "inference_backend": "Inference Backend:",

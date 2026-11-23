@@ -207,7 +207,6 @@
     "status_panel_screenshot_fps": "截圖 FPS",
     "status_panel_detection_fps": "偵測 FPS",
     "idle_detect_enabled": "啟用未瞄準時降低偵測頻率",
-    "idle_detect_interval": "閒置偵測間隔 (ms)",
     "aim_y_reduce_enable": "啟用 Y 軸速度歸零",
     "aim_y_reduce_delay": "Y軸歸零延遲 (秒)",
     "inference_backend": "推理後端：",

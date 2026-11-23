@@ -148,7 +148,6 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "detect_mode": {"type": "choice", "choices": ["full", "reduced", "stop"], "derived": "detect_mode"},
         "keep_detecting": {"type": "bool"},
         "idle_detect_enabled": {"type": "bool"},
-        "idle_detect_interval": {"type": "float", "scale": 1000.0, "min": 5, "max": 500},
         "single_target_mode": {"type": "bool"},
         # The GUI's own slider ticks in raw ints 5-100 internally but labels
         # itself "v/10" (a SliderLabelCard quirk) — expose the human value

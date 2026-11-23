@@ -223,7 +223,6 @@ _FIELD_MAP = {
     'max_queue_size':             'performance.max_queue_size',
     'detect_interval':            'performance.timing.detect_interval',
     'screenshot_interval':        'performance.timing.capture_interval',
-    'idle_detect_interval':       'performance.timing.idle_interval',
     'idle_detect_enabled':        'performance.timing.idle_enabled',
     'enable_latency_stats':       'performance.latency_stats.enabled',
     'latency_stats_interval':     'performance.latency_stats.interval',
@@ -754,10 +753,9 @@ class Config:
         # 偵測節流：
         # - detect_interval: 進入瞄準/需要即時反應時的間隔
         # - screenshot_interval: 螢幕截圖間隔（獨立於偵測間隔）
-        # - idle_detect_interval: 未瞄準但 keep_detecting=True 時的間隔（降低占用）
+        # - 未瞄準但 keep_detecting=True 時的間隔：固定 50 ms（ai_loop.IDLE_DETECT_INTERVAL_S，不再可調）
         self.detect_interval: float = 0.01       # 秒，預設 10ms
         self.screenshot_interval: float = 0.01   # 秒，預設 10ms
-        self.idle_detect_interval: float = 0.05  # 秒，預設 50ms
         self.idle_detect_enabled: bool = False     # 是否啟用未瞄準時降低偵測頻率
         self.aim_toggle_key: int = 45       # Insert 鍵
         self.auto_fire_key2: int = 0x04     # 滑鼠中鍵
@@ -1302,8 +1300,6 @@ def validate_config(config_instance: Config) -> None:
     # 向後兼容：確保截圖間隔在合理範圍內 (1-100ms)
     _validate_screenshot_interval(config_instance)
 
-    # 向後兼容：確保閒置檢測間隔在合理範圍內 (5-500ms)
-    _validate_idle_detect_interval(config_instance)
 
     # 向後兼容：修正截圖方式
     _validate_screenshot_method(config_instance)
@@ -1393,17 +1389,6 @@ def _validate_detect_interval(config: Config) -> None:
     elif detect_interval_ms > 100:
         config.detect_interval = 0.1  # 100ms
         logger.warning("[Config] detect_interval too large, clamped to 100ms")
-
-
-def _validate_idle_detect_interval(config: Config) -> None:
-    """驗證並修正閒置檢測間隔"""
-    idle_ms = getattr(config, 'idle_detect_interval', 0.05) * 1000
-    if idle_ms < 5:
-        config.idle_detect_interval = 0.005
-        logger.warning("[Config] idle_detect_interval too small, clamped to 5ms")
-    elif idle_ms > 500:
-        config.idle_detect_interval = 0.5
-        logger.warning("[Config] idle_detect_interval too large, clamped to 500ms")
 
 
 def _validate_screenshot_interval(config: Config) -> None:

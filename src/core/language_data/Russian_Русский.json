@@ -158,7 +158,6 @@
     "wizard_finish": "Начать",
     "wizard_skip": "Пропустить",
     "idle_detect_enabled": "Снизить частоту обнаружения без прицеливания",
-    "idle_detect_interval": "Интервал обнаружения в режиме ожидания (мс)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
     "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
     "inference_backend": "Бэкенд инференса:",

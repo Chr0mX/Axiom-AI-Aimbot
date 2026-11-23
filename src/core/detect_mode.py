@@ -4,7 +4,7 @@
 only on the web, the second on both) although together they describe one three-way choice:
 
 * ``full``    — keep detecting at the normal rate (``keep_detecting`` on, idle off)
-* ``reduced`` — keep detecting, but only every ``idle_detect_interval`` (``keep_detecting`` on,
+* ``reduced`` — keep detecting, but only every ``ai_loop.IDLE_DETECT_INTERVAL_S`` (50 ms) (``keep_detecting`` on,
   ``idle_detect_enabled`` on)
 * ``stop``    — no detection (and no capture/decode work) until aiming starts
   (``keep_detecting`` off)

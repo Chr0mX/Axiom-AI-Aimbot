@@ -416,6 +416,10 @@ def _set_windows_timer_resolution_1ms(enable: bool) -> bool:
 # more precise and is no longer offered).
 _CMC_SIZE = 128
 
+# Detection interval while not aiming in the "Reduced speed" When-Not-Aiming mode. It used to be a slider
+# (5-500 ms, default 50); nothing needed another value.
+IDLE_DETECT_INTERVAL_S = 0.05
+
 
 def ai_logic_loop(
     config: Config,
@@ -995,7 +999,7 @@ def ai_logic_loop(
                 if _effective_always_aim or getattr(config, 'always_auto_fire', False):
                     idle_enabled = False
                 if idle_enabled and not is_aiming:
-                    desired_interval = getattr(config, 'idle_detect_interval', config.detect_interval)
+                    desired_interval = IDLE_DETECT_INTERVAL_S
                 else:
                     desired_interval = config.detect_interval
 

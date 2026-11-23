@@ -158,7 +158,6 @@
     "wizard_finish": "始める",
     "wizard_skip": "スキップ",
     "idle_detect_enabled": "非エイム中の検出頻度を下げる",
-    "idle_detect_interval": "アイドル検出間隔 (ms)",
     "aim_y_reduce_enable": "Enable Y-Axis Recoil Reset",
     "aim_y_reduce_delay": "Y-Axis Reset Delay (s)",
     "inference_backend": "推論バックエンド：",

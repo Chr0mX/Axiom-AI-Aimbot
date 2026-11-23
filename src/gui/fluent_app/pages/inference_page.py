@@ -361,15 +361,6 @@ class InferencePage(BasePage):
         self.detectModeCard.hBoxLayout.addWidget(self.detectModeCombo, 0)
         self.detectModeCard.hBoxLayout.addSpacing(16)
 
-        self.idleDetectIntervalCard = SliderSpinCard(
-            FluentIcon.SPEED_MEDIUM,
-            t("idle_detect_interval"),
-            5, 500,
-            suffix="ms",
-            description="",
-            parent=self.generalGroup
-        )
-
         self.singleTargetCard = SwitchSettingCard(
             FluentIcon.PEOPLE,
             t("single_target_mode"),
@@ -442,7 +433,6 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.confidenceCard)
         self.generalGroup.addSettingCard(self.semanticFilterCard)
         self.generalGroup.addSettingCard(self.detectModeCard)
-        self.generalGroup.addSettingCard(self.idleDetectIntervalCard)
         self.generalGroup.addSettingCard(self.singleTargetCard)
         self.generalGroup.addSettingCard(self.secondInferCard)
         self.generalGroup.addSettingCard(self.hudConfidenceCard)
@@ -499,7 +489,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         self.confidenceCard.valueChanged.connect(self._onConfidenceChanged)
         self.semanticFilterCard.checkedChanged.connect(self._onSemanticFilterChanged)
         self.detectModeCombo.currentIndexChanged.connect(self._onDetectModeChanged)
-        self.idleDetectIntervalCard.valueChanged.connect(self._onIdleDetectIntervalChanged)
         self.singleTargetCard.checkedChanged.connect(self._onSingleTargetChanged)
 
 
@@ -554,8 +543,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
             self.semanticFilterCard.setChecked(bool(getattr(self._config, 'detect_semantic_filter_enabled', False)))
 
             self._syncDetectModeCombo()
-            idle_ms = int(round(getattr(self._config, 'idle_detect_interval', 0.05) * 1000))
-            self.idleDetectIntervalCard.setValue(max(5, min(500, idle_ms)))
             self.singleTargetCard.setChecked(getattr(self._config, 'single_target_mode', False))
 
 
@@ -742,14 +729,13 @@ anchorInflAdaptiveCard anchorInflDynamicCard
             self._config.detect_semantic_filter_enabled = bool(checked)
 
     def _syncDetectModeCombo(self):
-        """Show the saved choice (no write) and the card that only the reduced rate needs."""
+        """Show the saved choice (no write)."""
         if not self._config:
             return
         mode = mode_from_config(self._config)
         self.detectModeCombo.blockSignals(True)
         self.detectModeCombo.setCurrentIndex(_DETECT_MODES.index(mode))
         self.detectModeCombo.blockSignals(False)
-        self.idleDetectIntervalCard.setVisible(mode == 'reduced')
         # The reduced rate cannot apply under Always Aim / Always Auto-Fire: say so, don't rewrite it.
         note = _DETECT_MODE_IGNORED if reduced_rate_ignored(self._config) else ""
         self.detectModeCard.contentLabel.setText(t("detect_mode_desc", _DETECT_MODE_DESC) + (" " + note if note else ""))
@@ -758,10 +744,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         if self._config and not self._isLoadingConfig and 0 <= index < len(_DETECT_MODES):
             apply_mode(self._config, _DETECT_MODES[index])
             self._syncDetectModeCombo()
-
-    def _onIdleDetectIntervalChanged(self, value):
-        if self._config:
-            self._config.idle_detect_interval = value / 1000.0
 
     def _onSingleTargetChanged(self, checked):
         if self._config:
@@ -849,7 +831,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
                                                _DETECT_MODE_LABELS)):
             self.detectModeCombo.setItemText(i, t(key, default))
         self._syncDetectModeCombo()
-        self.idleDetectIntervalCard.titleLabel.setText(t("idle_detect_interval"))
         self.singleTargetCard.titleLabel.setText(t("single_target_mode"))
         self.secondInferCard.titleLabel.setText(t("weapon_detection_method", "Weapon Detection Method"))
         self.secondInferCard.contentLabel.setText(t("weapon_detection_method_desc", "Off / OCR (PaddleOCR) / ONNX (HUD weapon detector)"))

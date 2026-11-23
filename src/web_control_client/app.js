@@ -889,14 +889,12 @@
     show("inf-anchor-infl-dynamic-card", on && fov && fovMode === "dynamic");
   }
 
-  // The reduced-speed interval only matters for "Reduced speed"; the note says when it cannot apply
-  // (server extra reduced_rate_ignored = Always Aim / Always Auto-Fire on), mirroring inference_page.py.
+  // The note says when "Reduced speed" cannot apply (server extra reduced_rate_ignored = Always Aim /
+  // Always Auto-Fire on), mirroring inference_page.py.
   function updateDetectModeVisibility() {
     var d = lastSettings.inference || {};
     var sel = document.getElementById("inf-detect_mode");
     var mode = sel ? sel.value : d.detect_mode;
-    var card = document.getElementById("inf-idle-interval-card");
-    if (card) card.classList.toggle("hidden", mode !== "reduced");
     var note = document.getElementById("inf-detect-mode-note");
     if (note) note.classList.toggle("hidden", !(mode === "reduced" && d.reduced_rate_ignored));
   }

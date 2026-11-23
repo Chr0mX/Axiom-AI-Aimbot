@@ -37,7 +37,7 @@ def auto_fire_loop(config: Config, boxes_queue: queue.Queue) -> None:
     logger = logging.getLogger(__name__)
     
     BOX_UPDATE_INTERVAL = 1 / 60  # 60Hz update frequency
-    # Twice the slowest legitimate refresh (idle_detect_interval is capped at 0.5s).
+    # Twice the slowest legitimate refresh (the reduced-speed interval is 50 ms).
     MAX_BOX_AGE_S = 1.0
     
     # Cache key configuration

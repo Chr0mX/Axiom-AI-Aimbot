@@ -605,35 +605,6 @@ class TestValidateDetectInterval:
 
 
 # ============================================================
-# 5. _validate_idle_detect_interval 測試
-# ============================================================
-
-class TestValidateIdleDetectInterval:
-    """測試閒置檢測間隔驗證"""
-
-    def test_normal_value_unchanged(self):
-        from core.config import _validate_idle_detect_interval
-        c = _make_config()
-        c.idle_detect_interval = 0.05  # 50ms
-        _validate_idle_detect_interval(c)
-        assert c.idle_detect_interval == 0.05
-
-    def test_too_small_corrected(self):
-        from core.config import _validate_idle_detect_interval
-        c = _make_config()
-        c.idle_detect_interval = 0.001  # 1ms < 5ms
-        _validate_idle_detect_interval(c)
-        assert c.idle_detect_interval == 0.005
-
-    def test_too_large_corrected(self):
-        from core.config import _validate_idle_detect_interval
-        c = _make_config()
-        c.idle_detect_interval = 1.0  # 1000ms > 500ms
-        _validate_idle_detect_interval(c)
-        assert c.idle_detect_interval == 0.5
-
-
-# ============================================================
 # 6. _validate_mouse_method 測試
 # ============================================================
 
