@@ -442,9 +442,6 @@ class TestNestedFieldPaths:
             motion_variation_enabled=True, motion_variation_range=0.06,
             speed_shaping_enabled=True, speed_shaping_low=4.0, speed_shaping_high=22.0,
             speed_shaping_low_factor=0.88,
-            micro_stutter_enabled=False, micro_stutter_prob=0.03, micro_stutter_min=0.65,
-            micro_stutter_max=0.90,
-            reaction_variability_enabled=False, reaction_skip_prob=0.015,
         )
         base.update(overrides)
         return types.SimpleNamespace(**base)
@@ -576,14 +573,14 @@ class TestGetSerialPorts:
 
 class TestResetHumanization:
     def test_replaces_humanization_with_fresh_defaults(self):
-        stale = types.SimpleNamespace(enabled=False, intensity=0.1)
+        stale = types.SimpleNamespace(enabled=True, intensity=0.1)
         config = _config(humanization=stale)
         result = wcs.reset_humanization(config)
         assert result == {"ok": True}
         # core.humanization is pure Python (no Qt/onnxruntime), genuinely
         # importable here — real HumanizationConfig() defaults, not faked.
         assert config.humanization is not stale
-        assert config.humanization.enabled is True
+        assert config.humanization.enabled is False       # fresh defaults: Humanization is opt-in
         assert config.humanization.intensity == 0.5
 
     def test_humanization_unavailable(self, monkeypatch):

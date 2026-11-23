@@ -1220,26 +1220,6 @@
             <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-jitter-subgroup">
               <div class="field-card">
                 <div class="field-info">
-                  <div class="field-title">Jitter Base</div>
-                  <div class="field-desc">Minimum jitter amplitude added every frame, in pixels.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-jitter-base" data-key="humanization.micro_jitter_base" data-advanced="1" data-type="number" min="0" max="2" step="0.01">
-                  <span class="field-slider-value">px</span>
-                </div>
-              </div>
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Jitter Scale</div>
-                  <div class="field-desc">Extra jitter added per pixel of movement, as a percentage of the movement size.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-jitter-scale" data-key="humanization.micro_jitter_scale" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
-                <span class="field-slider-value">%</span>
-                </div>
-              </div>
-              <div class="field-card">
-                <div class="field-info">
                   <div class="field-title">Apply While Aiming Idle</div>
                   <div class="field-desc">Also apply Micro-Jitter's tremor while the aim key is held but no target is locked.</div>
                 </div>
@@ -1263,18 +1243,6 @@
                 </label>
               </div>
             </div>
-            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-motion-variation-subgroup">
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Variation Range</div>
-                  <div class="field-desc">Random output-scale range applied each frame (mean-preserving).</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-motion-variation-range" data-key="humanization.motion_variation_range" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
-                <span class="field-slider-value">%</span>
-                </div>
-              </div>
-            </div>
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Speed Shaping</div>
@@ -1285,103 +1253,6 @@
                   <input type="checkbox" id="aim-humanization-speed-shaping-enabled" data-key="humanization.speed_shaping_enabled" data-type="bool">
                   <span class="slider"></span>
                 </label>
-              </div>
-            </div>
-            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-speed-shaping-subgroup">
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Fine-Control Threshold</div>
-                  <div class="field-desc">Movements below this size are compressed by the Low-Speed Factor.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-speed-shaping-low" data-key="humanization.speed_shaping_low" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
-                  <span class="field-slider-value">px</span>
-                </div>
-              </div>
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Full-Speed Threshold</div>
-                  <div class="field-desc">Movements above this size pass through unmodified.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-speed-shaping-high" data-key="humanization.speed_shaping_high" data-advanced="1" data-type="number" min="0" max="50" step="0.1">
-                  <span class="field-slider-value">px</span>
-                </div>
-              </div>
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Low-Speed Factor</div>
-                  <div class="field-desc">Magnitude scale applied to movements below the Fine-Control Threshold.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-speed-shaping-low-factor" data-key="humanization.speed_shaping_low_factor" data-advanced="1" data-type="number" min="0" max="1" step="0.01">
-                </div>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Micro-Stutter</div>
-                <div class="field-desc">Occasional brief magnitude reduction, modeling muscle hesitation.</div>
-              </div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="aim-humanization-micro-stutter-enabled" data-key="humanization.micro_stutter_enabled" data-type="bool">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-stutter-subgroup">
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Stutter Chance</div>
-                  <div class="field-desc">Probability per frame of a brief magnitude reduction.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-stutter-prob" data-key="humanization.micro_stutter_prob" data-advanced="1" data-type="number" min="0" max="20" step="0.1">
-                <span class="field-slider-value">%</span>
-                </div>
-              </div>
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Stutter Min</div>
-                  <div class="field-desc">Lower bound of the stutter magnitude factor.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-stutter-min" data-key="humanization.micro_stutter_min" data-advanced="1" data-type="number" min="0" max="1" step="0.01">
-                </div>
-              </div>
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Stutter Max</div>
-                  <div class="field-desc">Upper bound of the stutter magnitude factor.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-stutter-max" data-key="humanization.micro_stutter_max" data-advanced="1" data-type="number" min="0" max="1" step="0.01">
-                </div>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Reaction Variability</div>
-                <div class="field-desc">Occasionally skip a frame's mouse injection to simulate human micro-hesitation. Adds real per-frame latency.</div>
-              </div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="aim-humanization-reaction-variability-enabled" data-key="humanization.reaction_variability_enabled" data-type="bool">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-            <div class="field-group hidden micro-grid subgroup" data-cols="2" data-kind="sub" id="aim-humanization-reaction-subgroup">
-              <div class="field-card">
-                <div class="field-info">
-                  <div class="field-title">Skip Chance</div>
-                  <div class="field-desc">Probability per frame of skipping the mouse injection entirely.</div>
-                </div>
-                <div class="field-control">
-                  <input type="number" id="aim-humanization-reaction-skip-prob" data-key="humanization.reaction_skip_prob" data-advanced="1" data-type="number" min="0" max="10" step="0.1">
-                <span class="field-slider-value">%</span>
-                </div>
               </div>
             </div>
             <div class="field-card">

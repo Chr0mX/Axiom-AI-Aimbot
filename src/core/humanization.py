@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 
 @dataclass
@@ -32,14 +32,12 @@ class HumanizationConfig:
     -------------
     Each feature can be toggled independently, regardless of intensity.
 
-    Safe defaults
-    -------------
-    Conservative values that add perceptible naturalness without measurable
-    accuracy loss at typical aimbot operation distances (2–50 px deltas).
+    Fine-tuning values (jitter base/scale, variation range, speed-shaping thresholds) have no GUI: they are
+    conservative defaults that can still be edited by hand in the ``humanization`` block of config.json.
     """
 
     # ── Master ────────────────────────────────────────────────────────────────
-    enabled: bool = True
+    enabled: bool = False           # opt-in, like every other optional aim feature
     intensity: float = 0.5          # 0.0–1.0; master blend for all effects
 
     # ── Feature 1 · Micro-jitter ──────────────────────────────────────────────
@@ -67,15 +65,6 @@ class HumanizationConfig:
     motion_variation_enabled: bool = True
     motion_variation_range: float = 0.06  # ±6 % per frame at intensity=1.0
 
-    # ── Feature 3 · Reaction variability ─────────────────────────────────────
-    # Probabilistically suppresses one mouse injection to simulate the ~10 ms
-    # micro-hesitations present in all human motor control.
-    # Returns None to signal "skip this frame" — the PID corrects the missed
-    # frame automatically on the next cycle.
-    # Disabled by default: some users prefer zero frame skips.
-    reaction_variability_enabled: bool = False
-    reaction_skip_prob: float = 0.015   # fraction of frames suppressed at intensity=1.0
-
     # ── Feature 4 · Speed shaping ─────────────────────────────────────────────
     # Non-linear magnitude scale that mirrors human fine-motor behaviour:
     #   · Small movements (< low threshold)  → compressed by low_factor
@@ -87,17 +76,6 @@ class HumanizationConfig:
     speed_shaping_high: float = 22.0        # above this (px): full-speed zone
     speed_shaping_low_factor: float = 0.88  # magnitude scale in fine-control zone
 
-    # ── Feature 5 · Micro-stutter ─────────────────────────────────────────────
-    # Occasional random magnitude reduction — models the brief muscle hesitation
-    # humans exhibit before committing to a movement.
-    # Probabilistic and bounded; does not accumulate across frames.
-    # Disabled by default for minimal visual impact.
-    micro_stutter_enabled: bool = False
-    micro_stutter_prob: float = 0.03        # probability per frame at intensity=1.0
-    micro_stutter_min: float = 0.65         # lower bound of stutter factor
-    micro_stutter_max: float = 0.90         # upper bound of stutter factor
-
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -106,7 +84,7 @@ def apply_humanization(
     dx: float,
     dy: float,
     cfg: HumanizationConfig,
-) -> Optional[Tuple[float, float]]:
+) -> Tuple[float, float]:
     """
     Apply perceptual humanization to final PID output (dx, dy).
 
@@ -118,9 +96,7 @@ def apply_humanization(
         cfg    : HumanizationConfig instance.
 
     Returns:
-        (dx, dy) with humanization applied, or
-        None    → caller should skip mouse injection for this frame
-                  (reaction variability feature only).
+        (dx, dy) with humanization applied.
 
     Complexity : O(1), no heap allocations, no persistent state mutations.
     Latency    : < 0.05 ms on any modern CPU (measured on i7-12700K at ~0.02 ms).
@@ -155,16 +131,6 @@ def apply_humanization(
         dy *= scale
         magnitude = math.hypot(dx, dy)
 
-    # ── Feature 5 · Micro-stutter ─────────────────────────────────────────────
-    # Bounded reduction — stutter_factor ∈ [min, max] ⊂ (0, 1).
-    # Not applied to zero movement to avoid spurious state.
-    if cfg.micro_stutter_enabled and magnitude > 0.0:
-        if random.random() < cfg.micro_stutter_prob * intensity:
-            s = random.uniform(cfg.micro_stutter_min, cfg.micro_stutter_max)
-            dx *= s
-            dy *= s
-            magnitude = math.hypot(dx, dy)
-
     # ── Feature 2 · Motion variation ─────────────────────────────────────────
     # Symmetric interval around 1.0 → E[scale] = 1.0, no bias accumulation.
     # Note: X and Y share the same scale draw to avoid introducing axis coupling.
@@ -185,44 +151,4 @@ def apply_humanization(
         dx += random.uniform(-amp, amp)
         dy += random.uniform(-amp, amp)
 
-    # ── Feature 3 · Reaction variability ─────────────────────────────────────
-    # Checked last so jitter/shaping already ran in case we return early.
-    # Probability capped implicitly by keeping reaction_skip_prob ≤ 0.05
-    # in safe defaults — frame skips are invisible at 100+ fps.
-    if cfg.reaction_variability_enabled:
-        if random.random() < cfg.reaction_skip_prob * intensity:
-            return None
-
     return dx, dy
-
-
-# ---------------------------------------------------------------------------
-# Intensity presets (convenience — not used by apply_humanization directly)
-# ---------------------------------------------------------------------------
-
-def make_humanization_config(intensity: float = 0.5) -> HumanizationConfig:
-    """
-    Build a HumanizationConfig scaled to the given intensity level.
-
-    intensity=0.0 → all features off, perfect robotic precision
-    intensity=0.5 → default safe profile (recommended)
-    intensity=1.0 → maximum human-like naturalness
-
-    The intensity field on the returned config is set to the provided value;
-    feature toggles follow the profile below.
-    """
-    intensity = max(0.0, min(1.0, intensity))
-
-    if intensity == 0.0:
-        return HumanizationConfig(enabled=False, intensity=0.0)
-
-    # At intensity ≥ 0.3 enable stutter; at ≥ 0.6 enable reaction variability.
-    return HumanizationConfig(
-        enabled=True,
-        intensity=intensity,
-        micro_jitter_enabled=True,
-        motion_variation_enabled=True,
-        speed_shaping_enabled=True,
-        micro_stutter_enabled=intensity >= 0.3,
-        reaction_variability_enabled=intensity >= 0.6,
-    )

@@ -6,9 +6,7 @@ Coverage:
   - apply_humanization: disabled / zero-intensity passthrough
   - Feature 1: micro-jitter — zero-mean bias, magnitude scaling
   - Feature 2: motion variation — mean-preserving, bounded
-  - Feature 3: reaction variability — None return, zero prob
   - Feature 4: speed shaping — low/high/boundary magnitudes
-  - Feature 5: micro-stutter — magnitude reduction guarantee
   - Determinism with fixed random seed
   - Direction preservation for large movements
   - Config serialisation round-trip (to_dict / from_dict)
@@ -36,8 +34,6 @@ def _cfg(**kwargs):
         micro_jitter_enabled=False,
         motion_variation_enabled=False,
         speed_shaping_enabled=False,
-        micro_stutter_enabled=False,
-        reaction_variability_enabled=False,
     )
     for k, v in kwargs.items():
         setattr(base, k, v)
@@ -60,32 +56,19 @@ def _make_config():
 # ---------------------------------------------------------------------------
 
 class TestHumanizationConfigDefaults:
-    def test_enabled_by_default(self):
+    def test_off_by_default(self):
         from core.humanization import HumanizationConfig
-        assert HumanizationConfig().enabled is True
+        assert HumanizationConfig().enabled is False
 
     def test_intensity_in_range(self):
         from core.humanization import HumanizationConfig
         cfg = HumanizationConfig()
         assert 0.0 <= cfg.intensity <= 1.0
 
-    def test_reaction_variability_off_by_default(self):
-        from core.humanization import HumanizationConfig
-        assert HumanizationConfig().reaction_variability_enabled is False
-
-    def test_micro_stutter_off_by_default(self):
-        from core.humanization import HumanizationConfig
-        assert HumanizationConfig().micro_stutter_enabled is False
-
     def test_speed_shaping_thresholds_ordered(self):
         from core.humanization import HumanizationConfig
         cfg = HumanizationConfig()
         assert cfg.speed_shaping_low < cfg.speed_shaping_high
-
-    def test_stutter_bounds_ordered(self):
-        from core.humanization import HumanizationConfig
-        cfg = HumanizationConfig()
-        assert 0.0 < cfg.micro_stutter_min <= cfg.micro_stutter_max < 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -162,8 +145,6 @@ class TestMicroJitter:
             micro_jitter_enabled=True,
             motion_variation_enabled=False,
             speed_shaping_enabled=False,
-            micro_stutter_enabled=False,
-            reaction_variability_enabled=False,
         )
         random.seed(7)
         for _ in range(2000):
@@ -204,8 +185,6 @@ class TestMotionVariation:
             motion_variation_enabled=True,
             motion_variation_range=rng,
             speed_shaping_enabled=False,
-            micro_stutter_enabled=False,
-            reaction_variability_enabled=False,
         )
         random.seed(3)
         for _ in range(1000):
@@ -219,59 +198,6 @@ class TestMotionVariation:
         for _ in range(100):
             result = _apply(0.0, 0.0, motion_variation_enabled=True)
             assert result == (0.0, 0.0)
-
-
-# ---------------------------------------------------------------------------
-# Feature 3 · Reaction variability
-# ---------------------------------------------------------------------------
-
-class TestReactionVariability:
-    def test_certain_skip_returns_none(self):
-        """prob=1.0 → every call returns None."""
-        cfg = _cfg(
-            reaction_variability_enabled=True,
-            reaction_skip_prob=1.0,
-        )
-        from core.humanization import apply_humanization
-        random.seed(0)
-        for _ in range(100):
-            assert apply_humanization(5.0, 5.0, cfg) is None
-
-    def test_zero_prob_never_skips(self):
-        """prob=0.0 → never returns None."""
-        cfg = _cfg(
-            reaction_variability_enabled=True,
-            reaction_skip_prob=0.0,
-        )
-        from core.humanization import apply_humanization
-        random.seed(0)
-        for _ in range(1000):
-            assert apply_humanization(5.0, 5.0, cfg) is not None
-
-    def test_default_prob_is_low(self):
-        """At default settings, skip rate is very low (< 5%)."""
-        from core.humanization import HumanizationConfig, apply_humanization
-        cfg = HumanizationConfig(
-            enabled=True, intensity=1.0,
-            micro_jitter_enabled=False,
-            motion_variation_enabled=False,
-            speed_shaping_enabled=False,
-            micro_stutter_enabled=False,
-            reaction_variability_enabled=True,
-        )
-        random.seed(11)
-        skips = sum(
-            1 for _ in range(10_000)
-            if apply_humanization(5.0, 5.0, cfg) is None
-        )
-        assert skips / 10_000 < 0.05
-
-    def test_feature_disabled_never_returns_none(self):
-        """When disabled the feature is entirely bypassed."""
-        random.seed(0)
-        result = _apply(5.0, 5.0, reaction_variability_enabled=False)
-        assert result is not None
-
 
 # ---------------------------------------------------------------------------
 # Feature 4 · Speed shaping
@@ -354,70 +280,13 @@ class TestSpeedShaping:
             cfg = HumanizationConfig(
                 enabled=True, intensity=intensity,
                 micro_jitter_enabled=False, motion_variation_enabled=False,
-                speed_shaping_enabled=True, micro_stutter_enabled=False,
-                reaction_variability_enabled=False,
+                speed_shaping_enabled=True,
                 speed_shaping_low=10.0, speed_shaping_high=30.0,
                 speed_shaping_low_factor=0.5,
             )
             return apply_humanization(5.0, 0.0, cfg)[0]
 
         assert shaped(1.0) < shaped(0.5) < shaped(0.1)
-
-
-# ---------------------------------------------------------------------------
-# Feature 5 · Micro-stutter
-# ---------------------------------------------------------------------------
-
-class TestMicroStutter:
-    def test_certain_stutter_reduces_magnitude(self):
-        """prob=1.0 → magnitude always reduced."""
-        result = _apply(
-            10.0, 0.0,
-            micro_stutter_enabled=True,
-            micro_stutter_prob=1.0,
-            micro_stutter_min=0.5,
-            micro_stutter_max=0.8,
-        )
-        assert result is not None
-        assert math.hypot(*result) < 10.0
-
-    def test_stutter_factor_bounded(self):
-        """Output magnitude always in [min, max] * input when stuttered."""
-        mn, mx = 0.6, 0.9
-        random.seed(0)
-        cfg = _cfg(
-            micro_stutter_enabled=True,
-            micro_stutter_prob=1.0,
-            micro_stutter_min=mn,
-            micro_stutter_max=mx,
-        )
-        from core.humanization import apply_humanization
-        for _ in range(500):
-            result = apply_humanization(10.0, 0.0, cfg)
-            assert result is not None
-            assert 10.0 * mn - 1e-9 <= result[0] <= 10.0 * mx + 1e-9
-
-    def test_zero_prob_never_stutters(self):
-        """prob=0 → output always equals input (no stutter)."""
-        random.seed(0)
-        for _ in range(500):
-            result = _apply(
-                10.0, 0.0,
-                micro_stutter_enabled=True,
-                micro_stutter_prob=0.0,
-            )
-            assert result is not None
-            assert result == (10.0, 0.0)
-
-    def test_zero_movement_skips_stutter(self):
-        """Stutter branch is skipped when magnitude == 0."""
-        result = _apply(
-            0.0, 0.0,
-            micro_stutter_enabled=True,
-            micro_stutter_prob=1.0,
-        )
-        assert result == (0.0, 0.0)
-
 
 # ---------------------------------------------------------------------------
 # Cross-feature: determinism
@@ -457,8 +326,6 @@ class TestDirectionPreservation:
             micro_jitter_enabled=True,
             motion_variation_enabled=True,
             speed_shaping_enabled=True,
-            micro_stutter_enabled=True,
-            reaction_variability_enabled=False,  # avoid None returns in loop
         )
         random.seed(42)
         for _ in range(2000):
@@ -470,42 +337,6 @@ class TestDirectionPreservation:
         from core.humanization import HumanizationConfig, apply_humanization
         cfg = HumanizationConfig(intensity=0.0)
         assert apply_humanization(-5.5, 8.8, cfg) == (-5.5, 8.8)
-
-
-# ---------------------------------------------------------------------------
-# make_humanization_config preset helper
-# ---------------------------------------------------------------------------
-
-class TestMakeHumanizationConfig:
-    def test_zero_intensity_disabled(self):
-        from core.humanization import make_humanization_config
-        cfg = make_humanization_config(0.0)
-        assert cfg.enabled is False
-
-    def test_full_intensity_enabled(self):
-        from core.humanization import make_humanization_config
-        cfg = make_humanization_config(1.0)
-        assert cfg.enabled is True
-        assert cfg.intensity == 1.0
-        assert cfg.micro_stutter_enabled is True
-        assert cfg.reaction_variability_enabled is True
-
-    def test_mid_intensity_partial_features(self):
-        from core.humanization import make_humanization_config
-        cfg = make_humanization_config(0.5)
-        assert cfg.micro_jitter_enabled is True
-        assert cfg.motion_variation_enabled is True
-        assert cfg.speed_shaping_enabled is True
-        assert cfg.micro_stutter_enabled is True      # >= 0.3
-        assert cfg.reaction_variability_enabled is False  # < 0.6
-
-    def test_clamps_out_of_range(self):
-        from core.humanization import make_humanization_config
-        cfg = make_humanization_config(1.5)
-        assert cfg.intensity == 1.0
-        cfg2 = make_humanization_config(-0.5)
-        assert cfg2.enabled is False
-
 
 # ---------------------------------------------------------------------------
 # Config integration
@@ -561,8 +392,8 @@ class TestConfigIntegration:
         c1 = _make_config()
         c1.humanization.enabled = False
         c1.humanization.intensity = 0.3
-        c1.humanization.micro_stutter_enabled = True
-        c1.humanization.micro_stutter_prob = 0.07
+        c1.humanization.motion_variation_enabled = False
+        c1.humanization.micro_jitter_base = 0.07
 
         d = c1.to_dict()
 
@@ -571,5 +402,24 @@ class TestConfigIntegration:
 
         assert c2.humanization.enabled is False
         assert c2.humanization.intensity == pytest.approx(0.3)
-        assert c2.humanization.micro_stutter_enabled is True
-        assert c2.humanization.micro_stutter_prob == pytest.approx(0.07)
+        assert c2.humanization.motion_variation_enabled is False
+        assert c2.humanization.micro_jitter_base == pytest.approx(0.07)
+
+
+class TestRemovedFeatures:
+    """Micro-Stutter and Reaction Variability were removed: old config files carrying them must still load."""
+
+    def test_old_keys_are_ignored_and_never_returned(self):
+        c = _make_config()
+        c.from_dict({"humanization": {"enabled": True, "intensity": 0.4, "micro_stutter_enabled": True,
+                                      "micro_stutter_prob": 1.0, "reaction_variability_enabled": True,
+                                      "reaction_skip_prob": 1.0}})
+        assert c.humanization.enabled is True and c.humanization.intensity == pytest.approx(0.4)
+        assert not hasattr(c.humanization, "micro_stutter_enabled")
+        assert not hasattr(c.humanization, "reaction_variability_enabled")
+        from core.humanization import apply_humanization
+        for _ in range(200):
+            assert apply_humanization(5.0, 5.0, c.humanization) is not None      # a frame is never skipped now
+
+    def test_new_installs_start_with_humanization_off(self):
+        assert _make_config().humanization.enabled is False

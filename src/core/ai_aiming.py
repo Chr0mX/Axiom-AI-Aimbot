@@ -496,10 +496,7 @@ def _finish_aim_move(
 
     _hcfg = getattr(config, 'humanization', None)
     if _hcfg is not None and _hcfg.enabled:
-        _result = apply_humanization(dx, dy, _hcfg)
-        if _result is None:
-            return
-        dx, dy = _result
+        dx, dy = apply_humanization(dx, dy, _hcfg)
 
     raw_x = dx + state.aim_carry_x
     raw_y = dy + state.aim_carry_y
@@ -532,7 +529,7 @@ def apply_idle_micro_jitter(config: "Config", state: LoopState, mouse_method: st
 
     Reuses apply_humanization(0.0, 0.0, hcfg) unchanged rather than
     reimplementing the jitter math: with a zero-magnitude input, Speed
-    Shaping / Motion Variation / Micro-Stutter all no-op via their own
+    Shaping / Motion Variation both no-op via their own
     `magnitude > 0.0` guards, and only Micro-Jitter's amplitude floor
     (micro_jitter_base, scaled by intensity) fires — the exact same
     per-axis noise draw used on-target, just with no proportional term.
@@ -551,10 +548,7 @@ def apply_idle_micro_jitter(config: "Config", state: LoopState, mouse_method: st
     if not (hcfg.micro_jitter_enabled and getattr(hcfg, 'micro_jitter_idle_enabled', False)):
         return
 
-    result = apply_humanization(0.0, 0.0, hcfg)
-    if result is None:
-        return  # reaction-variability skip — no movement this frame
-    dx, dy = result
+    dx, dy = apply_humanization(0.0, 0.0, hcfg)
 
     # Same sub-pixel carry as the main path, so idle-jitter's fractional
     # remainder isn't silently dropped either.

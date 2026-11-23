@@ -942,8 +942,6 @@
     "humanization.micro_jitter_enabled",
     "humanization.motion_variation_enabled",
     "humanization.speed_shaping_enabled",
-    "humanization.micro_stutter_enabled",
-    "humanization.reaction_variability_enabled",
   ];
 
   // Advanced Aim Tuning: each sub-setting is shown only while the option it
@@ -1005,10 +1003,6 @@
       document.getElementById(groupId).classList.toggle("hidden", !enabled);
     }
     gate("aim-humanization-micro-jitter-enabled", "aim-humanization-jitter-subgroup");
-    gate("aim-humanization-motion-variation-enabled", "aim-humanization-motion-variation-subgroup");
-    gate("aim-humanization-speed-shaping-enabled", "aim-humanization-speed-shaping-subgroup");
-    gate("aim-humanization-micro-stutter-enabled", "aim-humanization-stutter-subgroup");
-    gate("aim-humanization-reaction-variability-enabled", "aim-humanization-reaction-subgroup");
   }
 
   document.getElementById("aim-humanization-reset-btn").addEventListener("click", function () {
