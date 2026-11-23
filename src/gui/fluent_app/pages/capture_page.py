@@ -456,7 +456,7 @@ class CapturePage(BasePage):
         self.ndiGroup = SettingCardGroup("NDI", self.scrollWidget)
 
         self.ndiSourceCombo = ComboBox()
-        self.ndiSourceCombo.setMinimumWidth(360)
+        self.ndiSourceCombo.setMinimumWidth(240)
         self.ndiSourceCard = SettingCard(
             FluentIcon.CAMERA,
             "NDI Stream",

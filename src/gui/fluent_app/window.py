@@ -3,7 +3,7 @@ import sys
 from ctypes import byref, c_int, WinDLL
 from ctypes.wintypes import DWORD
 from PyQt6.QtCore import QUrl, QTimer
-from PyQt6.QtGui import QIcon, QDesktopServices, QColor
+from PyQt6.QtGui import QIcon, QDesktopServices, QColor, QGuiApplication
 from qfluentwidgets import (FluentWindow, NavigationItemPosition, FluentIcon,
                             Theme, setTheme, setThemeColor, qconfig, InfoBar, InfoBarPosition)
 from qfluentwidgets.common.style_sheet import setCustomStyleSheet
@@ -46,11 +46,17 @@ class AxiomWindow(FluentWindow):
         # Window Setup
         self.setWindowTitle(f"Axiom v{__version__}")
         # 1100x750 was cramped enough to clip/wrap SettingCard titles and
-        # descriptions on several pages (long PID/humanization/target-area
-        # labels in particular) — 1280x820 gives every card's text room to
-        # lay out on one line while still fitting comfortably on a common
-        # 1366x768 laptop display.
-        self.resize(1280, 820)
+        # descriptions on several pages, so the preferred size is 1280x820 —
+        # but never larger than ~90 % of the screen's usable area (820 px is
+        # taller than a 1366x768 panel), and never smaller than a size at
+        # which the slider cards (flexible slider + fixed-width value box)
+        # still have room for their controls.
+        self.setMinimumSize(900, 600)
+        avail = QGuiApplication.primaryScreen().availableGeometry() if QGuiApplication.primaryScreen() else None
+        if avail is not None:
+            self.resize(max(900, min(1280, int(avail.width() * 0.9))), max(600, min(820, int(avail.height() * 0.9))))
+        else:
+            self.resize(1280, 820)
 
         # Track current theme state
         # Respect the global qfluentwidgets theme (which may have been set by the wizard)
