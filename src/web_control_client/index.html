@@ -991,45 +991,7 @@
           </div>
           </section>
 
-          <section class="module">
-          <div data-default-collapsed="1" class="field-group-title">Inference Performance</div>
-          <div class="field-group">
-            <div class="field-card" id="inf-cuda-io-card">
-              <div class="field-info">
-                <div class="field-title">CUDA IO Binding</div>
-                <div class="field-desc">Zero-copy GPU inference for the CUDA backend. Always on with TensorRT; not used by other backends.</div>
-              </div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="inf-cuda_io_binding_enabled" data-key="cuda_io_binding_enabled" data-advanced="1" data-type="bool">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Frame Skip Gate</div>
-                <div class="field-desc">Skip inference when the capture region hasn't changed significantly.</div>
-              </div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="inf-frame_skip_enabled" data-key="frame_skip_enabled" data-advanced="1" data-type="bool">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Skip Threshold</div>
-                <div class="field-desc">Avg pixel diff below this value triggers skip (higher = more skipping).</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-frame_skip_threshold" data-key="frame_skip_threshold" data-advanced="1" data-type="number" min="0.5" max="10" step="0.1">
-              </div>
-            </div>
-          </div>
-          </section>
-          </div>
+                    </div>
         </div>
 
         <div class="panel" id="panel-aim">

@@ -30,19 +30,18 @@ class TestFovFollowEffective:
 
 
 class TestCudaIoBindingEffective:
-    def test_user_switch_wins_for_any_provider(self):
-        assert cuda_io_binding_effective(NS(cuda_io_binding_enabled=True), ["CUDAExecutionProvider"]) is True
-
-    def test_tensorrt_is_always_on_without_touching_the_saved_value(self):
-        cfg = NS(cuda_io_binding_enabled=False)
+    def test_on_for_cuda_and_tensorrt_off_elsewhere(self):
+        cfg = NS()
+        assert cuda_io_binding_effective(cfg, ["CUDAExecutionProvider"]) is True
         assert cuda_io_binding_effective(cfg, ["TensorrtExecutionProvider", "CUDAExecutionProvider"]) is True
-        assert cfg.cuda_io_binding_enabled is False
-
-    def test_plain_cuda_and_cpu_follow_the_switch(self):
-        cfg = NS(cuda_io_binding_enabled=False)
-        assert cuda_io_binding_effective(cfg, ["CUDAExecutionProvider"]) is False
+        assert cuda_io_binding_effective(cfg, ["TensorrtExecutionProvider"]) is True
+        assert cuda_io_binding_effective(cfg, ["DmlExecutionProvider", "CPUExecutionProvider"]) is False
         assert cuda_io_binding_effective(cfg, ["CPUExecutionProvider"]) is False
         assert cuda_io_binding_effective(cfg, []) is False
+
+    def test_a_stale_saved_switch_is_ignored(self):
+        # The "CUDA IO Binding" switch was removed; an old config may still carry the attribute.
+        assert cuda_io_binding_effective(NS(cuda_io_binding_enabled=False), ["CPUExecutionProvider"]) is False
 
 
 class TestUvcEngine:

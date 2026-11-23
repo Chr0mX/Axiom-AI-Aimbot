@@ -902,14 +902,12 @@
   }
 
   // Same display rules as inference_page.py: the cursor-follow FOV is meaningless for the external feeds
-  // (uvc/ndi/udp), and the IO-binding switch only applies to the plain CUDA provider. Display only — the
+  // (uvc/ndi/udp). Display only — the
   // saved values are untouched (the loop derives the effective ones).
   function updateInferenceProviderVisibility(data) {
     var follow = document.getElementById("inf-follow-mouse-card");
     var external = ["uvc", "ndi", "udp"].indexOf(String(data.screenshot_method || "").toLowerCase()) !== -1;
     if (follow) follow.classList.toggle("hidden", external);
-    var cuda = document.getElementById("inf-cuda-io-card");
-    if (cuda) cuda.classList.toggle("hidden", !data.cuda_io_binding_applies);
   }
 
   // Weapon Detection method (Inference tab) -> what the other tabs show. Mirrors the Qt pages:

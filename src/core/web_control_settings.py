@@ -150,14 +150,11 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "idle_detect_enabled": {"type": "bool"},
         "idle_detect_interval": {"type": "float", "scale": 1000.0, "min": 5, "max": 500},
         "single_target_mode": {"type": "bool"},
-        "cuda_io_binding_enabled": {"type": "bool"},
-        "frame_skip_enabled": {"type": "bool"},
         # The GUI's own slider ticks in raw ints 5-100 internally but labels
         # itself "v/10" (a SliderLabelCard quirk) — expose the human value
         # (0.5-10.0) directly here instead of replicating that internal
         # raw-int convention, since a plain number input has no separate
         # label to carry the /10 translation the GUI's format_func provides.
-        "frame_skip_threshold": {"type": "float", "min": 0.5, "max": 10.0},
         # Weapon Detection Method (inference_page.py) — off / OCR / ONNX HUD.
         "second_inference_mode": {
             "type": "choice",
@@ -561,10 +558,8 @@ def get_tab_settings(config, tab: str) -> dict:
         # visibility rule as inference_page.py's _updateTrackingVisibility()).
         result["sticky_lock_enabled"] = bool(getattr(config, "sticky_lock_enabled", False))
         # Read-only extras mirroring inference_page.py's own visibility rules: Follow Mouse is meaningless
-        # for the external feeds (uvc/ndi/udp), and the IO-binding switch only applies to the plain CUDA provider.
+        # for the external feeds (uvc/ndi/udp).
         result["screenshot_method"] = str(getattr(config, "screenshot_method", "mss"))
-        from .ai_loop_utils import cuda_io_binding_switch_applies
-        result["cuda_io_binding_applies"] = bool(cuda_io_binding_switch_applies(config))
         # Read-only extra: the reduced rate cannot apply while Always Aim / Always Auto-Fire is on.
         from .detect_mode import reduced_rate_ignored
         result["reduced_rate_ignored"] = bool(reduced_rate_ignored(config))

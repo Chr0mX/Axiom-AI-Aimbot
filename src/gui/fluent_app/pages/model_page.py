@@ -880,10 +880,6 @@ class ModelPage(BasePage):
         if prev_backend != selected_backend:
             self._config.inference_backend = selected_backend
 
-        # Auto-enable CUDA IO Binding when TensorRT is selected (config only; widget syncs on next load)
-        if selected_backend == "tensorrt" and not self._isLoadingConfig:
-            self._config.cuda_io_binding_enabled = True
-
         if not self._isLoadingConfig and (selected_backend == "directml" or prev_backend == "directml"):
             if selected_backend == "tensorrt":
                 self._ensureTrtInstalled()

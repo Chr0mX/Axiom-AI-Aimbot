@@ -235,13 +235,10 @@ _FIELD_MAP = {
     # --- performance ---
     'thread_priority':            'performance.thread_priority',
     'max_queue_size':             'performance.max_queue_size',
-    'cuda_io_binding_enabled':    'performance.cuda_io_binding_enabled',
     'detect_interval':            'performance.timing.detect_interval',
     'screenshot_interval':        'performance.timing.capture_interval',
     'idle_detect_interval':       'performance.timing.idle_interval',
     'idle_detect_enabled':        'performance.timing.idle_enabled',
-    'frame_skip_enabled':         'performance.frame_skip.enabled',
-    'frame_skip_threshold':       'performance.frame_skip.threshold',
     'enable_latency_stats':       'performance.latency_stats.enabled',
     'latency_stats_interval':     'performance.latency_stats.interval',
 
@@ -903,7 +900,6 @@ class Config:
         self.trt_fp16_enabled: bool = False
 
         # CUDA IO Binding 零拷貝推理（僅 CUDA provider 有效）
-        self.cuda_io_binding_enabled: bool = False
 
         # Kalman filter aim-point smoother — independent toggle from
         # prediction_enabled (VelocityPredictor); both can run together
@@ -913,8 +909,6 @@ class Config:
         self.kalman_measurement_noise: float = 0.1  # lower = reacts faster / noisier
 
         # Frame skip gate
-        self.frame_skip_enabled: bool = False
-        self.frame_skip_threshold: float = 2.0     # avg pixel diff below this → skip
 
         # Camera motion compensation — subtract per-frame global scene shift before PID
         self.cam_motion_comp_enabled: bool = False

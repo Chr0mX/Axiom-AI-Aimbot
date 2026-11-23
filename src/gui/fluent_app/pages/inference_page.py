@@ -8,7 +8,7 @@ from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
     FluentIcon, SettingCard, SegmentedWidget, ComboBox,
 )
-from ..components.slider_spin_card import SliderSpinCard, SliderLabelCard, SliderDoubleSpinCard
+from ..components.slider_spin_card import SliderSpinCard, SliderDoubleSpinCard
 
 from ..base_page import BasePage
 from ..language_manager import t
@@ -400,33 +400,6 @@ class InferencePage(BasePage):
             parent=self.generalGroup,
         )
 
-        # === Inference Performance ===
-        self.inferPerfGroup = SettingCardGroup(t("inference_performance", "Inference Performance"), self.scrollWidget)
-
-        self.cudaIoBindingCard = SwitchSettingCard(
-            FluentIcon.COPY,
-            t("cuda_io_binding", "CUDA IO Binding"),
-            t("cuda_io_binding_desc", "Zero-copy GPU inference. Effective only with CUDA or TensorRT backend."),
-            parent=self.inferPerfGroup
-        )
-
-        self.frameSkipCard = SwitchSettingCard(
-            FluentIcon.SPEED_MEDIUM,
-            t("frame_skip_enabled", "Frame Skip Gate"),
-            t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."),
-            parent=self.inferPerfGroup
-        )
-
-        self.frameSkipThresholdCard = SliderLabelCard(
-            FluentIcon.ALIGNMENT,
-            t("frame_skip_threshold", "Skip Threshold"),
-            5, 100,
-            format_func=lambda v: f"{v / 10:.1f}",
-            description=t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"),
-            slider_width=160,
-            parent=self.inferPerfGroup
-        )
-
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -475,11 +448,6 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.hudConfidenceCard)
         self.addContent(self.generalGroup)
 
-        self.inferPerfGroup.addSettingCard(self.cudaIoBindingCard)
-        self.inferPerfGroup.addSettingCard(self.frameSkipCard)
-        self.inferPerfGroup.addSettingCard(self.frameSkipThresholdCard)
-        self.addContent(self.inferPerfGroup)
-
         self.scrollLayout.addStretch(1)
 
     # ──────────────────────────────────────────────
@@ -492,7 +460,7 @@ class InferencePage(BasePage):
         rules keep working underneath."""
         self.markAdvancedAttrs(*"""
 anchorInflAdaptiveCard anchorInflDynamicCard
-            advFovGroup inferPerfGroup
+            advFovGroup
             afovSmoothCard afovMaxSpeedCard afovLostDelayCard afovReacquireCard afovDynRadiusCard afovMaxRadiusCard
             """.split())
 
@@ -534,9 +502,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         self.idleDetectIntervalCard.valueChanged.connect(self._onIdleDetectIntervalChanged)
         self.singleTargetCard.checkedChanged.connect(self._onSingleTargetChanged)
 
-        self.cudaIoBindingCard.checkedChanged.connect(self._onCudaIoBindingChanged)
-        self.frameSkipCard.checkedChanged.connect(self._onFrameSkipChanged)
-        self.frameSkipThresholdCard.valueChanged.connect(self._onFrameSkipThresholdChanged)
 
         self.secondInferSegment.currentItemChanged.connect(self._onSecondInferChanged)
         self.hudConfidenceCard.valueChanged.connect(self._onHudConfidenceChanged)
@@ -593,9 +558,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
             self.idleDetectIntervalCard.setValue(max(5, min(500, idle_ms)))
             self.singleTargetCard.setChecked(getattr(self._config, 'single_target_mode', False))
 
-            self.cudaIoBindingCard.setChecked(bool(getattr(self._config, 'cuda_io_binding_enabled', False)))
-            self.frameSkipCard.setChecked(bool(getattr(self._config, 'frame_skip_enabled', False)))
-            self.frameSkipThresholdCard.setValue(int(round(getattr(self._config, 'frame_skip_threshold', 2.0) * 10)))
 
             mode = getattr(self._config, 'second_inference_mode', 'off')
             self.secondInferSegment.setCurrentItem(mode if mode in ("off", "v1_ocr", "v2_onnx") else "off")
@@ -608,7 +570,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         finally:
             self._isLoadingConfig = False
 
-        self._updateProviderDependentWidgets()
 
     # ──────────────────────────────────────────────
     # Helpers
@@ -731,16 +692,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         is_external = method in EXTERNAL_CAPTURE_METHODS
         self.fovFollowCard.setVisible(not is_external)
 
-    def _updateProviderDependentWidgets(self):
-        """Show/hide and auto-configure CUDA IO Binding based on the active ORT provider."""
-        if not self._config:
-            return
-        from core.ai_loop_utils import cuda_io_binding_switch_applies
-        # Under TensorRT IO binding is always on (ai_loop_utils.cuda_io_binding_effective), so the
-        # switch is only meaningful — and only shown — for the plain CUDA provider. The saved
-        # value is never rewritten from here.
-        self.cudaIoBindingCard.setVisible(cuda_io_binding_switch_applies(self._config))
-
     # ──────────────────────────────────────────────
     # Callbacks
     # ──────────────────────────────────────────────
@@ -816,18 +767,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         if self._config:
             self._config.single_target_mode = checked
 
-    def _onCudaIoBindingChanged(self, checked):
-        if self._config:
-            self._config.cuda_io_binding_enabled = bool(checked)
-
-    def _onFrameSkipChanged(self, checked):
-        if self._config:
-            self._config.frame_skip_enabled = bool(checked)
-
-    def _onFrameSkipThresholdChanged(self, value):
-        if self._config:
-            self._config.frame_skip_threshold = value / 10.0
-
     def _onSecondInferChanged(self, key: str):
         if self._config:
             self._config.second_inference_mode = key
@@ -851,7 +790,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
 
         self.fovGroup.titleLabel.setText(t("fov_and_detect_range"))
         self.generalGroup.titleLabel.setText(t("inference_general_params", "Detection Settings"))
-        self.inferPerfGroup.titleLabel.setText(t("inference_performance", "Inference Performance"))
 
         self.fovCard.titleLabel.setText(t("fov_size"))
         self.fovHeightCard.titleLabel.setText(t("fov_height", "FOV Height"))
@@ -921,9 +859,3 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         self.hudConfidenceCard.titleLabel.setText(t("weapon_detection_threshold", "Weapon Detection Threshold"))
         self.hudConfidenceCard.contentLabel.setText(t("weapon_detection_threshold_desc", "Minimum confidence for ONNX weapon detections"))
 
-        self.cudaIoBindingCard.titleLabel.setText(t("cuda_io_binding", "CUDA IO Binding"))
-        self.cudaIoBindingCard.contentLabel.setText(t("cuda_io_binding_desc", "Zero-copy GPU inference. Effective only with CUDA or TensorRT backend."))
-        self.frameSkipCard.titleLabel.setText(t("frame_skip_enabled", "Frame Skip Gate"))
-        self.frameSkipCard.contentLabel.setText(t("frame_skip_desc", "Skip inference when the capture region hasn't changed significantly."))
-        self.frameSkipThresholdCard.titleLabel.setText(t("frame_skip_threshold", "Skip Threshold"))
-        self.frameSkipThresholdCard.contentLabel.setText(t("frame_skip_threshold_desc", "Avg pixel diff below this value triggers skip (higher = more skipping)"))

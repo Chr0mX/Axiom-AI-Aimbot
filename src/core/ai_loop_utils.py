@@ -128,24 +128,11 @@ def fov_follow_effective(config: Config) -> bool:
 
 
 def cuda_io_binding_effective(config: Config, providers=()) -> bool:
-    """CUDA IO binding on/off for a session using ``providers``: the user's switch, plus
-    always on under TensorRT (the GUI used to force that into the saved config on every
-    load; it is now decided here and the saved value is left alone)."""
-    if getattr(config, 'cuda_io_binding_enabled', False):
-        return True
-    return any('Tensorrt' in str(p) for p in providers)
-
-
-def cuda_io_binding_switch_applies(config) -> bool:
-    """Whether the "CUDA IO Binding" switch means anything right now: only for the plain CUDA provider.
-    Under TensorRT IO binding is always on (``cuda_io_binding_effective``) and every other provider
-    ignores it, so the Qt Inference page and Web Control show the card only when this is true.
-    Display rule only — it never touches the saved value."""
-    provider = str(getattr(config, 'current_provider', '') or '')
-    backend = str(getattr(config, 'inference_backend', '') or '').lower()
-    is_trt = provider == 'TensorrtExecutionProvider' or backend == 'tensorrt'
-    is_cuda = provider == 'CUDAExecutionProvider' or backend == 'cuda'
-    return is_cuda and not is_trt
+    """Whether a session running on ``providers`` uses CUDA IO binding: always on CUDA and TensorRT, never
+    elsewhere. It used to be a user switch (off by default for plain CUDA, forced on under TensorRT); the
+    runtime already falls back to ``model.run`` when binding fails, so there is nothing left to choose.
+    ``config`` is kept for the call signature."""
+    return any('Tensorrt' in str(p) or 'CUDA' in str(p) for p in providers)
 
 
 def update_crosshair_position(config: Config, half_width: int, half_height: int) -> None:
