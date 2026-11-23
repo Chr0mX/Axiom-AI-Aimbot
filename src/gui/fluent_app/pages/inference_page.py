@@ -32,7 +32,6 @@ _AFOV_GROUPS = (
     ("afovAnchorGroup", "afov_group_anchor", "Anchor FOV: Anchor"),
     ("afovMoveGroup", "afov_group_move", "Anchor FOV: Movement"),
     ("afovLostGroup", "afov_group_lost", "Anchor FOV: Lost Anchor"),
-    ("afovRadiusGroup", "afov_group_radius", "Anchor FOV: Size"),
 )
 _AFOV_CARDS = (
     # attr, group, kind, config field, i18n key, title, description, extra
@@ -51,32 +50,10 @@ _AFOV_CARDS = (
     ("afovFollowCard", "afovMoveGroup", "slider", "afov_follow_speed", "afov_follow_speed", "Follow Speed",
      "How quickly the FOV centre closes in on the anchor (per second). Higher = tighter, lower = floatier.",
      (1, 100, "/s", 1)),
-    ("afovSmoothCard", "afovMoveGroup", "slider", "afov_smoothing", "afov_smoothing", "FOV Anchor Smoothing",
-     "Low-pass on the anchor before the FOV follows it, to remove detection jitter. 0 = off. Separate from Aim Step Smoothing and Estimator Smoothing (Aim page).", (0, 100, "%", 100)),
-    ("afovMaxSpeedCard", "afovMoveGroup", "slider", "afov_max_speed", "afov_max_speed", "Maximum Movement Speed",
-     "Fastest the FOV centre may travel, in pixels per second (0 = unlimited).", (0, 20000, "px/s", 1)),
-    ("afovPredTimeCard", "afovMoveGroup", "slider", "afov_predict_time_ms", "afov_predict_time", "FOV Look-ahead",
-     "Lead the anchor by the tracker's velocity so the FOV arrives where the target is going (the aim point has its own Aim Lead). "
-     "0 = off; fades out by itself when confidence drops.", (0, 500, "ms", 1)),
     ("afovLostCard", "afovLostGroup", "combo", "afov_lost_behavior", "afov_lost_behavior", "Lost Target Behaviour",
      "Hold: keep the last FOV position. Return to Centre: glide back to the crosshair. Search: stay and expand the FOV so a new anchor can be found.",
      (("hold", "afov_lost_hold", "Hold"), ("return", "afov_lost_return", "Return to Centre"),
       ("search", "afov_lost_search", "Search (Expand)"))),
-    ("afovLostDelayCard", "afovLostGroup", "slider", "afov_lost_delay_ms", "afov_lost_delay", "FOV Lost Delay",
-     "The anchor must be gone this long before the behaviour above starts (brief detection gaps are ridden out). Only delays the FOV's own reaction - separate from Lock Persistence and Lost Target Timeout (Aim page).",
-     (0, 2000, "ms", 1)),
-    ("afovReacquireCard", "afovLostGroup", "combo", "afov_reacquire", "afov_reacquire", "Reacquisition Behaviour",
-     "Smooth: glide to the new anchor at the normal speed. Fast: catch up quickly (still continuous, never a jump).",
-     (("smooth", "afov_reacq_smooth", "Smooth"), ("fast", "afov_reacq_fast", "Fast Catch-up"))),
-    ("afovMaxRadiusCard", "afovRadiusGroup", "slider", "afov_max_radius", "afov_max_radius", "Maximum Radius",
-     "The most the FOV radius can grow to with Dynamic Radius or Search. The normal size is FOV Width \u00f7 2.", (1, 1000, "px", 1)),
-    ("afovDynRadiusCard", "afovRadiusGroup", "switch", "afov_dynamic_radius", "afov_dynamic_radius", "Dynamic Radius",
-     "Widen the FOV (up to the maximum radius) for fast or low-confidence targets.", None),
-    ("afovFitCard", "afovRadiusGroup", "switch", "afov_fit_box_enabled", "afov_fit_box", "Fit FOV to Target Box While Aiming",
-     "While aim is active and a target is locked, shrink the FOV to the target's detection box (never above FOV Width/Height); "
-     "it grows back to the normal size when aim is released. Needs the Detection or Tracker source.", None),
-    ("afovFitPadCard", "afovRadiusGroup", "slider", "afov_fit_padding_pct", "afov_fit_padding", "Fit Padding",
-     "Extra room around the box, as a percentage of its size, so a moving target stays inside the FOV.", (0, 200, "%", 1)),
 )
 
 # (i18n key, English title, English description) per Anchor Prediction card —
@@ -426,7 +403,6 @@ class InferencePage(BasePage):
         self.markAdvancedAttrs(*"""
 anchorInflAdaptiveCard anchorInflDynamicCard
             advFovGroup
-            afovSmoothCard afovMaxSpeedCard afovLostDelayCard afovReacquireCard afovDynRadiusCard afovMaxRadiusCard
             """.split())
 
     def _connectSignals(self):
@@ -548,24 +524,14 @@ anchorInflAdaptiveCard anchorInflDynamicCard
 
     def _updateAnchorFovVisibility(self):
         """Anchor FOV groups appear only in Anchor mode (hidden, not greyed out); the position
-        and offsets need a box source, Manual X/Y the manual one, the prediction sliders need
-        prediction on."""
+        needs a box source (Manual is a point from the crosshair; the offsets apply to every source)."""
         if not self._config:
             return
         anchor = _fov_mode.mode_from_config(self._config) == 'anchor'
         manual = str(getattr(self._config, 'afov_source', 'detection')) == 'manual'
-        grows = bool(getattr(self._config, 'afov_dynamic_radius', False)) or \
-            str(getattr(self._config, 'afov_lost_behavior', 'hold')) == 'search'
         for gattr, _k, _t in _AFOV_GROUPS:
             getattr(self, gattr).setVisible(anchor)
-        # Manual is a point from the crosshair, so a box position means nothing; the offsets
-        # apply to every source. Maximum Radius is only headroom for Dynamic Radius / Search.
         self.afovPositionCard.setVisible(anchor and not manual)
-        self.afovMaxRadiusCard.setVisible(anchor and grows)
-        # Fitting needs a box to fit to; Manual has none. The padding only matters while it is on.
-        fit_on = bool(getattr(self._config, 'afov_fit_box_enabled', False))
-        self.afovFitCard.setVisible(anchor and not manual)
-        self.afovFitPadCard.setVisible(anchor and not manual and fit_on)
 
     def _onAfovComboChanged(self, field, values, index):
         if self._config and not self._isLoadingConfig and 0 <= index < len(values):

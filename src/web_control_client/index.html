@@ -702,36 +702,6 @@
                 <span class="field-slider-value">/s</span>
               </div>
             </div>
-            <div class="field-card" id="inf-afov-smooth-card">
-              <div class="field-info">
-                <div class="field-title">FOV Anchor Smoothing</div>
-                <div class="field-desc">Low-pass on the anchor before the FOV follows it, to remove detection jitter. 0 = off. Separate from Aim Step Smoothing and Estimator Smoothing (Aim tab).</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_smoothing" data-key="afov_smoothing" data-advanced="1" data-type="number" min="0" max="100" step="5">
-                <span class="field-slider-value">%</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-maxspeed-card">
-              <div class="field-info">
-                <div class="field-title">Maximum Movement Speed</div>
-                <div class="field-desc">Fastest the FOV centre may travel, in pixels per second (0 = unlimited).</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_max_speed" data-key="afov_max_speed" data-advanced="1" data-type="number" min="0" max="50000" step="50">
-                <span class="field-slider-value">px/s</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-predtime-card">
-              <div class="field-info">
-                <div class="field-title">FOV Look-ahead</div>
-                <div class="field-desc">Lead the anchor by the tracker's velocity so the FOV arrives where the target is going (the aim point has its own Aim Lead). 0 = off; fades out by itself when confidence drops.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_predict_time_ms" data-key="afov_predict_time_ms" data-type="number" min="0" max="500" step="5">
-                <span class="field-slider-value">ms</span>
-              </div>
-            </div>
           </div>
           </section>
 
@@ -751,80 +721,9 @@
                 </select>
               </div>
             </div>
-            <div class="field-card" id="inf-afov-lostdelay-card">
-              <div class="field-info">
-                <div class="field-title">FOV Lost Delay</div>
-                <div class="field-desc">The anchor must be gone this long before the behaviour above starts (brief detection gaps are ridden out). Only delays the FOV's own reaction - separate from Lock Persistence and Lost Target Timeout (Aim tab).</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_lost_delay_ms" data-key="afov_lost_delay_ms" data-advanced="1" data-type="number" min="0" max="5000" step="10">
-                <span class="field-slider-value">ms</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-reacq-card">
-              <div class="field-info">
-                <div class="field-title">Reacquisition Behaviour</div>
-                <div class="field-desc">Smooth: glide to the new anchor at the normal speed. Fast: catch up quickly (still continuous, never a jump).</div>
-              </div>
-              <div class="field-control">
-                <select id="inf-afov_reacquire" data-key="afov_reacquire" data-advanced="1" data-type="choice">
-                  <option value="smooth">Smooth</option>
-                  <option value="fast">Fast Catch-up</option>
-                </select>
-              </div>
-            </div>
           </div>
           </section>
 
-          <section class="module hidden" id="inf-afov-sec-radius">
-          <div class="field-group-title">Anchor FOV: Size</div>
-          <div class="field-group">
-            <div class="field-card" id="inf-afov-maxr-card">
-              <div class="field-info">
-                <div class="field-title">Maximum Radius</div>
-                <div class="field-desc">The most the FOV radius can grow to with Dynamic Radius or Search. The normal size is FOV Width ÷ 2.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_max_radius" data-key="afov_max_radius" data-advanced="1" data-type="number" min="1" max="2000" step="1">
-                <span class="field-slider-value">px</span>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-dynr-card">
-              <div class="field-info">
-                <div class="field-title">Dynamic Radius</div>
-                <div class="field-desc">Widen the FOV (up to the maximum) for fast or low-confidence targets.</div>
-              </div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="inf-afov_dynamic_radius" data-key="afov_dynamic_radius" data-advanced="1" data-type="bool">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-fit-card">
-              <div class="field-info">
-                <div class="field-title">Fit FOV to Target Box While Aiming</div>
-                <div class="field-desc">While aim is active and a target is locked, shrink the FOV to the target's detection box (never above FOV Width/Height); it grows back to the normal size when aim is released. Needs the Detection or Tracker source.</div>
-              </div>
-              <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="inf-afov_fit_box_enabled" data-key="afov_fit_box_enabled" data-type="bool">
-                  <span class="slider"></span>
-                </label>
-              </div>
-            </div>
-            <div class="field-card" id="inf-afov-fitpad-card">
-              <div class="field-info">
-                <div class="field-title">Fit Padding</div>
-                <div class="field-desc">Extra room around the box, as a percentage of its size, so a moving target stays inside the FOV.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-afov_fit_padding_pct" data-key="afov_fit_padding_pct" data-type="number" min="0" max="200" step="1">
-                <span class="field-slider-value">%</span>
-              </div>
-            </div>
-          </div>
-          </section>
 
           <section class="module">
           <div class="field-group-title">Anchor Box Prediction</div>

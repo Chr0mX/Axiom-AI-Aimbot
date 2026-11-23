@@ -798,7 +798,7 @@
           updateUvcSubVisibility();
         }
         if (tab === "inference" && (key === "fov_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
-        if (tab === "inference" && (key === "afov_source" || key === "afov_lost_behavior" || key === "afov_dynamic_radius" || key === "afov_fit_box_enabled")) updateAnchorFovVisibility();
+        if (tab === "inference" && (key === "afov_source" || key === "afov_lost_behavior")) updateAnchorFovVisibility();
         if (tab === "inference" && (key === "anchor_enabled" || key === "fov_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "capture" && key === "hud_udp_enabled") updateWeaponDetectVisibility();
@@ -847,8 +847,7 @@
 
   // Mirrors inference_page.py's _updateAnchorFovVisibility(): the Anchor FOV groups appear only
   // in Anchor mode; Position needs a box source (Manual is a point from the crosshair; the
-  // offsets apply to every source), and Maximum Radius only matters with Dynamic Radius or the
-  // Search behaviour.
+  // offsets apply to every source).
   function updateAnchorFovVisibility() {
     var d = lastSettings.inference || {};
     var el = function (id) { return document.getElementById(id); };
@@ -856,16 +855,9 @@
     var mode = val("fov_mode", "off");
     var anchor = mode === "anchor";
     var src = val("afov_source", "detection");
-    var dyn = !!val("afov_dynamic_radius", false);
-    var search = val("afov_lost_behavior", "hold") === "search";
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
-    ["anchor", "move", "lost", "radius"].forEach(function (k) { show("inf-afov-sec-" + k, anchor); });
+    ["anchor", "move", "lost"].forEach(function (k) { show("inf-afov-sec-" + k, anchor); });
     show("inf-afov-position-card", anchor && src !== "manual");
-    show("inf-afov-maxr-card", anchor && (dyn || search));
-    // Fitting needs a box to fit to (Manual has none); the padding only matters while it is on.
-    var fit = !!val("afov_fit_box_enabled", false);
-    show("inf-afov-fit-card", anchor && src !== "manual");
-    show("inf-afov-fitpad-card", anchor && src !== "manual" && fit);
   }
 
   // Mirrors inference_page.py's _updateAnchorVisibility(): Anchor Box Prediction shows only what is

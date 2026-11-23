@@ -24,11 +24,7 @@ def cfg(**kw):
     c = SimpleNamespace(
         fov_shrink_mode="anchor", fov_size=200, fov_height=200, crosshairX=320, crosshairY=320,
         afov_source="detection", afov_position="center", afov_offset_x=0, afov_offset_y=0,
-        afov_follow_speed=12.0, afov_smoothing=0.0,
-        afov_max_speed=0,
-        afov_predict_time_ms=0, afov_lost_behavior="hold", afov_lost_delay_ms=150,
-        afov_reacquire="smooth", afov_max_radius=300,
-        afov_dynamic_radius=False, fov_circle_filter_enabled=False)
+        afov_follow_speed=12.0, afov_lost_behavior="hold", fov_circle_filter_enabled=False)
     for k, v in kw.items():
         setattr(c, k, v)
     return c
@@ -105,11 +101,11 @@ def test_follows_moving_object_with_small_lag():
 
 # 3 ─ rapid movement ──────────────────────────────────────────────────────────
 def test_rapid_movement_respects_max_speed_and_stays_continuous():
-    c, s = cfg(afov_max_speed=1500, afov_follow_speed=40.0), new_state()
+    c, s = cfg(afov_follow_speed=100.0), new_state()
     fps = 144.0
     out = run(c, s, seq(144, lambda i, t: ([box_at(40 + 3000 * (t - T0) % 560, 300)], box_at(40 + 3000 * (t - T0) % 560, 300))), fps)
     steps = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(out, out[1:])]
-    assert max(steps) <= 1500 / fps + 1e-6
+    assert max(steps) <= af.MAX_SPEED_PX_S / fps + 1e-6
     assert all(0 <= o[0] <= 640 and 0 <= o[1] <= 640 for o in out)       # kept inside the region
 
 
@@ -118,62 +114,19 @@ def test_noisy_boxes_are_smoothed():
     rnd = random.Random(7)
     noise = [(rnd.gauss(0, 4), rnd.gauss(0, 4)) for _ in range(600)]
 
-    def spread(smoothing):
-        c, s = cfg(afov_smoothing=smoothing, afov_follow_speed=15.0), new_state()
+    def spread():
+        c, s = cfg(afov_follow_speed=15.0), new_state()
         out = run(c, s, seq(600, lambda i, t: ([box_at(400 + noise[i][0], 300 + noise[i][1])], box_at(400 + noise[i][0], 300 + noise[i][1]))))
         tail = [o[0] for o in out[300:]]
         m = sum(tail) / len(tail)
         return math.sqrt(sum((x - m) ** 2 for x in tail) / len(tail))
 
     raw = 4.0
-    assert spread(0.0) < raw * 0.6          # the follow lag alone already averages
-    assert spread(0.8) < spread(0.0) * 0.7  # input smoothing removes more
-    assert spread(0.8) < 1.0
+    assert spread() < raw * 0.6             # the fixed input smoothing plus the follow lag average the jitter
 
 
-# 5 ─ prediction ──────────────────────────────────────────────────────────────
-def _moving_with_tracker(c, fps=144.0, n=144, v=300.0, conf=0.9):
-    s = new_state()
-    out = []
-    for i in range(n):
-        t = T0 + i / fps
-        b = box_at(100 + v * (t - T0), 300)
-        s.locked_box = b
-        s.tracker.on_match(t, b, conf, same_target=(s.tracker.last_box is not None))
-        out.append(af.update_anchor_fov(c, s, [b], CROSS[0], CROSS[1], REGION, t))
-    return out, s
 
 
-def test_prediction_anticipates_movement_and_is_off_by_default():
-    base, _ = _moving_with_tracker(cfg())
-    pred, st = _moving_with_tracker(cfg(afov_predict_time_ms=150))
-    assert pred[-1][0] > base[-1][0] + 5                 # leads the un-predicted FOV
-    assert pred[-1][0] - base[-1][0] < 100 * 0.9 + 1     # lead capped by the radius
-    assert st.afov.pred_gain > 0.9
-    assert af.predict_active(cfg()) is False and af.predict_active(cfg(afov_predict_time_ms=150)) is True
-
-
-def test_prediction_fades_when_tracking_is_unreliable():
-    good, _ = _moving_with_tracker(cfg(afov_predict_time_ms=100), conf=0.9)
-    shaky, st = _moving_with_tracker(cfg(afov_predict_time_ms=100), conf=0.2)
-    off, _ = _moving_with_tracker(cfg())
-    assert st.afov.pred_gain < 0.05
-    assert abs(shaky[-1][0] - off[-1][0]) < 1.0          # low confidence -> no lead
-    assert good[-1][0] > shaky[-1][0] + 5
-
-
-def test_prediction_gain_never_snaps():
-    c = cfg(afov_predict_time_ms=100)
-    s = new_state()
-    gains = []
-    for i in range(200):
-        t = T0 + i / 144.0
-        b = box_at(100 + 300 * (t - T0), 300)
-        s.locked_box = b
-        s.tracker.on_match(t, b, 0.9 if i < 100 else 0.1, same_target=(i > 0))
-        af.update_anchor_fov(c, s, [b], 320, 320, REGION, t)
-        gains.append(s.afov.pred_gain)
-    assert max(abs(b - a) for a, b in zip(gains, gains[1:])) < 0.06
 
 
 # 6 ─ temporary loss ──────────────────────────────────────────────────────────
@@ -217,7 +170,7 @@ def test_lost_return_glides_back_to_crosshair():
 
 
 def test_lost_search_expands_then_shrinks_back_on_reacquire():
-    c, s = cfg(afov_lost_behavior="search", afov_max_radius=300), new_state()
+    c, s = cfg(afov_lost_behavior="search"), new_state()
     settle(c, s)
     out = run(c, s, seq(432, lambda i, t: ([], None)), start=T0 + 2.0)
     assert s.afov.phase == af.PH_SEARCH
@@ -241,20 +194,6 @@ def test_reacquires_a_new_object(behavior):
     assert s.afov.phase == af.PH_FOLLOW
     assert out[-1][:2] == pytest.approx(((new[0] + new[2]) / 2, (new[1] + new[3]) / 2), abs=0.5)
 
-
-def test_fast_reacquire_catches_up_sooner_but_stays_continuous():
-    def go(mode):
-        c, s = cfg(afov_reacquire=mode, afov_follow_speed=6.0, afov_max_speed=800), new_state()
-        settle(c, s)
-        run(c, s, seq(288, lambda i, t: ([], None)), start=T0 + 2.0)
-        nb = box_at(100, 560)
-        return run(c, s, seq(60, lambda i, t: ([nb], list(nb))), start=T0 + 4.0)
-
-    slow, fast = go("smooth"), go("fast")
-    d = lambda o: math.hypot(o[-1][0] - 100, o[-1][1] - 560)
-    assert d(fast) < d(slow)
-    steps = [math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(fast, fast[1:])]
-    assert max(steps) <= 800 * 3 / 144 + 1e-6
 
 
 def test_detection_with_lock_follows_the_locked_target_not_the_nearest():
@@ -328,29 +267,14 @@ def test_size_is_the_fov_width_in_every_mode():
         assert settle(c, s)[-1][2] == width
 
 
-def test_maximum_radius_is_headroom_never_a_cap_on_the_base_size():
-    # a Maximum Radius below the base radius must not shrink the FOV
-    c, s = cfg(fov_size=400, fov_height=400, afov_max_radius=120), new_state()
-    assert settle(c, s)[-1][2] == 400
+def test_search_radius_is_headroom_never_a_cap_on_the_base_size():
+    # a base radius above the search radius must not shrink the FOV
+    c, s = cfg(fov_size=800, fov_height=800), new_state()
+    assert settle(c, s)[-1][2] == 800
     # the hard floor stops a tiny FOV Width from collapsing the radius
     c, s = cfg(fov_size=10, fov_height=10), new_state()
     assert settle(c, s)[-1][2] == int(2 * af.MIN_RADIUS_PX)
 
-
-def test_dynamic_radius_widens_for_fast_or_unsure_targets():
-    def final(v, conf):
-        c, s = cfg(afov_dynamic_radius=True, afov_max_radius=250), new_state()
-        out = []
-        for i in range(288):
-            t = T0 + i / 144.0
-            b = box_at(100 + v * (t - T0) % 400, 300)
-            s.locked_box = b
-            s.tracker.on_match(t, b, conf, same_target=(i > 0))
-            out.append(af.update_anchor_fov(c, s, [b], 320, 320, REGION, t))
-        return out[-1][2]
-
-    slow, fast, unsure = final(10, 0.95), final(600, 0.95), final(10, 0.1)
-    assert fast > slow + 60 and unsure > slow + 20 and fast <= 500
 
 
 def test_rectangular_fov_keeps_its_aspect_ratio():
@@ -380,7 +304,7 @@ def test_stalls_and_clock_glitches_do_not_move_the_fov():
 
 
 def test_unusual_settings_cannot_break_the_controller():
-    c = cfg(afov_follow_speed=float("nan"), afov_smoothing=5, afov_max_speed=-1, afov_radius="x",
+    c = cfg(afov_follow_speed=float("nan"), afov_radius="x",
             afov_min_radius=None, afov_lost_behavior="nonsense", afov_source=42)
     s = new_state()
     out = run(c, s, seq(30, lambda i, t: ([box_at(400, 300)], None)))
@@ -389,7 +313,7 @@ def test_unusual_settings_cannot_break_the_controller():
 
 def test_stable_at_high_inference_fps():
     for fps in (240.0, 500.0, 1000.0):
-        c, s = cfg(afov_smoothing=0.5, afov_max_speed=2000), new_state()
+        c, s = cfg(), new_state()
         nb = box_at(500, 250)
         out = run(c, s, seq(int(fps), lambda i, t: ([nb], list(nb))), fps)
         assert out[-1][:2] == pytest.approx((500, 250), abs=1.0)
@@ -419,12 +343,13 @@ def test_clear_is_a_no_op_for_other_modes():
 
 
 def test_published_state_is_the_controllers_real_state():
-    c = cfg(afov_predict_time_ms=100)
-    out, st = _moving_with_tracker(c)
-    ctrl = st.afov
+    c, s = cfg(), new_state()
+    out = settle(c, s)
+    ctrl = s.afov
     assert (c.fov_center_x, c.fov_center_y) == (ctrl.cx, ctrl.cy)
     assert c.fov_effective_size == out[-1][2] and c.afov_has_anchor and not c.afov_lost
-    assert (c.afov_anchor_x, c.afov_pred_x) == (ctrl.ax, ctrl.px) and c.afov_pred_x > c.afov_anchor_x
+    assert (c.afov_anchor_x, c.afov_anchor_y) == (ctrl.ax, ctrl.ay)
+    assert not hasattr(c, "afov_pred_x")                   # the look-ahead marker is gone
 
 
 # 10 ─ existing modes untouched ───────────────────────────────────────────────
@@ -455,18 +380,18 @@ def test_config_defaults_persistence_and_validation(tmp_path):
     from core import config as cfgmod
     Config = _new_config
     c = Config()
-    assert c.fov_shrink_mode == "adaptive" and c.afov_predict_time_ms == 0
+    assert c.fov_shrink_mode == "adaptive"
     assert c.afov_lost_behavior == "hold" and c.fov_center_x is None
     d = c.to_dict()
     assert d["aim"]["fov_anchor"]["source"] == "detection"
     assert "fov_center_x" not in str(d) and "afov_active" not in str(d)      # runtime-only
     c.fov_shrink_mode = "anchor"
-    c.afov_source, c.afov_position, c.afov_max_radius = "tracker", "top", 140
-    c.afov_predict_time_ms, c.afov_lost_behavior = 120, "search"
+    c.afov_source, c.afov_position = "tracker", "top"
+    c.afov_lost_behavior = "search"
     c2 = Config()
     c2.from_dict(c.to_dict())
-    assert (c2.fov_shrink_mode, c2.afov_source, c2.afov_position, c2.afov_max_radius) == ("anchor", "tracker", "top", 140)
-    assert c2.afov_predict_time_ms == 120 and c2.afov_lost_behavior == "search"
+    assert (c2.fov_shrink_mode, c2.afov_source, c2.afov_position) == ("anchor", "tracker", "top")
+    assert c2.afov_lost_behavior == "search"
     # an old config without any of it loads the defaults
     old = Config()
     old.from_dict({"aim": {"fov_size": 250}})
@@ -474,15 +399,15 @@ def test_config_defaults_persistence_and_validation(tmp_path):
     # garbage is clamped
     bad = Config()
     bad.afov_source, bad.afov_lost_behavior, bad.afov_position = "zzz", 7, "custom"
-    bad.afov_max_radius, bad.afov_follow_speed = 99999, float("nan")
+    bad.afov_follow_speed = float("nan")
     bad.fov_shrink_mode = "bogus"
     cfgmod.validate_config(bad)
     assert bad.afov_source == "detection" and bad.afov_lost_behavior == "hold"
-    assert bad.afov_position == "center" and bad.afov_max_radius == 4096
+    assert bad.afov_position == "center"
     assert bad.afov_follow_speed == 12.0 and bad.fov_shrink_mode == "adaptive"
 
 
 def test_anchor_settings_are_aim_preset_eligible():
     from core.config_manager import _AIM_PRESET_FIELDS
-    assert {"afov_source", "afov_max_radius", "afov_lost_behavior", "afov_predict_time_ms"} <= set(_AIM_PRESET_FIELDS)
+    assert {"afov_source", "afov_lost_behavior", "afov_follow_speed"} <= set(_AIM_PRESET_FIELDS)
     assert "fov_center_x" not in _AIM_PRESET_FIELDS

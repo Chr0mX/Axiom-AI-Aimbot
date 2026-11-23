@@ -367,11 +367,6 @@
           ctx.beginPath(); ctx.moveTo(fcx, fcy); ctx.lineTo(ax, ay); ctx.stroke();
           ctx.setLineDash([]);
           ctx.beginPath(); ctx.arc(ax, ay, 4, 0, Math.PI * 2); ctx.fill();
-          if (afov.pred) {
-            const px = X(afov.pred.x), py = Y(afov.pred.y);
-            ctx.beginPath(); ctx.moveTo(px - 6, py); ctx.lineTo(px + 6, py);
-            ctx.moveTo(px, py - 6); ctx.lineTo(px, py + 6); ctx.stroke();
-          }
           ctx.restore();
         } else {
           ctx.save();

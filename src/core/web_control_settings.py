@@ -121,16 +121,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "afov_offset_x": {"type": "int", "min": -1000, "max": 1000},
         "afov_offset_y": {"type": "int", "min": -1000, "max": 1000},
         "afov_follow_speed": {"type": "float", "min": 1, "max": 100},
-        "afov_smoothing": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
-        "afov_max_speed": {"type": "int", "min": 0, "max": 50000},
-        "afov_predict_time_ms": {"type": "int", "min": 0, "max": 500},
         "afov_lost_behavior": {"type": "choice", "choices": ["hold", "return", "search"]},
-        "afov_lost_delay_ms": {"type": "int", "min": 0, "max": 5000},
-        "afov_reacquire": {"type": "choice", "choices": ["smooth", "fast"]},
-        "afov_max_radius": {"type": "int", "min": 1, "max": 2000},
-        "afov_dynamic_radius": {"type": "bool"},
-        "afov_fit_box_enabled": {"type": "bool"},
-        "afov_fit_padding_pct": {"type": "int", "min": 0, "max": 200},
         "fov_dynamic_safeguards": {"type": "bool"},
         # Anchor Box Prediction (inference_page.py: switch, FOV horizon, FOV influence; the estimator tuning
         # is on the Aim tab; core/anchor_prediction.py)

@@ -1107,8 +1107,7 @@ def ai_logic_loop(
                     # (the shrink modes never run). boxes = every detection that
                     # passed the class/confidence filters, in capture coordinates.
                     _fov_cx, _fov_cy, _effective_fov_size, _effective_fov_height = update_anchor_fov(
-                        config, state, all_boxes, crosshair_x, crosshair_y, region, current_time,
-                        aiming=is_aiming)
+                        config, state, all_boxes, crosshair_x, crosshair_y, region, current_time)
                 else:
                     clear_anchor_fov(config, state)
                     _fov_cx, _fov_cy = crosshair_x, crosshair_y

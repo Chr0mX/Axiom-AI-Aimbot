@@ -187,16 +187,7 @@ _FIELD_MAP = {
     'afov_offset_x':              'aim.fov_anchor.offset_x',
     'afov_offset_y':              'aim.fov_anchor.offset_y',
     'afov_follow_speed':          'aim.fov_anchor.follow_speed',
-    'afov_smoothing':             'aim.fov_anchor.smoothing',
-    'afov_max_speed':             'aim.fov_anchor.max_speed',
-    'afov_predict_time_ms':       'aim.fov_anchor.predict.time_ms',
     'afov_lost_behavior':         'aim.fov_anchor.lost.behavior',
-    'afov_lost_delay_ms':         'aim.fov_anchor.lost.delay_ms',
-    'afov_reacquire':             'aim.fov_anchor.lost.reacquire',
-    'afov_max_radius':            'aim.fov_anchor.radius.max',
-    'afov_dynamic_radius':        'aim.fov_anchor.radius.dynamic',
-    'afov_fit_box_enabled':       'aim.fov_anchor.fit_box.enabled',
-    'afov_fit_padding_pct':       'aim.fov_anchor.fit_box.padding_pct',
     'anchor_enabled':             'tracking.anchor.enabled',
     'anchor_mode':                'tracking.anchor.mode',
     'anchor_horizon_ms':          'tracking.anchor.horizon_ms',
@@ -552,20 +543,7 @@ class Config:
         self.afov_offset_x: int = 0              # px added to the anchor point (manual source: from the crosshair)
         self.afov_offset_y: int = 0
         self.afov_follow_speed: float = 12.0     # 1/s approach rate (higher = tighter)
-        self.afov_smoothing: float = 0.3         # 0..1 low-pass on the anchor (0 = off)
-        self.afov_max_speed: int = 4000          # px/s cap on the FOV centre (0 = unlimited)
-        self.afov_predict_time_ms: int = 0       # FOV look-ahead: lead the anchor by the tracker's velocity (0 = off)
         self.afov_lost_behavior: str = 'hold'    # 'hold' / 'return' / 'search'
-        self.afov_lost_delay_ms: int = 150       # anchor must be gone this long first
-        self.afov_reacquire: str = 'smooth'      # 'smooth' / 'fast' (catch-up boost)
-        # The Anchor FOV size is FOV Width/Height like every other mode (radius = width / 2);
-        # this is only the growth headroom for Dynamic Radius and Search.
-        self.afov_max_radius: int = 300
-        self.afov_dynamic_radius: bool = False   # widen with target speed / low confidence
-        # Opt-in: while aim is active and a target is locked, shrink the FOV to the padded
-        # detection box of the anchor (never above FOV Width/Height); released with aim.
-        self.afov_fit_box_enabled: bool = False
-        self.afov_fit_padding_pct: int = 30      # extra room around the box, % (0-200)
         # Runtime-only (unpersisted): the Anchor FOV controller's real state, published
         # every frame while the mode is active so every overlay draws what the filter used.
         self.fov_center_x = None                 # None = FOV centred on the crosshair
@@ -576,8 +554,6 @@ class Config:
         self.afov_phase: int = 0
         self.afov_anchor_x: float = 0.0
         self.afov_anchor_y: float = 0.0
-        self.afov_pred_x: float = 0.0
-        self.afov_pred_y: float = 0.0
 
         # Runtime state — not serialized (see _FIELD_MAP: neither key appears
         # there). The FOV width/height actually in effect THIS frame
@@ -1118,16 +1094,6 @@ class Config:
         mx, my = _legacy_num('aim.fov_anchor.manual_x'), _legacy_num('aim.fov_anchor.manual_y')
         if self.afov_source == 'manual' and (mx or my) and not (self.afov_offset_x or self.afov_offset_y):
             self.afov_offset_x, self.afov_offset_y = int(mx or 0), int(my or 0)   # manual X/Y = the offset pair
-        strength = _legacy_num('aim.fov_anchor.predict.strength')
-        if strength is not None and strength != 1.0:    # lead = time x strength: fold it into the time
-            self.afov_predict_time_ms = int(max(0, min(500, round(self.afov_predict_time_ms * strength))))
-        # The look-ahead used to be a switch plus a time: off (or absent) now means time 0.
-        legacy_on = _get_path(data, 'aim.fov_anchor.predict.enabled')
-        if legacy_on is not _MISSING:
-            if not legacy_on:
-                self.afov_predict_time_ms = 0
-            elif _get_path(data, 'aim.fov_anchor.predict.time_ms') is _MISSING:
-                self.afov_predict_time_ms = 80            # the old default time that "on" implied
         migrate_anchor_settings(self)
         if self.aim_part == 'center':               # "Smart (Center-mass)" was Custom at a different default
             self.aim_part = 'custom'
@@ -1562,7 +1528,7 @@ def _validate_anchor(config: Config) -> None:
 
 def _validate_anchor_fov(config: Config) -> None:
     """Clamp the Anchor FOV settings (core/anchor_fov.py)."""
-    from .anchor_fov import SOURCES, POSITIONS, LOST_MODES, REACQUIRE_MODES
+    from .anchor_fov import SOURCES, POSITIONS, LOST_MODES
 
     def pick(name, allowed, default):
         if getattr(config, name, default) not in allowed:
@@ -1574,18 +1540,9 @@ def _validate_anchor_fov(config: Config) -> None:
     pick('afov_source', SOURCES, 'detection')
     pick('afov_position', POSITIONS, 'center')
     pick('afov_lost_behavior', LOST_MODES, 'hold')
-    pick('afov_reacquire', REACQUIRE_MODES, 'smooth')
     num('afov_offset_x', 0, -1000, 1000, int)
     num('afov_offset_y', 0, -1000, 1000, int)
     num('afov_follow_speed', 12.0, 0.5, 100.0)
-    num('afov_smoothing', 0.3, 0.0, 1.0)
-    num('afov_max_speed', 4000, 0, 50000, int)
-    num('afov_predict_time_ms', 0, 0, 500, int)
-    num('afov_lost_delay_ms', 150, 0, 5000, int)
-    config.afov_dynamic_radius = bool(getattr(config, 'afov_dynamic_radius', False))
-    num('afov_max_radius', 300, 1, 4096, int)
-    config.afov_fit_box_enabled = bool(getattr(config, 'afov_fit_box_enabled', False))
-    num('afov_fit_padding_pct', 30, 0, 200, int)
 
 
 def _finite(value, default: float) -> float:

@@ -126,37 +126,29 @@ class TestAnchorFovMigration:
         c = load({"aim": {"fov_anchor": {"source": "tracker", "manual_x": 120, "manual_y": -40}}})
         assert (c.afov_offset_x, c.afov_offset_y) == (0, 0)
 
-    @pytest.mark.parametrize("time_ms,strength,want", [(80, 1.5, 120), (100, 0.5, 50), (300, 2.0, 500),
-                                                       (80, 0.0, 0), (80, 1.0, 80)])
-    def test_strength_is_folded_into_the_look_ahead_time(self, time_ms, strength, want):
-        c = load({"aim": {"fov_anchor": {"predict": {"time_ms": time_ms, "strength": strength}}}})
-        assert c.afov_predict_time_ms == want
 
-    def test_the_lead_is_numerically_unchanged_by_the_fold(self):
-        t_ms, strength = 90, 1.4
-        c = load({"aim": {"fov_anchor": {"predict": {"enabled": True, "time_ms": t_ms, "strength": strength}}}})
-        p = af.AnchorFovParams()
-        p.load(c)
-        assert p.lead_s == pytest.approx(t_ms * strength / 1000.0, abs=0.0006)      # old: lead_s * strength
 
     def test_retired_keys_are_not_attributes_and_never_written_back(self):
         c = load({"aim": {"fov_anchor": {"radius": {"default": 250, "min": 20}, "manual_x": 5,
-                                         "predict": {"strength": 1.5}}}})
-        for k in ("afov_radius", "afov_min_radius", "afov_manual_x", "afov_manual_y", "afov_predict_strength"):
+                                         "predict": {"strength": 1.5, "time_ms": 90}, "smoothing": 0.9,
+                                         "fit_box": {"enabled": True}}}})
+        for k in ("afov_radius", "afov_min_radius", "afov_manual_x", "afov_manual_y", "afov_predict_strength",
+                  "afov_predict_time_ms", "afov_smoothing", "afov_max_speed", "afov_lost_delay_ms", "afov_reacquire",
+                  "afov_max_radius", "afov_dynamic_radius", "afov_fit_box_enabled", "afov_fit_padding_pct"):
             assert not hasattr(c, k), k
-        assert "manual_x" not in str(c.to_dict()) and "strength" not in str(c.to_dict()["aim"]["fov_anchor"])
+        fa = str(c.to_dict()["aim"]["fov_anchor"])
+        assert "manual_x" not in fa and "strength" not in fa and "predict" not in fa and "fit_box" not in fa
 
     def test_old_main_build_file_still_loads_everything_else(self):
         c = load({"aim": {"fov_size": 260, "fov_anchor": {"source": "tracker", "follow_speed": 20,
                                                            "radius": {"default": 100, "max": 280, "dynamic": True}}}})
-        assert (c.afov_source, c.afov_follow_speed, c.afov_max_radius, c.afov_dynamic_radius) == \
-            ("tracker", 20.0, 280, True)
+        assert (c.afov_source, c.afov_follow_speed) == ("tracker", 20.0)
 
 
 class TestAnchorFovSize:
     @staticmethod
     def params(**kw):
-        c = NS(fov_size=200, fov_height=200, afov_max_radius=300)
+        c = NS(fov_size=200, fov_height=200)
         for k, v in kw.items():
             setattr(c, k, v)
         p = af.AnchorFovParams()
@@ -167,44 +159,12 @@ class TestAnchorFovSize:
         assert self.params(fov_size=200).radius == 100.0          # same as the old default of 100
         assert self.params(fov_size=340).radius == 170.0
 
-    def test_maximum_radius_is_headroom_only(self):
-        p = self.params(fov_size=500, afov_max_radius=120)
-        assert p.radius == 250.0 and p.max_radius == 250.0
-        assert self.params(fov_size=200, afov_max_radius=300).max_radius == 300.0
+    def test_search_radius_is_headroom_only(self):
+        p = self.params(fov_size=800)
+        assert p.radius == 400.0 and p.max_radius == 400.0                 # never cuts the base size
+        assert self.params(fov_size=200).max_radius == af.SEARCH_RADIUS_PX
 
     def test_floor_and_garbage_fov_width(self):
         assert self.params(fov_size=4).radius == af.MIN_RADIUS_PX
         assert self.params(fov_size=float("nan")).radius == af.DEFAULT_RADIUS_PX
         assert math.isfinite(self.params(fov_size=None).radius)
-
-
-# ── FOV look-ahead: one slider (0 = off) instead of a switch plus a time ─────────
-class TestLookAheadMerge:
-    @pytest.mark.parametrize("predict,want", [
-        ({"enabled": False, "time_ms": 120}, 0),                 # off stays off
-        ({"enabled": True, "time_ms": 120}, 120),                # on keeps the tuned time
-        ({"enabled": True}, 80),                                 # on without a time = the old default time
-        ({"enabled": False}, 0),
-        ({"enabled": True, "time_ms": 80, "strength": 1.5}, 120),   # strength fold still applies first
-    ])
-    def test_legacy_files_fold_into_the_time(self, predict, want):
-        assert load({"aim": {"fov_anchor": {"predict": predict}}}).afov_predict_time_ms == want
-
-    def test_new_files_have_no_switch_and_keep_their_time(self):
-        c = new_config()
-        c.afov_predict_time_ms = 90
-        d = c.to_dict()["aim"]["fov_anchor"]["predict"]
-        assert d == {"time_ms": 90}
-        assert load(c.to_dict()).afov_predict_time_ms == 90        # no 'enabled' key -> nothing is zeroed
-
-    def test_default_is_off_and_the_switch_is_gone(self):
-        c = new_config()
-        assert c.afov_predict_time_ms == 0 and not hasattr(c, "afov_predict_enabled")
-        assert af.predict_active(c) is False
-
-    def test_params_follow_the_time(self):
-        p = af.AnchorFovParams()
-        p.load(NS(fov_size=200, fov_height=200, afov_predict_time_ms=150))
-        assert p.predict is True and p.lead_s == pytest.approx(0.15)
-        p.load(NS(fov_size=200, fov_height=200, afov_predict_time_ms=0))
-        assert p.predict is False

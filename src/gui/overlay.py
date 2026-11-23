@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, QTimer, QPointF
 import ctypes
 
 # Pure module (no Qt/Windows imports): the FOV centre every drawing/in-FOV test here uses.
-from core.anchor_fov import anchor_fov_active, fov_center, predict_active
+from core.anchor_fov import anchor_fov_active, fov_center
 
 if TYPE_CHECKING:
     pass
@@ -580,11 +580,6 @@ class PyQtOverlay(QWidget):
             painter.setBrush(color)
             painter.drawEllipse(int(ax) - 4, int(ay) - 4, 8, 8)          # the anchor point
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            if predict_active(cfg):
-                px, py = int(getattr(cfg, 'afov_pred_x', ax)), int(getattr(cfg, 'afov_pred_y', ay))
-                painter.setPen(QPen(color, 1))
-                painter.drawLine(px - 6, py, px + 6, py)                 # predicted anchor
-                painter.drawLine(px, py - 6, px, py + 6)
         else:
             painter.setPen(QPen(color, 1))
             painter.drawLine(int(fcx) - 6, int(fcy), int(fcx) + 6, int(fcy))

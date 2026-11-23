@@ -15,17 +15,13 @@ Responsibilities are kept in separate, small pieces:
                              detections and ``TargetTracker`` are the inputs)
 * anchor position         -- :func:`anchor_point` (box centre / top / bottom
                              + X/Y offsets)
-* movement prediction     -- :meth:`AnchorFovController._lead` (tracker velocity,
-                             confidence weighted, opt-in)
 * position smoothing      -- :meth:`AnchorFovController.step` (input low-pass,
                              exponential follow, speed cap -- frame-rate
-                             independent, no jumps)
+                             independent, no jumps; the smoothing and speed cap
+                             are fixed values, only the follow speed is a setting)
 * radius                  -- :meth:`AnchorFovController._radius_target`
-                             (independent of the position)
-* fit to the target box   -- :meth:`AnchorFovController._fit_target` (opt-in: while
-                             aim is active and a target is locked the FOV shrinks
-                             to the padded detection box, never above the
-                             configured FOV, and glides back when aim is released)
+                             (independent of the position; the FOV Width / 2,
+                             widened to ``SEARCH_RADIUS_PX`` while searching)
 * lost-anchor handling    -- the ``hold`` / ``return`` / ``search`` branch in
                              :meth:`AnchorFovController.step`
 * visualisation           -- :func:`publish_anchor_fov` writes the controller's
@@ -45,7 +41,6 @@ from .target_tracking import TrackState, box_iou, clamp
 SOURCES = ('detection', 'tracker', 'manual')
 POSITIONS = ('center', 'top', 'bottom')
 LOST_MODES = ('hold', 'return', 'search')
-REACQUIRE_MODES = ('smooth', 'fast')
 
 # Controller phases (also what the overlays show).
 PH_FOLLOW = 0     # an anchor exists and is being followed
@@ -60,13 +55,10 @@ DEFAULT_RADIUS_PX = 100.0
 _MAX_DT_S = 1.0            # a longer gap between frames is a stall, not motion
 _SMOOTH_MAX_S = 0.25       # input low-pass time constant at smoothing == 1
 _RADIUS_TAU_S = 0.20       # radius approaches its target with this time constant
-_BOOST_S = 0.40            # "fast" reacquisition boost duration
-_BOOST_FACTOR = 3.0        # ... follow rate / speed cap multiplier during it
-_PRED_UP_TAU_S = 0.20      # prediction gain fades in/out, never snaps
-_PRED_DOWN_TAU_S = 0.10
-_PRED_DEADZONE_PX_S = 20.0  # below this speed no lead (detector jitter)
-_PRED_MAX_LEAD_FRAC = 0.9  # lead never exceeds this fraction of the radius
-_DYN_SPEED_RADII_S = 3.0   # dynamic radius is fully wide at this many radii per second
+SMOOTHING = 0.3            # input low-pass strength (0-1); was a slider, the default is what everyone used
+MAX_SPEED_PX_S = 4000.0    # cap on how fast the FOV centre may move (never a jump); was a slider
+LOST_DELAY_S = 0.15        # the anchor must be gone this long before the lost behaviour starts; was a slider
+SEARCH_RADIUS_PX = 300.0   # how far the FOV grows while searching for a lost anchor (never below its own size)
 _MIN_IOU = 0.10            # locked box <-> detection match
 
 
@@ -87,17 +79,6 @@ def fov_center(config) -> tuple:
     return float(getattr(config, 'crosshairX', 0)), float(getattr(config, 'crosshairY', 0))
 
 
-def look_ahead_ms(config) -> float:
-    """The FOV look-ahead in ms (0 = off): the one setting that replaced the old enable switch."""
-    v = getattr(config, 'afov_predict_time_ms', 0)
-    return clamp(float(v), 0.0, 500.0) if _finite(v) else 0.0
-
-
-def predict_active(config) -> bool:
-    """True when the Anchor FOV leads its anchor by the tracker velocity (look-ahead > 0)."""
-    return look_ahead_ms(config) > 0.0
-
-
 def _finite(v) -> bool:
     return isinstance(v, (int, float)) and math.isfinite(v)
 
@@ -109,12 +90,8 @@ def _num(config, name: str, default: float) -> float:
 
 class AnchorFovParams:
     """Settings snapshot, refreshed in place each frame (no allocation)."""
-    __slots__ = ('source', 'position', 'off_x', 'off_y',
-                 'follow', 'smoothing', 'max_speed',
-                 'predict', 'lead_s',
-                 'lost_mode', 'lost_delay_s', 'reacquire',
-                 'radius', 'min_radius', 'max_radius', 'dynamic_radius',
-                 'aspect', 'fit', 'fit_pad')
+    __slots__ = ('source', 'position', 'off_x', 'off_y', 'follow',
+                 'lost_mode', 'radius', 'min_radius', 'max_radius', 'aspect')
 
     def __init__(self) -> None:
         for n in self.__slots__:
@@ -122,11 +99,7 @@ class AnchorFovParams:
         self.source = 'detection'
         self.position = 'center'
         self.lost_mode = 'hold'
-        self.reacquire = 'smooth'
-        self.predict = False
-        self.dynamic_radius = False
         self.aspect = 1.0
-        self.fit = False
 
     def load(self, c) -> None:
         src = str(getattr(c, 'afov_source', 'detection'))
@@ -136,32 +109,22 @@ class AnchorFovParams:
         self.off_x = _num(c, 'afov_offset_x', 0.0)
         self.off_y = _num(c, 'afov_offset_y', 0.0)
         self.follow = clamp(_num(c, 'afov_follow_speed', 12.0), 0.5, 100.0)
-        self.smoothing = clamp(_num(c, 'afov_smoothing', 0.3), 0.0, 1.0)
-        self.max_speed = max(0.0, _num(c, 'afov_max_speed', 4000.0))      # px/s, 0 = unlimited
-        self.lead_s = look_ahead_ms(c) / 1000.0
-        self.predict = self.lead_s > 0.0           # look-ahead 0 = off
         lm = str(getattr(c, 'afov_lost_behavior', 'hold'))
         self.lost_mode = lm if lm in LOST_MODES else 'hold'
-        self.lost_delay_s = clamp(_num(c, 'afov_lost_delay_ms', 150.0), 0.0, 5000.0) / 1000.0
-        rq = str(getattr(c, 'afov_reacquire', 'smooth'))
-        self.reacquire = rq if rq in REACQUIRE_MODES else 'smooth'
         # The FOV size is the one FOV Width every mode uses: radius = Width / 2 (the aspect still comes
-        # from FOV Height / Width). Maximum Radius is only headroom to grow into (Dynamic Radius,
-        # Search), so it can never cut the base size.
+        # from FOV Height / Width). The search radius is only headroom to grow into, so it can never
+        # cut the base size.
         rmin = MIN_RADIUS_PX
         base = clamp(_num(c, 'fov_size', 2.0 * DEFAULT_RADIUS_PX) * 0.5, rmin, 4096.0)
         self.min_radius = rmin
         self.radius = base
-        self.max_radius = clamp(_num(c, 'afov_max_radius', 300.0), base, 4096.0)
-        self.dynamic_radius = bool(getattr(c, 'afov_dynamic_radius', False))
+        self.max_radius = clamp(SEARCH_RADIUS_PX, base, 4096.0)
         self.aspect = _aspect(c)
-        self.fit = bool(getattr(c, 'afov_fit_box_enabled', False))
-        self.fit_pad = clamp(_num(c, 'afov_fit_padding_pct', 30.0), 0.0, 200.0) / 100.0
 
 
 class AnchorSample:
     """What the source resolution found this frame (one reused instance)."""
-    __slots__ = ('valid', 'x', 'y', 'vx', 'vy', 'reliability', 'speed', 'conf', 'bw', 'bh')
+    __slots__ = ('valid', 'x', 'y')
 
     def __init__(self) -> None:
         self.clear()
@@ -169,11 +132,6 @@ class AnchorSample:
     def clear(self) -> None:
         self.valid = False
         self.x = self.y = 0.0
-        self.vx = self.vy = 0.0
-        self.reliability = 0.0     # 0..1: how far the velocity can be trusted
-        self.speed = 0.0           # px/s, smoothed, for the dynamic radius
-        self.conf = 1.0            # 0..1 target confidence (dynamic radius)
-        self.bw = self.bh = 0.0    # size of the anchor's box in px (0 = unknown: Manual source)
 
 
 # ── anchor position ──────────────────────────────────────────────────────────
@@ -194,36 +152,7 @@ def anchor_point(box: Sequence[float], position: str, off_x: float, off_y: float
     return x + off_x, y + off_y
 
 
-def _box_size(box):
-    """(width, height) of a box in px; (0, 0) if it is degenerate or not finite."""
-    w, h = abs(float(box[2]) - float(box[0])), abs(float(box[3]) - float(box[1]))
-    return (w, h) if (math.isfinite(w) and math.isfinite(h) and w > 0.0 and h > 0.0) else (0.0, 0.0)
-
-
 # ── anchor source resolution ─────────────────────────────────────────────────
-
-def _tracker_motion(s: AnchorSample, tr, now: float) -> None:
-    """Velocity / reliability from the tracker's own history (never re-derived)."""
-    s.vx = s.vy = 0.0
-    s.reliability = 0.0
-    s.speed = 0.0
-    s.conf = 1.0
-    if tr is None or not tr.locked:
-        return
-    s.speed = float(getattr(tr, 'speed_ema', 0.0) or 0.0)
-    conf = float(getattr(tr, 'conf_ema', 0.0) or 0.0)
-    s.conf = clamp(conf, 0.0, 1.0)
-    if tr.state is TrackState.TEMPORARILY_LOST:
-        return                       # position is already extrapolated; no second lead
-    rel = clamp((conf - 0.25) / 0.5, 0.0, 1.0)
-    age = tr.lock_age(now)
-    if age < 0.25:                   # a brand-new lock has no velocity history yet
-        rel *= age / 0.25
-    vx, vy = float(tr.vx), float(tr.vy)
-    if not (math.isfinite(vx) and math.isfinite(vy)):
-        return
-    s.vx, s.vy, s.reliability = vx, vy, rel
-
 
 def resolve_detection_anchor(s: AnchorSample, p: AnchorFovParams, boxes, locked_box,
                              tracker, now: float, fcx: float, fcy: float,
@@ -261,9 +190,6 @@ def resolve_detection_anchor(s: AnchorSample, p: AnchorFovParams, boxes, locked_
         return
     s.valid = True
     s.x, s.y = x, y
-    s.bw, s.bh = _box_size(best)
-    if locked_box is not None:
-        _tracker_motion(s, tracker, now)
 
 
 def resolve_tracker_anchor(s: AnchorSample, p: AnchorFovParams, tracker, now: float) -> None:
@@ -287,8 +213,6 @@ def resolve_tracker_anchor(s: AnchorSample, p: AnchorFovParams, tracker, now: fl
         return
     s.valid = True
     s.x, s.y = x, y
-    s.bw, s.bh = _box_size(lb)
-    _tracker_motion(s, tracker, now)
 
 
 def resolve_manual_anchor(s: AnchorSample, p: AnchorFovParams, cross_x: float, cross_y: float) -> None:
@@ -305,9 +229,8 @@ def resolve_manual_anchor(s: AnchorSample, p: AnchorFovParams, cross_x: float, c
 
 class AnchorFovController:
     """Holds the FOV's actual centre/radius and moves them toward the anchor."""
-    __slots__ = ('params', 'sample', 'initialised', 'cx', 'cy', 'sx', 'sy', 'radius', 'shape',
-                 'last_t', 'ax', 'ay', 'px', 'py', 'pred_gain', 'lost_since',
-                 'phase', 'was_valid', 'boost_until', 'lost', 'fitted')
+    __slots__ = ('params', 'sample', 'initialised', 'cx', 'cy', 'sx', 'sy', 'radius',
+                 'last_t', 'ax', 'ay', 'lost_since', 'phase', 'lost')
 
     def __init__(self) -> None:
         self.params = AnchorFovParams()
@@ -319,82 +242,31 @@ class AnchorFovController:
         self.cx = self.cy = 0.0        # FOV centre actually in effect
         self.sx = self.sy = 0.0        # smoothed target the centre is gliding to
         self.radius = 0.0              # FOV half width
-        self.shape = 1.0               # half height / half width (FOV Height / Width, or the box's shape while fitted)
-        self.fitted = False            # the size currently follows the target box
         self.last_t = 0.0
-        self.ax = self.ay = 0.0        # last resolved anchor point (before prediction)
-        self.px = self.py = 0.0        # ... plus the prediction lead
-        self.pred_gain = 0.0
+        self.ax = self.ay = 0.0        # last resolved anchor point
         self.lost_since = 0.0
         self.phase = PH_FOLLOW
-        self.was_valid = False
-        self.boost_until = 0.0
         self.lost = False
 
     # -- helpers ------------------------------------------------------------
-    def _lead(self, p: AnchorFovParams, s: AnchorSample, dt: float, base_r: float) -> None:
-        """Set (px, py) = anchor + a confidence-weighted velocity lead.
-
-        The gain fades in and out (never snaps), is zero below a small speed
-        (detector jitter), and the lead never exceeds a fraction of the radius.
-        """
-        target_gain = s.reliability if (p.predict and s.valid) else 0.0
-        tau = _PRED_UP_TAU_S if target_gain > self.pred_gain else _PRED_DOWN_TAU_S
-        self.pred_gain += (target_gain - self.pred_gain) * (1.0 - math.exp(-dt / tau)) if dt > 0.0 else 0.0
-        lx = ly = 0.0
-        if self.pred_gain > 1e-3 and s.valid:
-            speed = math.hypot(s.vx, s.vy)
-            if speed > _PRED_DEADZONE_PX_S:
-                eff = (speed - _PRED_DEADZONE_PX_S) / speed
-                k = p.lead_s * self.pred_gain * eff
-                lx, ly = s.vx * k, s.vy * k
-                lead = math.hypot(lx, ly)
-                cap = base_r * _PRED_MAX_LEAD_FRAC
-                if lead > cap:
-                    lx, ly = lx * cap / lead, ly * cap / lead
-        self.px, self.py = self.ax + lx, self.ay + ly
-
     @staticmethod
-    def _radius_target(p: AnchorFovParams, s: AnchorSample, base_r: float, valid: bool,
-                       searching: bool) -> float:
-        """Independent of the position: search widens to the maximum; the optional
-        dynamic adjustment widens with the target's speed and low confidence."""
-        if searching:
-            return p.max_radius
-        if p.dynamic_radius and valid:
-            f = clamp(s.speed / (base_r * _DYN_SPEED_RADII_S), 0.0, 1.0)
-            f = min(1.0, f + (1.0 - s.conf) * 0.5)
-            return base_r + (p.max_radius - base_r) * f
-        return base_r
-
-    @staticmethod
-    def _fit_target(p: AnchorFovParams, s: AnchorSample, base_r: float):
-        """(half width, half-height / half-width) of the padded target box, never above the
-        configured FOV and never below the hard floor; None when the anchor has no box."""
-        if not (s.valid and s.bw > 0.0 and s.bh > 0.0):
-            return None
-        pad = 1.0 + p.fit_pad
-        base_h = base_r * p.aspect
-        tw = clamp(s.bw * pad * 0.5, p.min_radius, base_r)
-        th = clamp(s.bh * pad * 0.5, p.min_radius, max(p.min_radius, base_h))
-        return tw, th / tw
+    def _radius_target(p: AnchorFovParams, base_r: float, searching: bool) -> float:
+        """Independent of the position: the base radius, widened to the search radius while
+        looking for a lost anchor."""
+        return p.max_radius if searching else base_r
 
     # -- main step ----------------------------------------------------------
-    def step(self, now: float, cross_x: float, cross_y: float, bounds,
-             aiming: bool = False, locked: bool = False) -> None:
+    def step(self, now: float, cross_x: float, cross_y: float, bounds) -> None:
         """Advance one frame using ``self.sample`` (already resolved).
 
         ``bounds`` = (left, top, right, bottom) the FOV centre is kept inside.
-        ``aiming`` / ``locked``: aim is active and a target is locked -- the only time the
-        optional "fit to target box" size applies.
         """
         p, s = self.params, self.sample
         if not self.initialised:
             self.cx = self.sx = float(cross_x)
             self.cy = self.sy = float(cross_y)
             self.radius = clamp(p.radius, p.min_radius, p.max_radius)
-            self.shape = p.aspect
-            self.ax, self.ay, self.px, self.py = self.cx, self.cy, self.cx, self.cy
+            self.ax, self.ay = self.cx, self.cy
             self.initialised = True
             dt = 0.0
         else:
@@ -408,23 +280,17 @@ class AnchorFovController:
         searching = False
 
         if s.valid:
-            if not self.was_valid and p.reacquire == 'fast':
-                self.boost_until = now + _BOOST_S
-            self.was_valid = True
             self.lost_since = 0.0
             self.lost = False
             self.phase = PH_FOLLOW
             self.ax = clamp(s.x, l, r)
             self.ay = clamp(s.y, t, b)
-            self._lead(p, s, dt, base_r)
-            tx, ty = clamp(self.px, l, r), clamp(self.py, t, b)
+            tx, ty = self.ax, self.ay
         else:
-            self.was_valid = False
             self.lost = True
-            self._lead(p, s, dt, base_r)            # fades the gain out
             if self.lost_since == 0.0:
                 self.lost_since = now
-            if now - self.lost_since < p.lost_delay_s:
+            if now - self.lost_since < LOST_DELAY_S:
                 self.phase = PH_GRACE
                 tx, ty = self.sx, self.sy           # finish gliding to the last anchor
             elif p.lost_mode == 'return':
@@ -440,41 +306,21 @@ class AnchorFovController:
 
         if dt > 0.0:
             # 1) input low-pass: removes detector jitter before it reaches the FOV
-            if p.smoothing > 0.0:
-                a1 = 1.0 - math.exp(-dt / (p.smoothing * _SMOOTH_MAX_S))
-                self.sx += (tx - self.sx) * a1
-                self.sy += (ty - self.sy) * a1
-            else:
-                self.sx, self.sy = tx, ty
-            # 2) exponential follow with an optional speed cap (never a jump)
-            boost = _BOOST_FACTOR if now < self.boost_until else 1.0
-            a2 = 1.0 - math.exp(-dt * p.follow * boost)
+            a1 = 1.0 - math.exp(-dt / (SMOOTHING * _SMOOTH_MAX_S))
+            self.sx += (tx - self.sx) * a1
+            self.sy += (ty - self.sy) * a1
+            # 2) exponential follow with a speed cap (never a jump)
+            a2 = 1.0 - math.exp(-dt * p.follow)
             dx, dy = (self.sx - self.cx) * a2, (self.sy - self.cy) * a2
-            if p.max_speed > 0.0:
-                lim = p.max_speed * boost * dt
-                step = math.hypot(dx, dy)
-                if step > lim:
-                    dx, dy = dx * lim / step, dy * lim / step
+            lim = MAX_SPEED_PX_S * dt
+            step = math.hypot(dx, dy)
+            if step > lim:
+                dx, dy = dx * lim / step, dy * lim / step
             self.cx = clamp(self.cx + dx, l, r)
             self.cy = clamp(self.cy + dy, t, b)
-            # 3) size: the normal radius target, or (opt-in) the padded target box while aiming
-            rt = self._radius_target(p, s, base_r, s.valid, searching)
-            shape_t = p.aspect
-            fit = None
-            if p.fit and aiming and locked:
-                fit = self._fit_target(p, s, base_r)
-                if fit is not None:
-                    rt, shape_t = fit
-                    self.fitted = True
-                elif self.fitted and self.phase == PH_GRACE:
-                    rt, shape_t = self.radius, self.shape       # anchor just vanished: keep the fit through the grace
-                else:
-                    self.fitted = False
-            else:
-                self.fitted = False
-            a3 = 1.0 - math.exp(-dt / _RADIUS_TAU_S)
-            self.radius += (rt - self.radius) * a3
-            self.shape += (shape_t - self.shape) * a3
+            # 3) size: the base radius (widened while searching)
+            rt = self._radius_target(p, base_r, searching)
+            self.radius += (rt - self.radius) * (1.0 - math.exp(-dt / _RADIUS_TAU_S))
         else:
             # first/stalled frame: keep the target consistent, move nothing
             self.sx, self.sy = clamp(self.sx, l, r), clamp(self.sy, t, b)
@@ -484,14 +330,12 @@ class AnchorFovController:
 # ── glue used by the inference loop ──────────────────────────────────────────
 
 def update_anchor_fov(config, state, boxes, cross_x: float, cross_y: float,
-                      region: Optional[dict], now: float, aiming: bool = False):
+                      region: Optional[dict], now: float):
     """Resolve the anchor, advance the controller and publish its state.
 
     Returns ``(centre_x, centre_y, fov_width, fov_height)`` for this frame's FOV
     filter.  The width/height keep the configured FOV's aspect ratio
-    (``fov_height / fov_size``) so a rectangular FOV stays rectangular -- except
-    while the optional "fit to target box" is active, when they take the (padded)
-    target box's own shape.  ``aiming`` = aim is active this frame.
+    (``fov_height / fov_size``) so a rectangular FOV stays rectangular.
     """
     ctrl = getattr(state, 'afov', None)
     if ctrl is None:
@@ -503,7 +347,7 @@ def update_anchor_fov(config, state, boxes, cross_x: float, cross_y: float,
     if ctrl.initialised:
         fcx, fcy = ctrl.cx, ctrl.cy
         hw = ctrl.radius
-        hh = hw * ctrl.shape
+        hh = hw * p.aspect
     else:
         fcx, fcy, hw = float(cross_x), float(cross_y), p.radius
         hh = hw * p.aspect
@@ -525,11 +369,9 @@ def update_anchor_fov(config, state, boxes, cross_x: float, cross_y: float,
     else:
         bounds = (cross_x - 4096.0, cross_y - 4096.0, cross_x + 4096.0, cross_y + 4096.0)
 
-    tr = getattr(state, 'tracker', None)
-    locked = getattr(state, 'locked_box', None) is not None or bool(tr is not None and getattr(tr, 'locked', False))
-    ctrl.step(now, float(cross_x), float(cross_y), bounds, aiming=bool(aiming), locked=locked)
+    ctrl.step(now, float(cross_x), float(cross_y), bounds)
     w = max(1, int(round(ctrl.radius * 2.0)))
-    h = max(1, int(round(ctrl.radius * 2.0 * ctrl.shape)))
+    h = max(1, int(round(ctrl.radius * 2.0 * p.aspect)))
     publish_anchor_fov(config, ctrl, w, h)
     return ctrl.cx, ctrl.cy, w, h
 
@@ -552,8 +394,6 @@ def publish_anchor_fov(config, ctrl: AnchorFovController, w: int, h: int) -> Non
     config.afov_phase = ctrl.phase
     config.afov_anchor_x = ctrl.ax
     config.afov_anchor_y = ctrl.ay
-    config.afov_pred_x = ctrl.px
-    config.afov_pred_y = ctrl.py
 
 
 def clear_anchor_fov(config, state) -> None:

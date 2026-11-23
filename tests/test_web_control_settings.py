@@ -1420,10 +1420,10 @@ class TestAnchorAimLeadSettings:
 
 class TestAnchorFovSettings:
     KEYS = ("afov_source", "afov_position", "afov_offset_x", "afov_offset_y",
-            "afov_follow_speed", "afov_smoothing", "afov_max_speed",
-            "afov_predict_time_ms", "afov_lost_behavior", "afov_lost_delay_ms",
-            "afov_reacquire", "afov_max_radius", "afov_dynamic_radius")
-    RETIRED = ("afov_manual_x", "afov_manual_y", "afov_predict_strength", "afov_radius", "afov_min_radius")
+            "afov_follow_speed", "afov_lost_behavior")
+    RETIRED = ("afov_manual_x", "afov_manual_y", "afov_predict_strength", "afov_radius", "afov_min_radius",
+               "afov_smoothing", "afov_max_speed", "afov_predict_time_ms", "afov_lost_delay_ms", "afov_reacquire",
+               "afov_max_radius", "afov_dynamic_radius", "afov_fit_box_enabled", "afov_fit_padding_pct")
 
     def test_every_schema_field_is_a_real_persisted_config_field(self):
         from unittest.mock import patch
@@ -1439,22 +1439,21 @@ class TestAnchorFovSettings:
             assert k not in wcs._SCHEMA["inference"], k
 
     def test_round_trip_and_percent_units(self):
-        config = _config(afov_smoothing=0.3, afov_source="detection",
-                         afov_lost_behavior="hold", afov_max_radius=300, fov_shrink_mode="adaptive")
+        config = _config(afov_source="detection", afov_lost_behavior="hold", afov_follow_speed=12.0,
+                         fov_shrink_mode="adaptive", fov_reduce_on_target_enabled=True)
         shown = wcs.get_tab_settings(config, "inference")
-        assert shown["afov_smoothing"] == pytest.approx(30.0)
+        assert shown["afov_follow_speed"] == pytest.approx(12.0) and shown["fov_mode"] == "adaptive"
         res = wcs.apply_tab_settings(config, "inference", {
-            "fov_shrink_mode": "Anchor", "afov_source": "tracker", "afov_smoothing": 60,
-            "afov_lost_behavior": "search", "afov_max_radius": 140})
+            "fov_mode": "Anchor", "afov_source": "tracker", "afov_follow_speed": 30,
+            "afov_lost_behavior": "search"})
         assert res["ok"] is True
         assert config.fov_shrink_mode == "anchor" and config.afov_source == "tracker"
-        assert config.afov_smoothing == pytest.approx(0.6) and config.afov_lost_behavior == "search"
-        assert config.afov_max_radius == 140
+        assert config.afov_follow_speed == pytest.approx(30.0) and config.afov_lost_behavior == "search"
 
     def test_bad_values_are_rejected_atomically(self):
-        config = _config(afov_source="detection", afov_max_radius=100)
-        bad = wcs.apply_tab_settings(config, "inference", {"afov_max_radius": 120, "afov_source": "psychic"})
-        assert bad["ok"] is False and bad["field"] == "afov_source" and config.afov_max_radius == 100
+        config = _config(afov_source="detection", afov_follow_speed=12.0)
+        bad = wcs.apply_tab_settings(config, "inference", {"afov_follow_speed": 20, "afov_source": "psychic"})
+        assert bad["ok"] is False and bad["field"] == "afov_source" and config.afov_follow_speed == 12.0
 
     def test_retired_values_from_old_scripts_are_still_accepted_and_normalised(self):
         config = _config(afov_position="top", anchor_mode="adaptive", anchor_enabled=True, anchor_accel_comp=0.35,
