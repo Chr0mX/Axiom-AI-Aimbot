@@ -6,7 +6,6 @@ so the table that drives them is read from the source with `ast`.
 """
 import ast
 import json
-import re
 from pathlib import Path
 
 import pytest

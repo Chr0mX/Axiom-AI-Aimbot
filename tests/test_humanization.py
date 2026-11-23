@@ -14,7 +14,6 @@ Coverage:
 
 from __future__ import annotations
 
-import math
 import random
 from unittest.mock import patch
 
