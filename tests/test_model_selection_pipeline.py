@@ -192,7 +192,6 @@ def test_schema_includes_parity_fields():
     from core import web_control_settings as wcs
 
     assert "second_inference_mode" in wcs._SCHEMA["inference"]
-    assert "hud_confidence" in wcs._SCHEMA["inference"]
     assert "hud_udp_enabled" in wcs._SCHEMA["capture"]
     assert "second_inference_fps" in wcs._SCHEMA["capture"]
     assert "show_aim_prediction_marker" in wcs._SCHEMA["visuals"]

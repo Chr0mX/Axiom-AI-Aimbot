@@ -381,16 +381,6 @@ class InferencePage(BasePage):
         self.secondInferCard.hBoxLayout.addWidget(self.secondInferSegment, 0, Qt.AlignmentFlag.AlignRight)
         self.secondInferCard.hBoxLayout.addSpacing(16)
 
-        self.hudConfidenceCard = SliderDoubleSpinCard(
-            FluentIcon.FILTER,
-            t("weapon_detection_threshold", "Weapon Detection Threshold"),
-            0.01, 1.0,
-            decimals=2,
-            step=0.05,
-            description=t("weapon_detection_threshold_desc", "Minimum confidence for ONNX weapon detections"),
-            parent=self.generalGroup,
-        )
-
     # ──────────────────────────────────────────────
     # Layout
     # ──────────────────────────────────────────────
@@ -435,7 +425,6 @@ class InferencePage(BasePage):
         self.generalGroup.addSettingCard(self.detectModeCard)
         self.generalGroup.addSettingCard(self.singleTargetCard)
         self.generalGroup.addSettingCard(self.secondInferCard)
-        self.generalGroup.addSettingCard(self.hudConfidenceCard)
         self.addContent(self.generalGroup)
 
         self.scrollLayout.addStretch(1)
@@ -493,7 +482,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
 
 
         self.secondInferSegment.currentItemChanged.connect(self._onSecondInferChanged)
-        self.hudConfidenceCard.valueChanged.connect(self._onHudConfidenceChanged)
 
     # ──────────────────────────────────────────────
     # Config load
@@ -548,8 +536,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
 
             mode = getattr(self._config, 'second_inference_mode', 'off')
             self.secondInferSegment.setCurrentItem(mode if mode in ("off", "v1_ocr", "v2_onnx") else "off")
-            self.hudConfidenceCard.setValue(float(getattr(self._config, 'hud_confidence', 0.10)))
-            self._updateHudConfidenceVisibility(mode)
 
             # Apply initial screenshot-method effect on fov_follow visibility
             method = getattr(self._config, 'screenshot_method', 'mss')
@@ -752,16 +738,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
     def _onSecondInferChanged(self, key: str):
         if self._config:
             self._config.second_inference_mode = key
-        self._updateHudConfidenceVisibility(key)
-
-    def _updateHudConfidenceVisibility(self, mode: str):
-        # Only the ONNX HUD weapon detector has a detection threshold (OCR has none, and
-        # "off" runs nothing) — the web client follows the same rule.
-        self.hudConfidenceCard.setVisible(mode == "v2_onnx")
-
-    def _onHudConfidenceChanged(self, value: float):
-        if self._config:
-            self._config.hud_confidence = float(value)
 
     # ──────────────────────────────────────────────
     # Retranslate
@@ -837,6 +813,4 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         self.secondInferSegment.setItemText("off", t("weapon_detect_off", "Off"))
         self.secondInferSegment.setItemText("v1_ocr", t("weapon_detect_v1_ocr", "V1 OCR"))
         self.secondInferSegment.setItemText("v2_onnx", t("weapon_detect_v2_onnx", "V2 ONNX"))
-        self.hudConfidenceCard.titleLabel.setText(t("weapon_detection_threshold", "Weapon Detection Threshold"))
-        self.hudConfidenceCard.contentLabel.setText(t("weapon_detection_threshold_desc", "Minimum confidence for ONNX weapon detections"))
 

@@ -159,7 +159,6 @@ _SCHEMA: dict[str, dict[str, dict]] = {
             "type": "choice",
             "choices": ["off", "v1_ocr", "v2_onnx"],
         },
-        "hud_confidence": {"type": "float", "min": 0.01, "max": 1.0},
     },
     "aim": {
         "aim_part": {"type": "choice", "choices": ["head", "body", "custom"]},

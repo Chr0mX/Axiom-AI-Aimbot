@@ -923,7 +923,6 @@
       if (el) el.classList.toggle("hidden", !show);
     }
     var hudUdp = document.getElementById("cap-hud_udp_enabled");
-    toggle("inf-hud-confidence-card", onnx);
     toggle("cap-weapon-module", active);
     toggle("cap-hud-udp-enable-card", onnx);
     toggle("cap-hud-udp-port-card", onnx && !!(hudUdp && hudUdp.checked));

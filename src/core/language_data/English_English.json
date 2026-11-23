@@ -106,8 +106,6 @@
   "general_params": "General Parameters",
   "weapon_detection_method": "Weapon Detection Method",
   "weapon_detection_method_desc": "Off / OCR (PaddleOCR) / ONNX (HUD weapon detector)",
-  "weapon_detection_threshold": "Weapon Detection Threshold",
-  "weapon_detection_threshold_desc": "Minimum confidence for ONNX weapon detections",
   "head": "Head",
   "head_height_ratio": "Head Height Ratio (%)",
   "head_width_ratio": "Head Width Ratio (%)",
