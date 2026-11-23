@@ -721,7 +721,7 @@
         if (tab === "capture") updateCaptureVisibility(data.screenshot_method);
         if (tab === "capture" || tab === "model") noteWeaponMode(data.second_inference_mode);
         if (tab === "inference") {
-          updateFovReduceVisibility(!!data.fov_reduce_on_target_enabled);
+          updateFovReduceVisibility();
           updateAnchorVisibility();
           updateDetectModeVisibility();
           updateWeaponDetectVisibility(data.second_inference_mode);
@@ -797,9 +797,9 @@
         if (tab === "capture" && (key === "uvc_capture_method" || key === "uvc_engine")) {
           updateUvcSubVisibility();
         }
-        if (tab === "inference" && (key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
+        if (tab === "inference" && (key === "fov_mode" || key === "fov_retention_enabled")) updateFovReduceVisibility();
         if (tab === "inference" && (key === "afov_source" || key === "afov_lost_behavior" || key === "afov_dynamic_radius" || key === "afov_fit_box_enabled")) updateAnchorFovVisibility();
-        if (tab === "inference" && (key === "anchor_enabled" || key === "fov_reduce_on_target_enabled" || key === "fov_shrink_mode")) updateAnchorVisibility();
+        if (tab === "inference" && (key === "anchor_enabled" || key === "fov_mode")) updateAnchorVisibility();
         if (tab === "inference" && key === "second_inference_mode") updateWeaponDetectVisibility(value);
         if (tab === "capture" && key === "hud_udp_enabled") updateWeaponDetectVisibility();
         if (tab === "inference" && key === "detect_mode") updateDetectModeVisibility();
@@ -822,26 +822,22 @@
   }
 
   // Mirrors inference_page.py's _updateFovReduceVisibility()/_updateTrackingVisibility():
-  // shrink settings need "Reduce FOV"; Dynamic Safeguards only in Dynamic mode; the
-  // retention cards need Sticky Target Lock too (the lock settings themselves are on the Aim tab).
-  function updateFovReduceVisibility(enabled) {
+  // the shrink settings need a shrinking FOV mode (Fixed/Adaptive/Dynamic); Dynamic Safeguards only in
+  // Dynamic; the retention cards need Sticky Target Lock too (the lock settings are on the Aim tab).
+  function updateFovReduceVisibility() {
     var d = lastSettings.inference || {};
     var el = function (id) { return document.getElementById(id); };
-    var reduceEl = el("inf-fov_reduce_on_target_enabled");
-    var on = (enabled !== undefined) ? !!enabled : (reduceEl ? reduceEl.checked : !!d.fov_reduce_on_target_enabled);
+    var mode = (el("inf-fov_mode") || {}).value || d.fov_mode || "off";
+    var on = mode === "fixed" || mode === "adaptive" || mode === "dynamic";
     var sticky = !!d.sticky_lock_enabled;
-    var mode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode;
     var ret = el("inf-fov_retention_enabled") ? el("inf-fov_retention_enabled").checked : !!d.fov_retention_enabled;
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
-    // Anchor FOV owns the centre and radius: the shrink cards (and their master switch)
-    // only apply to Fixed/Adaptive/Dynamic. The mode picker itself is always available.
-    var shrink = on && mode !== "anchor";
-    show("inf-fov-reduce-card", mode !== "anchor");
+    // Anchor FOV owns the centre and radius: the shrink cards only apply to Fixed/Adaptive/Dynamic.
+    var shrink = on;
     show("inf-fov-min-size-card", shrink);
     show("inf-fov-min-duration-card", shrink);
     show("inf-fov-mode-card", true);
     show("inf-fov-dynsafe-card", shrink && mode === "dynamic");
-    show("inf-fov-delay-card", shrink);
     show("inf-fov-recovery-card", shrink);
     show("inf-fov-retention-card", shrink && sticky);
     show("inf-fov-retention-pct-card", shrink && sticky && ret);
@@ -857,7 +853,7 @@
     var d = lastSettings.inference || {};
     var el = function (id) { return document.getElementById(id); };
     var val = function (key, fallback) { var e = el("inf-" + key); return e ? (e.type === "checkbox" ? e.checked : e.value) : (d[key] !== undefined ? d[key] : fallback); };
-    var mode = val("fov_shrink_mode", "adaptive");
+    var mode = val("fov_mode", "off");
     var anchor = mode === "anchor";
     var src = val("afov_source", "detection");
     var dyn = !!val("afov_dynamic_radius", false);
@@ -880,11 +876,11 @@
     var d = lastSettings.inference || {};
     var el = function (id) { return document.getElementById(id); };
     var on = el("inf-anchor_enabled") ? el("inf-anchor_enabled").checked : !!d.anchor_enabled;
-    var fov = el("inf-fov_reduce_on_target_enabled") ? el("inf-fov_reduce_on_target_enabled").checked : !!d.fov_reduce_on_target_enabled;
+    var fovMode = (el("inf-fov_mode") || {}).value || d.fov_mode || "off";
+    var fov = fovMode === "fixed" || fovMode === "adaptive" || fovMode === "dynamic";
     var show = function (id, v) { var c = el(id); if (c) c.classList.toggle("hidden", !v); };
     show("inf-anchor-horizon-card", on);
     show("inf-anchor-hint-card", on);
-    var fovMode = (el("inf-fov_shrink_mode") || {}).value || d.fov_shrink_mode || "adaptive";
     show("inf-anchor-infl-adaptive-card", on && fov && fovMode === "adaptive");
     show("inf-anchor-infl-dynamic-card", on && fov && fovMode === "dynamic");
   }

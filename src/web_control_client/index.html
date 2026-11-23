@@ -539,18 +539,21 @@
                 </label>
               </div>
             </div>
-            <div class="field-card" id="inf-fov-reduce-card">
+            </div>
+            <div class="field-card" id="inf-fov-mode-card">
               <div class="field-info">
-                <div class="field-title">Reduce FOV on Active Target</div>
-                <div class="field-desc">Temporarily shrink the FOV while a target is locked, so a random target near the edge can't steal the lock mid-engagement.</div>
+                <div class="field-title">FOV Mode</div>
+                <div class="field-desc">Off: the FOV does not change while a target is locked. Fixed: always shrink to FOV Min Size. Adaptive: shrink while the target is steady, confident and near the centre; grow when it nears the edge or tracking gets shaky. Dynamic: shrink while steady; grow on fast movement, sudden direction changes or unstable detections. Anchor: the FOV centre follows an anchor and its radius is set independently.</div>
               </div>
               <div class="field-control">
-                <label class="switch">
-                  <input type="checkbox" id="inf-fov_reduce_on_target_enabled" data-key="fov_reduce_on_target_enabled" data-type="bool">
-                  <span class="slider"></span>
-                </label>
+                <select id="inf-fov_mode" data-key="fov_mode" data-type="choice">
+                  <option value="off">Off</option>
+                  <option value="fixed">Fixed</option>
+                  <option value="adaptive">Adaptive</option>
+                  <option value="dynamic">Dynamic</option>
+                  <option value="anchor">Anchor</option>
+                </select>
               </div>
-            </div>
             </div>
             <div class="field-card" id="inf-fov-min-size-card">
               <div class="field-info">
@@ -572,20 +575,6 @@
                 <span class="field-slider-value">s</span>
               </div>
             </div>
-            <div class="field-card" id="inf-fov-mode-card">
-              <div class="field-info">
-                <div class="field-title">Shrink Mode</div>
-                <div class="field-desc">Fixed: always shrink to FOV Min Size. Adaptive: shrink while the target is steady, confident and near the centre; grow when it nears the edge or tracking gets shaky. Dynamic: shrink while steady; grow on fast movement, sudden direction changes or unstable detections. These three need Reduce FOV on Active Target. Anchor: the FOV centre follows an anchor and its radius is set independently — works on its own.</div>
-              </div>
-              <div class="field-control">
-                <select id="inf-fov_shrink_mode" data-key="fov_shrink_mode" data-type="choice">
-                  <option value="fixed">Fixed</option>
-                  <option value="adaptive">Adaptive</option>
-                  <option value="dynamic">Dynamic</option>
-                  <option value="anchor">Anchor</option>
-                </select>
-              </div>
-            </div>
             <div class="field-card" id="inf-fov-dynsafe-card">
               <div class="field-info">
                 <div class="field-title">Dynamic Safeguards</div>
@@ -596,16 +585,6 @@
                   <input type="checkbox" id="inf-fov_dynamic_safeguards" data-key="fov_dynamic_safeguards" data-type="bool">
                   <span class="slider"></span>
                 </label>
-              </div>
-            </div>
-            <div class="field-card" id="inf-fov-delay-card">
-              <div class="field-info">
-                <div class="field-title">FOV Expansion Delay</div>
-                <div class="field-desc">After the lock is released, wait this long before the FOV starts growing back.</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="inf-fov_expand_delay_ms" data-key="fov_expand_delay_ms" data-advanced="1" data-type="number" min="0" max="2000" step="10">
-                <span class="field-slider-value">ms</span>
               </div>
             </div>
             <div class="field-card" id="inf-fov-recovery-card">

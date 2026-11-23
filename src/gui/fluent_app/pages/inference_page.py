@@ -3,6 +3,7 @@
 
 from PyQt6.QtCore import Qt
 from core.config import EXTERNAL_CAPTURE_METHODS
+from core import fov_mode as _fov_mode
 from core.detect_mode import MODES as _DETECT_MODES, apply_mode, mode_from_config, reduced_rate_ignored
 from qfluentwidgets import (
     SettingCardGroup, SwitchSettingCard,
@@ -14,7 +15,7 @@ from ..base_page import BasePage
 from ..language_manager import t
 
 
-_FOV_MODES = ("fixed", "adaptive", "dynamic", "anchor")
+_FOV_MODES = _fov_mode.MODES        # off / fixed / adaptive / dynamic / anchor (core/fov_mode.py)
 
 # "When Not Aiming" (core/detect_mode.py): labels in MODES order.
 _DETECT_MODE_LABELS = ("Full speed", "Reduced speed", "Stop detecting")
@@ -175,15 +176,9 @@ class InferencePage(BasePage):
         self.fovShrinkGroup = SettingCardGroup(t("fov_shrinking", "FOV Shrinking"), self.scrollWidget)
         self.advFovGroup = SettingCardGroup(t("advanced_fov", "Advanced FOV"), self.scrollWidget)
 
-        self.fovReduceEnableCard = SwitchSettingCard(
-            FluentIcon.ZOOM,
-            t("fov_reduce_on_target", "Reduce FOV on Active Target"),
-            t("fov_reduce_on_target_desc", "Temporarily shrink the FOV while a target is locked, so a random target near the edge of the FOV can't steal the lock mid-engagement."),
-            parent=self.fovShrinkGroup
-        )
-
         self.fovModeCombo = ComboBox()
         self.fovModeCombo.addItems([
+            t("fov_mode_off", "Off"),
             t("fov_mode_fixed", "Fixed"),
             t("fov_mode_adaptive", "Adaptive"),
             t("fov_mode_dynamic", "Dynamic"),
@@ -192,7 +187,7 @@ class InferencePage(BasePage):
         self.fovModeCombo.setMinimumWidth(130)
         self.fovModeCard = SettingCard(
             FluentIcon.ZOOM,
-            t("fov_shrink_mode", "Shrink Mode"),
+            t("fov_mode", "FOV Mode"),
             self._fovModeDesc(),
             self.fovShrinkGroup
         )
@@ -269,13 +264,6 @@ class InferencePage(BasePage):
             setattr(self, attr, card)
 
         # --- Advanced FOV ---
-        self.fovExpandDelayCard = SliderSpinCard(
-            FluentIcon.HISTORY,
-            t("fov_expand_delay", "FOV Expansion Delay"),
-            0, 2000, suffix="ms",
-            description=t("fov_expand_delay_desc", "After the lock is released, wait this long before the FOV starts growing back. Controls WHEN recovery begins."),
-            parent=self.advFovGroup
-        )
         self.fovRecoveryCard = SliderSpinCard(
             FluentIcon.SPEED_HIGH,
             t("fov_recovery_duration", "FOV Recovery Duration"),
@@ -315,8 +303,8 @@ class InferencePage(BasePage):
             parent=self.fovGroup
         )
 
-        for _c in (self.fovReduceEnableCard, self.fovModeCard, self.fovDynSafeCard, self.fovMinSizeCard, self.fovMinSizeDurationCard,
-                   self.fovExpandDelayCard, self.fovRecoveryCard, self.fovRetentionCard, self.fovRetentionPctCard, self.stickyHintCard):
+        for _c in (self.fovModeCard, self.fovDynSafeCard, self.fovMinSizeCard, self.fovMinSizeDurationCard,
+                   self.fovRecoveryCard, self.fovRetentionCard, self.fovRetentionPctCard, self.stickyHintCard):
             _tip(_c, _c.contentLabel.text())
 
         # === Detection Settings ===
@@ -393,7 +381,6 @@ class InferencePage(BasePage):
         self.fovGroup.addSettingCard(self.detectRangeCard)
         self.addContent(self.fovGroup)
 
-        self.fovShrinkGroup.addSettingCard(self.fovReduceEnableCard)
         self.fovShrinkGroup.addSettingCard(self.fovModeCard)
         self.fovShrinkGroup.addSettingCard(self.fovDynSafeCard)
         self.fovShrinkGroup.addSettingCard(self.fovMinSizeCard)
@@ -412,7 +399,6 @@ class InferencePage(BasePage):
             self.anchorGroup.addSettingCard(card)
         self.addContent(self.anchorGroup)
 
-        self.advFovGroup.addSettingCard(self.fovExpandDelayCard)
         self.advFovGroup.addSettingCard(self.fovRecoveryCard)
         self.advFovGroup.addSettingCard(self.fovRetentionCard)
         self.advFovGroup.addSettingCard(self.fovRetentionPctCard)
@@ -448,7 +434,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         self.fovHeightCard.valueChanged.connect(self._onFovHeightChanged)
         self.fovFollowCard.checkedChanged.connect(self._onFovFollowChanged)
         self.fovCircleCard.checkedChanged.connect(self._onFovCircleChanged)
-        self.fovReduceEnableCard.checkedChanged.connect(self._onFovReduceEnableChanged)
         self.fovMinSizeCard.valueChanged.connect(self._onFovMinSizeChanged)
         self.fovMinSizeDurationCard.valueChanged.connect(self._onFovMinSizeDurationChanged)
         self.fovModeCombo.currentIndexChanged.connect(self._onFovModeChanged)
@@ -468,7 +453,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         self.anchorHorizonCard.valueChanged.connect(lambda v: self._setCfg('anchor_horizon_ms', float(v)))
         self.anchorInflAdaptiveCard.valueChanged.connect(lambda v: self._setCfg('anchor_fov_influence_adaptive', v / 100.0))
         self.anchorInflDynamicCard.valueChanged.connect(lambda v: self._setCfg('anchor_fov_influence_dynamic', v / 100.0))
-        self.fovExpandDelayCard.valueChanged.connect(lambda v: self._setCfg('fov_expand_delay_ms', int(v)))
         self.fovRecoveryCard.valueChanged.connect(lambda v: self._setCfg('fov_recovery_duration_ms', int(v)))
         self.fovRetentionCard.checkedChanged.connect(self._onFovRetentionChanged)
         self.fovRetentionPctCard.valueChanged.connect(lambda v: self._setCfg('fov_retention_pct', float(v)))
@@ -496,12 +480,9 @@ anchorInflAdaptiveCard anchorInflDynamicCard
             self.fovHeightCard.setValue(int(getattr(self._config, 'fov_height', self._config.fov_size)))
             self.fovFollowCard.setChecked(self._config.fov_follow_mouse)
             self.fovCircleCard.setChecked(bool(getattr(self._config, 'fov_circle_filter_enabled', False)))
-            fov_reduce_on = bool(getattr(self._config, 'fov_reduce_on_target_enabled', False))
-            self.fovReduceEnableCard.setChecked(fov_reduce_on)
             self.fovMinSizeCard.setValue(int(getattr(self._config, 'fov_min_size_pct', 50.0)))
             self.fovMinSizeDurationCard.setValue(float(getattr(self._config, 'fov_min_size_duration', 1.0)))
-            mode = str(getattr(self._config, 'fov_shrink_mode', 'adaptive'))
-            self.fovModeCombo.setCurrentIndex(_FOV_MODES.index(mode) if mode in _FOV_MODES else 1)
+            self.fovModeCombo.setCurrentIndex(_FOV_MODES.index(_fov_mode.mode_from_config(self._config)))
             self.fovDynSafeCard.setChecked(bool(getattr(self._config, 'fov_dynamic_safeguards', False)))
             for attr, _g, kind, field, _k, _t, _d, extra in _AFOV_CARDS:
                 card, val = getattr(self, attr), getattr(self._config, field, None)
@@ -517,11 +498,10 @@ anchorInflAdaptiveCard anchorInflDynamicCard
             self.anchorHorizonCard.setValue(int(round(float(getattr(self._config, 'anchor_horizon_ms', 100.0)))))
             self.anchorInflAdaptiveCard.setValue(int(round(float(getattr(self._config, 'anchor_fov_influence_adaptive', 0.5)) * 100)))
             self.anchorInflDynamicCard.setValue(int(round(float(getattr(self._config, 'anchor_fov_influence_dynamic', 0.5)) * 100)))
-            self.fovExpandDelayCard.setValue(int(getattr(self._config, 'fov_expand_delay_ms', 200)))
             self.fovRecoveryCard.setValue(int(getattr(self._config, 'fov_recovery_duration_ms', 400)))
             self.fovRetentionCard.setChecked(bool(getattr(self._config, 'fov_retention_enabled', False)))
             self.fovRetentionPctCard.setValue(int(round(float(getattr(self._config, 'fov_retention_pct', 100.0)))))
-            self._updateFovReduceVisibility(fov_reduce_on)
+            self._updateFovReduceVisibility()
             self.detectRangeCard.setValue(self._config.detect_range_size)
 
             interval_ms = int(round(self._config.detect_interval * 1000))
@@ -548,23 +528,19 @@ anchorInflAdaptiveCard anchorInflDynamicCard
     # Helpers
     # ──────────────────────────────────────────────
 
-    def _updateFovReduceVisibility(self, enabled: bool):
-        """Hide the min-size % / duration cards while the toggle is off —
-        per the request, not just greyed out, to keep the FOV group
-        uncluttered when the feature isn't in use."""
-        # Anchor FOV owns the FOV centre and radius, so the shrink-only cards (and the
-        # "Reduce FOV" switch that enables them) apply to Fixed/Adaptive/Dynamic only.
-        # The mode picker itself is always available.
-        mode = str(getattr(self._config, 'fov_shrink_mode', 'adaptive')) if self._config else 'adaptive'
-        shrink = enabled and mode != 'anchor'
-        self.fovReduceEnableCard.setVisible(mode != 'anchor')
+    def _updateFovReduceVisibility(self):
+        """Hide the shrink-only cards unless a shrinking FOV mode is chosen — hidden, not greyed
+        out, to keep the FOV group uncluttered when the feature isn't in use."""
+        # Anchor FOV owns the FOV centre and radius, so the shrink-only cards apply to
+        # Fixed/Adaptive/Dynamic only. The mode picker itself is always available.
+        mode = _fov_mode.mode_from_config(self._config) if self._config else _fov_mode.OFF
+        shrink = mode in _fov_mode.SHRINK_MODES
         self.fovModeCard.setVisible(True)
-        self.fovDynSafeCard.setVisible(shrink and mode == 'dynamic')
+        self.fovDynSafeCard.setVisible(mode == 'dynamic')
         self.fovMinSizeCard.setVisible(shrink)
         self.fovMinSizeDurationCard.setVisible(shrink)
         # Advanced FOV only matters while the shrinking feature is on; lock retention
         # additionally depends on Sticky Lock (_updateTrackingVisibility).
-        self.fovExpandDelayCard.setVisible(shrink)
         self.fovRecoveryCard.setVisible(shrink)
         self._updateTrackingVisibility()
         self._updateAnchorVisibility()
@@ -576,7 +552,7 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         prediction on."""
         if not self._config:
             return
-        anchor = str(getattr(self._config, 'fov_shrink_mode', 'adaptive')) == 'anchor'
+        anchor = _fov_mode.mode_from_config(self._config) == 'anchor'
         manual = str(getattr(self._config, 'afov_source', 'detection')) == 'manual'
         grows = bool(getattr(self._config, 'afov_dynamic_radius', False)) or \
             str(getattr(self._config, 'afov_lost_behavior', 'hold')) == 'search'
@@ -608,10 +584,10 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         if not self._config:
             return
         on = bool(getattr(self._config, 'anchor_enabled', False))
-        fov_on = bool(getattr(self._config, 'fov_reduce_on_target_enabled', False))
+        shrink = _fov_mode.mode_from_config(self._config)
+        fov_on = shrink in _fov_mode.SHRINK_MODES
         self.anchorHorizonCard.setVisible(on)
         self.anchorEstHintCard.setVisible(on)
-        shrink = str(getattr(self._config, 'fov_shrink_mode', 'adaptive'))
         self.anchorInflAdaptiveCard.setVisible(on and fov_on and shrink == 'adaptive')
         self.anchorInflDynamicCard.setVisible(on and fov_on and shrink == 'dynamic')
 
@@ -621,8 +597,7 @@ anchorInflAdaptiveCard anchorInflDynamicCard
 
     def _updateTrackingVisibility(self):
         sticky = bool(getattr(self._config, 'sticky_lock_enabled', False)) if self._config else False
-        fov_on_ = bool(getattr(self._config, 'fov_reduce_on_target_enabled', False)) if self._config else False
-        fov_on_ = fov_on_ and str(getattr(self._config, 'fov_shrink_mode', 'adaptive')) != 'anchor'
+        fov_on_ = bool(self._config) and _fov_mode.shrinking(self._config)
         ret_on = bool(getattr(self._config, 'fov_retention_enabled', False)) if self._config else False
         self.fovRetentionCard.setVisible(sticky and fov_on_)
         self.fovRetentionPctCard.setVisible(sticky and fov_on_ and ret_on)
@@ -632,13 +607,12 @@ anchorInflAdaptiveCard anchorInflDynamicCard
     @staticmethod
     def _fovModeDesc():
         return t(
-            "fov_shrink_mode_desc",
-            "Fixed: always shrink to FOV Min Size. Adaptive: shrink while the target is steady, "
-            "confident and near the centre; grow when it nears the edge or tracking gets shaky. "
-            "Dynamic: shrink while steady; grow on fast movement, sudden direction changes or "
-            "unstable detections. These three need Reduce FOV on Active Target. "
-            "Anchor: the FOV centre follows an anchor and its radius is set independently; "
-            "it works on its own.")
+            "fov_mode_desc",
+            "Off: the FOV does not change while a target is locked. Fixed: always shrink to FOV Min Size. "
+            "Adaptive: shrink while the target is steady, confident and near the centre; grow when it nears "
+            "the edge or tracking gets shaky. Dynamic: shrink while steady; grow on fast movement, sudden "
+            "direction changes or unstable detections. Anchor: the FOV centre follows an anchor and its "
+            "radius is set independently.")
 
     def _setCfg(self, name, value):
         if self._config and not self._isLoadingConfig:
@@ -650,8 +624,8 @@ anchorInflAdaptiveCard anchorInflDynamicCard
 
     def _onFovModeChanged(self, index):
         if self._config and not self._isLoadingConfig and 0 <= index < len(_FOV_MODES):
-            self._config.fov_shrink_mode = _FOV_MODES[index]
-            self._updateFovReduceVisibility(bool(getattr(self._config, 'fov_reduce_on_target_enabled', False)))
+            _fov_mode.apply_mode(self._config, _FOV_MODES[index])
+            self._updateFovReduceVisibility()
 
     def _applyScreenshotMethodEffect(self, method: str):
         """Called by capture page (and on load) to sync fov_follow visibility."""
@@ -684,11 +658,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
     def _onFovCircleChanged(self, checked):
         if self._config:
             self._config.fov_circle_filter_enabled = bool(checked)
-
-    def _onFovReduceEnableChanged(self, checked):
-        if self._config:
-            self._config.fov_reduce_on_target_enabled = bool(checked)
-        self._updateFovReduceVisibility(bool(checked))
 
     def _onFovMinSizeChanged(self, value):
         if self._config:
@@ -754,8 +723,6 @@ anchorInflAdaptiveCard anchorInflDynamicCard
         self.fovFollowCard.titleLabel.setText(t("fov_follow_mouse"))
         self.fovCircleCard.titleLabel.setText(t("fov_circle_filter", "Circular FOV Filter"))
         self.fovCircleCard.contentLabel.setText(t("fov_circle_filter_desc", "Only track targets inside the FOV ellipse — a circle when Width equals Height — instead of the full rectangular region"))
-        self.fovReduceEnableCard.titleLabel.setText(t("fov_reduce_on_target", "Reduce FOV on Active Target"))
-        self.fovReduceEnableCard.contentLabel.setText(t("fov_reduce_on_target_desc", "Temporarily shrink the FOV while a target is locked, so a random target near the edge of the FOV can't steal the lock mid-engagement."))
         self.fovMinSizeCard.titleLabel.setText(t("fov_min_size_pct", "FOV Min Size"))
         self.fovMinSizeCard.contentLabel.setText(t("fov_min_size_pct_desc", "How much to shrink the FOV to, as a percentage of FOV Width/Height, while a target is locked"))
         self.fovMinSizeDurationCard.titleLabel.setText(t("fov_min_size_duration", "FOV Min Size Duration"))
@@ -770,7 +737,7 @@ anchorInflAdaptiveCard anchorInflDynamicCard
             card.titleLabel.setText(t(key, title))
             card.contentLabel.setText(t(key + "_desc", desc))
         self.advFovGroup.titleLabel.setText(t("advanced_fov", "Advanced FOV"))
-        self.fovModeCard.titleLabel.setText(t("fov_shrink_mode", "Shrink Mode"))
+        self.fovModeCard.titleLabel.setText(t("fov_mode", "FOV Mode"))
         self.fovModeCard.contentLabel.setText(self._fovModeDesc())
         self.fovRetentionCard.titleLabel.setText(t("fov_retention", "Keep Lock Outside Shrunk FOV"))
         self.fovRetentionCard.contentLabel.setText(t("fov_retention_desc", "Keep tracking a locked target that drifts outside the shrunk FOV (no aiming there) instead of dropping it. Needs Sticky Target Lock. Rivals can't take the lock meanwhile."))
@@ -787,10 +754,9 @@ anchorInflAdaptiveCard anchorInflDynamicCard
             if kind == 'combo':
                 for i, (_v, ik, idef) in enumerate(extra):
                     card.combo.setItemText(i, t(ik, idef))
-        for i, (key, default) in enumerate((("fov_mode_fixed", "Fixed"), ("fov_mode_adaptive", "Adaptive"), ("fov_mode_dynamic", "Dynamic"), ("fov_mode_anchor", "Anchor"))):
+        for i, (key, default) in enumerate((("fov_mode_off", "Off"), ("fov_mode_fixed", "Fixed"), ("fov_mode_adaptive", "Adaptive"), ("fov_mode_dynamic", "Dynamic"), ("fov_mode_anchor", "Anchor"))):
             self.fovModeCombo.setItemText(i, t(key, default))
         for card, key, title, desc in (
-            (self.fovExpandDelayCard, "fov_expand_delay", "FOV Expansion Delay", "After the lock is released, wait this long before the FOV starts growing back. Controls WHEN recovery begins."),
             (self.fovRecoveryCard, "fov_recovery_duration", "FOV Recovery Duration", "How long the FOV takes to grow from its minimum back to full size (also the speed limit for Adaptive/Dynamic expansion). Controls HOW FAST it recovers. 0 = instant."),
             (self.stickyHintCard, "tracking_needs_sticky", "Needs Sticky Target Lock", "Keeping a lock outside the shrunk FOV needs Sticky Target Lock - turn it on under Target Tracking on the Aim page, where the other lock settings are too."),
         ):

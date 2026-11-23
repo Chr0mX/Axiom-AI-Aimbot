@@ -1278,7 +1278,8 @@ class TestFovTrackingFields:
 
     def test_new_fields_are_in_the_schema_and_exist_on_config(self):
         from core.config import _FIELD_MAP
-        for key in ("fov_shrink_mode", "fov_dynamic_safeguards", "fov_expand_delay_ms",
+        assert "fov_mode" in wcs._SCHEMA["inference"] and "fov_expand_delay_ms" in _FIELD_MAP   # the delay is fixed, not a control
+        for key in ("fov_shrink_mode", "fov_dynamic_safeguards",
                     "fov_recovery_duration_ms", "fov_retention_enabled", "fov_retention_pct"):
             assert key in wcs._SCHEMA["inference"], key
             assert key in _FIELD_MAP, key          # a typo would otherwise create an unpersisted attribute

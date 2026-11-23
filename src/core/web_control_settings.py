@@ -105,6 +105,9 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "fov_height": {"type": "int", "min": 50, "max": 500},
         "fov_follow_mouse": {"type": "bool"},
         "fov_circle_filter_enabled": {"type": "bool"},
+        # One choice replaces the switch + mode in the UI (core/fov_mode.py); the two persisted fields
+        # stay writable here as API aliases for existing scripts.
+        "fov_mode": {"type": "choice", "choices": ["off", "fixed", "adaptive", "dynamic", "anchor"], "derived": "fov_mode"},
         "fov_reduce_on_target_enabled": {"type": "bool"},
         "fov_min_size_pct": {"type": "float", "min": 1, "max": 100},
         "fov_min_size_duration": {"type": "float", "min": 0.0, "max": 10.0},
@@ -135,7 +138,6 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "anchor_horizon_ms": {"type": "float", "min": 20, "max": 500},
         "anchor_fov_influence_adaptive": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
         "anchor_fov_influence_dynamic": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
-        "fov_expand_delay_ms": {"type": "int", "min": 0, "max": 2000},
         "fov_recovery_duration_ms": {"type": "int", "min": 0, "max": 3000},
         "fov_retention_enabled": {"type": "bool"},
         "fov_retention_pct": {"type": "float", "min": 100, "max": 400},
@@ -463,7 +465,18 @@ def _detect_mode_set(config, value):
     apply_mode(config, value)
 
 
+def _fov_mode_get(config):
+    from .fov_mode import mode_from_config
+    return mode_from_config(config)
+
+
+def _fov_mode_set(config, value):
+    from .fov_mode import apply_mode
+    apply_mode(config, value)
+
+
 _DERIVED = {
+    "fov_mode": (_fov_mode_get, _fov_mode_set),
     "uvc_engine": (_uvc_engine_get, _uvc_engine_set),
     "detect_mode": (_detect_mode_get, _detect_mode_set),
 }
