@@ -21,8 +21,7 @@ Responsibilities are kept in separate, small pieces:
                              exponential follow, speed cap -- frame-rate
                              independent, no jumps)
 * radius                  -- :meth:`AnchorFovController._radius_target`
-                             (independent of the position; ``radius_scale`` is
-                             the hook for a future Adaptive-FOV radius)
+                             (independent of the position)
 * fit to the target box   -- :meth:`AnchorFovController._fit_target` (opt-in: while
                              aim is active and a target is locked the FOV shrinks
                              to the padded detection box, never above the
@@ -382,12 +381,10 @@ class AnchorFovController:
 
     # -- main step ----------------------------------------------------------
     def step(self, now: float, cross_x: float, cross_y: float, bounds,
-             radius_scale: float = 1.0, aiming: bool = False, locked: bool = False) -> None:
+             aiming: bool = False, locked: bool = False) -> None:
         """Advance one frame using ``self.sample`` (already resolved).
 
         ``bounds`` = (left, top, right, bottom) the FOV centre is kept inside.
-        ``radius_scale`` multiplies the default radius before the min/max clamp
-        (hook for a future Adaptive-FOV radius; 1.0 today).
         ``aiming`` / ``locked``: aim is active and a target is locked -- the only time the
         optional "fit to target box" size applies.
         """
@@ -395,7 +392,7 @@ class AnchorFovController:
         if not self.initialised:
             self.cx = self.sx = float(cross_x)
             self.cy = self.sy = float(cross_y)
-            self.radius = clamp(p.radius * radius_scale, p.min_radius, p.max_radius)
+            self.radius = clamp(p.radius, p.min_radius, p.max_radius)
             self.shape = p.aspect
             self.ax, self.ay, self.px, self.py = self.cx, self.cy, self.cx, self.cy
             self.initialised = True
@@ -406,7 +403,7 @@ class AnchorFovController:
                 dt = 0.0
         self.last_t = now
 
-        base_r = clamp(p.radius * radius_scale, p.min_radius, p.max_radius)
+        base_r = clamp(p.radius, p.min_radius, p.max_radius)
         l, t, r, b = bounds
         searching = False
 
@@ -487,8 +484,7 @@ class AnchorFovController:
 # ── glue used by the inference loop ──────────────────────────────────────────
 
 def update_anchor_fov(config, state, boxes, cross_x: float, cross_y: float,
-                      region: Optional[dict], now: float, radius_scale: float = 1.0,
-                      aiming: bool = False):
+                      region: Optional[dict], now: float, aiming: bool = False):
     """Resolve the anchor, advance the controller and publish its state.
 
     Returns ``(centre_x, centre_y, fov_width, fov_height)`` for this frame's FOV
@@ -531,7 +527,7 @@ def update_anchor_fov(config, state, boxes, cross_x: float, cross_y: float,
 
     tr = getattr(state, 'tracker', None)
     locked = getattr(state, 'locked_box', None) is not None or bool(tr is not None and getattr(tr, 'locked', False))
-    ctrl.step(now, float(cross_x), float(cross_y), bounds, radius_scale, aiming=bool(aiming), locked=locked)
+    ctrl.step(now, float(cross_x), float(cross_y), bounds, aiming=bool(aiming), locked=locked)
     w = max(1, int(round(ctrl.radius * 2.0)))
     h = max(1, int(round(ctrl.radius * 2.0 * ctrl.shape)))
     publish_anchor_fov(config, ctrl, w, h)

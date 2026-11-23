@@ -221,7 +221,7 @@ _FIELD_MAP = {
     'min_lock_duration_ms':       'tracking.sticky_lock.min_lock_ms',
     'target_switch_threshold':    'tracking.sticky_lock.switch_threshold',
     'reacquire_radius_px':        'tracking.sticky_lock.reacquire_radius_px',
-    'tracking_confidence':        'inference.tracking_confidence',
+    'tracking_confidence':        'tracking.sticky_lock.tracking_confidence',
     'target_priority_mode':       'tracking.target_priority.mode',
     'target_priority_confidence_weight': 'tracking.target_priority.confidence_weight',
 
@@ -343,6 +343,7 @@ _FIELD_MAP = {
 # split out of aim, MAKCU/Arduino merged, ocr -> weapon_detection). from_dict()
 # still reads these, so v2 config.json files and grouped presets load unchanged.
 _V2_PATHS = {
+    'tracking_confidence': 'inference.tracking_confidence',   # was filed under inference.* (kept out of presets)
     'AimKeys': 'aim.aim_keys',
     'aim_toggle_key': 'aim.aim_toggle_key',
     'AimToggle': 'aim.aim_toggle',
@@ -1144,6 +1145,8 @@ class Config:
             elif _get_path(data, 'aim.fov_anchor.predict.time_ms') is _MISSING:
                 self.afov_predict_time_ms = 80            # the old default time that "on" implied
         migrate_anchor_settings(self)
+        if self.aim_part == 'center':               # "Smart (Center-mass)" was Custom at a different default
+            self.aim_part = 'custom'
 
         # Crosshair color: nested [r, g, b], else legacy flat r/g/b.
         # Each channel is parsed on its own and clamped to 0-255; a bad value

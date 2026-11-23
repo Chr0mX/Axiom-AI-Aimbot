@@ -111,7 +111,7 @@ class _AimPointPreview(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(200)
-        self._aim_part = "center"
+        self._aim_part = "custom"
         self._head_h = 0.20   # fraction 0–1
         self._head_w = 0.38   # fraction 0–1
         self._body_w = 0.87   # fraction 0–1
@@ -173,7 +173,7 @@ class _AimPointPreview(QWidget):
             ay = by + head_px // 2
         elif self._aim_part == "body":
             ay = by + head_px + (bh - head_px) // 2
-        elif self._aim_part in ("custom", "center"):
+        elif self._aim_part == "custom":
             ay = by + int(bh * self._custom_y)
 
         # red X crosshair
@@ -197,8 +197,7 @@ class _AimPointPreview(QWidget):
         p.setFont(fnt)
         p.setPen(QColor(160, 160, 160, 130))
         label = {"head": "Head aim", "body": "Body aim",
-                 "custom": f"Custom ({int(self._custom_y*100)}%)",
-                 "center": f"Smart @ {int(self._custom_y*100)}%"}.get(self._aim_part, self._aim_part)
+                 "custom": f"Custom ({int(self._custom_y*100)}%)"}.get(self._aim_part, self._aim_part)
         p.drawText(6, H - 5, label)
 
         p.end()
@@ -216,14 +215,15 @@ class _ArduinoConnectWorker(QThread):
 
     finishedResult = pyqtSignal(bool)  # ok
 
-    def __init__(self, com_port: str, parent=None):
+    def __init__(self, com_port: str, baud_rate: int = 115200, parent=None):
         super().__init__(parent)
         self._com_port = com_port
+        self._baud_rate = baud_rate
 
     def run(self) -> None:
         try:
             from win_utils import connect_arduino
-            ok = connect_arduino(self._com_port)
+            ok = connect_arduino(self._com_port, self._baud_rate)
         except Exception:
             ok = False
         self.finishedResult.emit(ok)
@@ -397,7 +397,7 @@ class AimPage(BasePage):
         self.generalGroup = SettingCardGroup(t("general_params"), self.scrollWidget)
 
         self.aimPartCombo = ComboBox()
-        self.aimPartCombo.addItems([t("head"), t("body"), t("center", "Smart (Center-mass)"), t("custom", "Custom")])
+        self.aimPartCombo.addItems([t("head"), t("body"), t("custom", "Custom")])
         self.aimPartCombo.setMinimumWidth(120)
         self.aimPartCard = SettingCard(
             FluentIcon.PEOPLE,
@@ -1625,8 +1625,8 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self._isLoadingConfig = True
         try:
             # General
-            aim_parts = ["head", "body", "center", "custom"]
-            part = self._config.aim_part if self._config.aim_part in aim_parts else "center"
+            aim_parts = ["head", "body", "custom"]
+            part = self._config.aim_part if self._config.aim_part in aim_parts else "custom"
             self.aimPartCombo.setCurrentIndex(aim_parts.index(part))
             self._updateTargetAreaVisibility(part)
 
@@ -1656,6 +1656,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             # Xbox
             self.xboxSensitivityCard.setValue(int(round(getattr(self._config, 'xbox_sensitivity', 1.0) * 100)))
             self.xboxDeadzoneCard.setValue(int(round(getattr(self._config, 'xbox_deadzone', 0.05) * 100)))
+            self._applyXboxSettings()
             self._updateXboxConnectionStatus()
 
             # ViGEm Network
@@ -1814,28 +1815,26 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
     # ── General Callbacks ────────────────────────
 
     def _onAimPartChanged(self, index):
-        parts = ["head", "body", "center", "custom"]
+        parts = ["head", "body", "custom"]
         if self._config and 0 <= index < len(parts):
             self._config.aim_part = parts[index]
         self._updateTargetAreaVisibility(parts[index] if 0 <= index < len(parts) else "head")
 
     def _updateTargetAreaVisibility(self, aim_part):
-        is_smart = aim_part == "center"
-        is_custom = aim_part == "custom"
         is_head_or_body = aim_part in ("head", "body")
-        uses_custom_y = is_smart or is_custom
+        uses_custom_y = aim_part == "custom"
         self.targetAreaGroup.titleLabel.setText(t("target_point_tracking", "Target Point Tracking"))
         # head_height_ratio and the adaptive-ratio scale it feeds are only
-        # consumed by calculate_aim_target()'s Head/Body branches — Smart and
-        # Custom modes use aim_custom_y_pct instead, so these do nothing there.
+        # consumed by calculate_aim_target()'s Head/Body branches — Custom
+        # mode uses aim_custom_y_pct instead, so these do nothing there.
         for card in [self.headHeightCard, self.adaptiveRatioCard, self.adaptiveRatioRefHCard]:
             card.setEnabled(is_head_or_body)
         # head_width_ratio/body_width_ratio are consumed only by auto_fire.py's
         # hit-zone geometry, entirely independent of aim_part — always tunable.
         self.headWidthCard.setEnabled(True)
         self.bodyWidthCard.setEnabled(True)
-        # Posture-aware's crouch check runs before the aim_part switch inside
-        # calculate_aim_target() and applies to every mode, not just Smart —
+        # Posture-aware's crouch check overrides the aim_part switch inside
+        # calculate_aim_target() and applies to every mode —
         # always tunable so it can't get silently stuck on/off from another tab.
         self.postureAwareCard.setEnabled(True)
         self.crouchAspectCard.setEnabled(True)
@@ -1903,7 +1902,8 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             return  # a connect attempt is already in flight
         self.arduinoConnectBtn.setEnabled(False)
         self.connectionLabel.setText(t("connecting", "Connecting..."))
-        self._arduinoConnectWorker = _ArduinoConnectWorker(com_port, parent=self)
+        baud = int(getattr(self._config, 'arduino_baud_rate', 115200) or 115200) if self._config else 115200
+        self._arduinoConnectWorker = _ArduinoConnectWorker(com_port, baud, parent=self)
         self._arduinoConnectWorker.finishedResult.connect(
             lambda ok, port=com_port: self._onArduinoConnectFinished(ok, port))
         self._arduinoConnectWorker.start()
@@ -1990,7 +1990,8 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
                     notify(self, "warning", t("test_heart_confirm_title"),
                                         "Arduino not connected. Please set COM port first.")
                     return
-                if not arduino_mouse.connect(com_port):
+                baud = int(getattr(self._config, 'arduino_baud_rate', 115200) or 115200)
+                if not arduino_mouse.connect(com_port, baud):
                     notify(self, "warning", t("test_heart_confirm_title"),
                                         f"Failed to connect to {com_port}.")
                     return
@@ -2038,12 +2039,27 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             except ImportError:
                 pass
 
+    def _applyXboxSettings(self):
+        """Push the saved sensitivity / deadzone into the controller singleton.
+
+        The sliders only reach it from their own change handlers, and loading blocks their signals, so
+        a saved value, a loaded preset or a restart used to leave the controller on its defaults."""
+        if not self._config:
+            return
+        try:
+            from win_utils import set_xbox_sensitivity, set_xbox_deadzone
+            set_xbox_sensitivity(float(getattr(self._config, 'xbox_sensitivity', 1.0)))
+            set_xbox_deadzone(float(getattr(self._config, 'xbox_deadzone', 0.05)))
+        except ImportError:
+            pass
+
     def _onXboxConnectToggle(self):
         try:
             from win_utils import is_xbox_connected, connect_xbox, disconnect_xbox
             if is_xbox_connected():
                 disconnect_xbox()
             else:
+                self._applyXboxSettings()
                 connect_xbox()
             self._updateXboxConnectionStatus()
         except ImportError:
@@ -2521,9 +2537,9 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self._refreshPreview()
 
     def _refreshPreview(self):
-        parts = ["head", "body", "center", "custom"]
+        parts = ["head", "body", "custom"]
         idx = self.aimPartCombo.currentIndex()
-        aim_part = parts[idx] if 0 <= idx < len(parts) else "center"
+        aim_part = parts[idx] if 0 <= idx < len(parts) else "custom"
         self.aimPreview.setParams(
             aim_part,
             self.headHeightCard.value() if hasattr(self.headHeightCard, 'value') else 20,
@@ -2709,7 +2725,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.camMotionCompSizeCard.titleLabel.setText(t("cam_motion_comp_size", "Compensation Resolution"))
         self.camMotionCompSizeCard.contentLabel.setText(t("cam_motion_comp_size_desc", "128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)"))
 
-        parts = ["head", "body", "center", "custom"]
+        parts = ["head", "body", "custom"]
         idx = self.aimPartCombo.currentIndex()
         self._updateTargetAreaVisibility(parts[idx] if 0 <= idx < len(parts) else "head")
         self.customYCard.titleLabel.setText(t("aim_custom_y_pct", "Custom Aim Y Position (%)"))
@@ -2730,4 +2746,4 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.targetClassCard.contentLabel.setText(t("aim_target_class_ids_desc",
             "Choose which detected classes count as a valid aim target (e.g. never aim at a teammate class). All checked = no restriction."))
 
-        reset_items(self.aimPartCombo, [t("head"), t("body"), t("center", "Smart (Center-mass)"), t("custom", "Custom")])
+        reset_items(self.aimPartCombo, [t("head"), t("body"), t("custom", "Custom")])

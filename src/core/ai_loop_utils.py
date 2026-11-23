@@ -246,9 +246,6 @@ def get_effective_detect_range_size(
     return max(fov_size, fov_height, min(int(capture_height), int(capture_width), detection_size))
 
 
-FOV_SHRINK_MODES = ('fixed', 'adaptive', 'dynamic')
-
-
 # A gap longer than this between calls (idle branch, app pause) means the clock
 # is stale: treat it as "no time passed" instead of letting the FOV jump its
 # whole travel in one call.

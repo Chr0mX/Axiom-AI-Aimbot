@@ -359,15 +359,6 @@ def test_rectangular_fov_keeps_its_aspect_ratio():
     assert out[-1][2:] == (200, 100)
 
 
-def test_radius_scale_hook_for_a_future_adaptive_radius():
-    ctrl = af.AnchorFovController()
-    c = cfg()
-    ctrl.params.load(c)
-    ctrl.sample.valid = False
-    ctrl.step(T0, 320, 320, (0, 0, 640, 640), radius_scale=0.5)
-    assert ctrl.radius == pytest.approx(50.0)
-
-
 # robustness ──────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
 def test_invalid_coordinates_are_ignored(bad):

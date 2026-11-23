@@ -163,7 +163,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "hud_confidence": {"type": "float", "min": 0.01, "max": 1.0},
     },
     "aim": {
-        "aim_part": {"type": "choice", "choices": ["head", "body", "center", "custom"]},
+        "aim_part": {"type": "choice", "choices": ["head", "body", "custom"]},
         # Setting mouse_move_method to makcu / vigem_network also sets mouse_click_method to the same
         # backend, server-side (core/aim_coupling.py, _post_apply) — the Qt Aim page uses the same rule.
         "mouse_move_method": {"type": "choice", "choices": ["ddxoft", "mouse_event", "sendinput", "arduino", "makcu", "xbox", "vigem_network"]},

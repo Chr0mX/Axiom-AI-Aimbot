@@ -147,20 +147,19 @@ def calculate_aim_target(
 
     # --- Posture-aware targeting ---
     # When box_w / box_h exceeds the threshold the player is likely crouching,
-    # sliding, or prone. Fall back to center-mass to avoid overshooting above them.
+    # sliding, or prone. Fall back to center-mass to avoid overshooting above them
+    # (the X/Y offsets below still apply on that path).
+    posture_center = False
     if config is not None and getattr(config, 'aim_posture_aware_enabled', False) and box_h > 0:
         threshold = float(getattr(config, 'aim_crouch_aspect_threshold', 1.2))
-        if box_w / box_h >= threshold:
-            return box_center_x, abs_y1 + box_h * 0.5
+        posture_center = box_w / box_h >= threshold
 
-    if aim_part == 'custom':
+    if posture_center:
+        target_x = box_center_x
+        target_y = abs_y1 + box_h * 0.5
+    elif aim_part in ('custom', 'center'):       # 'center' (old "Smart") was the same code path: kept as an alias
         target_x = box_center_x
         pct = float(getattr(config, 'aim_custom_y_pct', 30.0)) / 100.0
-        target_y = abs_y1 + box_h * pct
-    elif aim_part == 'center':
-        # Smart (center-mass): intelligent target selection + custom Y offset within box.
-        target_x = box_center_x
-        pct = float(getattr(config, 'aim_custom_y_pct', 50.0)) / 100.0
         target_y = abs_y1 + box_h * pct
     elif aim_part == 'head':
         target_x = box_center_x

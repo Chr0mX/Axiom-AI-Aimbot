@@ -25,18 +25,18 @@ class _Cfg:
 def test_offsets_shift_the_aim_point():
     box = [0.0, 0.0, 100.0, 200.0]
     cfg = _Cfg()
-    x0, y0 = calculate_aim_target(box, "center", 0.26, cfg)
+    x0, y0 = calculate_aim_target(box, "custom", 0.26, cfg)
     cfg.aim_x_offset_frac = 0.10
     cfg.aim_y_offset_frac = 0.05
-    x1, y1 = calculate_aim_target(box, "center", 0.26, cfg)
+    x1, y1 = calculate_aim_target(box, "custom", 0.26, cfg)
     assert abs((x1 - x0) - 10.0) < 1e-6
     assert abs((y1 - y0) - 10.0) < 1e-6
 
 
 def test_zero_offsets_match_the_unshifted_point():
     box = [10.0, 20.0, 50.0, 80.0]
-    bare = calculate_aim_target(box, "center", 0.26, None)
-    same = calculate_aim_target(box, "center", 0.26, _Cfg())
+    bare = calculate_aim_target(box, "custom", 0.26, None)
+    same = calculate_aim_target(box, "custom", 0.26, _Cfg())
     assert bare == same
 
 
@@ -212,3 +212,25 @@ def test_anchor_settings_are_clamped():
     assert low.anchor_horizon_ms == 20.0 and low.anchor_history_len == 4
     assert low.anchor_mode == "adaptive" and low.anchor_enabled is False
     assert all(math.isfinite(v) for v in vars(cfg).values() if isinstance(v, float))
+
+
+def test_center_is_an_alias_of_custom():
+    """The old "Smart (Center-mass)" part took the same Custom-Y path; stale values still resolve."""
+    box = [0.0, 0.0, 100.0, 200.0]
+
+    class C(_Cfg):
+        aim_custom_y_pct = 40.0
+    assert calculate_aim_target(box, "center", 0.26, C()) == calculate_aim_target(box, "custom", 0.26, C())
+    assert calculate_aim_target(box, "custom", 0.26, C())[1] == 80.0
+
+
+def test_posture_fallback_still_applies_the_offsets():
+    """Crouching targets used to return the bare centre, ignoring the X/Y offsets."""
+    class C(_Cfg):
+        aim_posture_aware_enabled = True
+        aim_crouch_aspect_threshold = 1.2
+        aim_x_offset_frac = 0.1
+        aim_y_offset_frac = 0.05
+    wide = [0.0, 0.0, 200.0, 100.0]                      # aspect 2.0 -> crouch fallback = centre-mass
+    x, y = calculate_aim_target(wide, "head", 0.26, C())
+    assert (x, y) == (100.0 + 20.0, 50.0 + 5.0)

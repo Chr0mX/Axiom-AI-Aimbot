@@ -72,11 +72,7 @@ def _looks_like_environment_box(bw: float, bh: float, conf: float) -> bool:
         return False
     if ar < 8 or area < 100:
         return False
-    if ar <= 0.14 and bh >= 28:
-        return True
     if ar >= 1.85 and bh >= 18:
-        return True
-    if ar <= 0.22 and bh >= 40 and cf < 0.52:
         return True
     if area >= 8000 and cf < 0.5:
         return True

@@ -1163,3 +1163,33 @@ class TestPredictionMethodValidation:
         c2 = _make_config()
         c2.from_dict(d)
         assert c2.prediction_method == 'anchor'
+
+
+class TestCleanupMigrations:
+    """Old files must keep loading after the settings cleanup."""
+
+    def test_aim_part_center_becomes_custom(self):
+        c = _make_config()
+        c.from_dict({"aim": {"aim_part": "center"}})
+        assert c.aim_part == "custom"
+
+    def test_tracking_confidence_reads_new_and_old_location(self):
+        new = _make_config()
+        new.from_dict({"tracking": {"sticky_lock": {"tracking_confidence": 0.4}}})
+        old = _make_config()
+        old.from_dict({"inference": {"tracking_confidence": 0.3}})
+        assert new.tracking_confidence == 0.4 and old.tracking_confidence == 0.3
+        assert new.to_dict()["tracking"]["sticky_lock"]["tracking_confidence"] == 0.4
+        assert "tracking_confidence" not in new.to_dict().get("inference", {})
+
+    def test_tracking_confidence_is_preset_eligible(self):
+        from core.config_manager import _AIM_PRESET_FIELDS
+        assert "tracking_confidence" in _AIM_PRESET_FIELDS
+
+    def test_removed_fields_in_old_files_are_ignored(self):
+        c = _make_config()
+        c.from_dict({"performance": {"frame_skip": {"enabled": True}, "cuda_io_binding_enabled": True},
+                     "aim": {"deadzone": {"enabled": True}}, "inference": {"semantic_filter": {"min_bbox_area_px": 9}}})
+        for gone in ("frame_skip_enabled", "cuda_io_binding_enabled", "aim_deadzone_enabled", "detect_min_bbox_area_px"):
+            assert not hasattr(c, gone)
+        assert "frame_skip" not in str(c.to_dict())
