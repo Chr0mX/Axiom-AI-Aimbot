@@ -1032,7 +1032,7 @@ class TestV3Layout:
             "aim": {"aim_keys": [1, 6, 2], "aim_toggle_key": 45, "min_confidence": 0.3,
                     "detect_range_size": 640, "keep_detecting": True, "target_class_ids": [0],
                     "detect_semantic_filter_enabled": True,
-                    "semantic_filter": {"min_bbox_area_px": 12.0}, "fov_size": 222},
+                    "semantic_filter": {"enabled": True}, "fov_size": 222},
             "autofire": {"key": 5, "key2": 6},
             "hardware": {"devices": {"makcu": {"port": "COM7", "connection": "udp"},
                                      "arduino": {"port": "COM3"}},
@@ -1045,7 +1045,7 @@ class TestV3Layout:
         assert c.AimKeys == [1, 6, 2] and c.aim_toggle_key == 45
         assert c.min_confidence == 0.3 and c.detect_range_size == 640
         assert c.aim_target_class_ids == [0] and c.detect_semantic_filter_enabled is True
-        assert c.detect_min_bbox_area_px == 12.0 and c.fov_size == 222
+        assert c.fov_size == 222
         assert (c.auto_fire_key, c.auto_fire_key2) == (5, 6)
         assert c.makcu_com_port == "COM7" and c.makcu_connection == "udp"
         assert c.arduino_com_port == "COM3" and c.makcu_aim_button == "rmb"

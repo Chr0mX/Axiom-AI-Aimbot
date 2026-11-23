@@ -131,9 +131,6 @@ _FIELD_MAP = {
     'fov_retention_pct':          'aim.fov_reduce.retention_pct',
     'max_move_per_frame_px':      'aim.max_move_per_frame_px',
     'detect_semantic_filter_enabled': 'inference.semantic_filter.enabled',
-    'detect_min_bbox_area_px':    'inference.semantic_filter.min_bbox_area_px',
-    'detect_min_bbox_short_side_px': 'inference.semantic_filter.min_bbox_short_side_px',
-    'detect_min_bbox_max_side_frac': 'inference.semantic_filter.min_bbox_max_side_frac',
     'pid_kp_x':                   'aim.pid.x.kp',
     'pid_ki_x':                   'aim.pid.x.ki',
     'pid_kd_x':                   'aim.pid.x.kd',
@@ -153,9 +150,6 @@ _FIELD_MAP = {
     'kalman_measurement_noise':   'aim.kalman.measurement_noise',
     'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
     'cam_motion_comp_size':       'aim.cam_motion_comp.size',
-    'aim_deadzone_enabled':       'aim.deadzone.enabled',
-    'aim_deadzone_min_px':        'aim.deadzone.min_px',
-    'aim_deadzone_close_px':      'aim.deadzone.close_px',
     'head_width_ratio':           'aim.target_area.head_width_ratio',
     'head_height_ratio':          'aim.target_area.head_height_ratio',
     'body_width_ratio':           'aim.target_area.body_width_ratio',
@@ -228,7 +222,6 @@ _FIELD_MAP = {
     'target_switch_threshold':    'tracking.sticky_lock.switch_threshold',
     'reacquire_radius_px':        'tracking.sticky_lock.reacquire_radius_px',
     'tracking_confidence':        'inference.tracking_confidence',
-    'sticky_adaptive_iou':        'tracking.sticky_lock.adaptive_iou',
     'target_priority_mode':       'tracking.target_priority.mode',
     'target_priority_confidence_weight': 'tracking.target_priority.confidence_weight',
 
@@ -362,9 +355,6 @@ _V2_PATHS = {
     'single_target_mode': 'aim.single_target_mode',
     'aim_target_class_ids': 'aim.target_class_ids',
     'detect_semantic_filter_enabled': 'aim.detect_semantic_filter_enabled',
-    'detect_min_bbox_area_px': 'aim.semantic_filter.min_bbox_area_px',
-    'detect_min_bbox_short_side_px': 'aim.semantic_filter.min_bbox_short_side_px',
-    'detect_min_bbox_max_side_frac': 'aim.semantic_filter.min_bbox_max_side_frac',
     'makcu_com_port': 'hardware.devices.makcu.port',
     'makcu_baud_rate': 'hardware.devices.makcu.baud_rate',
     'makcu_connection': 'hardware.devices.makcu.connection',
@@ -958,7 +948,6 @@ class Config:
         self.target_switch_threshold: float = 0.35  # score advantage (0-1) a rival needs to take over
         self.reacquire_radius_px: int = 150       # how far from the last known position the same target may reappear
         self.tracking_confidence: float = 0.0     # min confidence to KEEP a lock; 0 = same as min_confidence
-        self.sticky_adaptive_iou: bool = True
         self.sticky_gap_extrapolate: bool = False
         self.sticky_gap_frames: int = 3
 
@@ -993,9 +982,6 @@ class Config:
         self.preset_slots: List[str] = ["", "", "", "", ""]
 
         # Aim shaping (ported from Someone_idea)
-        self.aim_deadzone_enabled: bool = False
-        self.aim_deadzone_min_px: float = 0.4
-        self.aim_deadzone_close_px: float = 0.2
         self.max_move_per_frame_px: float = 85.0
 
         # Semantic false-positive filter (ported from Someone_idea)
@@ -1003,9 +989,6 @@ class Config:
         # Minimum-geometry layer of the semantic filter (detection_semantics.py).
         # 0 = disabled (matches pre-existing behavior); not yet exposed in the
         # GUI, but now a real persisted field instead of an unreachable default.
-        self.detect_min_bbox_area_px: float = 0.0
-        self.detect_min_bbox_short_side_px: float = 0.0
-        self.detect_min_bbox_max_side_frac: float = 0.0
 
         # 供 _draw_overlay 使用的鎖定框顯示狀態（由 process_aiming 更新）
         self.display_locked_box: list | None = None

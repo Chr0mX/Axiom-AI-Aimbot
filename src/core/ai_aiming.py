@@ -211,32 +211,6 @@ def _adaptive_sticky_iou(base_iou: float, box: list, fov_size: float) -> float:
     return max(0.04, b * 0.34)
 
 
-def _apply_adaptive_deadzone(
-    error_x: float, error_y: float, box_height: float, config
-) -> tuple:
-    # Zero out small errors so the cursor doesn't micro-jitter when already on-target.
-    # Deadzone grows with target proximity because detection noise is larger for close targets.
-    # Ported from Someone_idea/ai_aiming.py.
-    try:
-        if not getattr(config, 'aim_deadzone_enabled', False):
-            return error_x, error_y
-        fov = float(getattr(config, 'fov_size', 222) or 222)
-        h_norm = box_height / max(fov, 1.0)
-        dz_min = float(getattr(config, 'aim_deadzone_min_px', 0.4))
-        dz_close = float(getattr(config, 'aim_deadzone_close_px', 0.2))
-        t = min(1.0, h_norm / 0.28)
-        deadzone = dz_min + (dz_close * 9.0 - dz_min) * (t ** 0.85)
-        deadzone = max(0.16, min(deadzone, fov * 0.075))
-        mag = math.hypot(error_x, error_y)
-        if mag < deadzone:
-            return 0.0, 0.0
-        scale = min(1.0, (mag - deadzone) / (deadzone * 0.3 + 1e-6))
-        ratio = (mag - deadzone) / mag
-        return error_x * ratio * scale, error_y * ratio * scale
-    except Exception:
-        return error_x, error_y
-
-
 def _apply_per_frame_cap(move_x: float, move_y: float, config) -> tuple:
     # Hard cap on pixels-per-frame to prevent instant lock-on snaps.
     # A mouse travelling 300+ px in a single 16ms frame is physically implausible for a human.
@@ -254,7 +228,7 @@ def _apply_per_frame_cap(move_x: float, move_y: float, config) -> tuple:
 def sticky_iou_threshold(config: Config, state: LoopState) -> float:
     """Overlap needed to treat a box as the locked target (adaptive to its size)."""
     base = float(getattr(config, 'lock_iou_threshold', 0.3))
-    if state.locked_box is not None and getattr(config, 'sticky_adaptive_iou', True):
+    if state.locked_box is not None:
         return _adaptive_sticky_iou(base, state.locked_box, float(getattr(config, 'fov_size', 222)))
     return base
 
@@ -522,20 +496,6 @@ def process_aiming(
         if _cam_comp:
             errorX -= state.cam_shift_x
             errorY -= state.cam_shift_y
-
-        # --- Adaptive deadzone (new feature from Someone_idea) ---
-        if getattr(config, 'aim_deadzone_enabled', False):
-            errorX, errorY = _apply_adaptive_deadzone(errorX, errorY, selected_box[3] - selected_box[1], config)
-            if errorX == 0.0 and errorY == 0.0:
-                # Keep previous_error current even while suppressed by the
-                # deadzone, so the derivative term doesn't see a multi-frame-
-                # stale error (and produce a one-frame Kd kick) the moment
-                # the target exits the deadzone. Outputs discarded — no
-                # movement is intended this frame.
-                _now = current_time if getattr(config, 'pid_time_normalize', False) else None
-                pid_x.update(0.0, _now)
-                pid_y.update(0.0, _now)
-                return
 
         if state.sticky_last_t > 0:
             _sdt = current_time - state.sticky_last_t

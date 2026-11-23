@@ -1,10 +1,9 @@
 """Unit tests for core/detection_semantics.py — the semantic false-positive
-filter (class-name deny list, min-geometry thresholds, aspect-ratio heuristic).
+filter (class-name deny list, aspect-ratio heuristic).
 """
 
 import pytest
 from core.detection_semantics import (
-    _filter_detections_min_geometry,
     _looks_like_environment_box,
     _looks_like_vehicle,
     _semantic_keep_label,
@@ -16,9 +15,6 @@ from core.detection_semantics import (
 class _FakeConfig:
     """Minimal config stand-in — only the attributes detection_semantics.py reads."""
     fov_size = 240
-    detect_min_bbox_area_px = 0.0
-    detect_min_bbox_short_side_px = 0.0
-    detect_min_bbox_max_side_frac = 0.0
     _detect_class_names = None
     aim_target_class_ids = []
 
@@ -100,46 +96,6 @@ class TestLooksLikeEnvironmentBox:
         assert _looks_like_environment_box(bw=30, bh=60, conf=0.4) is False
 
 
-class TestFilterDetectionsMinGeometry:
-    def test_all_thresholds_zero_is_a_noop(self):
-        """Regression guard: before this session's fix, detect_min_bbox_*
-        config fields didn't exist anywhere on Config, so getattr(...) always
-        fell back to 0 here and this layer was permanently a no-op. Confirms
-        that default (0.0) behavior is preserved exactly."""
-        boxes = [[0, 0, 2, 2], [10, 10, 15, 15]]
-        confs = [0.5, 0.6]
-        cids = [0, 1]
-        out_b, out_c, out_i = _filter_detections_min_geometry(boxes, confs, cids, _FakeConfig())
-        assert out_b == boxes
-        assert out_c == confs
-        assert out_i == cids
-
-    def test_min_short_side_drops_thin_boxes(self):
-        cfg = _FakeConfig()
-        cfg.detect_min_bbox_short_side_px = 10.0
-        boxes = [[0, 0, 2, 50], [0, 0, 20, 50]]  # first is 2px wide (thin), second 20px
-        confs = [0.5, 0.5]
-        out_b, out_c, out_i = _filter_detections_min_geometry(boxes, confs, [0, 0], cfg)
-        assert out_b == [[0, 0, 20, 50]]
-
-    def test_min_area_drops_tiny_boxes(self):
-        cfg = _FakeConfig()
-        cfg.detect_min_bbox_area_px = 5000.0
-        boxes = [[0, 0, 5, 5], [0, 0, 100, 100]]  # 25px^2 vs 10000px^2
-        confs = [0.5, 0.5]
-        out_b, out_c, out_i = _filter_detections_min_geometry(boxes, confs, [0, 0], cfg)
-        assert out_b == [[0, 0, 100, 100]]
-
-    def test_malformed_box_is_skipped_not_crashed(self):
-        # Needs a non-zero threshold, else the all-zero fast path returns
-        # boxes unfiltered before the per-box unpacking loop ever runs.
-        cfg = _FakeConfig()
-        cfg.detect_min_bbox_short_side_px = 1.0
-        boxes = [[0, 0]]  # missing coords
-        out_b, out_c, out_i = _filter_detections_min_geometry(boxes, [0.5], [0], cfg)
-        assert out_b == []
-
-
 class TestFilterDetectionsBySemanticClass:
     def test_empty_boxes_passthrough(self):
         out_b, out_c, out_i = filter_detections_by_semantic_class([], [], [], _FakeConfig())
@@ -163,16 +119,6 @@ class TestFilterDetectionsBySemanticClass:
         confs = [0.8]
         out_b, out_c, out_i = filter_detections_by_semantic_class(boxes, confs, [0], cfg)
         assert out_b == [[0, 0, 20, 40]]
-
-    def test_geometry_layer_runs_before_class_layer(self):
-        """Confirms the fixed geometry layer is actually wired into the
-        combined pipeline, not just callable in isolation."""
-        cfg = _FakeConfig()
-        cfg.detect_min_bbox_area_px = 5000.0
-        boxes = [[0, 0, 5, 5], [0, 0, 100, 100]]
-        confs = [0.9, 0.9]
-        out_b, out_c, out_i = filter_detections_by_semantic_class(boxes, confs, [0, 0], cfg)
-        assert out_b == [[0, 0, 100, 100]]
 
 
 class TestFilterDetectionsByTargetClass:
@@ -238,7 +184,7 @@ def test_malformed_box_is_kept_and_reported_once(caplog):
     from core.logging_config import reset_log_throttle
 
     reset_log_throttle()
-    cfg = SimpleNamespace(detect_min_bbox_area_px=0, detect_min_bbox_short_side_px=0, _detect_class_names={})
+    cfg = SimpleNamespace(_detect_class_names={})
     bad = ["a", "b", "c", "d"]
     with caplog.at_level(logging.WARNING, logger="core.detection_semantics"):
         for _ in range(3):

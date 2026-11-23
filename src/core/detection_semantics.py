@@ -2,8 +2,8 @@
 
 Ported from Someone_idea/detection_semantics.py.
 Filters detections that match vegetation, vehicles, signs, and HUD elements
-using three layers: ONNX class-name allow/deny lists, aspect-ratio geometry
-heuristics, and minimum bounding-box size thresholds.
+using two layers: ONNX class-name allow/deny lists and aspect-ratio geometry
+heuristics.
 
 Also holds `filter_detections_by_target_class()` — a separate, always-on
 target-class multi-select (`config.aim_target_class_ids`), independent of
@@ -125,52 +125,6 @@ def _semantic_keep_label(name: str) -> bool:
     return True
 
 
-def _filter_detections_min_geometry(
-    boxes: list, confidences: list, class_ids: list, config
-) -> Tuple[list, list, list]:
-    min_area = float(getattr(config, 'detect_min_bbox_area_px', 0) or 0)
-    min_short = float(getattr(config, 'detect_min_bbox_short_side_px', 0) or 0)
-    max_side_frac = float(getattr(config, 'detect_min_bbox_max_side_frac', 0) or 0)
-    roi_ref = float(max(120, min(2048, getattr(config, 'fov_size', 240) or 240)))
-    min_long_px = max_side_frac * roi_ref if max_side_frac > 0 else 0
-
-    if min_area <= 0 and min_short <= 0 and min_long_px <= 0:
-        return boxes, confidences, class_ids
-
-    cids = list(class_ids)
-    if len(cids) < len(boxes):
-        cids = cids + [0] * (len(boxes) - len(cids))
-
-    out_b, out_c, out_i = [], [], []
-    for i, box in enumerate(boxes):
-        try:
-            x1, y1, x2, y2 = float(box[0]), float(box[1]), float(box[2]), float(box[3])
-        except (TypeError, ValueError, IndexError):
-            continue
-        bw = max(1.0, abs(x2 - x1))
-        bh = max(1.0, abs(y2 - y1))
-        short_side = min(bw, bh)
-        long_side = max(bw, bh)
-        area = bw * bh
-        if min_short > 0 and short_side < min_short:
-            continue
-        if min_area > 0:
-            area_thr = min_area
-            if long_side < max(18, roi_ref * 0.06):
-                area_thr = max(100, min_area * 0.3)
-            elif long_side < max(28, roi_ref * 0.09):
-                area_thr = max(160, min_area * 0.45)
-            if area < area_thr:
-                continue
-        if min_long_px > 0 and long_side < min_long_px:
-            continue
-        out_b.append(box)
-        out_c.append(float(confidences[i]) if i < len(confidences) else 0.0)
-        out_i.append(int(cids[i]) if i < len(cids) else 0)
-
-    return out_b, out_c, out_i
-
-
 def filter_detections_by_semantic_class(
     boxes: list,
     confidences: list,
@@ -181,15 +135,13 @@ def filter_detections_by_semantic_class(
     """Filter detections by semantic class name, geometry, and aspect-ratio heuristics.
 
     Layers applied in order:
-    1. Minimum bbox geometry (area / short-side thresholds)
-    2. ONNX class-name deny list (trees, vehicles, HUD elements, etc.)
-    3. Aspect-ratio environment heuristic (wide/tall low-confidence shapes)
+    1. ONNX class-name deny list (trees, vehicles, HUD elements, etc.)
+    2. Aspect-ratio environment heuristic (wide/tall low-confidence shapes)
     """
     if not boxes:
         return boxes or [], confidences or [], list(class_ids) if class_ids else []
 
-    boxes, confidences, cids = _filter_detections_min_geometry(
-        list(boxes), list(confidences), list(class_ids) if class_ids else [], config)
+    boxes, confidences, cids = list(boxes), list(confidences), list(class_ids) if class_ids else []
 
     nmap = getattr(config, '_detect_class_names', None)
     out_b, out_c, out_i = [], [], []

@@ -54,7 +54,7 @@ def _make_config(**overrides):
         target_priority_mode="distance", target_priority_confidence_weight=0.5,
         kalman_enabled=False, prediction_enabled=False,
         prediction_horizon_ms=10.0, prediction_max_velocity=1200.0, prediction_history_len=3,
-        cam_motion_comp_enabled=False, aim_deadzone_enabled=False,
+        cam_motion_comp_enabled=False,
         aim_y_reduce_enabled=False, aim_y_reduce_delay=0.0,
         aim_y_reduce_settle_px=0.0, aim_y_reduce_floor=0.1, aim_y_reduce_ramp=0.0,
         aim_y_vel_restore_px_s=0.0, humanization=None, max_move_per_frame_px=0.0,
@@ -372,36 +372,6 @@ class TestAcquisitionPhaseGuard:
         # vx = 5px/0.005s = 1000px/s; predicted = 205 + 1000*0.1 = 305 ->
         # error 305-500=-195, materially different from the guarded -295.
         assert dx == -195, f"Expected the disabled guard to extrapolate the jump: dx={dx}"
-
-
-class TestDeadzonePreviousErrorFreshness:
-    """previous_error must not go stale while the deadzone suppresses
-    movement, or the derivative term sees a multi-frame-old error (and
-    produces a one-frame Kd kick) the moment the target exits the deadzone."""
-
-    def test_previous_error_reset_while_suppressed(self, sent_moves, monkeypatch):
-        from core.ai_aiming import process_aiming
-        from core.ai_loop_state import LoopState
-        from core.inference import PIDController
-        import core.ai_aiming as aiming_mod
-
-        config = _make_config(aim_deadzone_enabled=True)
-        state = LoopState()
-        pid_x, pid_y = PIDController(Kp=0.0, Ki=0.0, Kd=1.0), PIDController(Kp=0.0, Ki=0.0, Kd=1.0)
-        monkeypatch.setattr(aiming_mod, "_apply_adaptive_deadzone", lambda ex, ey, bh, cfg: (0.0, 0.0))
-
-        # Simulate "was tracking, error was nonzero" before entering the deadzone.
-        pid_x.update(50.0)
-        pid_y.update(50.0)
-        assert pid_x.previous_error == 50.0
-
-        box_c = [480.0, 480.0, 520.0, 520.0]
-        process_aiming(config, [box_c], 500, 500, pid_x, pid_y, "sendinput", state,
-                        current_time=1.0, confidences=[0.9])
-
-        assert sent_moves == []  # deadzone early-return, no movement sent
-        assert pid_x.previous_error == 0.0
-        assert pid_y.previous_error == 0.0
 
 
 class TestIdleMicroJitter:
