@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=22">
+  <link rel="stylesheet" href="styles.css?v=23">
 </head>
 <body>
   <div class="app">
@@ -815,6 +815,19 @@
                 <span class="field-slider-value">%</span>
               </div>
             </div>
+            <div class="field-card" id="inf-detect-mode-card">
+              <div class="field-info">
+                <div class="field-title">When Not Aiming</div>
+                <div class="field-desc">What detection does while the aim key is not held. Full speed: keep detecting. Reduced speed: detect only every 50 ms to save resources. Stop detecting: nothing runs until you aim. <span id="inf-detect-mode-note" class="hidden">(Reduced speed is ignored while Always Aim or Always Auto-Fire is on.)</span></div>
+              </div>
+              <div class="field-control">
+                <select id="inf-detect_mode" data-key="detect_mode" data-type="choice">
+                  <option value="full">Full speed</option>
+                  <option value="reduced">Reduced speed</option>
+                  <option value="stop">Stop detecting</option>
+                </select>
+              </div>
+            </div>
             <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info">
@@ -826,19 +839,6 @@
                   <input type="checkbox" id="inf-detect_semantic_filter_enabled" data-key="detect_semantic_filter_enabled" data-type="bool">
                   <span class="slider"></span>
                 </label>
-              </div>
-            </div>
-            <div class="field-card" id="inf-detect-mode-card">
-              <div class="field-info">
-                <div class="field-title">When Not Aiming</div>
-                <div class="field-desc">What detection does while the aim key is not held. Full speed: keep detecting. Reduced speed: detect only at the interval below to save resources. Stop detecting: nothing runs until you aim. <span id="inf-detect-mode-note" class="hidden">(Reduced speed is ignored while Always Aim or Always Auto-Fire is on.)</span></div>
-              </div>
-              <div class="field-control">
-                <select id="inf-detect_mode" data-key="detect_mode" data-type="choice">
-                  <option value="full">Full speed</option>
-                  <option value="reduced">Reduced speed</option>
-                  <option value="stop">Stop detecting</option>
-                </select>
               </div>
             </div>
             <div class="field-card">
@@ -2583,6 +2583,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=22"></script>
+  <script src="app.js?v=23"></script>
 </body>
 </html>

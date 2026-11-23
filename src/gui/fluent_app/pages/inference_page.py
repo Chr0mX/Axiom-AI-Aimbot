@@ -20,7 +20,7 @@ _FOV_MODES = _fov_mode.MODES        # off / fixed / adaptive / dynamic / anchor 
 # "When Not Aiming" (core/detect_mode.py): labels in MODES order.
 _DETECT_MODE_LABELS = ("Full speed", "Reduced speed", "Stop detecting")
 _DETECT_MODE_DESC = ("What detection does while the aim key is not held. Full speed: keep detecting. "
-                     "Reduced speed: detect only at the interval below to save resources. "
+                     "Reduced speed: detect only every 50 ms to save resources. "
                      "Stop detecting: nothing runs until you aim.")
 _DETECT_MODE_IGNORED = "(Reduced speed is ignored while Always Aim or Always Auto-Fire is on.)"
 

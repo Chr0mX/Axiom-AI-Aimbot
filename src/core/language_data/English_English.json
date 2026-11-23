@@ -378,7 +378,7 @@
   "connecting": "Connecting...",
   "custom": "Custom",
   "detect_mode": "When Not Aiming",
-  "detect_mode_desc": "What detection does while the aim key is not held. Full speed: keep detecting. Reduced speed: detect only at the interval below to save resources. Stop detecting: nothing runs until you aim.",
+  "detect_mode_desc": "What detection does while the aim key is not held. Full speed: keep detecting. Reduced speed: detect only every 50 ms to save resources. Stop detecting: nothing runs until you aim.",
   "dml_available": "✓ DmlExecutionProvider active",
   "dml_checking": "Checking…",
   "dml_dll_path": "DirectML DLL Path",
