@@ -948,8 +948,8 @@
 
   // Advanced Aim Tuning: each sub-setting is shown only while the option it
   // tunes is active, mirroring aim_page.py's _updateAimTuningVisibility().
-  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "prediction_ego_motion_comp", "aim_ema_smoothing_enabled",
-    "sticky_gap_extrapolate", "sticky_lock_enabled", "kalman_enabled", "cam_motion_comp_enabled", "aim_y_reduce_enabled",
+  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "aim_ema_smoothing_enabled",
+    "sticky_lock_enabled", "kalman_enabled", "cam_motion_comp_enabled", "aim_y_reduce_enabled",
     "target_priority_mode", "anchor_mode"];
 
   function updateAimTuningVisibility() {
@@ -962,13 +962,10 @@
     var predOn = !!(el("aim-prediction_enabled") && el("aim-prediction_enabled").checked);
     var method = el("aim-prediction_method") ? el("aim-prediction_method").value : "velocity";
     setCard("aim-prediction_method", predOn);
-    setCard("aim-prediction_lead_frames", predOn && method === "rolling");
-    setCard("aim-prediction_adaptive_lead", predOn && method !== "rolling");
-    setCard("aim-prediction_capture_timestamps", predOn && method !== "rolling");
+    setCard("aim-prediction_adaptive_lead", predOn);
+    setCard("aim-prediction_capture_timestamps", predOn);
     setCard("aim-prediction_lsq_fit", predOn && method === "velocity");
     setCard("aim-prediction_velocity_deadzone_px_s", predOn && method === "velocity");
-    setCard("aim-prediction_ego_motion_comp", predOn);
-    setCard("aim-prediction_ego_motion_scale", predOn && !!(el("aim-prediction_ego_motion_comp") && el("aim-prediction_ego_motion_comp").checked));
     setCard("aim-aim_ema_smoothing", !!(el("aim-aim_ema_smoothing_enabled") && el("aim-aim_ema_smoothing_enabled").checked));
     // Same parent -> child rules as aim_page.py (display only; hidden options keep their values).
     function on(id) { return !!(el(id) && el(id).checked); }
@@ -977,14 +974,10 @@
     setCard("aim-prediction_max_velocity", predOn);
     setCard("aim-prediction_history_len", predOn && method !== "anchor");
     setCard("aim-lock_persistence_ms", stickyOn);
-    setCard("aim-lock_iou_threshold", stickyOn);
     ["lost_target_timeout_ms", "min_lock_duration_ms", "target_switch_threshold", "reacquire_radius_px", "tracking_confidence"]
       .forEach(function (k) { setCard("aim-" + k, stickyOn); });
-    setCard("aim-sticky_gap_extrapolate", stickyOn);
-    setCard("aim-sticky_gap_frames", stickyOn && on("aim-sticky_gap_extrapolate"));
     setCard("aim-kalman_process_noise", on("aim-kalman_enabled"));
     setCard("aim-kalman_measurement_noise", on("aim-kalman_enabled"));
-    setCard("aim-cam_motion_comp_size", on("aim-cam_motion_comp_enabled"));
     ["aim_y_reduce_delay", "aim_y_reduce_floor", "aim_y_reduce_ramp", "aim_y_reduce_settle_px", "aim_y_vel_restore_px_s"].forEach(function (k) {
       setCard("aim-" + k, on("aim-aim_y_reduce_enabled"));
     });

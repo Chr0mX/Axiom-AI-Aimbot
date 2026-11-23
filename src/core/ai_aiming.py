@@ -13,7 +13,7 @@ from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .aim_paths import adaptive_lead_s, ema_step
 from .anchor_prediction import predict_aim_point
-from .target_predictor import EmaPredictor, RollingVelocityPredictor, VelocityPredictor
+from .target_predictor import VelocityPredictor
 from .target_tracking import box_iou, edge_ratio, lost_timeout_s, select_target
 
 if TYPE_CHECKING:
@@ -21,8 +21,6 @@ if TYPE_CHECKING:
 
 # Module-level singleton — shared across process_aiming calls.
 _predictor: Optional[VelocityPredictor] = None
-_ema_predictor: Optional[EmaPredictor] = None
-_rolling_predictor: Optional[RollingVelocityPredictor] = None
 _kalman: Optional[KalmanFilter2D] = None
 
 
@@ -36,25 +34,6 @@ def _get_kalman(config: Config) -> KalmanFilter2D:
     else:
         _kalman.reconfigure(pn, mn)
     return _kalman
-
-
-def record_ego_move(config: Config, state: LoopState, dx: float, dy: float) -> None:
-    """Remember a mouse move we just sent, for own-mouse compensation."""
-    if getattr(config, 'prediction_ego_motion_comp', False):
-        state.ego_pending.append((time.perf_counter(), float(dx), float(dy)))
-
-
-def settle_ego_moves(state: LoopState, frame_t: float) -> None:
-    """Fold every move sent before ``frame_t`` into the ego drift.
-
-    A frame captured at ``frame_t`` already shows the camera turn caused by
-    moves sent earlier, and none of the later ones, so only those are counted.
-    """
-    pending = state.ego_pending
-    while pending and pending[0][0] <= frame_t:
-        _t, dx, dy = pending.popleft()
-        state.ego_drift_x += dx
-        state.ego_drift_y += dy
 
 
 def _get_predictor(config: Config) -> VelocityPredictor:
@@ -74,27 +53,9 @@ def _get_predictor(config: Config) -> VelocityPredictor:
     return _predictor
 
 
-def _get_ema_predictor() -> EmaPredictor:
-    global _ema_predictor
-    if _ema_predictor is None:
-        _ema_predictor = EmaPredictor()
-    return _ema_predictor
-
-
-def _get_rolling_predictor() -> RollingVelocityPredictor:
-    global _rolling_predictor
-    if _rolling_predictor is None:
-        _rolling_predictor = RollingVelocityPredictor()
-    return _rolling_predictor
-
-
 def _reset_unused_predictors(method: str) -> None:
     if method != "velocity" and _predictor is not None:
         _predictor.reset()
-    if method != "ema" and _ema_predictor is not None:
-        _ema_predictor.reset()
-    if method != "rolling" and _rolling_predictor is not None:
-        _rolling_predictor.reset()
 
 
 # How often the aim-lead anchor track re-reads the shared anchor_* settings (seconds).
@@ -224,9 +185,14 @@ def _apply_per_frame_cap(move_x: float, move_y: float, config) -> tuple:
     return move_x, move_y
 
 
+# Base IoU for "this box is the locked target" (scaled by box size in _adaptive_sticky_iou). It used to be a
+# slider; the area scaling already multiplies it by 0.34-0.62, so the slider barely mattered.
+_STICKY_IOU_BASE = 0.3
+
+
 def sticky_iou_threshold(config: Config, state: LoopState) -> float:
     """Overlap needed to treat a box as the locked target (adaptive to its size)."""
-    base = float(getattr(config, 'lock_iou_threshold', 0.3))
+    base = _STICKY_IOU_BASE
     if state.locked_box is not None:
         return _adaptive_sticky_iou(base, state.locked_box, float(getattr(config, 'fov_size', 222)))
     return base
@@ -323,7 +289,7 @@ def process_aiming(
         # dt can produce a huge spurious velocity that wrongly disables Y
         # suppression right when it's needed. Reset the gate's timestamp
         # whenever the selected box isn't a continuation of the previous one.
-        _iou_thresh = float(getattr(config, 'lock_iou_threshold', 0.3))
+        _iou_thresh = _STICKY_IOU_BASE
         if _prev_locked_box is None or box_iou(_prev_locked_box, selected_box) < _iou_thresh:
             state.aim_y_last_target_t = 0.0
             # Same "is this genuinely a new target" edge as above — arms the
@@ -376,23 +342,6 @@ def process_aiming(
         else:
             pred_x, pred_y = target_x, target_y
 
-        # --- Own-mouse (ego-motion) compensation ---
-        # Our own mouse moves turn the camera, which slides the target across
-        # the screen the opposite way. Add the moves already visible in this
-        # frame back onto the position so the predictor/Kalman see the
-        # target's own motion only. Skipped while camera motion compensation
-        # is on, which already measures the whole background shift
-        # (including our moves) from the image.
-        _ego_comp = bool(getattr(config, 'prediction_ego_motion_comp', False)) and not _cam_comp
-        _ego_dx = _ego_dy = 0.0
-        if _ego_comp:
-            settle_ego_moves(state, state.frame_capture_t or time.perf_counter())
-            _ego_scale = float(getattr(config, 'prediction_ego_motion_scale', 1.0) or 1.0)
-            _ego_dx = state.ego_drift_x * _ego_scale
-            _ego_dy = state.ego_drift_y * _ego_scale
-            pred_x += _ego_dx
-            pred_y += _ego_dy
-
         # --- Acquisition-phase guard ---
         # For a short window right after a fresh lock, the crosshair is still
         # snapping onto the target under our own correction — that
@@ -416,20 +365,16 @@ def process_aiming(
         # feeling permanently a step behind.
         if getattr(config, 'prediction_enabled', False):
             method = str(getattr(config, 'prediction_method', 'velocity') or 'velocity')
-            if method not in ('velocity', 'ema', 'rolling', 'anchor'):
+            if method not in ('velocity', 'anchor'):
                 method = 'velocity'
             if _in_acquisition:
                 _reset_unused_predictors('')
                 if method == 'velocity':
                     _get_predictor(config).reset()
-                elif method == 'ema':
-                    _get_ema_predictor().reset()
-                elif method == 'anchor':
-                    state.aim_anchor.reset()
                 else:
-                    _get_rolling_predictor().reset()
+                    state.aim_anchor.reset()
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
-            if getattr(config, 'prediction_adaptive_lead', False) and method != 'rolling':
+            if getattr(config, 'prediction_adaptive_lead', False):
                 horizon_s = adaptive_lead_s(horizon_s, float(getattr(state, 'last_mouse_speed_px_s', 0.0)))
             # Optionally time each sample by when its frame was captured, so
             # a slow inference doesn't look like the target slowing down.
@@ -437,12 +382,7 @@ def process_aiming(
                 now_t = state.frame_capture_t
             else:
                 now_t = time.perf_counter()
-            if method == 'ema':
-                pred_x, pred_y = _get_ema_predictor().update(pred_x, pred_y, now_t, horizon_s)
-            elif method == 'rolling':
-                lead_frames = float(getattr(config, 'prediction_lead_frames', 3.0) or 3.0)
-                pred_x, pred_y = _get_rolling_predictor().update(pred_x, pred_y, now_t, lead_frames)
-            elif method == 'anchor':
+            if method == 'anchor':
                 pred_x, pred_y = _anchor_aim_lead(
                     config, state, selected_box, pred_x - target_x, pred_y - target_y,
                     pred_x, pred_y, now_t, horizon_s, _conf)
@@ -466,8 +406,6 @@ def process_aiming(
             if _kalman is not None:
                 _kalman.reset()
 
-        pred_x -= _ego_dx
-        pred_y -= _ego_dy
         if _cam_comp:
             target_x, target_y = pred_x + state.cam_drift_x, pred_y + state.cam_drift_y
         else:
@@ -499,11 +437,7 @@ def process_aiming(
         if state.sticky_last_t > 0:
             _sdt = current_time - state.sticky_last_t
             if _sdt > 0:
-                state.sticky_vx = (target_x - state.sticky_last_x) / _sdt
-                state.sticky_vy = (target_y - state.sticky_last_y) / _sdt
-                state.last_aim_dt = _sdt
-        state.sticky_last_x = target_x
-        state.sticky_last_y = target_y
+                state.last_aim_dt = _sdt           # feeds last_mouse_speed_px_s (Adaptive Lead)
         state.sticky_last_t = current_time
 
         _finish_aim_move(
@@ -584,34 +518,6 @@ def _finish_aim_move(
 
     if move_x != 0 or move_y != 0:
         send_mouse_move(move_x, move_y, method=mouse_method)
-        record_ego_move(config, state, move_x, move_y)
-
-
-def process_sticky_gap(
-    config: Config,
-    crosshair_x: int,
-    crosshair_y: int,
-    pid_x: PIDController,
-    pid_y: PIDController,
-    mouse_method: str,
-    state: LoopState,
-    current_time: float,
-) -> None:
-    """Keep steering along the last target velocity for a few missed frames."""
-    frames = int(getattr(state, 'no_detection_frames', 0) or 0)
-    limit = int(getattr(config, 'sticky_gap_frames', 3) or 3)
-    if frames <= 0 or frames > limit:
-        return
-    step = float(getattr(state, 'last_aim_dt', 0.0) or 0.016)
-    target_x = state.sticky_last_x + state.sticky_vx * frames * step
-    target_y = state.sticky_last_y + state.sticky_vy * frames * step
-    config.aim_predicted_x = target_x
-    config.aim_predicted_y = target_y
-    config.aim_prediction_active = True
-    _finish_aim_move(
-        config, state, pid_x, pid_y, mouse_method, current_time,
-        target_x - crosshair_x, target_y - crosshair_y, target_y, 0.0,
-    )
 
 
 def apply_idle_micro_jitter(config: "Config", state: LoopState, mouse_method: str) -> None:
@@ -661,4 +567,3 @@ def apply_idle_micro_jitter(config: "Config", state: LoopState, mouse_method: st
 
     if move_x != 0 or move_y != 0:
         send_mouse_move(move_x, move_y, method=mouse_method)
-        record_ego_move(config, state, move_x, move_y)

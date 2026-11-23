@@ -149,7 +149,6 @@ _FIELD_MAP = {
     'kalman_process_noise':       'aim.kalman.process_noise',
     'kalman_measurement_noise':   'aim.kalman.measurement_noise',
     'cam_motion_comp_enabled':    'aim.cam_motion_comp.enabled',
-    'cam_motion_comp_size':       'aim.cam_motion_comp.size',
     'head_width_ratio':           'aim.target_area.head_width_ratio',
     'head_height_ratio':          'aim.target_area.head_height_ratio',
     'body_width_ratio':           'aim.target_area.body_width_ratio',
@@ -179,13 +178,10 @@ _FIELD_MAP = {
     'prediction_max_velocity':    'tracking.prediction.max_velocity',
     'prediction_history_len':     'tracking.prediction.history_len',
     'prediction_method':          'tracking.prediction.method',
-    'prediction_lead_frames':     'tracking.prediction.lead_frames',
     'prediction_adaptive_lead':   'tracking.prediction.adaptive_lead',
     'prediction_capture_timestamps': 'tracking.prediction.capture_timestamps',
     'prediction_lsq_fit':         'tracking.prediction.lsq_fit',
     'prediction_velocity_deadzone_px_s': 'tracking.prediction.velocity_deadzone_px_s',
-    'prediction_ego_motion_comp': 'tracking.prediction.ego_motion_comp',
-    'prediction_ego_motion_scale': 'tracking.prediction.ego_motion_scale',
     'afov_source':                'aim.fov_anchor.source',
     'afov_position':              'aim.fov_anchor.position',
     'afov_offset_x':              'aim.fov_anchor.offset_x',
@@ -212,10 +208,7 @@ _FIELD_MAP = {
     'anchor_max_distance_pct':    'tracking.anchor.max_distance_pct',
     'anchor_fov_influence_adaptive': 'tracking.anchor.fov_influence_adaptive',
     'anchor_fov_influence_dynamic': 'tracking.anchor.fov_influence_dynamic',
-    'sticky_gap_extrapolate':     'tracking.sticky_lock.gap_extrapolate',
-    'sticky_gap_frames':          'tracking.sticky_lock.gap_frames',
     'sticky_lock_enabled':        'tracking.sticky_lock.enabled',
-    'lock_iou_threshold':         'tracking.sticky_lock.iou_threshold',
     'lock_persistence_ms':        'tracking.sticky_lock.persistence_ms',
     'lost_target_timeout_ms':     'tracking.sticky_lock.lost_timeout_ms',
     'min_lock_duration_ms':       'tracking.sticky_lock.min_lock_ms',
@@ -903,7 +896,6 @@ class Config:
 
         # Camera motion compensation — subtract per-frame global scene shift before PID
         self.cam_motion_comp_enabled: bool = False
-        self.cam_motion_comp_size: int = 128   # downsample resolution for phase correlation (128 or 256)
 
         # 速度預測瞄準（基於歷史位置估算目標未來位置）
         self.prediction_enabled: bool = False
@@ -911,15 +903,12 @@ class Config:
         self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
         self.prediction_history_len: int = 3         # 歷史點數量
         self.prediction_method: str = "velocity"     # velocity | ema | rolling | anchor (core/anchor_prediction.py, shares the anchor_* tuning)
-        self.prediction_lead_frames: float = 3.0     # rolling predictor, in frames
         self.prediction_adaptive_lead: bool = False
         # Velocity-estimate refinements — all off by default so existing
         # configs keep their current prediction feel until opted in.
         self.prediction_capture_timestamps: bool = False  # time samples by frame capture, not processing
         self.prediction_lsq_fit: bool = False             # least-squares velocity over the whole history
         self.prediction_velocity_deadzone_px_s: float = 0.0  # soft-zero speeds below this (0 = off)
-        self.prediction_ego_motion_comp: bool = False     # remove our own mouse moves from apparent motion
-        self.prediction_ego_motion_scale: float = 1.0     # screen px per mouse count sent
 
         # Anchor prediction — an additive layer that predicts the locked
         # target's future box and feeds the Adaptive/Dynamic FOV and lock
@@ -940,7 +929,6 @@ class Config:
 
         # 目標鎖定（Sticky Lock）
         self.sticky_lock_enabled: bool = False
-        self.lock_iou_threshold: float = 0.3
         # Time-based tracking (replaces counting frames). The old `tracking.sticky_lock.decay_frames`
         # key is only read as a migration source in from_dict() and is no longer written.
         self.lock_persistence_ms: int = 250       # grace period: aim state held across missed detections
@@ -949,8 +937,6 @@ class Config:
         self.target_switch_threshold: float = 0.35  # score advantage (0-1) a rival needs to take over
         self.reacquire_radius_px: int = 150       # how far from the last known position the same target may reappear
         self.tracking_confidence: float = 0.0     # min confidence to KEEP a lock; 0 = same as min_confidence
-        self.sticky_gap_extrapolate: bool = False
-        self.sticky_gap_frames: int = 3
 
         # FOV filter mode
         self.fov_circle_filter_enabled: bool = False  # circular FOV test instead of square
@@ -1536,17 +1522,14 @@ def _validate_gpu_monitor(config: Config) -> None:
 
 def _validate_aim_math(config: Config) -> None:
     """Clamp the optional Advanced Aim Tuning fields."""
-    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'ema', 'rolling', 'anchor'):
+    # 'ema' and 'rolling' were removed (the Anchor estimator and the Velocity predictor cover them): old files fall back.
+    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'anchor'):
         config.prediction_method = 'velocity'
     config.aim_x_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
     config.aim_y_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))
     config.aim_ema_smoothing = max(0.01, min(1.0, float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)))
-    config.prediction_lead_frames = max(1.0, min(10.0, float(getattr(config, 'prediction_lead_frames', 3.0) or 3.0)))
-    config.sticky_gap_frames = max(1, min(8, int(getattr(config, 'sticky_gap_frames', 3) or 3)))
     config.prediction_velocity_deadzone_px_s = max(
         0.0, min(500.0, float(getattr(config, 'prediction_velocity_deadzone_px_s', 0.0) or 0.0)))
-    config.prediction_ego_motion_scale = max(
-        0.1, min(5.0, float(getattr(config, 'prediction_ego_motion_scale', 1.0) or 1.0)))
 
 
 def migrate_anchor_settings(config) -> None:

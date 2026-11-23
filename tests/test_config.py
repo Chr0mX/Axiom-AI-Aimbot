@@ -1139,7 +1139,7 @@ class TestPredictionMethodValidation:
     def test_default_is_velocity(self):
         assert _make_config().prediction_method == 'velocity'
 
-    @pytest.mark.parametrize("method", ["velocity", "ema", "rolling", "anchor"])
+    @pytest.mark.parametrize("method", ["velocity", "anchor"])
     def test_known_methods_survive_validation(self, method):
         from core.config import validate_config
         c = _make_config()

@@ -736,7 +736,7 @@ class TestAnchorAimLead:
         from core.inference import PIDController
         import core.ai_aiming as aiming_mod
 
-        for name in ("_predictor", "_ema_predictor", "_rolling_predictor", "_kalman"):
+        for name in ("_predictor", "_kalman"):
             monkeypatch.setattr(aiming_mod, name, None)
         clock = {"t": 0.0}
         monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: clock["t"])
@@ -791,7 +791,7 @@ class TestAnchorAimLead:
         assert led == off
 
     def test_other_methods_never_touch_the_anchor_track(self, sent_moves, monkeypatch):
-        for method in ("velocity", "ema", "rolling"):
+        for method in ("velocity", "ema", "rolling"):    # stale values fall back to velocity
             _, state, _ = self._run(sent_moves, monkeypatch, prediction_method=method)
             assert state.aim_anchor.samples == 0, method
 
@@ -804,7 +804,7 @@ class TestAnchorAimLead:
         from core.ai_loop_state import LoopState
         from core.inference import PIDController
         import core.ai_aiming as aiming_mod
-        for name in ("_predictor", "_ema_predictor", "_rolling_predictor", "_kalman"):
+        for name in ("_predictor", "_kalman"):
             monkeypatch.setattr(aiming_mod, name, None)
         clock = {"t": 0.0}
         monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: clock["t"])
@@ -860,7 +860,7 @@ class TestAnchorAimLead:
         from core.inference import PIDController
         import core.ai_aiming as aiming_mod
 
-        for name in ("_predictor", "_ema_predictor", "_rolling_predictor", "_kalman"):
+        for name in ("_predictor", "_kalman"):
             monkeypatch.setattr(aiming_mod, name, None)
         clock = {"t": 0.0}
         monkeypatch.setattr(aiming_mod.time, "perf_counter", lambda: clock["t"])

@@ -412,6 +412,11 @@ def _set_windows_timer_resolution_1ms(enable: bool) -> bool:
         return False
 
 
+# Phase-correlation downsample size for Camera Motion Compensation (128 ~0.2 ms; 256 was only slightly
+# more precise and is no longer offered).
+_CMC_SIZE = 128
+
+
 def ai_logic_loop(
     config: Config,
     model: ort.InferenceSession,
@@ -704,7 +709,7 @@ def ai_logic_loop(
                 last_frame_seq = frame_seq
 
                 if getattr(config, 'cam_motion_comp_enabled', False):
-                    cmc_size = int(getattr(config, 'cam_motion_comp_size', 128))
+                    cmc_size = _CMC_SIZE
                     small = cv2.resize(frame[:, :, :3], (cmc_size, cmc_size), interpolation=cv2.INTER_LINEAR)
                     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
                     if _cmc_prev[0] is not None and _cmc_prev[0].shape == gray.shape:
@@ -1206,13 +1211,6 @@ def ai_logic_loop(
                         state.no_detection_frames += 1
                         config.display_locked_box_is_decaying = True
 
-                    if (aim_engaged and not boxes and holding_lock
-                            and getattr(config, 'sticky_gap_extrapolate', False)):
-                        ai_aiming.process_sticky_gap(
-                            config, crosshair_x, crosshair_y, pid_x, pid_y,
-                            state.cached_mouse_move_method, state, current_time,
-                        )
-
                     if not holding_lock:
                         pid_x.reset()
                         pid_y.reset()
@@ -1225,11 +1223,6 @@ def ai_logic_loop(
                         state.aim_ema_x = 0.0
                         state.aim_ema_y = 0.0
                         state.sticky_last_t = 0.0
-                        state.sticky_vx = 0.0
-                        state.sticky_vy = 0.0
-                        state.ego_pending.clear()
-                        state.ego_drift_x = 0.0
-                        state.ego_drift_y = 0.0
                         config.display_locked_box = None
                         config.display_locked_box_is_decaying = False
                         config.aim_prediction_active = False
@@ -1239,10 +1232,6 @@ def ai_logic_loop(
                         # newly-acquired target isn't corrupted by the old one's history.
                         if ai_aiming._predictor is not None:
                             ai_aiming._predictor.reset()
-                        if ai_aiming._ema_predictor is not None:
-                            ai_aiming._ema_predictor.reset()
-                        if ai_aiming._rolling_predictor is not None:
-                            ai_aiming._rolling_predictor.reset()
                         if ai_aiming._kalman is not None:
                             ai_aiming._kalman.reset()
 

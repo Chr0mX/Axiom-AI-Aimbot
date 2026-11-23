@@ -500,31 +500,9 @@ class TestNestedFieldPaths:
 
 
 class TestIntValuedChoices:
-    """"choice" fields whose choices list holds ints (cam_motion_comp_size,
-    makcu_baud_rate) instead of the usual strings — must round-trip as int,
+    """"choice" fields whose choices list holds ints (makcu_baud_rate)
+    instead of the usual strings — must round-trip as int,
     not get coerced into a string."""
-
-    def test_cam_motion_comp_size_round_trips_as_int(self):
-        config = _config(cam_motion_comp_size=128)
-        result = wcs.apply_tab_settings(config, "aim", {"cam_motion_comp_size": 256})
-        assert result["ok"] is True
-        assert config.cam_motion_comp_size == 256
-        assert isinstance(config.cam_motion_comp_size, int)
-
-    def test_cam_motion_comp_size_accepts_string_value(self):
-        """The HTML <select>'s value attribute is always a string — the
-        wire value from a real browser is "256", not the number 256."""
-        config = _config(cam_motion_comp_size=128)
-        result = wcs.apply_tab_settings(config, "aim", {"cam_motion_comp_size": "256"})
-        assert result["ok"] is True
-        assert config.cam_motion_comp_size == 256
-        assert isinstance(config.cam_motion_comp_size, int)
-
-    def test_cam_motion_comp_size_rejects_invalid_value(self):
-        config = _config(cam_motion_comp_size=128)
-        result = wcs.apply_tab_settings(config, "aim", {"cam_motion_comp_size": 512})
-        assert result == {"ok": False, "reason": "invalid_choice", "field": "cam_motion_comp_size"}
-        assert config.cam_motion_comp_size == 128
 
     def test_makcu_baud_rate_round_trips_as_int(self):
         config = _config(makcu_baud_rate=4_000_000)

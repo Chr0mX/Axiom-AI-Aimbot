@@ -3,7 +3,6 @@
 import pytest
 
 from core.aim_paths import adaptive_lead_s, ema_step
-from core.target_predictor import EmaPredictor, RollingVelocityPredictor
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -38,25 +37,6 @@ def test_zero_offsets_match_the_unshifted_point():
     bare = calculate_aim_target(box, "custom", 0.26, None)
     same = calculate_aim_target(box, "custom", 0.26, _Cfg())
     assert bare == same
-
-
-def test_ema_predictor_leads_a_constant_velocity():
-    pred = EmaPredictor(alpha=1.0)
-    pred.update(0, 0, 0.0, 0.1)
-    pred.update(10, 0, 0.1, 0.1)
-    x, y = pred.update(20, 0, 0.2, 0.1)
-    assert x > 20
-    assert y == 0
-
-
-def test_rolling_predictor_uses_frame_lead():
-    pred = RollingVelocityPredictor(history_len=5)
-    pred.update(0, 0, 0.0, 2)
-    x, _y = pred.update(10, 0, 0.1, 2)
-    assert abs(x - 30) < 1e-6
-
-
-
 
 
 def test_makcu_path_steps_accumulate_and_pid_steps_replace():
@@ -123,30 +103,26 @@ def test_velocity_deadzone_zeroes_slow_and_reduces_fast_motion():
     assert abs(x - (20 + 150 * 0.1)) < 1e-6
 
 
-def test_ego_moves_only_count_once_their_frame_shows_them():
-    from core.ai_aiming import settle_ego_moves
-    from core.ai_loop_state import LoopState
-    state = LoopState()
-    state.ego_pending.append((1.0, 5.0, -2.0))
-    state.ego_pending.append((2.0, 3.0, 0.0))
-    settle_ego_moves(state, 1.5)
-    assert (state.ego_drift_x, state.ego_drift_y) == (5.0, -2.0)
-    assert len(state.ego_pending) == 1
-    settle_ego_moves(state, 2.0)
-    assert state.ego_drift_x == 8.0 and not state.ego_pending
-
-
 def test_new_prediction_options_are_persisted_and_clamped():
     from types import SimpleNamespace
     from core.config import _FIELD_MAP, _validate_aim_math
-    for key in ("prediction_capture_timestamps", "prediction_lsq_fit",
-                "prediction_velocity_deadzone_px_s", "prediction_ego_motion_comp",
-                "prediction_ego_motion_scale"):
+    for key in ("prediction_capture_timestamps", "prediction_lsq_fit", "prediction_velocity_deadzone_px_s"):
         assert _FIELD_MAP[key].startswith("tracking.prediction.")
-    cfg = SimpleNamespace(prediction_velocity_deadzone_px_s=9999, prediction_ego_motion_scale=0.01)
+    cfg = SimpleNamespace(prediction_velocity_deadzone_px_s=9999)
     _validate_aim_math(cfg)
     assert cfg.prediction_velocity_deadzone_px_s == 500.0
-    assert cfg.prediction_ego_motion_scale == 0.1
+
+
+def test_removed_prediction_methods_fall_back_to_velocity():
+    from types import SimpleNamespace
+    from core.config import _validate_aim_math
+    for stale in ("ema", "rolling", "bogus"):
+        cfg = SimpleNamespace(prediction_method=stale)
+        _validate_aim_math(cfg)
+        assert cfg.prediction_method == "velocity", stale
+    cfg = SimpleNamespace(prediction_method="anchor")
+    _validate_aim_math(cfg)
+    assert cfg.prediction_method == "anchor"
 
 
 def _anchor_config():

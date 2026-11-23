@@ -62,11 +62,11 @@ def test_inference_page_no_longer_builds_the_lock_cards():
         assert needle not in src, needle
 
 
-def test_gap_extrapolation_sits_with_the_lock_cards():
+def test_retired_lock_cards_are_gone():
+    """Gap Extrapolation / Gap Frames and the IoU Match slider were removed (cleanup)."""
     src = AIM_PAGE.read_text(encoding="utf-8")
-    block = re.search(r"self\.stickyGapCard = SwitchSettingCard\(.*?\n        \)\n", src, re.S).group(0)
-    assert "parent=self.trackingGroup" in block
-    assert "self.trackingGroup.addSettingCard(self.stickyGapCard)" in src
+    for gone in ("stickyGapCard", "stickyGapFramesCard", "lockIouCard", "egoMotionCard", "camMotionCompSizeCard"):
+        assert gone not in src, gone
 
 
 def test_lock_cards_are_advanced_and_follow_sticky_lock():
@@ -80,7 +80,7 @@ def test_lock_cards_are_advanced_and_follow_sticky_lock():
 
 def test_web_page_has_the_cards_on_the_aim_tab_only():
     html = INDEX.read_text(encoding="utf-8")
-    for f in LOCK_FIELDS + ("sticky_gap_extrapolate", "sticky_gap_frames"):
+    for f in LOCK_FIELDS:
         assert 'id="aim-%s"' % f in html, f
         assert 'id="inf-%s"' % f not in html, f
 
@@ -88,8 +88,7 @@ def test_web_page_has_the_cards_on_the_aim_tab_only():
 def test_web_order_follows_the_plan():
     html = INDEX.read_text(encoding="utf-8")
     order = ["sticky_lock_enabled", "lock_persistence_ms", "lost_target_timeout_ms", "min_lock_duration_ms",
-             "target_switch_threshold", "reacquire_radius_px", "tracking_confidence", "lock_iou_threshold",
-             "sticky_gap_extrapolate", "sticky_gap_frames"]
+             "target_switch_threshold", "reacquire_radius_px", "tracking_confidence"]
     pos = [html.index('id="aim-%s"' % f) for f in order]
     assert pos == sorted(pos)
 

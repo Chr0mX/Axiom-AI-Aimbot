@@ -36,7 +36,6 @@ _KALMAN_MEAS_NOISE_DESC = "Higher = smoother but slower to react; lower = trusts
 # One table drives retranslateUi(), so a language switch refreshes every one of them (they used to keep
 # the text of the language the page was built in).
 _TUNING_TEXT = (
-    ("predictionLeadFramesCard", "prediction_lead_frames", "Rolling Lead", None, ""),
     ("predictionAdaptiveLeadCard", "prediction_adaptive_lead", "Adaptive Lead",
      "prediction_adaptive_lead_desc", "Stretch the time lead when the mouse is moving slowly"),
     ("captureTimestampsCard", "prediction_capture_timestamps", "Capture Timestamps",
@@ -44,17 +43,11 @@ _TUNING_TEXT = (
     ("lsqFitCard", "prediction_lsq_fit", "Least-Squares Velocity",
      "prediction_lsq_fit_desc", "Fit the speed through every point in the history, not just the oldest and newest"),
     ("velocityDeadzoneCard", "prediction_velocity_deadzone", "Velocity Deadzone", None, ""),
-    ("egoMotionCard", "prediction_ego_motion_comp", "Own-Mouse Compensation", "prediction_ego_motion_comp_desc",
-     "Don't count the camera turn from our own mouse moves as target motion. Ignored while Camera Motion Compensation is on"),
-    ("egoScaleCard", "prediction_ego_motion_scale", "Pixels per Mouse Count", None, ""),
     ("emaSmoothingCard", "aim_ema_smoothing_enabled", "Aim Step Smoothing", "aim_ema_smoothing_desc",
      "Smooths each mouse step after the PID. Separate from Estimator Smoothing (Anchor Estimator) and FOV Anchor Smoothing (Inference page)"),
     ("emaAmountCard", "aim_ema_smoothing", "Step Smoothing Amount", None, ""),
     ("aimXOffsetCard", "aim_x_offset_frac", "Aim X Offset", None, ""),
     ("aimYOffsetCard", "aim_y_offset_frac", "Aim Y Offset", None, ""),
-    ("stickyGapCard", "sticky_gap_extrapolate", "Gap Extrapolation", "sticky_gap_extrapolate_desc",
-     "Keep aiming along the last velocity for a few missed frames"),
-    ("stickyGapFramesCard", "sticky_gap_frames", "Gap Frames", None, ""),
 )
 
 # Lock timing / switching cards, all behind Sticky Target Lock (they used to be on the Inference page):
@@ -101,7 +94,7 @@ _ANCHOR_EST_TEXT = (
     ("anchorMaxDistCard", "anchor_max_distance_pct", "Maximum Prediction Distance",
      "Longest predicted movement, as a % of the FOV size. 0 = no limit"),
 )
-_PREDICTION_METHOD_DESC = ("Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; "
+_PREDICTION_METHOD_DESC = ("Velocity (extends the target's recent speed) or Anchor (predicts the target's box; "
                            "tuned under Anchor Estimator below)")
 
 
@@ -1053,31 +1046,10 @@ class AimPage(BasePage):
             parent=self.trackingGroup
         )
 
-        self.lockIouCard = SliderLabelCard(
-            FluentIcon.ZOOM_IN,
-            t("lock_iou_threshold", "IoU Match Threshold"),
-            10, 70,
-            format_func=lambda v: f"{v / 100:.2f}",
-            description=t("lock_iou_desc", "Minimum overlap required to match the same target across frames"),
-            slider_width=160,
-            parent=self.trackingGroup
-        )
-
         for _attr, _key, _title, _desc, _icon, _lo, _hi, _suffix, _f, _sc, _d in _LOCK_CARDS:
             setattr(self, _attr, SliderSpinCard(
                 getattr(FluentIcon, _icon), t(_key, _title), _lo, _hi, suffix=_suffix,
                 description=t(_key + "_desc", _desc), parent=self.trackingGroup))
-
-        self.stickyGapCard = SwitchSettingCard(
-            FluentIcon.RINGER,
-            t("sticky_gap_extrapolate", "Gap Extrapolation"),
-            t("sticky_gap_extrapolate_desc", "Keep aiming along the last velocity for a few missed frames"),
-            parent=self.trackingGroup,
-        )
-        self.stickyGapFramesCard = SliderLabelCard(
-            FluentIcon.HISTORY, t("sticky_gap_frames", "Gap Frames"),
-            1, 8, parent=self.trackingGroup,
-        )
 
         self.kalmanEnableCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
@@ -1112,19 +1084,6 @@ class AimPage(BasePage):
             t("cam_motion_comp_desc", "Subtract per-frame global scene shift (phase correlation) from aim error to cancel camera shake."),
             parent=self.trackingGroup
         )
-
-        self.camMotionCompSizeSegment = SegmentedWidget()
-        for _lbl, _key in [("128", "128"), ("256", "256")]:
-            self.camMotionCompSizeSegment.addItem(routeKey=_key, text=_lbl)
-        self.camMotionCompSizeSegment.setCurrentItem("128")
-        self.camMotionCompSizeCard = SettingCard(
-            FluentIcon.ZOOM_IN,
-            t("cam_motion_comp_size", "Compensation Resolution"),
-            t("cam_motion_comp_size_desc", "128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)"),
-            self.trackingGroup
-        )
-        self.camMotionCompSizeCard.hBoxLayout.addWidget(self.camMotionCompSizeSegment, 0, Qt.AlignmentFlag.AlignRight)
-        self.camMotionCompSizeCard.hBoxLayout.addSpacing(16)
 
         # === Target Area (shared by aim-point calculation and auto-fire hit zone) ===
         self.targetAreaGroup = SettingCardGroup(t("target_point_tracking", "Target Point Tracking"), self.scrollWidget)
@@ -1336,19 +1295,15 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.lockDecayCard)
         for _attr, *_rest in _LOCK_CARDS:
             self.trackingGroup.addSettingCard(getattr(self, _attr))
-        self.trackingGroup.addSettingCard(self.lockIouCard)
-        self.trackingGroup.addSettingCard(self.stickyGapCard)
-        self.trackingGroup.addSettingCard(self.stickyGapFramesCard)
         self.trackingGroup.addSettingCard(self.kalmanEnableCard)
         self.trackingGroup.addSettingCard(self.kalmanProcessNoiseCard)
         self.trackingGroup.addSettingCard(self.kalmanMeasNoiseCard)
         self.trackingGroup.addSettingCard(self.camMotionCompCard)
-        self.trackingGroup.addSettingCard(self.camMotionCompSizeCard)
         self.addContent(self.trackingGroup)
 
         self.mathGroup = SettingCardGroup(t("aim_tuning_group", "Advanced Aim Tuning"), self.scrollWidget)
         self.predictionMethodCombo = ComboBox()
-        self.predictionMethodCombo.addItems(["Velocity", "EMA", "Rolling", "Anchor"])
+        self.predictionMethodCombo.addItems(["Velocity", "Anchor"])
         self.predictionMethodCombo.setMinimumWidth(130)
         self.predictionMethodCard = SettingCard(
             FluentIcon.HISTORY,
@@ -1358,10 +1313,6 @@ class AimPage(BasePage):
         )
         self.predictionMethodCard.hBoxLayout.addWidget(self.predictionMethodCombo, 0)
         self.predictionMethodCard.hBoxLayout.addSpacing(16)
-        self.predictionLeadFramesCard = SliderLabelCard(
-            FluentIcon.HISTORY, t("prediction_lead_frames", "Rolling Lead"),
-            1, 10, format_func=lambda v: f"{v} fr", parent=self.mathGroup,
-        )
         self.predictionAdaptiveLeadCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("prediction_adaptive_lead", "Adaptive Lead"),
@@ -1384,16 +1335,6 @@ class AimPage(BasePage):
             FluentIcon.REMOVE_FROM, t("prediction_velocity_deadzone", "Velocity Deadzone"),
             0, 300, format_func=lambda v: "Off" if v == 0 else f"{v} px/s", parent=self.mathGroup,
         )
-        self.egoMotionCard = SwitchSettingCard(
-            FluentIcon.MOVE,
-            t("prediction_ego_motion_comp", "Own-Mouse Compensation"),
-            t("prediction_ego_motion_comp_desc", "Don't count the camera turn from our own mouse moves as target motion. Ignored while Camera Motion Compensation is on"),
-            parent=self.mathGroup,
-        )
-        self.egoScaleCard = SliderLabelCard(
-            FluentIcon.ZOOM, t("prediction_ego_motion_scale", "Pixels per Mouse Count"),
-            10, 500, format_func=lambda v: f"{v / 100:.2f}", parent=self.mathGroup,
-        )
         self.emaSmoothingCard = SwitchSettingCard(
             FluentIcon.SYNC,
             t("aim_ema_smoothing_enabled", "Aim Step Smoothing"),
@@ -1413,9 +1354,8 @@ class AimPage(BasePage):
             -100, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
         )
         for card in (
-            self.predictionMethodCard, self.predictionLeadFramesCard, self.predictionAdaptiveLeadCard,
+            self.predictionMethodCard, self.predictionAdaptiveLeadCard,
             self.captureTimestampsCard, self.lsqFitCard, self.velocityDeadzoneCard,
-            self.egoMotionCard, self.egoScaleCard,
             self.emaSmoothingCard, self.emaAmountCard, self.aimXOffsetCard, self.aimYOffsetCard,
         ):
             self.mathGroup.addSettingCard(card)
@@ -1481,10 +1421,10 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             humanizationMotionVariationRangeCard humanizationSpeedShapingLowCard humanizationSpeedShapingHighCard
             humanizationSpeedShapingLowFactorCard humanizationStutterProbCard humanizationStutterMinCard
             humanizationStutterMaxCard humanizationReactionSkipProbCard humanizationResetCard
-            predictionMaxVelCard predictionHistoryCard lockIouCard kalmanProcessNoiseCard kalmanMeasNoiseCard
-            camMotionCompSizeCard headWidthCard headHeightCard bodyWidthCard adaptiveRatioRefHCard crouchAspectCard
-            predictionLeadFramesCard captureTimestampsCard lsqFitCard velocityDeadzoneCard egoMotionCard
-            egoScaleCard emaSmoothingCard emaAmountCard stickyGapCard stickyGapFramesCard
+            predictionMaxVelCard predictionHistoryCard kalmanProcessNoiseCard kalmanMeasNoiseCard
+            headWidthCard headHeightCard bodyWidthCard adaptiveRatioRefHCard crouchAspectCard
+            captureTimestampsCard lsqFitCard velocityDeadzoneCard
+            emaSmoothingCard emaAmountCard
             anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHistoryCard anchorMaxDistCard
             lostTimeoutCard minLockCard switchThresholdCard reacquireRadiusCard trackConfCard
             """.split())
@@ -1570,19 +1510,14 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         # Target Tracking
         self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
         self.predictionMethodCombo.currentTextChanged.connect(self._onAimMathChanged)
-        self.predictionLeadFramesCard.valueChanged.connect(self._onAimMathChanged)
         self.predictionAdaptiveLeadCard.checkedChanged.connect(self._onAimMathChanged)
         self.captureTimestampsCard.checkedChanged.connect(self._onAimMathChanged)
         self.lsqFitCard.checkedChanged.connect(self._onAimMathChanged)
         self.velocityDeadzoneCard.valueChanged.connect(self._onAimMathChanged)
-        self.egoMotionCard.checkedChanged.connect(self._onAimMathChanged)
-        self.egoScaleCard.valueChanged.connect(self._onAimMathChanged)
         self.emaSmoothingCard.checkedChanged.connect(self._onAimMathChanged)
         self.emaAmountCard.valueChanged.connect(self._onAimMathChanged)
         self.aimXOffsetCard.valueChanged.connect(self._onAimMathChanged)
         self.aimYOffsetCard.valueChanged.connect(self._onAimMathChanged)
-        self.stickyGapCard.checkedChanged.connect(self._onAimMathChanged)
-        self.stickyGapFramesCard.valueChanged.connect(self._onAimMathChanged)
 
         # Anchor Estimator
         self.anchorModeCombo.currentIndexChanged.connect(self._onAnchorModeChanged)
@@ -1597,7 +1532,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.predictionHistoryCard.valueChanged.connect(self._onPredictionHistoryChanged)
         self.stickyLockCard.checkedChanged.connect(self._onStickyLockChanged)
         self.lockDecayCard.valueChanged.connect(self._onLockDecayChanged)
-        self.lockIouCard.valueChanged.connect(self._onLockIouChanged)
         for _attr, _k, _t, _d, _i, _lo, _hi, _sfx, _f, _sc, _def in _LOCK_CARDS:
             getattr(self, _attr).valueChanged.connect(
                 lambda v, f=_f, sc=_sc: self._setCfgValue(f, int(v) if sc == 1 else v / sc))
@@ -1605,7 +1539,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.kalmanProcessNoiseCard.valueChanged.connect(self._onKalmanProcessNoiseChanged)
         self.kalmanMeasNoiseCard.valueChanged.connect(self._onKalmanMeasNoiseChanged)
         self.camMotionCompCard.checkedChanged.connect(self._onCamMotionCompChanged)
-        self.camMotionCompSizeSegment.currentItemChanged.connect(self._onCamMotionCompSizeChanged)
 
         # Target Area
         self.headWidthCard.valueChanged.connect(self._onHeadWidthChanged)
@@ -1710,7 +1643,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             self.predictionHistoryCard.setValue(int(getattr(self._config, 'prediction_history_len', 3)))
             self.stickyLockCard.setChecked(bool(getattr(self._config, 'sticky_lock_enabled', False)))
             self.lockDecayCard.setValue(int(getattr(self._config, 'lock_persistence_ms', 250)))
-            self.lockIouCard.setValue(int(round(getattr(self._config, 'lock_iou_threshold', 0.3) * 100)))
             for _attr, _k, _t, _d, _i, _lo, _hi, _sfx, _f, _sc, _def in _LOCK_CARDS:
                 getattr(self, _attr).setValue(int(round(float(getattr(self._config, _f, _def)) * _sc)))
 
@@ -1721,27 +1653,18 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
 
             cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
             self.camMotionCompCard.setChecked(cmc_on)
-            cmc_size = str(getattr(self._config, 'cam_motion_comp_size', 128))
-            if cmc_size not in ("128", "256"):
-                cmc_size = "128"
-            self.camMotionCompSizeSegment.setCurrentItem(cmc_size)
 
-            method_map = {"velocity": "Velocity", "ema": "EMA", "rolling": "Rolling", "anchor": "Anchor"}
+            method_map = {"velocity": "Velocity", "anchor": "Anchor"}
             self.predictionMethodCombo.setCurrentText(method_map.get(
                 str(getattr(self._config, 'prediction_method', 'velocity')), "Velocity"))
-            self.predictionLeadFramesCard.setValue(int(getattr(self._config, 'prediction_lead_frames', 3)))
             self.predictionAdaptiveLeadCard.setChecked(bool(getattr(self._config, 'prediction_adaptive_lead', False)))
             self.captureTimestampsCard.setChecked(bool(getattr(self._config, 'prediction_capture_timestamps', False)))
             self.lsqFitCard.setChecked(bool(getattr(self._config, 'prediction_lsq_fit', False)))
             self.velocityDeadzoneCard.setValue(int(float(getattr(self._config, 'prediction_velocity_deadzone_px_s', 0.0) or 0.0)))
-            self.egoMotionCard.setChecked(bool(getattr(self._config, 'prediction_ego_motion_comp', False)))
-            self.egoScaleCard.setValue(int(round(float(getattr(self._config, 'prediction_ego_motion_scale', 1.0) or 1.0) * 100)))
             self.emaSmoothingCard.setChecked(bool(getattr(self._config, 'aim_ema_smoothing_enabled', False)))
             self.emaAmountCard.setValue(int(round(float(getattr(self._config, 'aim_ema_smoothing', 0.5)) * 100)))
             self.aimXOffsetCard.setValue(int(round(float(getattr(self._config, 'aim_x_offset_frac', 0.0)) * 100)))
             self.aimYOffsetCard.setValue(int(round(float(getattr(self._config, 'aim_y_offset_frac', 0.0)) * 100)))
-            self.stickyGapCard.setChecked(bool(getattr(self._config, 'sticky_gap_extrapolate', False)))
-            self.stickyGapFramesCard.setValue(int(getattr(self._config, 'sticky_gap_frames', 3)))
             amode = str(getattr(self._config, 'anchor_mode', 'adaptive'))
             self.anchorModeCombo.setCurrentIndex(_ANCHOR_MODES.index(amode) if amode in _ANCHOR_MODES else 2)
             self.anchorStrengthCard.setValue(int(round(float(getattr(self._config, 'anchor_strength', 1.0)) * 100)))
@@ -2380,22 +2303,17 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         # old values back over a preset/web change.
         if not self._config or self._isLoadingConfig:
             return
-        method = {"Velocity": "velocity", "EMA": "ema", "Rolling": "rolling", "Anchor": "anchor"}.get(
+        method = {"Velocity": "velocity", "Anchor": "anchor"}.get(
             self.predictionMethodCombo.currentText(), "velocity")
         self._config.prediction_method = method
-        self._config.prediction_lead_frames = float(self.predictionLeadFramesCard.value())
         self._config.prediction_adaptive_lead = bool(self.predictionAdaptiveLeadCard.isChecked())
         self._config.prediction_capture_timestamps = bool(self.captureTimestampsCard.isChecked())
         self._config.prediction_lsq_fit = bool(self.lsqFitCard.isChecked())
         self._config.prediction_velocity_deadzone_px_s = float(self.velocityDeadzoneCard.value())
-        self._config.prediction_ego_motion_comp = bool(self.egoMotionCard.isChecked())
-        self._config.prediction_ego_motion_scale = self.egoScaleCard.value() / 100.0
         self._config.aim_ema_smoothing_enabled = bool(self.emaSmoothingCard.isChecked())
         self._config.aim_ema_smoothing = self.emaAmountCard.value() / 100.0
         self._config.aim_x_offset_frac = self.aimXOffsetCard.value() / 100.0
         self._config.aim_y_offset_frac = self.aimYOffsetCard.value() / 100.0
-        self._config.sticky_gap_extrapolate = bool(self.stickyGapCard.isChecked())
-        self._config.sticky_gap_frames = int(self.stickyGapFramesCard.value())
         self._updateAimTuningVisibility()
 
     def _updateAimTuningVisibility(self):
@@ -2404,18 +2322,13 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         pred_on = self.predictionEnableCard.isChecked()
         method = self.predictionMethodCombo.currentText()
         self.predictionMethodCard.setVisible(pred_on)
-        # Rolling uses a frame lead; Velocity/EMA/Anchor use the time horizon, which
-        # Adaptive Lead stretches (ai_aiming skips it for Rolling). Anchor's own tuning
-        # (mode, strength, smoothing, ...) is the Anchor Estimator group below.
-        self.predictionLeadFramesCard.setVisible(pred_on and method == "Rolling")
-        self.predictionAdaptiveLeadCard.setVisible(pred_on and method != "Rolling")
-        # Rolling uses a frame count, so timestamps don't apply to it; the
-        # least-squares fit and deadzone are Velocity-method options.
-        self.captureTimestampsCard.setVisible(pred_on and method != "Rolling")
+        # Both methods use the time horizon, which Adaptive Lead stretches. Anchor's own tuning
+        # (mode, strength, smoothing, ...) is the Anchor Estimator group below; the least-squares
+        # fit and deadzone are Velocity-method options.
+        self.predictionAdaptiveLeadCard.setVisible(pred_on)
+        self.captureTimestampsCard.setVisible(pred_on)
         self.lsqFitCard.setVisible(pred_on and method == "Velocity")
         self.velocityDeadzoneCard.setVisible(pred_on and method == "Velocity")
-        self.egoMotionCard.setVisible(pred_on)
-        self.egoScaleCard.setVisible(pred_on and self.egoMotionCard.isChecked())
         self.emaAmountCard.setVisible(self.emaSmoothingCard.isChecked())
 
         # The rest of the "only while its parent option is on" rules (hidden, values kept; nothing here
@@ -2426,15 +2339,11 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.predictionHistoryCard.setVisible(pred_on and method != "Anchor")   # Anchor keeps its own history
         sticky_on = self.stickyLockCard.isChecked()
         self.lockDecayCard.setVisible(sticky_on)
-        self.lockIouCard.setVisible(sticky_on)
         for _attr, *_rest in _LOCK_CARDS:
             getattr(self, _attr).setVisible(sticky_on)
-        self.stickyGapCard.setVisible(sticky_on)
-        self.stickyGapFramesCard.setVisible(sticky_on and self.stickyGapCard.isChecked())
         kalman_on = self.kalmanEnableCard.isChecked()
         self.kalmanProcessNoiseCard.setVisible(kalman_on)
         self.kalmanMeasNoiseCard.setVisible(kalman_on)
-        self.camMotionCompSizeCard.setVisible(self.camMotionCompCard.isChecked())
         y_on = self.pidYReduceEnableCard.isChecked()
         for card in (self.pidYReduceDelayCard, self.pidYReduceFloorCard, self.pidYReduceRampCard,
                      self.pidYReduceSettleCard, self.pidYReduceVelCard):
@@ -2490,10 +2399,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         if self._config:
             self._config.lock_persistence_ms = int(value)
 
-    def _onLockIouChanged(self, value):
-        if self._config:
-            self._config.lock_iou_threshold = value / 100.0
-
     def _onKalmanEnableChanged(self, checked):
         if self._config:
             self._config.kalman_enabled = bool(checked)
@@ -2511,10 +2416,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         if self._config:
             self._config.cam_motion_comp_enabled = bool(checked)
         self._updateAimTuningVisibility()
-
-    def _onCamMotionCompSizeChanged(self, key):
-        if self._config:
-            self._config.cam_motion_comp_size = int(key)
 
     def _onHeadWidthChanged(self, value):
         if self._config:
@@ -2712,8 +2613,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
         self.lockDecayCard.titleLabel.setText(t("lock_persistence", "Lock Persistence"))
         self.lockDecayCard.contentLabel.setText(t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS). Never longer than Lost Target Timeout."))
-        self.lockIouCard.titleLabel.setText(t("lock_iou_threshold", "IoU Match Threshold"))
-        self.lockIouCard.contentLabel.setText(t("lock_iou_desc", "Minimum overlap required to match the same target across frames"))
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))
         self.kalmanEnableCard.contentLabel.setText(t("kalman_enabled_desc", "2D Kalman filter for aim-point smoothing."))
         self.kalmanProcessNoiseCard.titleLabel.setText(t("kalman_process_noise_label", "Process Noise"))
@@ -2722,8 +2621,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.kalmanMeasNoiseCard.contentLabel.setText(t("kalman_meas_noise_desc", _KALMAN_MEAS_NOISE_DESC))
         self.camMotionCompCard.titleLabel.setText(t("cam_motion_comp_enabled", "Camera Motion Compensation"))
         self.camMotionCompCard.contentLabel.setText(t("cam_motion_comp_desc", "Subtract per-frame global scene shift (phase correlation) from aim error to cancel camera shake."))
-        self.camMotionCompSizeCard.titleLabel.setText(t("cam_motion_comp_size", "Compensation Resolution"))
-        self.camMotionCompSizeCard.contentLabel.setText(t("cam_motion_comp_size_desc", "128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)"))
 
         parts = ["head", "body", "custom"]
         idx = self.aimPartCombo.currentIndex()

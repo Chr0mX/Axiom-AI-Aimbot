@@ -72,7 +72,7 @@ def test_aim_tuning_retranslation_table_matches_the_cards():
     src = (SRC / "gui" / "fluent_app" / "pages" / "aim_page.py").read_text(encoding="utf-8")
     table_src = re.search(r"_TUNING_TEXT = \((.*?)\n\)\n", src, re.S).group(1)
     rows = ast.literal_eval("(" + table_src + ")")
-    assert len(rows) >= 13
+    assert len(rows) >= 8
     for attr, title_key, title, desc_key, desc in rows:
         ctor = re.search(rf"\n        self\.{attr} = \w+\((.*?)\n        \)", src, re.S)
         assert ctor, f"{attr} is not built in aim_page"

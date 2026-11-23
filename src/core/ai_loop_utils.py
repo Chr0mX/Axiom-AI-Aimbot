@@ -94,7 +94,7 @@ def apply_cam_shift_deadzone(value: float, threshold: float) -> float:
     velocity predictor/Kalman filter). That integral feeds a
     frame-to-frame-differenced, then horizon-extrapolated, signal, so
     phase correlation's own measurement noise floor (quantization from the
-    cam_motion_comp_size downsample, sensor/compression noise) gets
+    the capture downsample, sensor/compression noise) gets
     amplified in a way the existing one-frame PID-error use of
     state.cam_shift_x/y itself (unfiltered, not differenced or
     extrapolated) never showed. Deadzoning here — only accumulating a

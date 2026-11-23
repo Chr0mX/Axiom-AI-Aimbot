@@ -45,8 +45,8 @@ class TestModeMigration:
         assert c.prediction_method == "velocity" and aim_uses_anchor(c) is False
 
     def test_disabled_leaves_other_prediction_methods_alone(self):
-        c = load({"tracking": {"anchor": {"mode": "disabled"}, "prediction": {"method": "ema"}}})
-        assert c.prediction_method == "ema"
+        c = load({"tracking": {"anchor": {"mode": "disabled"}, "prediction": {"method": "velocity"}}})
+        assert c.prediction_method == "velocity"
 
     @pytest.mark.parametrize("mode", MODES_UI)
     def test_current_modes_are_untouched(self, mode):

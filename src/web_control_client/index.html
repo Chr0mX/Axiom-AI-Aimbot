@@ -1450,21 +1450,13 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Aim Lead Method</div>
-                <div class="field-desc">Velocity, EMA, a rolling average of recent steps, or Anchor (predicts the target's box; tuned under Anchor Box Prediction on the Inference tab)</div>
+                <div class="field-desc">Velocity (extends the target's recent speed) or Anchor (predicts the target's box; tuned under Anchor Estimator below)</div>
               </div>
               <div class="field-control">
                 <select id="aim-prediction_method" data-key="prediction_method" data-type="choice">
                   <option value="velocity">Velocity</option>
-                  <option value="ema">EMA</option>
-                  <option value="rolling">Rolling</option>
                   <option value="anchor">Anchor</option>
                 </select>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Rolling Lead</div><div class="field-desc">Frames ahead for the rolling predictor</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-prediction_lead_frames" data-key="prediction_lead_frames" data-advanced="1" data-type="number" min="1" max="10" step="0.5">
               </div>
             </div>
             <div class="micro-grid" data-cols="2" data-kind="toggles">
@@ -1492,18 +1484,6 @@
               <div class="field-control">
                 <input type="number" id="aim-prediction_velocity_deadzone_px_s" data-key="prediction_velocity_deadzone_px_s" data-advanced="1" data-type="number" min="0" max="300" step="1">
                 <span class="field-slider-value">px/s</span>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Own-Mouse Compensation</div><div class="field-desc">Don't count the camera turn from our own mouse moves as target motion. Ignored while Camera Motion Compensation is on</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-prediction_ego_motion_comp" data-key="prediction_ego_motion_comp" data-advanced="1" data-type="bool"><span class="slider"></span></label>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Pixels per Mouse Count</div><div class="field-desc">Screen pixels one mouse count turns the camera by</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-prediction_ego_motion_scale" data-key="prediction_ego_motion_scale" data-advanced="1" data-type="number" min="0.1" max="5" step="0.01">
               </div>
             </div>
             <div class="field-card">
@@ -1623,27 +1603,6 @@
             </div>
             <div class="field-card">
               <div class="field-info">
-                <div class="field-title">IoU Match Threshold</div>
-                <div class="field-desc">Minimum overlap required to match the same target across frames</div>
-              </div>
-              <div class="field-control">
-                <input type="number" id="aim-lock_iou_threshold" data-key="lock_iou_threshold" data-advanced="1" data-type="number" min="0.10" max="0.70" step="0.01">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Gap Extrapolation</div><div class="field-desc">Keep aiming along the last velocity for a few missed frames</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-sticky_gap_extrapolate" data-key="sticky_gap_extrapolate" data-advanced="1" data-type="bool"><span class="slider"></span></label>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Gap Frames</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-sticky_gap_frames" data-key="sticky_gap_frames" data-advanced="1" data-type="number" min="1" max="8" step="1">
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
                 <div class="field-title">Kalman Filter</div>
                 <div class="field-desc">2D Kalman filter for aim-point smoothing.</div>
               </div>
@@ -1682,18 +1641,6 @@
                   <input type="checkbox" id="aim-cam_motion_comp_enabled" data-key="cam_motion_comp_enabled" data-type="bool">
                   <span class="slider"></span>
                 </label>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Compensation Resolution</div>
-                <div class="field-desc">128 = ~0.2 ms (recommended), 256 = ~0.5 ms (more precise)</div>
-              </div>
-              <div class="field-control">
-                <select id="aim-cam_motion_comp_size" data-key="cam_motion_comp_size" data-advanced="1" data-type="choice">
-                  <option value="128">128</option>
-                  <option value="256">256</option>
-                </select>
               </div>
             </div>
           </div>
