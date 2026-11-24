@@ -322,6 +322,9 @@ def detection_confidence_floor(config) -> float:
 def persistence_s(config) -> float:
     """Aim-hold grace period, never longer than the lost-target timeout."""
     p = max(0.0, float(getattr(config, 'lock_persistence_ms', 250)) / 1000.0)
+    if getattr(config, 'occlusion_coast_enabled', False):
+        # Occlusion coasting keeps aiming along the estimated path, so the aim state must outlive the coast window.
+        p = max(p, max(0.0, float(getattr(config, 'occlusion_coast_ms', 400.0)) / 1000.0))
     return min(p, lost_timeout_s(config))
 
 

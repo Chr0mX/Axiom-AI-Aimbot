@@ -47,6 +47,11 @@ class PIDController:
         self.previous_error: float = 0.0
         self._last_update_t: float = 0.0
 
+    def reset_integral(self) -> None:
+        """Drop only the accumulated integral (keeps the derivative baseline and the time stamp), e.g. when
+        the target reverses and the wound-up term would keep pushing the old way."""
+        self.integral = 0.0
+
     def _time_scale(self, now: Optional[float]) -> float:
         """dt / REFERENCE_DT, clamped; 1.0 when no time is supplied or this is
         the first sample since reset() (nothing to measure a dt against)."""

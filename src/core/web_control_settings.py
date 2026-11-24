@@ -202,7 +202,11 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "prediction_horizon_ms": {"type": "float", "min": 5, "max": 50},
         "prediction_max_velocity": {"type": "float", "min": 300, "max": 3000},
         "prediction_history_len": {"type": "int", "min": 2, "max": 6},
-        "prediction_method": {"type": "choice", "choices": ["velocity", "anchor"]},
+        "prediction_method": {"type": "choice", "choices": ["velocity", "anchor", "auto"]},
+        "auto_lead_max_ms": {"type": "float", "min": 20, "max": 150},
+        "strafe_response": {"type": "float", "scale": 100.0, "min": 0, "max": 100},
+        "occlusion_coast_enabled": {"type": "bool"},
+        "occlusion_coast_ms": {"type": "float", "min": 100, "max": 1500},
         # Anchor Estimator (aim_page.py): shared by the Aim Lead "Anchor" method and the Inference tab's Box Prediction.
         # "disabled" and "linear" are retired (the master switch / Acceleration 0 cover them); they are
         # still accepted from old scripts and folded by config.migrate_anchor_settings() in _post_apply.

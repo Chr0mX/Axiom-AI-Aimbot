@@ -72,6 +72,8 @@ class LoopState:
     # Aim-lead method 'anchor' (prediction_method): its own track, independent of the FOV bank above.
     aim_anchor: AnchorTrack = field(default_factory=AnchorTrack)
     aim_anchor_params_t: float = 0.0
+    # Strafe response: the aim track's reversal_t whose output-side reset (PID integral, Kalman) already ran.
+    reversal_seen_t: float = 0.0
     # Anchor FOV controller (core/anchor_fov.py), created lazily, only used in that mode.
     afov: Any = None
 
