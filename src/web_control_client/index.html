@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=26">
+  <link rel="stylesheet" href="styles.css?v=24">
 </head>
 <body>
   <div class="app">
@@ -1246,13 +1246,12 @@
             <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Aim Lead Method</div>
-                <div class="field-desc">Velocity (extends the target's recent speed), Anchor (predicts the target's box; tuned under Anchor Estimator below) or Auto (Anchor's estimator, with the lead sized from the measured capture-to-aim delay)</div>
+                <div class="field-desc">Velocity (extends the target's recent speed) or Anchor (predicts the target's box; tuned under Anchor Estimator below)</div>
               </div>
               <div class="field-control">
                 <select id="aim-prediction_method" data-key="prediction_method" data-type="choice">
                   <option value="velocity">Velocity</option>
                   <option value="anchor">Anchor</option>
-                  <option value="auto">Auto</option>
                 </select>
               </div>
             </div>
@@ -1281,20 +1280,6 @@
               <div class="field-control">
                 <input type="number" id="aim-prediction_velocity_deadzone_px_s" data-key="prediction_velocity_deadzone_px_s" data-advanced="1" data-type="number" min="0" max="300" step="1">
                 <span class="field-slider-value">px/s</span>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Auto Lead Limit</div><div class="field-desc">Longest lead the Auto method will use, however slow the pipeline gets</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-auto_lead_max_ms" data-key="auto_lead_max_ms" data-advanced="1" data-type="number" min="20" max="150" step="1">
-                <span class="field-slider-value">ms</span>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Strafe Response</div><div class="field-desc">How eagerly a left-right reversal is detected: the estimate drops the old heading at once instead of waiting for it to age out. Off = 0%</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-strafe_response" data-key="strafe_response" data-advanced="1" data-type="number" min="0" max="100" step="5">
-                <span class="field-slider-value">%</span>
               </div>
             </div>
             <div class="field-card">
@@ -2661,6 +2646,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=26"></script>
+  <script src="app.js?v=24"></script>
 </body>
 </html>

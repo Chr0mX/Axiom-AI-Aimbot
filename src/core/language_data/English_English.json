@@ -462,7 +462,7 @@
   "prediction_max_vel_desc": "Velocity spikes above this are treated as detection jumps and reset prediction",
   "prediction_max_velocity": "Max Velocity Cap",
   "prediction_method": "Aim Lead Method",
-  "prediction_method_desc": "Velocity (extends the target's recent speed), Anchor (predicts the target's box; tuned under Anchor Estimator below) or Auto (Anchor's estimator, with the lead sized from the measured capture-to-aim delay)",
+  "prediction_method_desc": "Velocity (extends the target's recent speed) or Anchor (predicts the target's box; tuned under Anchor Estimator below)",
   "prediction_velocity_deadzone": "Velocity Deadzone",
   "preview_fps_placeholder": "-- fps",
   "preview_group": "Preview",
@@ -583,9 +583,5 @@
   "humanization_speed_shaping_high": "Full-Speed Threshold",
   "humanization_speed_shaping_high_desc": "Movements above this size pass through unmodified.",
   "humanization_speed_shaping_low_factor": "Low-Speed Factor",
-  "humanization_speed_shaping_low_factor_desc": "Magnitude scale applied to movements below the Fine-Control Threshold.",
-  "auto_lead_max": "Auto Lead Limit",
-  "auto_lead_max_desc": "Longest lead the Auto method will use, however slow the pipeline gets",
-  "strafe_response": "Strafe Response",
-  "strafe_response_desc": "How eagerly a left-right reversal is detected: the estimate drops the old heading at once instead of waiting for it to age out. Off = 0%"
+  "humanization_speed_shaping_low_factor_desc": "Magnitude scale applied to movements below the Fine-Control Threshold."
 }

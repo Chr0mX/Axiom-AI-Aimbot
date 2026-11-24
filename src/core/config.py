@@ -182,8 +182,6 @@ _FIELD_MAP = {
     'prediction_capture_timestamps': 'tracking.prediction.capture_timestamps',
     'prediction_lsq_fit':         'tracking.prediction.lsq_fit',
     'prediction_velocity_deadzone_px_s': 'tracking.prediction.velocity_deadzone_px_s',
-    'strafe_response':            'tracking.prediction.strafe_response',
-    'auto_lead_max_ms':           'tracking.prediction.auto_max_ms',
     'afov_source':                'aim.fov_anchor.source',
     'afov_position':              'aim.fov_anchor.position',
     'afov_offset_x':              'aim.fov_anchor.offset_x',
@@ -878,16 +876,13 @@ class Config:
         self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
         self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
         self.prediction_history_len: int = 3         # 歷史點數量
-        self.prediction_method: str = "velocity"     # velocity | anchor | auto (core/anchor_prediction.py; anchor shares the anchor_* tuning)
+        self.prediction_method: str = "velocity"     # velocity | ema | rolling | anchor (core/anchor_prediction.py, shares the anchor_* tuning)
         self.prediction_adaptive_lead: bool = False
         # Velocity-estimate refinements — all off by default so existing
         # configs keep their current prediction feel until opted in.
         self.prediction_capture_timestamps: bool = False  # time samples by frame capture, not processing
         self.prediction_lsq_fit: bool = False             # least-squares velocity over the whole history
         self.prediction_velocity_deadzone_px_s: float = 0.0  # soft-zero speeds below this (0 = off)
-        # Auto lead / strafe response (core/anchor_prediction.py). Both opt-in.
-        self.strafe_response: float = 0.0             # 0 = off; 0..1 reversal-detector sensitivity (anchor/auto tracks)
-        self.auto_lead_max_ms: float = 60.0           # cap of the latency-aware 'auto' horizon (20-150)
 
         # Anchor prediction — an additive layer that predicts the locked
         # target's future box and feeds the Adaptive/Dynamic FOV and lock
@@ -1476,22 +1471,11 @@ def _validate_gpu_monitor(config: Config) -> None:
     config.status_panel_gpu_interval_ms = max(250, min(5000, interval))
 
 
-def _clamp_finite(value, lo: float, hi: float, default: float) -> float:
-    """``value`` as a float clamped to [lo, hi]; ``default`` for anything that is not a finite number."""
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return default
-    return max(lo, min(hi, v)) if math.isfinite(v) else default
-
-
 def _validate_aim_math(config: Config) -> None:
     """Clamp the optional Advanced Aim Tuning fields."""
     # 'ema' and 'rolling' were removed (the Anchor estimator and the Velocity predictor cover them): old files fall back.
-    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'anchor', 'auto'):
+    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'anchor'):
         config.prediction_method = 'velocity'
-    config.strafe_response = _clamp_finite(getattr(config, 'strafe_response', 0.0), 0.0, 1.0, 0.0)
-    config.auto_lead_max_ms = _clamp_finite(getattr(config, 'auto_lead_max_ms', 60.0), 20.0, 150.0, 60.0)
     config.aim_x_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
     config.aim_y_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))
     config.aim_ema_smoothing = max(0.01, min(1.0, float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)))

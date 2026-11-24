@@ -43,10 +43,6 @@ _TUNING_TEXT = (
     ("lsqFitCard", "prediction_lsq_fit", "Least-Squares Velocity",
      "prediction_lsq_fit_desc", "Fit the speed through every point in the history, not just the oldest and newest"),
     ("velocityDeadzoneCard", "prediction_velocity_deadzone", "Velocity Deadzone", None, ""),
-    ("autoLeadMaxCard", "auto_lead_max", "Auto Lead Limit", "auto_lead_max_desc",
-     "Longest lead the Auto method will use, however slow the pipeline gets"),
-    ("strafeResponseCard", "strafe_response", "Strafe Response", "strafe_response_desc",
-     "How eagerly a left-right reversal is detected: the estimate drops the old heading at once instead of waiting for it to age out. Off = 0%"),
     ("emaSmoothingCard", "aim_ema_smoothing_enabled", "Aim Step Smoothing", "aim_ema_smoothing_desc",
      "Smooths each mouse step after the PID. Separate from Estimator Smoothing (Anchor Estimator) and FOV Anchor Smoothing (Inference page)"),
     ("emaAmountCard", "aim_ema_smoothing", "Step Smoothing Amount", None, ""),
@@ -98,8 +94,8 @@ _ANCHOR_EST_TEXT = (
     ("anchorMaxDistCard", "anchor_max_distance_pct", "Maximum Prediction Distance",
      "Longest predicted movement, as a % of the FOV size. 0 = no limit"),
 )
-_PREDICTION_METHOD_DESC = ("Velocity (extends the target's recent speed), Anchor (predicts the target's box; tuned under "
-                           "Anchor Estimator below) or Auto (Anchor's estimator, with the lead sized from the measured capture-to-aim delay)")
+_PREDICTION_METHOD_DESC = ("Velocity (extends the target's recent speed) or Anchor (predicts the target's box; "
+                           "tuned under Anchor Estimator below)")
 
 
 class _AimPointPreview(QWidget):
@@ -1243,7 +1239,7 @@ class AimPage(BasePage):
 
         self.mathGroup = SettingCardGroup(t("aim_tuning_group", "Advanced Aim Tuning"), self.scrollWidget)
         self.predictionMethodCombo = ComboBox()
-        self.predictionMethodCombo.addItems(["Velocity", "Anchor", "Auto"])
+        self.predictionMethodCombo.addItems(["Velocity", "Anchor"])
         self.predictionMethodCombo.setMinimumWidth(130)
         self.predictionMethodCard = SettingCard(
             FluentIcon.HISTORY,
@@ -1275,22 +1271,6 @@ class AimPage(BasePage):
             FluentIcon.REMOVE_FROM, t("prediction_velocity_deadzone", "Velocity Deadzone"),
             0, 300, format_func=lambda v: "Off" if v == 0 else f"{v} px/s", parent=self.mathGroup,
         )
-        self.autoLeadMaxCard = SliderLabelCard(
-            FluentIcon.SPEED_HIGH,
-            t("auto_lead_max", "Auto Lead Limit"),
-            20, 150,
-            format_func=lambda v: f"{v} ms",
-            description=t("auto_lead_max_desc", "Longest lead the Auto method will use, however slow the pipeline gets"),
-            parent=self.mathGroup,
-        )
-        self.strafeResponseCard = SliderLabelCard(
-            FluentIcon.SYNC,
-            t("strafe_response", "Strafe Response"),
-            0, 100,
-            format_func=lambda v: "Off" if v == 0 else f"{v}%",
-            description=t("strafe_response_desc", "How eagerly a left-right reversal is detected: the estimate drops the old heading at once instead of waiting for it to age out. Off = 0%"),
-            parent=self.mathGroup,
-        )
         self.emaSmoothingCard = SwitchSettingCard(
             FluentIcon.SYNC,
             t("aim_ema_smoothing_enabled", "Aim Step Smoothing"),
@@ -1312,7 +1292,6 @@ class AimPage(BasePage):
         for card in (
             self.predictionMethodCard, self.predictionAdaptiveLeadCard,
             self.captureTimestampsCard, self.lsqFitCard, self.velocityDeadzoneCard,
-            self.autoLeadMaxCard, self.strafeResponseCard,
             self.emaSmoothingCard, self.emaAmountCard, self.aimXOffsetCard, self.aimYOffsetCard,
         ):
             self.mathGroup.addSettingCard(card)
@@ -1380,7 +1359,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             humanizationResetCard
             predictionMaxVelCard predictionHistoryCard kalmanProcessNoiseCard kalmanMeasNoiseCard
             headWidthCard headHeightCard bodyWidthCard adaptiveRatioRefHCard crouchAspectCard
-            captureTimestampsCard lsqFitCard velocityDeadzoneCard autoLeadMaxCard strafeResponseCard
+            captureTimestampsCard lsqFitCard velocityDeadzoneCard
             emaSmoothingCard emaAmountCard
             anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHistoryCard anchorMaxDistCard
             lostTimeoutCard minLockCard switchThresholdCard reacquireRadiusCard trackConfCard
@@ -1465,8 +1444,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.captureTimestampsCard.checkedChanged.connect(self._onAimMathChanged)
         self.lsqFitCard.checkedChanged.connect(self._onAimMathChanged)
         self.velocityDeadzoneCard.valueChanged.connect(self._onAimMathChanged)
-        self.autoLeadMaxCard.valueChanged.connect(self._onAimMathChanged)
-        self.strafeResponseCard.valueChanged.connect(self._onAimMathChanged)
         self.emaSmoothingCard.checkedChanged.connect(self._onAimMathChanged)
         self.emaAmountCard.valueChanged.connect(self._onAimMathChanged)
         self.aimXOffsetCard.valueChanged.connect(self._onAimMathChanged)
@@ -1607,9 +1584,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
             self.camMotionCompCard.setChecked(cmc_on)
 
-            self.autoLeadMaxCard.setValue(int(round(float(getattr(self._config, 'auto_lead_max_ms', 60.0)))))
-            self.strafeResponseCard.setValue(int(round(float(getattr(self._config, 'strafe_response', 0.0)) * 100)))
-            method_map = {"velocity": "Velocity", "anchor": "Anchor", "auto": "Auto"}
+            method_map = {"velocity": "Velocity", "anchor": "Anchor"}
             self.predictionMethodCombo.setCurrentText(method_map.get(
                 str(getattr(self._config, 'prediction_method', 'velocity')), "Velocity"))
             self.predictionAdaptiveLeadCard.setChecked(bool(getattr(self._config, 'prediction_adaptive_lead', False)))
@@ -2204,15 +2179,13 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         # old values back over a preset/web change.
         if not self._config or self._isLoadingConfig:
             return
-        method = {"Velocity": "velocity", "Anchor": "anchor", "Auto": "auto"}.get(
+        method = {"Velocity": "velocity", "Anchor": "anchor"}.get(
             self.predictionMethodCombo.currentText(), "velocity")
         self._config.prediction_method = method
         self._config.prediction_adaptive_lead = bool(self.predictionAdaptiveLeadCard.isChecked())
         self._config.prediction_capture_timestamps = bool(self.captureTimestampsCard.isChecked())
         self._config.prediction_lsq_fit = bool(self.lsqFitCard.isChecked())
         self._config.prediction_velocity_deadzone_px_s = float(self.velocityDeadzoneCard.value())
-        self._config.auto_lead_max_ms = float(self.autoLeadMaxCard.value())
-        self._config.strafe_response = self.strafeResponseCard.value() / 100.0
         self._config.aim_ema_smoothing_enabled = bool(self.emaSmoothingCard.isChecked())
         self._config.aim_ema_smoothing = self.emaAmountCard.value() / 100.0
         self._config.aim_x_offset_frac = self.aimXOffsetCard.value() / 100.0
@@ -2232,9 +2205,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.captureTimestampsCard.setVisible(pred_on)
         self.lsqFitCard.setVisible(pred_on and method == "Velocity")
         self.velocityDeadzoneCard.setVisible(pred_on and method == "Velocity")
-        self.autoLeadMaxCard.setVisible(pred_on and method == "Auto")
-        # Strafe Response acts on the Anchor-estimator track (the Anchor and Auto methods).
-        self.strafeResponseCard.setVisible(pred_on and method in ("Anchor", "Auto"))
         self.emaAmountCard.setVisible(self.emaSmoothingCard.isChecked())
 
         # The rest of the "only while its parent option is on" rules (hidden, values kept; nothing here
