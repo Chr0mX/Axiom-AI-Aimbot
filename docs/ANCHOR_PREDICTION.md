@@ -7,9 +7,8 @@ moment from now, and lets that prediction
 2. help **re-find the lock** when a fast target outruns its last box (fewer wrong
    re-locks / target switches).
 
-The same estimator can also lead the **aim point** itself: **Anchor** is a fourth
-*Aim Lead Method* on the Aim page (see [Aim-lead method](#aim-lead-method-aim-lead-method-anchor)
-below), independent of the master switch.
+The estimator only drives the FOV / lock layer. The aim point itself is led by the classic Velocity
+predictor (*Aim Lead*, Aim page); an Anchor method for the aim lead existed for a time and was removed.
 
 It never replaces the existing tracker, target selection or FOV logic. With
 **Enable Box Prediction** off (the default) nothing runs and the app behaves exactly as
@@ -71,7 +70,7 @@ engages for brisk acceleration or a long enough history window.
 Two modes used to exist and are retired as redundant (old files load unchanged, see *Retired options*):
 **Linear** was Velocity with Acceleration 0 (the estimator only used it to zero the acceleration term;
 the output is bit-identical, tested), and **Disabled** duplicated the master switch ("Enable Anchor
-Prediction") and, for the aim-lead method, the Prediction switch and method choice.
+Prediction").
 
 `quality = 0.4*confidence + 0.3*stability + 0.3*direction-consistency`, where *stability* is
 the overlap between the new box and the box the previous state **predicted** (so a fast but
@@ -133,45 +132,6 @@ unchanged. With influence 0 (or Anchor off) the corrections are exactly 0.
 predicted box)`. It can only add matches, never remove them, and is `None` (no change) unless
 the prediction is valid.
 
-## Aim-lead method (Aim Lead Method: Anchor)
-
-Aim page -> Advanced Aim Tuning -> **Aim Lead Method** is Velocity / **Anchor** (the EMA and Rolling methods were
-removed in the settings cleanup; the benchmark table below still lists them as historical reference).
-With Anchor the aim point is led by this estimator instead of the single-purpose velocity
-predictors. It is **independent of "Enable Box Prediction"** (that switch only governs the FOV /
-lock-association layer above): picking the method is enough, and the `anchor_*` tuning is shared.
-
-* **Own track.** `LoopState.aim_anchor` (one `AnchorTrack`) is fed the locked box shifted by the
-  same camera-drift compensation the aim point already carries
-  (`process_aiming`'s `pred_x - target_x`), so our own correction never reads as target velocity.
-  Time stamps are the same as the other predictors (`prediction_capture_timestamps` when on, else
-  `perf_counter`).
-* **Horizon.** The aim-lead horizon (`prediction_horizon_ms`, ~10 ms, incl. Adaptive Lead) - *not*
-  `anchor_horizon_ms`, which stays the FOV horizon.
-* **Lead.** `predict_aim_point()` takes the predicted box's displacement; the aim point keeps its
-  relative place inside the box (`aim = pcx + (aim_x - cx) * pw / w`), so a head offset follows a
-  box that grows or shrinks. Kalman (if on) still runs after it; the predicted-aim marker and Web ESP
-  marker read the final point unchanged.
-* **Shared tuning:** `anchor_mode`, `anchor_strength`,
-  `anchor_velocity_smoothing`, `anchor_accel_comp`, `anchor_confidence_threshold`,
-  `anchor_history_len`, `anchor_max_distance_pct`; `prediction_max_velocity` is the jump gate.
-  `anchor_horizon_ms` and the FOV influences only matter for the FOV layer. The shared tuning lives in
-  one place, the **Anchor Estimator** group on the Aim page (Aim tab in Web Control), shown while Anchor
-  Prediction is on **or** the method is Anchor; the Inference page keeps only the FOV-layer controls
-  and a pointer to it.
-* **Safeguards** come with the estimator: stationary dead-zone, noise-gated velocity /
-  acceleration, confidence fade-in, gap coasting (a couple of missed frames keep the lead, a long
-  gap restarts), restart on a teleport above `prediction_max_velocity`.
-* **Acquisition guard.** For the first 24 ms of a lock the track is reset and the frame is treated as a
-  fresh zero-velocity start, exactly like the other predictors. The track is also reset on genuine
-  target loss (`anchor_reset`), when prediction is turned off, and when the method is switched away.
-* **Not selected = no change.** Default stays `velocity`; the other methods and every FOV path are
-  untouched (a stationary target gets exactly zero lead).
-
-Which mode for the aim lead? The shared default `adaptive` smooths the velocity, which suits the FOV
-but lags on rapid acceleration; for the aim lead `velocity_accel` (Velocity) responds fastest, while
-`smoothed` / `adaptive` give the steadiest lead (see the benchmark).
-
 ## Settings
 
 Stored under `tracking.anchor.*` (aim-preset eligible) and `display.show_anchor_debug`.
@@ -196,9 +156,8 @@ influence of the current shrink mode) and Aim page -> **Anchor Estimator** (mode
 acceleration, confidence, history, maximum distance); debug toggle on the Visuals page. Web Control: the
 same split between the Inference and Aim tabs, plus the Visuals tab. Names: the aim-lead history is
 **Aim Lead History**, the estimator's is **Estimator History**; **Aim Step Smoothing** (mouse step),
-**Estimator Smoothing** and **FOV Anchor Smoothing** (Anchor FOV) are three different layers. The FOV layer is separate from the classic aim-lead predictors
-(`prediction_*`, ~10 ms, lead the *aim point*); they share only `prediction_max_velocity` - plus the
-`anchor_*` tuning when the aim-lead method is **Anchor** (previous section).
+**Estimator Smoothing** and **FOV Anchor Smoothing** (Anchor FOV) are three different layers. The FOV layer is separate from the classic aim-lead predictor
+(`prediction_*`, ~10 ms, leads the *aim point*); they share only `prediction_max_velocity`.
 
 ## Debug overlay
 
@@ -233,25 +192,6 @@ Lock stability with two crossing targets (800 vs 300 px/s): wrong re-locks per t
 1.00 -> 0.00 at 10 and 20 FPS, 1.00 -> 0.03 at 30 FPS, 0.60 -> 0.00 at 60 FPS; holds per trial
 0.48-0.83 -> 0.
 
-Aim-lead methods at the 10 ms aim-lead horizon, 60 FPS, 1 px detector noise (RMSE px of the led aim
-point against the target 10 ms later; baseline = no prediction):
-
-| Scenario | Baseline | Velocity | EMA | Rolling | Anchor linear | Anchor adaptive |
-|---|---|---|---|---|---|---|
-| Stationary | 1.39 | 1.87 | 0.97 | 1.57 | 1.39 | 1.39 |
-| Slow, 60 px/s | 1.46 | 1.87 | 1.30 | 1.57 | 1.50 | 1.45 |
-| Fast, 900 px/s | 9.12 | 1.87 | 15.12 | 1.57 | 1.51 | 1.44 |
-| Accelerating | 22.56 | 1.87 | 37.60 | 1.62 | 1.60 | 3.07 |
-| Sudden reversal | 5.31 | 2.08 | 8.51 | 1.94 | 1.91 | 2.20 |
-| Zig-zag | 4.19 | 1.94 | 6.65 | 1.92 | 1.89 | 3.14 |
-
-At a 10 ms horizon every velocity-based method is limited by detector noise, so accuracy on moving
-targets is on par with Velocity / Rolling (EMA lags). What Anchor adds is **no extra jitter on a
-still target** (RMSE equals the baseline, where Velocity adds ~0.5 px and Rolling ~0.2 px) and the
-gap / restart / confidence safeguards; `adaptive` trades some responsiveness on accelerating and
-zig-zag targets for that steadiness. Cost per frame: ~11 us (`linear`) / ~15 us (`adaptive`) for the
-aim-lead update itself against ~0.5 us for Velocity - about 0.2 % of one core at 144 FPS.
-
 Cost: ~28 us added per detection frame (best of 7; the FOV+tracker step itself is ~6 us), no
 memory retained per frame. That is ~0.4 % of a 144 FPS frame budget.
 
@@ -272,7 +212,7 @@ memory retained per frame. That is ~0.4 % of a 144 FPS frame budget.
 | Retired | Why | On load |
 |---|---|---|
 | mode `linear` | = Velocity with Acceleration 0 | mode `velocity_accel`, `anchor_accel_comp = 0` |
-| mode `disabled` | duplicates the master switch / the Prediction on-off and method choice | `anchor_enabled = False`, mode `adaptive`; an aim-lead method of Anchor becomes Velocity, so "no lead" stays "no lead" |
+| mode `disabled` | duplicates the master switch | `anchor_enabled = False`, mode `adaptive` |
 
 The Inference page now shows one FOV-influence slider: only the influence of the current shrink mode
 (Adaptive or Dynamic) ever acts, so the other is hidden (both values stay in the file).

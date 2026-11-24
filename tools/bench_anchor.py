@@ -24,8 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from core.ai_loop_state import LoopState  # noqa: E402
 from core.ai_loop_utils import anchor_on_match, anchor_ref_box, compute_effective_fov  # noqa: E402
-from core.anchor_prediction import AnchorParams, AnchorTrack, MODES, predict_aim_point  # noqa: E402
-from core.target_predictor import VelocityPredictor  # noqa: E402
+from core.anchor_prediction import AnchorParams, AnchorTrack, MODES  # noqa: E402
 from core.target_tracking import edge_ratio, find_continuation  # noqa: E402
 
 T0 = 1000.0
@@ -209,64 +208,11 @@ def cpu_cost(frames=5000, repeats=7):
     return out
 
 
-AIM_LEAD_METHODS = ("velocity", "anchor linear", "anchor adaptive")      # EMA / Rolling were removed from the app
-
-
-def _aim_lead_predictor(method, horizon, fps):
-    """(update(x, y, t, box) -> (x, y)) for one aim-lead Prediction Method, configured like the app
-    does at the given horizon."""
-    if method == "velocity":
-        pr = VelocityPredictor(history_len=3, max_velocity_px_per_s=5000.0)
-        return lambda x, y, t, b: pr.update(x, y, t, horizon)
-    tr = make_track(method.split()[1])
-    tr.params.max_speed_px_s = 5000.0
-    return lambda x, y, t, b: predict_aim_point(tr, t, b, x, y, horizon, 0.9)
-
-
-def aim_lead_error(fn, method, fps=60, seconds=3.0, noise=1.0, seed=1, horizon=0.01):
-    """RMSE (px) of the led aim point against where the target really is ``horizon`` later, and the RMSE of
-    not predicting at all. Same noisy detections for every method (seeded)."""
-    rng = random.Random(seed)
-    update = _aim_lead_predictor(method, horizon, fps)
-    se_p = se_b = 0.0
-    n = 0
-    for i in range(int(seconds * fps)):
-        t = i / fps
-        x, y = fn(t)
-        nx, ny = x + rng.gauss(0, noise), y + rng.gauss(0, noise)
-        px, py = update(nx, ny, T0 + t, box(nx, ny))
-        if t < 0.5:
-            continue
-        tx, ty = fn(t + horizon)
-        se_p += (px - tx) ** 2 + (py - ty) ** 2
-        se_b += (nx - tx) ** 2 + (ny - ty) ** 2
-        n += 1
-    return math.sqrt(se_p / n), math.sqrt(se_b / n)
-
-
-def aim_lead_cpu(frames=20000, repeats=5):
-    """Microseconds per frame of each aim-lead method's own update (best of ``repeats``)."""
-    out = {}
-    paths = [(CX + 80 * math.sin(i / 20), CY + 40 * math.sin(i / 13)) for i in range(frames)]
-    for method in AIM_LEAD_METHODS:
-        update = _aim_lead_predictor(method, 0.01, 144)
-        best = float("inf")
-        for _ in range(repeats):
-            update = _aim_lead_predictor(method, 0.01, 144)
-            t_start = time.perf_counter()
-            for i, (x, y) in enumerate(paths):
-                update(x, y, T0 + i / 144.0, (x - 20, y - 40, x + 20, y + 40))
-            best = min(best, (time.perf_counter() - t_start) / frames * 1e6)
-        out[method] = best
-    return out
-
-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
-    rep = {"prediction": {}, "aim_lead": {}, "fov": {}, "stability": {}, "cpu": cpu_cost(),
-           "aim_lead_cpu_us": aim_lead_cpu()}
+    rep = {"prediction": {}, "fov": {}, "stability": {}, "cpu": cpu_cost()}
 
     for name, fn in SCENARIOS.items():
         rep["prediction"][name] = {}
@@ -278,9 +224,6 @@ def main() -> None:
         for mode in ("linear", "smoothed", "adaptive"):
             rmse, base, jit = prediction_error(SCENARIOS["fast (900 px/s)"], mode, fps=fps)
             rep["prediction"][f"fast @ {fps} fps"][mode] = {"rmse_px": rmse, "baseline_px": base, "lead_jitter_px": jit}
-    for name, fn in SCENARIOS.items():
-        rep["aim_lead"][name] = {m: aim_lead_error(fn, m)[0] for m in AIM_LEAD_METHODS}
-        rep["aim_lead"][name]["baseline"] = aim_lead_error(fn, "velocity")[1]
     for mode, sg in (("adaptive", False), ("dynamic", False), ("dynamic", True)):
         for kind in ("approach", "zigzag"):
             off, on = fov_metrics(fov_run(mode, sg, False, kind)), fov_metrics(fov_run(mode, sg, True, kind))
@@ -300,12 +243,6 @@ def main() -> None:
         base = next(iter(modes.values()))["baseline_px"]
         jit = "  ".join(f"{m}: {v['lead_jitter_px']:5.2f}" for m, v in modes.items())
         print(f"{name:22s} baseline {base:7.2f} | {row}\n{'':22s} lead jitter (px)        | {jit}")
-    print("\n== Aim-lead Prediction Method at a 10 ms horizon, 60 FPS (RMSE px of the led aim point; "
-          "baseline = no prediction; noise sigma 1 px) ==")
-    print(f"{'':22s} {'baseline':>9s} " + " ".join(f"{m:>15s}" for m in AIM_LEAD_METHODS))
-    for name, row in rep["aim_lead"].items():
-        print(f"{name:22s} {row['baseline']:9.2f} " + " ".join(f"{row[m]:15.2f}" for m in AIM_LEAD_METHODS))
-    print("per-frame update cost (us): " + "  ".join(f"{m} {v:.2f}" for m, v in rep["aim_lead_cpu_us"].items()))
     print("\n== FOV (off -> on): total variation / jerk / mean scale ==")
     for k, v in rep["fov"].items():
         print(f"{k:28s} TV {v['total_variation'][0]:5.2f}->{v['total_variation'][1]:5.2f}  "

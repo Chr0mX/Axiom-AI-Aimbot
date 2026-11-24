@@ -931,7 +931,7 @@
 
   // Advanced Aim Tuning: each sub-setting is shown only while the option it
   // tunes is active, mirroring aim_page.py's _updateAimTuningVisibility().
-  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "aim_ema_smoothing_enabled",
+  var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "aim_ema_smoothing_enabled",
     "sticky_lock_enabled", "kalman_enabled", "cam_motion_comp_enabled", "aim_y_reduce_enabled",
     "target_priority_mode", "anchor_mode"];
 
@@ -943,19 +943,17 @@
       if (card) card.classList.toggle("hidden", !show);
     }
     var predOn = !!(el("aim-prediction_enabled") && el("aim-prediction_enabled").checked);
-    var method = el("aim-prediction_method") ? el("aim-prediction_method").value : "velocity";
-    setCard("aim-prediction_method", predOn);
     setCard("aim-prediction_adaptive_lead", predOn);
     setCard("aim-prediction_capture_timestamps", predOn);
-    setCard("aim-prediction_lsq_fit", predOn && method === "velocity");
-    setCard("aim-prediction_velocity_deadzone_px_s", predOn && method === "velocity");
+    setCard("aim-prediction_lsq_fit", predOn);
+    setCard("aim-prediction_velocity_deadzone_px_s", predOn);
     setCard("aim-aim_ema_smoothing", !!(el("aim-aim_ema_smoothing_enabled") && el("aim-aim_ema_smoothing_enabled").checked));
     // Same parent -> child rules as aim_page.py (display only; hidden options keep their values).
     function on(id) { return !!(el(id) && el(id).checked); }
     var stickyOn = on("aim-sticky_lock_enabled");
     setCard("aim-prediction_horizon_ms", predOn);
     setCard("aim-prediction_max_velocity", predOn);
-    setCard("aim-prediction_history_len", predOn && method !== "anchor");
+    setCard("aim-prediction_history_len", predOn);
     setCard("aim-lock_persistence_ms", stickyOn);
     ["lost_target_timeout_ms", "min_lock_duration_ms", "target_switch_threshold", "reacquire_radius_px", "tracking_confidence"]
       .forEach(function (k) { setCard("aim-" + k, stickyOn); });
@@ -966,10 +964,10 @@
     });
     setCard("aim-target_priority_confidence_weight", !!(el("aim-target_priority_mode") && el("aim-target_priority_mode").value === "composite"));
 
-    // Anchor Estimator: shown while Box Prediction (Inference tab, server extra anchor_enabled) or the Aim
-    // Lead with the Anchor method uses it (same rule as aim_page._updateAnchorEstimatorVisibility()).
+    // Anchor Estimator: shown while Box Prediction (Inference tab, server extra anchor_enabled) uses it
+    // (same rule as aim_page._updateAnchorEstimatorVisibility()).
     var d = lastSettings.aim || {};
-    var shared = !!d.anchor_enabled || (predOn && method === "anchor");
+    var shared = !!d.anchor_enabled;
     var sec = el("aim-anchor-est-sec");
     if (sec) sec.classList.toggle("hidden", !shared);
     var amode = (el("aim-anchor_mode") || {}).value || d.anchor_mode || "adaptive";
@@ -2940,7 +2938,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "24") return;
+    if (cssVer !== "25") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

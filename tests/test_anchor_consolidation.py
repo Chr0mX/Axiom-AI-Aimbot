@@ -12,7 +12,7 @@ import pytest
 
 from core import anchor_fov as af
 from core import config as cfgmod
-from core.anchor_prediction import MODES_UI, AnchorParams, AnchorTrack, aim_uses_anchor, anchor_active
+from core.anchor_prediction import MODES_UI, AnchorParams, AnchorTrack, anchor_active
 
 
 def new_config():
@@ -39,14 +39,6 @@ class TestModeMigration:
         c = load({"tracking": {"anchor": {"mode": "disabled", "enabled": True}}})
         assert c.anchor_enabled is False and c.anchor_mode == "adaptive"
         assert anchor_active(c) is False
-
-    def test_disabled_with_the_aim_lead_method_keeps_meaning_no_lead(self):
-        c = load({"tracking": {"anchor": {"mode": "disabled"}, "prediction": {"enabled": True, "method": "anchor"}}})
-        assert c.prediction_method == "velocity" and aim_uses_anchor(c) is False
-
-    def test_disabled_leaves_other_prediction_methods_alone(self):
-        c = load({"tracking": {"anchor": {"mode": "disabled"}, "prediction": {"method": "velocity"}}})
-        assert c.prediction_method == "velocity"
 
     @pytest.mark.parametrize("mode", MODES_UI)
     def test_current_modes_are_untouched(self, mode):

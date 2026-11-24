@@ -177,7 +177,6 @@ _FIELD_MAP = {
     'prediction_horizon_ms':      'tracking.prediction.horizon_ms',
     'prediction_max_velocity':    'tracking.prediction.max_velocity',
     'prediction_history_len':     'tracking.prediction.history_len',
-    'prediction_method':          'tracking.prediction.method',
     'prediction_adaptive_lead':   'tracking.prediction.adaptive_lead',
     'prediction_capture_timestamps': 'tracking.prediction.capture_timestamps',
     'prediction_lsq_fit':         'tracking.prediction.lsq_fit',
@@ -876,7 +875,6 @@ class Config:
         self.prediction_horizon_ms: float = 10.0    # 預測時間窗口 (ms)
         self.prediction_max_velocity: float = 1200.0  # 最大有效速度 (px/s)
         self.prediction_history_len: int = 3         # 歷史點數量
-        self.prediction_method: str = "velocity"     # velocity | ema | rolling | anchor (core/anchor_prediction.py, shares the anchor_* tuning)
         self.prediction_adaptive_lead: bool = False
         # Velocity-estimate refinements — all off by default so existing
         # configs keep their current prediction feel until opted in.
@@ -1473,9 +1471,6 @@ def _validate_gpu_monitor(config: Config) -> None:
 
 def _validate_aim_math(config: Config) -> None:
     """Clamp the optional Advanced Aim Tuning fields."""
-    # 'ema' and 'rolling' were removed (the Anchor estimator and the Velocity predictor cover them): old files fall back.
-    if getattr(config, 'prediction_method', 'velocity') not in ('velocity', 'anchor'):
-        config.prediction_method = 'velocity'
     config.aim_x_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
     config.aim_y_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))
     config.aim_ema_smoothing = max(0.01, min(1.0, float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)))
@@ -1488,9 +1483,8 @@ def migrate_anchor_settings(config) -> None:
 
     * ``anchor_mode == 'linear'`` is Velocity with the Acceleration slider at 0 (the estimator only
       used the mode to zero the acceleration term), so it becomes ``velocity_accel`` + accel 0.
-    * ``anchor_mode == 'disabled'`` duplicated the master switch (``anchor_enabled``) and, for the
-      aim-lead method, the Prediction on/off + method choice: it turns the FOV layer off, and an
-      aim-lead method that was Anchor falls back to Velocity so "no lead" stays "no lead".
+    * ``anchor_mode == 'disabled'`` duplicated the master switch (``anchor_enabled``): it turns the
+      FOV layer off.
     """
     mode = getattr(config, 'anchor_mode', 'adaptive')
     if mode == 'linear':
@@ -1499,8 +1493,6 @@ def migrate_anchor_settings(config) -> None:
     elif mode == 'disabled':
         config.anchor_enabled = False
         config.anchor_mode = 'adaptive'
-        if getattr(config, 'prediction_method', 'velocity') == 'anchor':
-            config.prediction_method = 'velocity'
 
 
 def _validate_anchor(config: Config) -> None:

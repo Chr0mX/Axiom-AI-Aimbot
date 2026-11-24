@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
-from .anchor_prediction import AnchorBank, AnchorTrack, AnchorView, FovAdjuster
+from .anchor_prediction import AnchorBank, AnchorView, FovAdjuster
 from .target_tracking import TargetTracker
 
 
@@ -69,9 +69,6 @@ class LoopState:
     anchor_view: AnchorView = field(default_factory=AnchorView)
     anchor_fov: FovAdjuster = field(default_factory=FovAdjuster)
     anchor_params_t: float = 0.0
-    # Aim-lead method 'anchor' (prediction_method): its own track, independent of the FOV bank above.
-    aim_anchor: AnchorTrack = field(default_factory=AnchorTrack)
-    aim_anchor_params_t: float = 0.0
     # Anchor FOV controller (core/anchor_fov.py), created lazily, only used in that mode.
     afov: Any = None
 

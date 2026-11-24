@@ -1104,36 +1104,20 @@ class TestTrackingSettings:
         assert c.tracking_confidence == 0.6          # capped at the acquisition bar
 
 
-class TestPredictionMethodValidation:
-    """prediction_method accepts velocity / ema / rolling / anchor; anything else falls back to velocity."""
+class TestRemovedPredictionMethod:
+    """The Aim Lead method choice is gone (only the Velocity predictor is left): old files that carry
+    tracking.prediction.method are ignored and the key is no longer written."""
 
-    def test_default_is_velocity(self):
-        assert _make_config().prediction_method == 'velocity'
+    def test_field_is_gone(self):
+        assert not hasattr(_make_config(), 'prediction_method')
+        assert 'method' not in _make_config().to_dict()['tracking']['prediction']
 
-    @pytest.mark.parametrize("method", ["velocity", "anchor"])
-    def test_known_methods_survive_validation(self, method):
-        from core.config import validate_config
+    @pytest.mark.parametrize("old", ["anchor", "ema", "rolling", "velocity"])
+    def test_old_files_still_load(self, old):
         c = _make_config()
-        c.prediction_method = method
-        validate_config(c)
-        assert c.prediction_method == method
-
-    @pytest.mark.parametrize("junk", ["", "ANCHOR2", "kalman", None, 3])
-    def test_unknown_methods_fall_back_to_velocity(self, junk):
-        from core.config import validate_config
-        c = _make_config()
-        c.prediction_method = junk
-        validate_config(c)
-        assert c.prediction_method == 'velocity'
-
-    def test_anchor_round_trips_through_the_file_format(self):
-        c = _make_config()
-        c.prediction_method = 'anchor'
-        d = c.to_dict()
-        assert d['tracking']['prediction']['method'] == 'anchor'
-        c2 = _make_config()
-        c2.from_dict(d)
-        assert c2.prediction_method == 'anchor'
+        c.from_dict({'tracking': {'prediction': {'enabled': True, 'method': old}}})
+        assert c.prediction_enabled is True
+        assert not hasattr(c, 'prediction_method')
 
 
 class TestCleanupMigrations:

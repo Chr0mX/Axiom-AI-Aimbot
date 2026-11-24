@@ -60,11 +60,11 @@ _AFOV_CARDS = (
 # one table used both when the cards are built and by retranslateUi().
 _ANCHOR_TEXT = {
     "anchorEnableCard": ("anchor_enabled", "Enable Box Prediction",
-                         "Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. This is separate from the Aim Lead (aim point, Aim page); both use the estimator tuned on the Aim page under Anchor Estimator."),
+                         "Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. This is separate from the Aim Lead (aim point, Aim page); the estimator is tuned on the Aim page under Anchor Estimator."),
     "anchorHorizonCard": ("anchor_horizon", "FOV Prediction Horizon",
                           "How far ahead the FOV / lock layer predicts the box (~100 ms). The Aim Lead has its own, much shorter horizon on the Aim page."),
     "anchorEstHintCard": ("anchor_est_hint", "Estimator Tuning",
-                          "Mode, strength, smoothing, acceleration, confidence, history and the distance limit are set once, on the Aim page under Anchor Estimator (shared with the Aim Lead Anchor method)."),
+                          "Mode, strength, smoothing, acceleration, confidence, history and the distance limit are set once, on the Aim page under Anchor Estimator."),
     "anchorInflAdaptiveCard": ("anchor_fov_influence_adaptive", "Prediction Influence on Adaptive FOV",
                                "How strongly the prediction opens the Adaptive FOV early for a target heading for its edge. 0 = ignore the prediction"),
     "anchorInflDynamicCard": ("anchor_fov_influence_dynamic", "Prediction Influence on Dynamic FOV",

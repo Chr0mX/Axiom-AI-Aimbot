@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=24">
+  <link rel="stylesheet" href="styles.css?v=25">
 </head>
 <body>
   <div class="app">
@@ -731,7 +731,7 @@
             <div class="field-card" id="inf-anchor-enable-card">
               <div class="field-info">
                 <div class="field-title">Enable Box Prediction</div>
-                <div class="field-desc">Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. This is separate from the Aim Lead (aim point, Aim page); both use the estimator tuned on the Aim page under Anchor Estimator.</div>
+                <div class="field-desc">Predict where the locked target's box will be a moment from now, and let that nudge the Adaptive/Dynamic FOV and help re-find the lock. Off = everything behaves exactly as before. This is separate from the Aim Lead (aim point, Aim page); the estimator is tuned on the Aim page under Anchor Estimator.</div>
               </div>
               <div class="field-control">
                 <label class="switch">
@@ -753,7 +753,7 @@
             <div class="field-card" id="inf-anchor-hint-card">
               <div class="field-info">
                 <div class="field-title">Estimator Tuning</div>
-                <div class="field-desc">Mode, strength, smoothing, acceleration, confidence, history and the distance limit are set once, on the Aim tab under Anchor Estimator (shared with the Aim Lead Anchor method).</div>
+                <div class="field-desc">Mode, strength, smoothing, acceleration, confidence, history and the distance limit are set once, on the Aim tab under Anchor Estimator.</div>
               </div>
             </div>
             <div class="field-card" id="inf-anchor-infl-adaptive-card">
@@ -1243,18 +1243,6 @@
                 <span class="field-slider-value">ms</span>
               </div>
             </div>
-            <div class="field-card">
-              <div class="field-info">
-                <div class="field-title">Aim Lead Method</div>
-                <div class="field-desc">Velocity (extends the target's recent speed) or Anchor (predicts the target's box; tuned under Anchor Estimator below)</div>
-              </div>
-              <div class="field-control">
-                <select id="aim-prediction_method" data-key="prediction_method" data-type="choice">
-                  <option value="velocity">Velocity</option>
-                  <option value="anchor">Anchor</option>
-                </select>
-              </div>
-            </div>
             <div class="micro-grid" data-cols="2" data-kind="toggles">
             <div class="field-card">
               <div class="field-info"><div class="field-title">Adaptive Lead</div><div class="field-desc">Stretch the time lead when the mouse is moving slowly</div></div>
@@ -1320,7 +1308,7 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Aim Lead History</div><div class="field-desc">How many recent detections the Aim Lead velocity estimate uses. The Anchor method has its own Estimator History.</div></div>
+              <div class="field-info"><div class="field-title">Aim Lead History</div><div class="field-desc">How many recent detections the Aim Lead velocity estimate uses.</div></div>
               <div class="field-control">
                 <input type="number" id="aim-prediction_history_len" data-key="prediction_history_len" data-advanced="1" data-type="number" min="2" max="6" step="1">
               </div>
@@ -2646,6 +2634,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=24"></script>
+  <script src="app.js?v=25"></script>
 </body>
 </html>

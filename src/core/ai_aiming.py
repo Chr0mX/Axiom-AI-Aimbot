@@ -12,7 +12,6 @@ from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .aim_paths import adaptive_lead_s, ema_step
-from .anchor_prediction import predict_aim_point
 from .target_predictor import VelocityPredictor
 from .target_tracking import box_iou, edge_ratio, lost_timeout_s, select_target
 
@@ -51,37 +50,6 @@ def _get_predictor(config: Config) -> VelocityPredictor:
     _predictor.lsq_fit = bool(getattr(config, 'prediction_lsq_fit', False))
     _predictor.velocity_deadzone = float(getattr(config, 'prediction_velocity_deadzone_px_s', 0.0) or 0.0)
     return _predictor
-
-
-def _reset_unused_predictors(method: str) -> None:
-    if method != "velocity" and _predictor is not None:
-        _predictor.reset()
-
-
-# How often the aim-lead anchor track re-reads the shared anchor_* settings (seconds).
-_ANCHOR_AIM_PARAMS_REFRESH_S = 0.25
-
-
-def _anchor_aim_lead(config: Config, state: LoopState, box, comp_dx: float, comp_dy: float,
-                     aim_x: float, aim_y: float, now_t: float, horizon_s: float,
-                     det_conf: float):
-    """Prediction Method 'anchor': lead the (already compensated) aim point with the
-    Anchor estimator. ``box`` is the locked box in raw screen coordinates; it is shifted
-    by the same camera-drift / own-mouse compensation the aim point carries
-    (``comp_dx/comp_dy``) so our own correction never reads as target velocity. Uses the
-    aim-lead horizon, not ``anchor_horizon_ms`` (that one is the FOV layer's)."""
-    track = state.aim_anchor
-    # 0.0 = never refreshed (fresh state / after anchor_reset): load the config right away
-    # instead of relying on the clock already being past the refresh interval.
-    if (state.aim_anchor_params_t == 0.0
-            or now_t - state.aim_anchor_params_t >= _ANCHOR_AIM_PARAMS_REFRESH_S
-            or state.aim_anchor_params_t > now_t):
-        track.params.update_from(config)
-        state.aim_anchor_params_t = now_t
-    if track.params.mode == 'disabled':          # stale value only: never stored (config.migrate_anchor_settings)
-        return aim_x, aim_y
-    shifted = (box[0] + comp_dx, box[1] + comp_dy, box[2] + comp_dx, box[3] + comp_dy)
-    return predict_aim_point(track, now_t, shifted, aim_x, aim_y, horizon_s, det_conf)
 
 
 def calculate_aim_target(
@@ -364,15 +332,8 @@ def process_aiming(
         # nothing anticipating a moving target, which read as the aimbot
         # feeling permanently a step behind.
         if getattr(config, 'prediction_enabled', False):
-            method = str(getattr(config, 'prediction_method', 'velocity') or 'velocity')
-            if method not in ('velocity', 'anchor'):
-                method = 'velocity'
             if _in_acquisition:
-                _reset_unused_predictors('')
-                if method == 'velocity':
-                    _get_predictor(config).reset()
-                else:
-                    state.aim_anchor.reset()
+                _get_predictor(config).reset()
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
             if getattr(config, 'prediction_adaptive_lead', False):
                 horizon_s = adaptive_lead_s(horizon_s, float(getattr(state, 'last_mouse_speed_px_s', 0.0)))
@@ -382,19 +343,9 @@ def process_aiming(
                 now_t = state.frame_capture_t
             else:
                 now_t = time.perf_counter()
-            if method == 'anchor':
-                pred_x, pred_y = _anchor_aim_lead(
-                    config, state, selected_box, pred_x - target_x, pred_y - target_y,
-                    pred_x, pred_y, now_t, horizon_s, _conf)
-            else:
-                pred_x, pred_y = _get_predictor(config).update(pred_x, pred_y, now_t, horizon_s)
-            _reset_unused_predictors(method)
-            if method != 'anchor' and state.aim_anchor.samples:
-                state.aim_anchor.reset()
-        else:
-            _reset_unused_predictors('')
-            if state.aim_anchor.samples:
-                state.aim_anchor.reset()
+            pred_x, pred_y = _get_predictor(config).update(pred_x, pred_y, now_t, horizon_s)
+        elif _predictor is not None:
+            _predictor.reset()
 
         # --- Kalman filter aim-point smoothing (optional) ---
         if getattr(config, 'kalman_enabled', False):

@@ -202,8 +202,7 @@ _SCHEMA: dict[str, dict[str, dict]] = {
         "prediction_horizon_ms": {"type": "float", "min": 5, "max": 50},
         "prediction_max_velocity": {"type": "float", "min": 300, "max": 3000},
         "prediction_history_len": {"type": "int", "min": 2, "max": 6},
-        "prediction_method": {"type": "choice", "choices": ["velocity", "anchor"]},
-        # Anchor Estimator (aim_page.py): shared by the Aim Lead "Anchor" method and the Inference tab's Box Prediction.
+        # Anchor Estimator (aim_page.py): used by the Inference tab's Box Prediction (FOV layer).
         # "disabled" and "linear" are retired (the master switch / Acceleration 0 cover them); they are
         # still accepted from old scripts and folded by config.migrate_anchor_settings() in _post_apply.
         "anchor_mode": {"type": "choice", "choices": ["velocity_accel", "smoothed", "adaptive", "linear", "disabled"]},
@@ -554,8 +553,8 @@ def get_tab_settings(config, tab: str) -> dict:
         result["reduced_rate_ignored"] = bool(reduced_rate_ignored(config))
 
     if tab == "aim":
-        # Read-only extra: the Anchor Estimator group is shown while Box Prediction (Inference tab) is on or
-        # the Aim Lead uses the Anchor method (same rule as aim_page._updateAnchorEstimatorVisibility()).
+        # Read-only extra: the Anchor Estimator group is shown while Box Prediction (Inference tab) is on
+        # (same rule as aim_page._updateAnchorEstimatorVisibility()).
         result["anchor_enabled"] = bool(getattr(config, "anchor_enabled", False))
 
     if tab == "keys":

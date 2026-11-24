@@ -76,7 +76,7 @@ _LOCK_CARDS = (
 # config.migrate_anchor_settings() turns old values into these on load.
 _ANCHOR_MODES = ("velocity_accel", "smoothed", "adaptive")
 
-# Anchor Estimator cards (shared by Aim Lead's Anchor method and the Inference page's Box Prediction):
+# Anchor Estimator cards (the Inference page's Box Prediction / FOV layer uses this estimator):
 # (attribute, title key, English title, English description) - one table for construction and retranslateUi().
 _ANCHOR_EST_TEXT = (
     ("anchorModeCard", "anchor_mode", "Estimator Mode",
@@ -94,8 +94,6 @@ _ANCHOR_EST_TEXT = (
     ("anchorMaxDistCard", "anchor_max_distance_pct", "Maximum Prediction Distance",
      "Longest predicted movement, as a % of the FOV size. 0 = no limit"),
 )
-_PREDICTION_METHOD_DESC = ("Velocity (extends the target's recent speed) or Anchor (predicts the target's box; "
-                           "tuned under Anchor Estimator below)")
 
 
 class _AimPointPreview(QWidget):
@@ -967,7 +965,7 @@ class AimPage(BasePage):
             t("prediction_history", "Aim Lead History"),
             2, 6,
             format_func=lambda v: str(v),
-            description=t("prediction_history_desc", "How many recent detections the Aim Lead velocity estimate uses. The Anchor method has its own Estimator History."),
+            description=t("prediction_history_desc", "How many recent detections the Aim Lead velocity estimate uses."),
             parent=self.trackingGroup
         )
 
@@ -1238,17 +1236,6 @@ class AimPage(BasePage):
         self.addContent(self.trackingGroup)
 
         self.mathGroup = SettingCardGroup(t("aim_tuning_group", "Advanced Aim Tuning"), self.scrollWidget)
-        self.predictionMethodCombo = ComboBox()
-        self.predictionMethodCombo.addItems(["Velocity", "Anchor"])
-        self.predictionMethodCombo.setMinimumWidth(130)
-        self.predictionMethodCard = SettingCard(
-            FluentIcon.HISTORY,
-            t("prediction_method", "Aim Lead Method"),
-            t("prediction_method_desc", _PREDICTION_METHOD_DESC),
-            self.mathGroup,
-        )
-        self.predictionMethodCard.hBoxLayout.addWidget(self.predictionMethodCombo, 0)
-        self.predictionMethodCard.hBoxLayout.addSpacing(16)
         self.predictionAdaptiveLeadCard = SwitchSettingCard(
             FluentIcon.SPEED_HIGH,
             t("prediction_adaptive_lead", "Adaptive Lead"),
@@ -1290,15 +1277,15 @@ class AimPage(BasePage):
             -100, 100, format_func=lambda v: f"{v}%", parent=self.mathGroup,
         )
         for card in (
-            self.predictionMethodCard, self.predictionAdaptiveLeadCard,
+            self.predictionAdaptiveLeadCard,
             self.captureTimestampsCard, self.lsqFitCard, self.velocityDeadzoneCard,
             self.emaSmoothingCard, self.emaAmountCard, self.aimXOffsetCard, self.aimYOffsetCard,
         ):
             self.mathGroup.addSettingCard(card)
         self.addContent(self.mathGroup)
 
-        # Anchor Estimator: the one home for the tuning shared by the Aim Lead "Anchor" method and the
-        # Inference page's Box Prediction (it used to live on the Inference page).
+        # Anchor Estimator: the one home for the Inference page's Box Prediction tuning
+        # (it used to live on the Inference page).
         self.anchorEstGroup = SettingCardGroup(t("anchor_estimator", "Anchor Estimator"), self.scrollWidget)
         _est = {a: (k, ti, de) for a, k, ti, de in _ANCHOR_EST_TEXT}
 
@@ -1439,7 +1426,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
 
         # Target Tracking
         self.predictionEnableCard.checkedChanged.connect(self._onPredictionEnableChanged)
-        self.predictionMethodCombo.currentTextChanged.connect(self._onAimMathChanged)
         self.predictionAdaptiveLeadCard.checkedChanged.connect(self._onAimMathChanged)
         self.captureTimestampsCard.checkedChanged.connect(self._onAimMathChanged)
         self.lsqFitCard.checkedChanged.connect(self._onAimMathChanged)
@@ -1584,9 +1570,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
             self.camMotionCompCard.setChecked(cmc_on)
 
-            method_map = {"velocity": "Velocity", "anchor": "Anchor"}
-            self.predictionMethodCombo.setCurrentText(method_map.get(
-                str(getattr(self._config, 'prediction_method', 'velocity')), "Velocity"))
             self.predictionAdaptiveLeadCard.setChecked(bool(getattr(self._config, 'prediction_adaptive_lead', False)))
             self.captureTimestampsCard.setChecked(bool(getattr(self._config, 'prediction_capture_timestamps', False)))
             self.lsqFitCard.setChecked(bool(getattr(self._config, 'prediction_lsq_fit', False)))
@@ -2179,9 +2162,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         # old values back over a preset/web change.
         if not self._config or self._isLoadingConfig:
             return
-        method = {"Velocity": "velocity", "Anchor": "anchor"}.get(
-            self.predictionMethodCombo.currentText(), "velocity")
-        self._config.prediction_method = method
         self._config.prediction_adaptive_lead = bool(self.predictionAdaptiveLeadCard.isChecked())
         self._config.prediction_capture_timestamps = bool(self.captureTimestampsCard.isChecked())
         self._config.prediction_lsq_fit = bool(self.lsqFitCard.isChecked())
@@ -2196,15 +2176,11 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         """Show each Advanced Aim Tuning sub-setting only while the option it
         tunes is active — hidden rather than greyed out, same as Humanization."""
         pred_on = self.predictionEnableCard.isChecked()
-        method = self.predictionMethodCombo.currentText()
-        self.predictionMethodCard.setVisible(pred_on)
-        # Both methods use the time horizon, which Adaptive Lead stretches. Anchor's own tuning
-        # (mode, strength, smoothing, ...) is the Anchor Estimator group below; the least-squares
-        # fit and deadzone are Velocity-method options.
+        # The Anchor Estimator group below is tuning for Box Prediction (Inference page), not the Aim Lead.
         self.predictionAdaptiveLeadCard.setVisible(pred_on)
         self.captureTimestampsCard.setVisible(pred_on)
-        self.lsqFitCard.setVisible(pred_on and method == "Velocity")
-        self.velocityDeadzoneCard.setVisible(pred_on and method == "Velocity")
+        self.lsqFitCard.setVisible(pred_on)
+        self.velocityDeadzoneCard.setVisible(pred_on)
         self.emaAmountCard.setVisible(self.emaSmoothingCard.isChecked())
 
         # The rest of the "only while its parent option is on" rules (hidden, values kept; nothing here
@@ -2212,7 +2188,7 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         # the Y-recoil detail cards and the composite-only confidence weight.
         self.predictionHorizonCard.setVisible(pred_on)
         self.predictionMaxVelCard.setVisible(pred_on)
-        self.predictionHistoryCard.setVisible(pred_on and method != "Anchor")   # Anchor keeps its own history
+        self.predictionHistoryCard.setVisible(pred_on)
         sticky_on = self.stickyLockCard.isChecked()
         self.lockDecayCard.setVisible(sticky_on)
         for _attr, *_rest in _LOCK_CARDS:
@@ -2225,13 +2201,12 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
                      self.pidYReduceSettleCard, self.pidYReduceVelCard):
             card.setVisible(y_on)
         self.targetPriorityWeightCard.setVisible(self.targetPriorityModeCombo.currentText() == "Composite")
-        self._updateAnchorEstimatorVisibility(pred_on, method)
+        self._updateAnchorEstimatorVisibility()
 
-    def _updateAnchorEstimatorVisibility(self, pred_on, method):
-        """The estimator tuning shows while something uses it: Box Prediction (Inference page, read from
-        config) or the Aim Lead with the Anchor method. Hidden, never greyed; values are kept."""
-        box_on = bool(getattr(self._config, 'anchor_enabled', False)) if self._config else False
-        shared = box_on or (pred_on and method == "Anchor")
+    def _updateAnchorEstimatorVisibility(self):
+        """The estimator tuning shows while Box Prediction (Inference page, read from config) uses it.
+        Hidden, never greyed; values are kept."""
+        shared = bool(getattr(self._config, 'anchor_enabled', False)) if self._config else False
         self.anchorEstGroup.setVisible(shared)
         idx = self.anchorModeCombo.currentIndex()
         mode = _ANCHOR_MODES[idx] if 0 <= idx < len(_ANCHOR_MODES) else 'adaptive'
@@ -2464,15 +2439,13 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         for i, (key, default) in enumerate((("anchor_mode_velocity", "Velocity"),
                                             ("anchor_mode_smoothed", "Smoothed"), ("anchor_mode_adaptive", "Adaptive"))):
             self.anchorModeCombo.setItemText(i, t(key, default))
-        self.predictionMethodCard.titleLabel.setText(t("prediction_method", "Aim Lead Method"))
-        self.predictionMethodCard.contentLabel.setText(t("prediction_method_desc", _PREDICTION_METHOD_DESC))
         self.predictionEnableCard.titleLabel.setText(t("prediction_enabled", "Aim Lead"))
         self.predictionEnableCard.contentLabel.setText(t("prediction_desc", "Aim slightly ahead of a moving target: extrapolates its position forward by the Aim Lead Horizon."))
         self.predictionHorizonCard.titleLabel.setText(t("prediction_horizon", "Aim Lead Horizon"))
         self.predictionMaxVelCard.titleLabel.setText(t("prediction_max_velocity", "Max Velocity Cap"))
         self.predictionMaxVelCard.contentLabel.setText(t("prediction_max_vel_desc", "Velocity spikes above this are treated as detection jumps and reset prediction"))
         self.predictionHistoryCard.titleLabel.setText(t("prediction_history", "Aim Lead History"))
-        self.predictionHistoryCard.contentLabel.setText(t("prediction_history_desc", "How many recent detections the Aim Lead velocity estimate uses. The Anchor method has its own Estimator History."))
+        self.predictionHistoryCard.contentLabel.setText(t("prediction_history_desc", "How many recent detections the Aim Lead velocity estimate uses."))
         self.stickyLockCard.titleLabel.setText(t("sticky_lock_enabled", "Sticky Target Lock"))
         self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
         self.lockDecayCard.titleLabel.setText(t("lock_persistence", "Lock Persistence"))

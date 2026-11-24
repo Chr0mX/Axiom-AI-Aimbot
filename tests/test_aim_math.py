@@ -113,18 +113,6 @@ def test_new_prediction_options_are_persisted_and_clamped():
     assert cfg.prediction_velocity_deadzone_px_s == 500.0
 
 
-def test_removed_prediction_methods_fall_back_to_velocity():
-    from types import SimpleNamespace
-    from core.config import _validate_aim_math
-    for stale in ("ema", "rolling", "bogus"):
-        cfg = SimpleNamespace(prediction_method=stale)
-        _validate_aim_math(cfg)
-        assert cfg.prediction_method == "velocity", stale
-    cfg = SimpleNamespace(prediction_method="anchor")
-    _validate_aim_math(cfg)
-    assert cfg.prediction_method == "anchor"
-
-
 def _anchor_config():
     from unittest.mock import patch
     with patch("core.config._get_screen_size", return_value=(1920, 1080)):

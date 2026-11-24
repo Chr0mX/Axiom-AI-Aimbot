@@ -1381,20 +1381,16 @@ class TestAnchorPredictionSettings:
 
 
 class TestAnchorAimLeadSettings:
-    """Prediction Method 'anchor' on the Aim tab + the read-only extra the Inference tab uses to
+    """The Anchor Estimator tuning on the Aim tab + the read-only extra the Inference tab uses to
     show the shared Anchor tuning cards (client: updateAimTuningVisibility() / d.anchor_enabled)."""
 
-    def test_anchor_is_an_accepted_prediction_method(self):
-        assert "anchor" in wcs._SCHEMA["aim"]["prediction_method"]["choices"]
-        config = _config(prediction_method="velocity")
-        assert wcs.apply_tab_settings(config, "aim", {"prediction_method": "Anchor"})["ok"] is True
-        assert config.prediction_method == "anchor"
-        bad = wcs.apply_tab_settings(config, "aim", {"prediction_method": "psychic"})
-        assert bad["ok"] is False and config.prediction_method == "anchor"
+    def test_prediction_method_is_gone(self):
+        assert "prediction_method" not in wcs._SCHEMA["aim"]
+        assert wcs.apply_tab_settings(_config(), "aim", {"prediction_method": "anchor"})["reason"] == "unknown_field"
 
     def test_the_estimator_tuning_lives_on_the_aim_tab_only(self):
-        """Mode/strength/smoothing/accel/confidence/history/max distance are shared by Aim Lead's Anchor method
-        and Box Prediction, and are edited in one place: the Aim tab (Anchor Estimator)."""
+        """Mode/strength/smoothing/accel/confidence/history/max distance belong to Box Prediction
+        and are edited in one place: the Aim tab (Anchor Estimator)."""
         moved = ("anchor_mode", "anchor_strength", "anchor_velocity_smoothing", "anchor_accel_comp",
                  "anchor_confidence_threshold", "anchor_history_len", "anchor_max_distance_pct")
         for k in moved:
@@ -1409,7 +1405,7 @@ class TestAnchorAimLeadSettings:
         assert wcs.get_tab_settings(_config(), "aim")["anchor_enabled"] is False        # bare config
 
     def test_the_old_inference_extra_is_gone(self):
-        assert "aim_uses_anchor" not in wcs.get_tab_settings(_config(prediction_enabled=True, prediction_method="anchor"), "inference")
+        assert "aim_uses_anchor" not in wcs.get_tab_settings(_config(prediction_enabled=True), "inference")
 
     def test_moved_fields_are_still_written_through_the_aim_route(self):
         c = _config(anchor_strength=1.0)
@@ -1456,15 +1452,13 @@ class TestAnchorFovSettings:
         assert bad["ok"] is False and bad["field"] == "afov_source" and config.afov_follow_speed == 12.0
 
     def test_retired_values_from_old_scripts_are_still_accepted_and_normalised(self):
-        config = _config(afov_position="top", anchor_mode="adaptive", anchor_enabled=True, anchor_accel_comp=0.35,
-                         prediction_method="anchor")
+        config = _config(afov_position="top", anchor_mode="adaptive", anchor_enabled=True, anchor_accel_comp=0.35)
         assert wcs.apply_tab_settings(config, "inference", {"afov_position": "custom"})["ok"] is True
         assert config.afov_position == "center"
         assert wcs.apply_tab_settings(config, "aim", {"anchor_mode": "linear"})["ok"] is True
         assert (config.anchor_mode, config.anchor_accel_comp) == ("velocity_accel", 0.0)
         assert wcs.apply_tab_settings(config, "aim", {"anchor_mode": "disabled"})["ok"] is True
         assert config.anchor_enabled is False and config.anchor_mode == "adaptive"
-        assert config.prediction_method == "velocity"
 
 
 class TestWriteOnlySecret:
