@@ -49,9 +49,6 @@ Aim-lead extras (all off unless their parameter is set, so the default behaviour
   both oppose the estimated velocity by more than the noise floor mean the target turned. The
   history is cut to the post-turn samples, smoothing is bypassed and the turn signal is cleared,
   so the lead flips within 2-3 frames instead of waiting for the old samples to age out.
-* Occlusion coasting (``coast_s`` > 0) - while the target is hidden ``coast_offset()`` gives the
-  centre's expected displacement: constant velocity for half the window, then a linear fade to a
-  stop at ``coast_s`` (never an open-ended extrapolation); the track tolerates the gap on re-entry.
 * Auto lead (``auto``) - the horizon is the measured capture-to-aim age plus a nominal output
   delay (``auto_horizon()``), not a fixed number of milliseconds.
 """
@@ -92,7 +89,6 @@ _SIGMA_FLOOR_PX = 0.5           # assumed detector jitter when the track looks p
 _SIGNIFICANCE_K = 2.0           # speed / acceleration must clear this many standard errors to count
 _REVERSAL_KEEP = 2              # samples kept (before the new one) when a reversal is detected (minimum)
 _REV_WINDOW_S = 0.035           # span of each of the two slope windows the reversal detector compares
-_COAST_HOLD_FRAC = 0.5          # share of the coast window travelled at full speed before fading to a stop
 _AUTO_OUT_S = 0.010             # nominal aim->effect delay the app cannot measure (Auto horizon)
 _AUTO_MIN_H_S = 0.005
 _REV_SIGMA_FLOOR_PX = 1.5       # jitter the reversal detector always assumes (px); slow estimate can only raise it
@@ -102,20 +98,6 @@ _TAU_AGE_S = 0.25               # smoothing of the measured pipeline age
 
 def _alpha(dt: float, tau: float) -> float:
     return 1.0 - math.exp(-dt / tau)
-
-
-def _coast_travel(t: float, window: float) -> float:
-    """Distance travelled over ``t`` seconds, in units of the starting speed, by a hidden target:
-    full speed for the first half of ``window``, then a linear fade to a stop at ``window``
-    (never an open-ended extrapolation; continuous and monotonic)."""
-    if t <= 0.0 or window <= 0.0:
-        return 0.0
-    hold = window * _COAST_HOLD_FRAC
-    if t <= hold:
-        return t
-    fade = window - hold
-    d = min(t - hold, fade)
-    return hold + d - d * d / (2.0 * fade)
 
 
 # ── settings ────────────────────────────────────────────────────────────────
@@ -134,7 +116,6 @@ _PARAM_DEFAULTS = {
     'influence_dynamic': 0.5,
     'auto': False,               # Prediction Method 'auto': latency-aware horizon
     'strafe': 0.0,               # 0 = off; 0..1 reversal-detector sensitivity
-    'coast_s': 0.0,              # 0 = off; occlusion coasting window (s)
     'auto_max_s': 0.06,          # cap of the Auto horizon
 }
 
@@ -172,11 +153,6 @@ class AnchorParams:
         self.auto = getattr(config, 'prediction_method', 'velocity') == 'auto'
         self._num('strafe', getattr(config, 'strafe_response', None))
         self.strafe = clamp01(self.strafe)
-        if bool(getattr(config, 'occlusion_coast_enabled', False)):
-            self._num('coast_s', getattr(config, 'occlusion_coast_ms', None), 0.001)
-            self.coast_s = max(0.0, self.coast_s)
-        else:
-            self.coast_s = 0.0
         self._num('auto_max_s', getattr(config, 'auto_lead_max_ms', None), 0.001)
         if self.auto:                                   # Auto fixes the estimator: raw fit (no smoothing lag), half the acceleration
             self.mode = 'velocity_accel'
@@ -268,7 +244,7 @@ class AnchorTrack:
         self.acc_thr = 0.0              # same for the acceleration magnitude (px/s^2)
         self._dt_typ = 0.0              # typical interval between samples (learned)
         self._coast_s = _COAST_START_S
-        self._gap_s = _MAX_GAP_S if self.params.coast_s <= 0.0 else max(_MAX_GAP_S, self.params.coast_s + 0.1)
+        self._gap_s = _MAX_GAP_S
         self._have_smooth = False
         self.err_ema = 0.0              # one-step prediction error / box size
         self.stab_ema = 0.5             # frame-to-frame box overlap
@@ -280,7 +256,6 @@ class AnchorTrack:
         self._rev_keep = _REVERSAL_KEEP     # samples kept when a reversal fires (set by the detector)
         self._sig_noise = 0.0           # slow, outlier-clipped detector-jitter estimate (px) for the detector
         self.age_ema = 0.0              # smoothed capture->aim age (Auto horizon)
-        self._aim_dx = self._aim_dy = 0.0   # aim point offset from the box centre at the last sample
         self.pred.clear()
 
     @property
@@ -324,12 +299,7 @@ class AnchorTrack:
         # One-step prediction error from the state BEFORE this sample.
         size = max(4.0, 0.5 * (self.w + self.h))
         coast = dt > self._coast_s
-        keep_v = coast and p.coast_s > 0.0          # occlusion coasting: keep the velocity through the gap
-        if keep_v:
-            decay = 1.0
-            k = _coast_travel(dt, p.coast_s)
-            ex, ey = self.cx + self.vx * k, self.cy + self.vy * k
-        elif coast:
+        if coast:
             decay = math.exp(-dt / _COAST_DECAY_S)
             travel = _COAST_DECAY_S * (1.0 - decay)
             ex, ey = self.cx + self.vx * travel, self.cy + self.vy * travel
@@ -338,7 +308,7 @@ class AnchorTrack:
             ex = self.cx + self.vx * dt + 0.5 * self.ax * a_c * dt * dt
             ey = self.cy + self.vy * dt + 0.5 * self.ay * a_c * dt * dt
         err = math.hypot(cx - ex, cy - ey) / size
-        if self._n >= 3 and not keep_v:             # a coasted gap's miss is not detector noise: keep it out of sigma
+        if self._n >= 3:
             self.err_ema += (err - self.err_ema) * _alpha(dt, _TAU_ERR_S)
         # Stability: overlap with where the previous state expected the box to be (the last box
         # moved by the expected displacement). Plain frame-to-frame overlap would fall with speed
@@ -428,8 +398,6 @@ class AnchorTrack:
         self._dt_typ = dt if self._dt_typ == 0.0 else self._dt_typ + (dt - self._dt_typ) * _TAU_DT_S
         self._coast_s = max(_COAST_START_S, _COAST_FRAMES * self._dt_typ)
         self._gap_s = max(_MAX_GAP_S, _GAP_FRAMES * self._dt_typ)
-        if self.params.coast_s > 0.0:                       # a hidden target must not restart the track
-            self._gap_s = max(self._gap_s, self.params.coast_s + 0.1)
 
     def miss(self, t: float) -> None:
         """No detection this frame. Nothing is stored; ``predict(now=t)``
@@ -544,37 +512,7 @@ class AnchorTrack:
         accuracy = 1.0 - clamp01(self.err_ema / _ERR_ZERO_FIT)
         self.confidence = support * accuracy * (0.5 + 0.5 * self.det_conf)
 
-    # ── occlusion coasting / auto horizon ───────────────────────────────
-    def coast_offset(self, now: float, horizon_s: float = 0.0):
-        """While the target is hidden: ``(dx, dy)`` the centre is expected to have moved since the
-        last sample (``horizon_s`` further ahead when it is the aim point that is being led), or
-        ``None`` when coasting is off, there is no velocity estimate, the track is not trustworthy
-        or the hidden time exceeds the coast window - the caller then stops driving the crosshair,
-        which is exactly the behaviour without coasting. A target whose heading was unstable
-        (turn signal) or whose track was shaky (confidence) coasts a shorter distance."""
-        p = self.params
-        window = p.coast_s
-        if window <= 0.0 or self._n < 2:
-            return None
-        lag = now - self.last_t
-        if not math.isfinite(lag) or lag <= 0.0 or lag > window:
-            return None
-        conf = self.confidence
-        if conf < 0.5 * p.conf_threshold:
-            return None
-        speed = math.hypot(self.vx, self.vy)
-        if speed <= max(self.sig_thr, _STATIONARY_BOX_PER_S * max(1.0, min(self.w, self.h))):
-            return 0.0, 0.0                       # standing target: stay put
-        q = clamp01(1.0 - 1.5 * self.turn_ema) * (0.5 + 0.5 * clamp01(conf))
-        k = _coast_travel(min(lag + max(0.0, horizon_s), window), window) * q
-        dx, dy = self.vx * k, self.vy * k
-        cap = p.max_distance_px
-        dist = math.hypot(dx, dy)
-        if cap > 0.0 and dist > cap:
-            dx *= cap / dist
-            dy *= cap / dist
-        return dx, dy
-
+    # ── auto horizon ────────────────────────────────────────────────────
     def auto_horizon(self, age_s: float, dt: float) -> float:
         """Aim-lead horizon for Prediction Method 'auto': the measured capture->aim age (smoothed so
         its jitter doesn't become lead noise) plus a nominal output delay, within [5 ms, auto_max_s]."""
@@ -853,12 +791,6 @@ def aim_uses_anchor(config) -> bool:
             and getattr(config, 'anchor_mode', 'adaptive') in MODES[1:])
 
 
-def aim_track_active(config) -> bool:
-    """The aim-lead track (``LoopState.aim_anchor``) is fed while the method leads with it OR occlusion
-    coasting needs a motion estimate (coasting works with any method, even with Prediction off)."""
-    return aim_uses_anchor(config) or bool(getattr(config, 'occlusion_coast_enabled', False))
-
-
 def _lead_from(p: "Prediction", aim_x: float, aim_y: float):
     """Aim point led by the prediction ``p`` (unchanged when it is not valid). The aim point keeps its
     relative place inside the box: it moves with the predicted centre and scales with its size."""
@@ -891,40 +823,22 @@ def auto_aim_point(track: "AnchorTrack", now: float, box: Sequence[float], aim_x
     """Prediction Method 'auto': like ``predict_aim_point`` but the horizon is the measured
     capture->aim age (``age_s``) plus the nominal output delay (``AnchorTrack.auto_horizon``).
     ``now`` must be the frame's capture time (the same clock ``age_s`` is measured against), so the
-    pipeline latency is counted exactly once. Also remembers where the aim point sits inside the box
-    for ``auto_coast_point``."""
+    pipeline latency is counted exactly once."""
     if not (math.isfinite(aim_x) and math.isfinite(aim_y)):
         return aim_x, aim_y
     prev = track.last_t
     if not track.update(now, box, det_conf):
         return aim_x, aim_y
-    track._aim_dx, track._aim_dy = aim_x - track.cx, aim_y - track.cy
     h = track.auto_horizon(age_s, track.last_t - prev if prev > 0.0 else 0.0)
     return _lead_from(track.predict(h, now), aim_x, aim_y)
 
 
-def remember_aim_offset(track: "AnchorTrack", aim_x: float, aim_y: float) -> None:
-    """Record the aim point's offset from the box centre at the newest sample (for coasting)."""
-    if math.isfinite(aim_x) and math.isfinite(aim_y):
-        track._aim_dx, track._aim_dy = aim_x - track.cx, aim_y - track.cy
-
-
-def auto_coast_point(track: "AnchorTrack", now: float, age_s: float = 0.0):
-    """Aim point while the target is hidden: where it is expected to be, or ``None`` when coasting
-    does not apply (off / expired / untrustworthy) - the caller then leaves the crosshair alone."""
-    off = track.coast_offset(now, track.auto_horizon(age_s, 0.0) if track.params.auto else 0.0)
-    if off is None:
-        return None
-    return track.cx + track._aim_dx + off[0], track.cy + track._aim_dy + off[1]
-
-
-def make_auto_track(strafe_response: float = 0.6, coast_ms: float = 400.0, max_ms: float = 60.0) -> "AnchorTrack":
+def make_auto_track(strafe_response: float = 0.6, max_ms: float = 60.0) -> "AnchorTrack":
     """A track configured like Prediction Method 'auto' with the app's other defaults (tests / bench)."""
     p = AnchorParams()
     p.auto = True
     p.mode, p.accel_comp, p.history_len, p.smoothing = 'velocity_accel', 0.5, 6, 0.4
     p.conf_threshold, p.max_speed_px_s = 0.35, 1200.0
     p.strafe = clamp01(strafe_response)
-    p.coast_s = max(0.0, coast_ms / 1000.0)
     p.auto_max_s = max(0.005, max_ms / 1000.0)
     return AnchorTrack(p)

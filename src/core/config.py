@@ -184,8 +184,6 @@ _FIELD_MAP = {
     'prediction_velocity_deadzone_px_s': 'tracking.prediction.velocity_deadzone_px_s',
     'strafe_response':            'tracking.prediction.strafe_response',
     'auto_lead_max_ms':           'tracking.prediction.auto_max_ms',
-    'occlusion_coast_enabled':    'tracking.occlusion.enabled',
-    'occlusion_coast_ms':         'tracking.occlusion.coast_ms',
     'afov_source':                'aim.fov_anchor.source',
     'afov_position':              'aim.fov_anchor.position',
     'afov_offset_x':              'aim.fov_anchor.offset_x',
@@ -887,11 +885,9 @@ class Config:
         self.prediction_capture_timestamps: bool = False  # time samples by frame capture, not processing
         self.prediction_lsq_fit: bool = False             # least-squares velocity over the whole history
         self.prediction_velocity_deadzone_px_s: float = 0.0  # soft-zero speeds below this (0 = off)
-        # Auto lead / strafe response / occlusion coasting (core/anchor_prediction.py). All opt-in.
+        # Auto lead / strafe response (core/anchor_prediction.py). Both opt-in.
         self.strafe_response: float = 0.0             # 0 = off; 0..1 reversal-detector sensitivity (anchor/auto tracks)
         self.auto_lead_max_ms: float = 60.0           # cap of the latency-aware 'auto' horizon (20-150)
-        self.occlusion_coast_enabled: bool = False    # keep aiming along the estimated trajectory while the lock is hidden
-        self.occlusion_coast_ms: float = 400.0        # how long a hidden target is coasted (100-1500; <= lost-target timeout)
 
         # Anchor prediction — an additive layer that predicts the locked
         # target's future box and feeds the Adaptive/Dynamic FOV and lock
@@ -1496,8 +1492,6 @@ def _validate_aim_math(config: Config) -> None:
         config.prediction_method = 'velocity'
     config.strafe_response = _clamp_finite(getattr(config, 'strafe_response', 0.0), 0.0, 1.0, 0.0)
     config.auto_lead_max_ms = _clamp_finite(getattr(config, 'auto_lead_max_ms', 60.0), 20.0, 150.0, 60.0)
-    config.occlusion_coast_ms = _clamp_finite(getattr(config, 'occlusion_coast_ms', 400.0), 100.0, 1500.0, 400.0)
-    config.occlusion_coast_enabled = bool(getattr(config, 'occlusion_coast_enabled', False))
     config.aim_x_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_x_offset_frac', 0.0) or 0.0)))
     config.aim_y_offset_frac = max(-1.0, min(1.0, float(getattr(config, 'aim_y_offset_frac', 0.0) or 0.0)))
     config.aim_ema_smoothing = max(0.01, min(1.0, float(getattr(config, 'aim_ema_smoothing', 0.5) or 0.5)))

@@ -992,21 +992,6 @@ class AimPage(BasePage):
             parent=self.trackingGroup
         )
 
-        self.occlusionCoastCard = SwitchSettingCard(
-            FluentIcon.VIEW,
-            t("occlusion_coast", "Occlusion Coasting"),
-            t("occlusion_coast_desc", "While the locked target is hidden behind cover, keep aiming along its estimated path (it slows to a stop at the limit below) instead of freezing the crosshair"),
-            parent=self.trackingGroup
-        )
-        self.occlusionCoastMsCard = SliderLabelCard(
-            FluentIcon.HISTORY,
-            t("occlusion_coast_ms", "Coast Limit"),
-            100, 1500,
-            format_func=lambda v: f"{v} ms",
-            description=t("occlusion_coast_ms_desc", "How long a hidden target is followed. Also keeps the lock held for at least this long; never beyond Lost Target Timeout"),
-            parent=self.trackingGroup
-        )
-
         for _attr, _key, _title, _desc, _icon, _lo, _hi, _suffix, _f, _sc, _d in _LOCK_CARDS:
             setattr(self, _attr, SliderSpinCard(
                 getattr(FluentIcon, _icon), t(_key, _title), _lo, _hi, suffix=_suffix,
@@ -1248,8 +1233,6 @@ class AimPage(BasePage):
         self.trackingGroup.addSettingCard(self.predictionHistoryCard)
         self.trackingGroup.addSettingCard(self.stickyLockCard)
         self.trackingGroup.addSettingCard(self.lockDecayCard)
-        self.trackingGroup.addSettingCard(self.occlusionCoastCard)
-        self.trackingGroup.addSettingCard(self.occlusionCoastMsCard)
         for _attr, *_rest in _LOCK_CARDS:
             self.trackingGroup.addSettingCard(getattr(self, _attr))
         self.trackingGroup.addSettingCard(self.kalmanEnableCard)
@@ -1398,7 +1381,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             predictionMaxVelCard predictionHistoryCard kalmanProcessNoiseCard kalmanMeasNoiseCard
             headWidthCard headHeightCard bodyWidthCard adaptiveRatioRefHCard crouchAspectCard
             captureTimestampsCard lsqFitCard velocityDeadzoneCard autoLeadMaxCard strafeResponseCard
-            occlusionCoastCard occlusionCoastMsCard
             emaSmoothingCard emaAmountCard
             anchorStrengthCard anchorSmoothingCard anchorAccelCard anchorConfCard anchorHistoryCard anchorMaxDistCard
             lostTimeoutCard minLockCard switchThresholdCard reacquireRadiusCard trackConfCard
@@ -1485,8 +1467,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.velocityDeadzoneCard.valueChanged.connect(self._onAimMathChanged)
         self.autoLeadMaxCard.valueChanged.connect(self._onAimMathChanged)
         self.strafeResponseCard.valueChanged.connect(self._onAimMathChanged)
-        self.occlusionCoastCard.checkedChanged.connect(self._onOcclusionCoastChanged)
-        self.occlusionCoastMsCard.valueChanged.connect(lambda v: self._setCfgValue('occlusion_coast_ms', float(v)))
         self.emaSmoothingCard.checkedChanged.connect(self._onAimMathChanged)
         self.emaAmountCard.valueChanged.connect(self._onAimMathChanged)
         self.aimXOffsetCard.valueChanged.connect(self._onAimMathChanged)
@@ -1627,8 +1607,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
             cmc_on = bool(getattr(self._config, 'cam_motion_comp_enabled', False))
             self.camMotionCompCard.setChecked(cmc_on)
 
-            self.occlusionCoastCard.setChecked(bool(getattr(self._config, 'occlusion_coast_enabled', False)))
-            self.occlusionCoastMsCard.setValue(int(round(float(getattr(self._config, 'occlusion_coast_ms', 400.0)))))
             self.autoLeadMaxCard.setValue(int(round(float(getattr(self._config, 'auto_lead_max_ms', 60.0)))))
             self.strafeResponseCard.setValue(int(round(float(getattr(self._config, 'strafe_response', 0.0)) * 100)))
             method_map = {"velocity": "Velocity", "anchor": "Anchor", "auto": "Auto"}
@@ -2254,10 +2232,9 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.captureTimestampsCard.setVisible(pred_on)
         self.lsqFitCard.setVisible(pred_on and method == "Velocity")
         self.velocityDeadzoneCard.setVisible(pred_on and method == "Velocity")
-        coast_on = self.occlusionCoastCard.isChecked()
         self.autoLeadMaxCard.setVisible(pred_on and method == "Auto")
-        # Strafe Response acts on the Anchor-estimator track: the Anchor/Auto methods, or any method while coasting feeds it.
-        self.strafeResponseCard.setVisible((pred_on and method in ("Anchor", "Auto")) or coast_on)
+        # Strafe Response acts on the Anchor-estimator track (the Anchor and Auto methods).
+        self.strafeResponseCard.setVisible(pred_on and method in ("Anchor", "Auto"))
         self.emaAmountCard.setVisible(self.emaSmoothingCard.isChecked())
 
         # The rest of the "only while its parent option is on" rules (hidden, values kept; nothing here
@@ -2270,8 +2247,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.lockDecayCard.setVisible(sticky_on)
         for _attr, *_rest in _LOCK_CARDS:
             getattr(self, _attr).setVisible(sticky_on)
-        self.occlusionCoastCard.setVisible(sticky_on)            # coasting needs a held lock
-        self.occlusionCoastMsCard.setVisible(sticky_on and coast_on)
         kalman_on = self.kalmanEnableCard.isChecked()
         self.kalmanProcessNoiseCard.setVisible(kalman_on)
         self.kalmanMeasNoiseCard.setVisible(kalman_on)
@@ -2302,11 +2277,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
     def _onAnchorModeChanged(self, index):
         if self._config and not self._isLoadingConfig and 0 <= index < len(_ANCHOR_MODES):
             self._config.anchor_mode = _ANCHOR_MODES[index]
-        self._updateAimTuningVisibility()
-
-    def _onOcclusionCoastChanged(self, checked):
-        if self._config and not self._isLoadingConfig:
-            self._config.occlusion_coast_enabled = bool(checked)
         self._updateAimTuningVisibility()
 
     def _onPredictionEnableChanged(self, checked):
@@ -2535,10 +2505,6 @@ pidUnsafeCard pidTimeNormCard maxMovePerFrameCard pidYReduceDelayCard pidYReduce
         self.predictionHistoryCard.contentLabel.setText(t("prediction_history_desc", "How many recent detections the Aim Lead velocity estimate uses. The Anchor method has its own Estimator History."))
         self.stickyLockCard.titleLabel.setText(t("sticky_lock_enabled", "Sticky Target Lock"))
         self.stickyLockCard.contentLabel.setText(t("sticky_lock_desc", "Lock onto a target and hold aim across short detection gaps."))
-        self.occlusionCoastCard.titleLabel.setText(t("occlusion_coast", "Occlusion Coasting"))
-        self.occlusionCoastCard.contentLabel.setText(t("occlusion_coast_desc", "While the locked target is hidden behind cover, keep aiming along its estimated path (it slows to a stop at the limit below) instead of freezing the crosshair"))
-        self.occlusionCoastMsCard.titleLabel.setText(t("occlusion_coast_ms", "Coast Limit"))
-        self.occlusionCoastMsCard.contentLabel.setText(t("occlusion_coast_ms_desc", "How long a hidden target is followed. Also keeps the lock held for at least this long; never beyond Lost Target Timeout"))
         self.lockDecayCard.titleLabel.setText(t("lock_persistence", "Lock Persistence"))
         self.lockDecayCard.contentLabel.setText(t("lock_persistence_desc", "How long aim is held after the target is lost before the lock is released (time-based, so it behaves the same at any inference FPS). Never longer than Lost Target Timeout."))
         self.kalmanEnableCard.titleLabel.setText(t("kalman_enabled_label", "Kalman Filter"))

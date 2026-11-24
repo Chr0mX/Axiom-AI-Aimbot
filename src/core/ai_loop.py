@@ -1242,16 +1242,7 @@ def ai_logic_loop(
                     # this frame. Runs after the reset above so this call's own
                     # sub-pixel carry isn't wiped by it in the same frame; opt-in
                     # (see apply_idle_micro_jitter's docstring), no-ops otherwise.
-                    # Occlusion coasting (opt-in): the lock is hidden but still held -- keep the crosshair
-                    # moving along the estimated trajectory (which replaces the idle jitter this frame).
-                    coasted = False
-                    if (holding_lock and aim_engaged and sticky and state.locked_box is not None
-                            and getattr(config, 'occlusion_coast_enabled', False)
-                            and _retained is not AMBIGUOUS_LOCK):
-                        coasted = ai_aiming.coast_aim(
-                            config, state, crosshair_x, crosshair_y, pid_x, pid_y,
-                            state.cached_mouse_move_method, current_time)
-                    if aim_engaged and not coasted:
+                    if aim_engaged:
                         ai_aiming.apply_idle_micro_jitter(config, state, state.cached_mouse_move_method)
 
                 if config.single_target_mode:

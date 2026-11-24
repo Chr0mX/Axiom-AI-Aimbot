@@ -587,9 +587,5 @@
   "auto_lead_max": "Auto Lead Limit",
   "auto_lead_max_desc": "Longest lead the Auto method will use, however slow the pipeline gets",
   "strafe_response": "Strafe Response",
-  "strafe_response_desc": "How eagerly a left-right reversal is detected: the estimate drops the old heading at once instead of waiting for it to age out. Off = 0%",
-  "occlusion_coast": "Occlusion Coasting",
-  "occlusion_coast_desc": "While the locked target is hidden behind cover, keep aiming along its estimated path (it slows to a stop at the limit below) instead of freezing the crosshair",
-  "occlusion_coast_ms": "Coast Limit",
-  "occlusion_coast_ms_desc": "How long a hidden target is followed. Also keeps the lock held for at least this long; never beyond Lost Target Timeout"
+  "strafe_response_desc": "How eagerly a left-right reversal is detected: the estimate drops the old heading at once instead of waiting for it to age out. Off = 0%"
 }

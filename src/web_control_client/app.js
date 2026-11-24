@@ -933,7 +933,7 @@
   // tunes is active, mirroring aim_page.py's _updateAimTuningVisibility().
   var AIM_TUNING_TOGGLE_KEYS = ["prediction_enabled", "prediction_method", "aim_ema_smoothing_enabled",
     "sticky_lock_enabled", "kalman_enabled", "cam_motion_comp_enabled", "aim_y_reduce_enabled",
-    "target_priority_mode", "anchor_mode", "occlusion_coast_enabled"];
+    "target_priority_mode", "anchor_mode"];
 
   function updateAimTuningVisibility() {
     function el(id) { return document.getElementById(id); }
@@ -949,10 +949,9 @@
     setCard("aim-prediction_capture_timestamps", predOn);
     setCard("aim-prediction_lsq_fit", predOn && method === "velocity");
     setCard("aim-prediction_velocity_deadzone_px_s", predOn && method === "velocity");
-    var coastOn = !!(el("aim-occlusion_coast_enabled") && el("aim-occlusion_coast_enabled").checked);
     setCard("aim-auto_lead_max_ms", predOn && method === "auto");
-    // Strafe Response acts on the Anchor-estimator track: Anchor/Auto, or any method while coasting feeds it.
-    setCard("aim-strafe_response", (predOn && (method === "anchor" || method === "auto")) || coastOn);
+    // Strafe Response acts on the Anchor-estimator track (Anchor and Auto methods).
+    setCard("aim-strafe_response", predOn && (method === "anchor" || method === "auto"));
     setCard("aim-aim_ema_smoothing", !!(el("aim-aim_ema_smoothing_enabled") && el("aim-aim_ema_smoothing_enabled").checked));
     // Same parent -> child rules as aim_page.py (display only; hidden options keep their values).
     function on(id) { return !!(el(id) && el(id).checked); }
@@ -961,8 +960,6 @@
     setCard("aim-prediction_max_velocity", predOn);
     setCard("aim-prediction_history_len", predOn && method !== "anchor");
     setCard("aim-lock_persistence_ms", stickyOn);
-    setCard("aim-occlusion_coast_enabled", stickyOn);          // coasting needs a held lock
-    setCard("aim-occlusion_coast_ms", stickyOn && coastOn);
     ["lost_target_timeout_ms", "min_lock_duration_ms", "target_switch_threshold", "reacquire_radius_px", "tracking_confidence"]
       .forEach(function (k) { setCard("aim-" + k, stickyOn); });
     setCard("aim-kalman_process_noise", on("aim-kalman_enabled"));
@@ -2946,7 +2943,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "25") return;
+    if (cssVer !== "26") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");

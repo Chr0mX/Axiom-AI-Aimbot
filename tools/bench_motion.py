@@ -1,4 +1,4 @@
-"""Aim-lead / strafe / occlusion benchmark for the prediction layer.
+"""Aim-lead / strafe benchmark for the prediction layer.
 
     python tools/bench_motion.py                 # human-readable report
     python tools/bench_motion.py --json          # machine-readable
@@ -13,10 +13,10 @@ where the target really is when the mouse move takes effect (capture -> output l
     anchor            Anchor estimator, adaptive mode, app defaults (horizon 10 ms)
     velocity@tuned    velocity with the horizon hand-set to the true total latency (best case a user can do)
     anchor@tuned      same for anchor
-    auto              Anchor estimator + latency-aware horizon + strafe response (+ occlusion coasting)
+    auto              Anchor estimator + latency-aware horizon + strafe response
 
-Metrics: lead RMSE (px), time-to-recover after a reversal (ms), overshoot after a stop (px), error while
-the target is hidden and at re-appearance, per-frame CPU (us).
+Metrics: lead RMSE (px), time-to-recover after a reversal (ms), overshoot after a stop (px),
+per-frame CPU (us).
 """
 from __future__ import annotations
 
@@ -38,7 +38,6 @@ W, H = 40.0, 80.0
 L_PIPE = 0.025          # capture -> aim computation (measured by the app as perf_counter() - frame_capture_t)
 L_OUT = 0.012           # aim computation -> the move taking effect (not measured by the app)
 L_TOTAL = L_PIPE + L_OUT
-RELOCK_RADIUS = 150.0   # reacquire_radius_px default
 
 
 def box(cx, cy):
@@ -74,7 +73,7 @@ REVERSAL_SCENARIOS = ("strafe 350 px/s T=1.2s", "strafe 350 px/s T=0.6s")
 
 
 # ── estimator adapters ──────────────────────────────────────────────────────
-# update(x, y, t_cap, age, box) -> (aim_x, aim_y);  coast(t_now, age) -> (x, y) | None
+# update(x, y, t_cap, age, box) -> (aim_x, aim_y)
 
 class VelocityEst:
     def __init__(self, horizon):
@@ -83,9 +82,6 @@ class VelocityEst:
 
     def update(self, x, y, t, age, b):
         return self.p.update(x, y, t, self.h)
-
-    def coast(self, t, age):
-        return None
 
 
 def _anchor_params(horizon):
@@ -103,25 +99,17 @@ class AnchorEst:
     def update(self, x, y, t, age, b):
         return predict_aim_point(self.tr, t, b, x, y, self.h, 0.9)
 
-    def coast(self, t, age):
-        return None
-
 
 def _make_auto():
     """The new estimator is wired in by the same helpers the app uses (see core.ai_aiming)."""
-    from core.anchor_prediction import make_auto_track, auto_aim_point, auto_coast_point  # noqa: F401
+    from core.anchor_prediction import make_auto_track, auto_aim_point
 
     class AutoEst:
-        def __init__(self, coast=True, strafe=0.6):
-            self.tr = make_auto_track(strafe_response=strafe, coast_ms=400.0 if coast else 0.0)
-            self.use_coast = coast
-            self.lat = 0.0
+        def __init__(self, strafe=0.6):
+            self.tr = make_auto_track(strafe_response=strafe)
 
         def update(self, x, y, t, age, b):
             return auto_aim_point(self.tr, t, b, x, y, age, 0.9)
-
-        def coast(self, t, age):
-            return auto_coast_point(self.tr, t, age) if self.use_coast else None
     return AutoEst
 
 
@@ -137,7 +125,7 @@ def build(name):
     if name == "auto":
         return _make_auto()()
     if name == "auto-nostrafe":
-        return _make_auto()(coast=True, strafe=0.0)
+        return _make_auto()(strafe=0.0)
     raise KeyError(name)
 
 
@@ -242,51 +230,6 @@ def stop_overshoot(name, fps=60, noise=1.0, seed=1):
     return worst
 
 
-OCCLUSION = {
-    "straight":      (lambda t: (300.0 + 350.0 * t, 500.0), None),
-    "reverses":      (lambda t: (300.0 + 350.0 * min(t, 1.2) - 350.0 * max(0.0, t - 1.2), 500.0), None),
-    "accelerating":  (lambda t: (300.0 + 0.5 * 600.0 * min(t, 1.5) ** 2 + 900.0 * max(0.0, t - 1.5), 500.0), None),
-    "stops in cover": (lambda t: (300.0 + 350.0 * min(t, 1.1), 500.0), None),
-}
-
-
-def occlusion_run(kind, name, window, fps=60, noise=1.0, seed=1):
-    """Hidden during [1.0, 1.0 + window). Returns dict: mean aim error while hidden (px), aim error on the first
-    detection after, the jump of the aim point at re-appearance, and whether re-lock is within the radius.
-    Without coasting the aim point simply stays where it last was (today's behaviour)."""
-    fn = OCCLUSION[kind][0]
-    rng = random.Random(seed)
-    est = build(name)
-    t0, t1 = 1.0, 1.0 + window
-    last_aim = None
-    last_seen = None
-    err_hidden, n_hidden = 0.0, 0
-    out = {}
-    for t, _ in frames(fps, t1 + 0.6, 0.0, 0.0, rng):
-        x, y = fn(t)
-        truth = fn(t + L_TOTAL)
-        if t0 <= t < t1:
-            c = est.coast(T0 + t, L_PIPE)
-            aim = c if c is not None else last_aim
-            if aim is not None:
-                err_hidden += math.hypot(aim[0] - truth[0], aim[1] - truth[1])
-                n_hidden += 1
-                last_aim = aim
-            continue
-        nx, ny = x + rng.gauss(0, noise), y + rng.gauss(0, noise)
-        px, py = est.update(nx, ny, T0 + t, L_PIPE, box(nx, ny))
-        if t >= t1 and "first_err" not in out:
-            out["first_err"] = math.hypot(px - truth[0], py - truth[1])
-            out["jump"] = math.hypot(px - last_aim[0], py - last_aim[1]) if last_aim else 0.0
-            ref = last_aim if last_aim is not None else last_seen
-            out["relock"] = ref is not None and math.hypot(nx - ref[0], ny - ref[1]) <= RELOCK_RADIUS
-        if t < t0:
-            last_aim = (px, py)
-            last_seen = (nx, ny)
-    out["hidden_err"] = err_hidden / max(1, n_hidden)
-    return out
-
-
 def cpu_us(name, frames_n=20000, repeats=5):
     paths = [(500 + 80 * math.sin(i / 20), 500 + 40 * math.sin(i / 13)) for i in range(frames_n)]
     best = float("inf")
@@ -310,11 +253,6 @@ CL_CONFIGS = {
     "anchor": dict(prediction_enabled=True, prediction_method="anchor"),
     "auto": dict(prediction_enabled=True, prediction_method="auto", strafe_response=0.6),
     "auto-nostrafe": dict(prediction_enabled=True, prediction_method="auto", strafe_response=0.0),
-    "auto+coast": dict(prediction_enabled=True, prediction_method="auto", strafe_response=0.6,
-                       occlusion_coast_enabled=True, occlusion_coast_ms=400.0),
-    "velocity+coast": dict(prediction_enabled=True, prediction_method="velocity",
-                           occlusion_coast_enabled=True, occlusion_coast_ms=400.0),
-    "off+coast": dict(prediction_enabled=False, occlusion_coast_enabled=True, occlusion_coast_ms=400.0),
 }
 
 
@@ -336,7 +274,7 @@ def _cl_config(over):
         aim_y_reduce_enabled=False, aim_y_reduce_delay=0.0, aim_y_reduce_settle_px=0.0, aim_y_reduce_floor=0.1,
         aim_y_reduce_ramp=0.0, aim_y_vel_restore_px_s=0.0, humanization=None, max_move_per_frame_px=0.0,
         aim_ema_smoothing_enabled=False, aim_ema_smoothing=0.5, mouse_move_method="sendinput",
-        strafe_response=0.0, auto_lead_max_ms=60.0, occlusion_coast_enabled=False, occlusion_coast_ms=400.0,
+        strafe_response=0.0, auto_lead_max_ms=60.0,
     )
     for k, v in over.items():
         setattr(cfg, k, v)
@@ -352,86 +290,10 @@ def _load_aiming():
     return A
 
 
-def closed_loop(name, fn, fps=60, seconds=3.0, hidden=None, noise=1.0, seed=1, jitter=0.0, extra=None):
-    """Run the real aiming code against ``fn`` and return pointing-error metrics (px)."""
-    from collections import deque
-    A = _load_aiming()
-    from core.ai_loop_state import LoopState
-    from core.ai_loop_utils import anchor_reset
-    from core.inference import PIDController
-    from core.target_tracking import hold_lock_on_miss
-    over = dict(CL_CONFIGS[name])
-    over.update(extra or {})
-    cfg = _cl_config(over)
-    st = LoopState()
-    pid_x, pid_y = PIDController(0.26, 0.0, 0.12), PIDController(0.26, 0.0, 0.12)
-    A._predictor = None
-    A._kalman = None
-    cross = [fn(0.0)[0], 500.0]
-    fifo = deque()
-    clock = {"t": 0.0}
-    rng = random.Random(seed)
-    real_pc = time.perf_counter
-
-    def send(dx, dy, method=None):
-        fifo.append((clock["t"] + L_OUT, dx, dy))
-
-    A.send_mouse_move = send
-    time.perf_counter = lambda: T0 + clock["t"]
-    errs, hid, pre, reacq = [], [], [], None
-    try:
-        for t_cap, _ in frames(fps, seconds, jitter, 0.0, rng):
-            t_proc = t_cap + L_PIPE
-            clock["t"] = t_proc
-            while fifo and fifo[0][0] <= t_proc:
-                _, dx, dy = fifo.popleft()
-                cross[0] += dx
-                cross[1] += dy
-            tx, ty = fn(t_proc)
-            st.frame_capture_t = T0 + t_cap
-            now_wall = T0 + t_proc
-            is_hidden = hidden is not None and hidden[0] <= t_cap < hidden[1]
-            st.aiming_start_time = T0
-            if not is_hidden:
-                x, y = fn(t_cap)
-                nx, ny = x + rng.gauss(0, noise), y + rng.gauss(0, noise)
-                A.process_aiming(cfg, [[nx - W / 2, ny - H / 2, nx + W / 2, ny + H / 2]], cross[0], cross[1],
-                                 pid_x, pid_y, "sendinput", st, now_wall, confidences=[0.9])
-            else:
-                holding = hold_lock_on_miss(st.tracker, cfg, now_wall, st.locked_box is not None)
-                if not holding:
-                    pid_x.reset()
-                    pid_y.reset()
-                    st.locked_box = None
-                    st.aim_carry_x = st.aim_carry_y = 0.0
-                    st.aim_ema_x = st.aim_ema_y = 0.0
-                    st.sticky_last_t = 0.0
-                    anchor_reset(cfg, st)
-                    if A._predictor is not None:
-                        A._predictor.reset()
-                    if A._kalman is not None:
-                        A._kalman.reset()
-                elif cfg.occlusion_coast_enabled:
-                    A.coast_aim(cfg, st, cross[0], cross[1], pid_x, pid_y, "sendinput", now_wall)
-            err = abs(cross[0] - tx)
-            if t_cap < 0.7:
-                continue
-            if is_hidden:
-                hid.append(err)
-            else:
-                errs.append(err)
-                if hidden is not None and t_cap < hidden[0]:
-                    pre.append(err)
-                if hidden is not None and t_cap >= hidden[1] and reacq is None:
-                    if err <= max(15.0, 1.5 * (sum(pre) / max(1, len(pre)))):     # back to its own normal tracking error
-                        reacq = t_cap - hidden[1]
-    finally:
-        time.perf_counter = real_pc
-        A.send_mouse_move = lambda dx, dy, method=None: None
-    out = {"rms": math.sqrt(sum(e * e for e in errs) / max(1, len(errs))),
-           "hidden": sum(hid) / len(hid) if hid else float("nan"),
-           "reacq_ms": None if hidden is None else (1000.0 * reacq if reacq is not None else float("inf"))}
-    return out
+def closed_loop(name, fn, fps=60, seconds=3.0, extra=None):
+    """Run the real aiming code against ``fn``; RMS pointing error (px) after a 0.7 s warm-up."""
+    errs = [e for t, e in _cl_trace(name, fn, fps, seconds, extra) if t >= 0.7]
+    return {"rms": math.sqrt(sum(e * e for e in errs) / max(1, len(errs)))}
 
 
 def closed_loop_reversal_peak(name, fn, fps=60, seconds=4.0, extra=None):
@@ -495,15 +357,13 @@ def _cl_trace(name, fn, fps, seconds, extra):
 
 
 CL_METHODS = ("off", "velocity", "velocity@tuned", "anchor", "auto-nostrafe", "auto")
-CL_COAST_METHODS = ("off", "off+coast", "velocity", "velocity+coast", "auto", "auto+coast")
 
 
 def run_closed_loop(only=None):
-    global CL_METHODS, CL_COAST_METHODS
+    global CL_METHODS
     if only:
         CL_METHODS = tuple(m for m in CL_METHODS if m in only)
-        CL_COAST_METHODS = tuple(m for m in CL_COAST_METHODS if m in only)
-    res = {"lead": {}, "rates": {}, "strafe_peak": {}, "occlusion": {}, "smoothing": {}}
+    res = {"lead": {}, "rates": {}, "strafe_peak": {}, "smoothing": {}}
     for sname, fn in SCENARIOS.items():
         res["lead"][sname] = {m: closed_loop(m, fn)["rms"] for m in CL_METHODS}
     fn = SCENARIOS["strafe 350 px/s T=0.6s"]
@@ -514,10 +374,6 @@ def run_closed_loop(only=None):
     for label, extra in {"Aim Step Smoothing 0.5": dict(aim_ema_smoothing_enabled=True),
                          "Kalman": dict(kalman_enabled=True)}.items():
         res["smoothing"][label] = {m: closed_loop(m, fn, extra=extra)["rms"] for m in CL_METHODS}
-    for kind, (ofn, _) in OCCLUSION.items():
-        for w in (0.1, 0.25, 0.4, 0.8):
-            res["occlusion"][f"{kind} {int(w * 1000)}ms"] = {
-                m: closed_loop(m, ofn, fps=60, seconds=3.0, hidden=(1.0, 1.0 + w)) for m in CL_COAST_METHODS}
     return res
 
 
@@ -527,15 +383,6 @@ def report_closed_loop(res):
     _table("Strafe T=0.6 s by update rate", res["rates"], CL_METHODS)
     _table("Peak error within 200 ms of a reversal (strafe T=1.2 s)", res["strafe_peak"], CL_METHODS)
     _table("Strafe T=0.6 s with a smoothing stage on", res["smoothing"], CL_METHODS)
-    print("\nOcclusion (hidden from t=1.0 s): mean pointing error while hidden px / ms after it returns until back within 1.5x its own pre-occlusion error")
-    print("  " + " " * 24 + "".join(f"{m:>18}" for m in CL_COAST_METHODS))
-    for k, v in res["occlusion"].items():
-        cells = ""
-        for m in CL_COAST_METHODS:
-            r = v[m]
-            re = "never" if r["reacq_ms"] == float("inf") else f"{r['reacq_ms']:.0f}"
-            cells += f"{r['hidden']:7.1f} / {re:>5}".rjust(18)
-        print(f"  {k:<24}{cells}")
 
 
 # ── report ──────────────────────────────────────────────────────────────────
@@ -555,10 +402,6 @@ def run(methods):
         for f in (30, 60, 144):
             res["reversal"][f"{s} @{f}"] = {m: reversal_recovery(SCENARIOS[s], m, fps=f, seconds=4.0) for m in methods}
     res["overshoot"] = {m: stop_overshoot(m) for m in methods}
-    res["occlusion"] = {}
-    for kind in OCCLUSION:
-        for w in (0.1, 0.25, 0.4, 0.8):
-            res["occlusion"][f"{kind} {int(w * 1000)}ms"] = {m: occlusion_run(kind, m, w) for m in methods}
     res["cpu_us"] = {m: cpu_us(m) for m in methods}
     return res
 
@@ -585,14 +428,6 @@ def report(res):
     print("\nOvershoot past a stop (px, 0.5 s window)")
     print("  " + "".join(f"{m:>16}" for m in ms))
     print("  " + "".join(f"{res['overshoot'][m]:16.1f}" for m in ms))
-    print("\nOcclusion: mean aim error while hidden px / aim error 1st frame after px   (jump, re-lock in brackets)")
-    print("  " + " " * 24 + "".join(f"{m:>26}" for m in ms))
-    for k, v in res["occlusion"].items():
-        cells = ""
-        for m in ms:
-            x = v[m]
-            cells += f"{x['hidden_err']:7.1f}/{x['first_err']:6.1f} ({x['jump']:5.1f},{'Y' if x['relock'] else 'n'})".rjust(26)
-        print(f"  {k:<24}{cells}")
     print("\nCPU per frame (us)")
     print("  " + "".join(f"{m:>16}" for m in ms))
     print("  " + "".join(f"{res['cpu_us'][m]:16.2f}" for m in ms))

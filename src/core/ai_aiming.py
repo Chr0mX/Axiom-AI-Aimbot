@@ -12,7 +12,7 @@ from .humanization import apply_humanization
 from .inference import PIDController
 from .kalman_filter import KalmanFilter2D
 from .aim_paths import adaptive_lead_s, ema_step
-from .anchor_prediction import auto_aim_point, predict_aim_point, remember_aim_offset
+from .anchor_prediction import auto_aim_point, predict_aim_point
 from .target_predictor import VelocityPredictor
 from .target_tracking import box_iou, edge_ratio, lost_timeout_s, select_target
 
@@ -68,12 +68,10 @@ _REVERSAL_OUTPUT_S = 0.10
 
 def _track_clock(config: Config, state: LoopState, method: str):
     """``(sample time, capture->now age)`` for the aim-lead track. Samples are timed by when their frame was
-    captured whenever that is known and the track needs it (Auto, occlusion coasting, or the capture-timestamp
-    option), so inference jitter never reads as target motion; ``age`` is what Auto adds to its horizon."""
+    captured whenever that is known and the track needs it (Auto, or the capture-timestamp option), so inference jitter never reads as target motion; ``age`` is what Auto adds to its horizon."""
     cap = state.frame_capture_t
     now = time.perf_counter()
-    if cap > 0.0 and (method == 'auto' or getattr(config, 'occlusion_coast_enabled', False)
-                      or getattr(config, 'prediction_capture_timestamps', False)):
+    if cap > 0.0 and (method == 'auto' or getattr(config, 'prediction_capture_timestamps', False)):
         return cap, max(0.0, now - cap)
     return now, 0.0
 
@@ -104,7 +102,6 @@ def _anchor_aim_lead(config: Config, state: LoopState, box, comp_dx: float, comp
         return aim_x, aim_y
     shifted = (box[0] + comp_dx, box[1] + comp_dy, box[2] + comp_dx, box[3] + comp_dy)
     out = predict_aim_point(track, now_t, shifted, aim_x, aim_y, horizon_s, det_conf)
-    remember_aim_offset(track, aim_x, aim_y)     # where the aim point sits in the box, for occlusion coasting
     return out
 
 
@@ -115,81 +112,6 @@ def _auto_aim_lead(config: Config, state: LoopState, box, comp_dx: float, comp_d
     track = _refresh_aim_track(config, state, now_t)
     shifted = (box[0] + comp_dx, box[1] + comp_dy, box[2] + comp_dx, box[3] + comp_dy)
     return auto_aim_point(track, now_t, shifted, aim_x, aim_y, age_s, det_conf)
-
-
-def _feed_coast_track(config: Config, state: LoopState, box, comp_dx: float, comp_dy: float,
-                      aim_x: float, aim_y: float, now_t: float, det_conf: float) -> None:
-    """Occlusion coasting with a lead method that has no Anchor track (Velocity / Prediction off): feed the
-    aim-lead track the detection so it has a motion estimate to coast with. It never changes the aim point."""
-    track = _refresh_aim_track(config, state, now_t)
-    shifted = (box[0] + comp_dx, box[1] + comp_dy, box[2] + comp_dx, box[3] + comp_dy)
-    if track.update(now_t, shifted, det_conf):
-        remember_aim_offset(track, aim_x, aim_y)
-
-
-def coast_ref_box(config: Config, state: LoopState):
-    """Where the hidden lock should be right now (its last box moved by the coast offset, in screen
-    coordinates), as an extra overlap reference for re-finding it; None when coasting is off / not valid."""
-    if not getattr(config, 'occlusion_coast_enabled', False):
-        return None
-    trk = state.aim_anchor
-    if trk.last_box is None or trk.samples < 2:
-        return None
-    t, _age = _track_clock(config, state, 'coast')
-    off = trk.coast_offset(t)
-    if off is None or (off[0] == 0.0 and off[1] == 0.0):
-        return None
-    cdx = state.cam_drift_x if getattr(config, 'cam_motion_comp_enabled', False) else 0.0
-    cdy = state.cam_drift_y if getattr(config, 'cam_motion_comp_enabled', False) else 0.0
-    x1, y1, x2, y2 = trk.last_box
-    return (x1 + off[0] + cdx, y1 + off[1] + cdy, x2 + off[0] + cdx, y2 + off[1] + cdy)
-
-
-def coast_aim(config: Config, state: LoopState, crosshair_x: float, crosshair_y: float,
-              pid_x, pid_y, mouse_method: str, current_time: float) -> bool:
-    """Occlusion coasting: the locked target is hidden (ai_loop.py's miss branch, lock still held). Drive the
-    crosshair along the estimated trajectory instead of leaving it where it stopped. The point comes from
-    ``AnchorTrack.coast_offset`` (constant speed, then a fade to a stop at the coast window), then goes through
-    the same PID / smoothing / carry / cap path as a real detection (``_finish_aim_move``). Returns False when
-    there is nothing to coast with (off, expired, no confident estimate): the crosshair is then left alone."""
-    if not getattr(config, 'occlusion_coast_enabled', False):
-        return False
-    trk = state.aim_anchor
-    if trk.samples < 2 or trk.last_box is None:
-        return False
-    method = str(getattr(config, 'prediction_method', 'velocity') or 'velocity')
-    t, age = _track_clock(config, state, method)
-    _refresh_aim_track(config, state, t)
-    if trk.params.auto:
-        horizon = trk.auto_horizon(age, 0.0)
-    elif getattr(config, 'prediction_enabled', False):
-        horizon = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
-    else:
-        horizon = 0.0
-    off = trk.coast_offset(t, horizon)
-    if off is None:
-        return False
-    aim_x = trk.cx + trk._aim_dx + off[0]
-    aim_y = trk.cy + trk._aim_dy + off[1]
-    cam = bool(getattr(config, 'cam_motion_comp_enabled', False))
-    if cam:                                       # the track lives in the drift-compensated frame
-        target_x, target_y = aim_x + state.cam_drift_x, aim_y + state.cam_drift_y
-    else:
-        target_x, target_y = aim_x, aim_y
-    config.aim_predicted_x, config.aim_predicted_y = target_x, target_y
-    config.aim_prediction_active = True
-    errorX, errorY = target_x - crosshair_x, target_y - crosshair_y
-    if cam:
-        errorX -= state.cam_shift_x
-        errorY -= state.cam_shift_y
-    if state.sticky_last_t > 0:
-        _sdt = current_time - state.sticky_last_t
-        if _sdt > 0:
-            state.last_aim_dt = _sdt
-    state.sticky_last_t = current_time
-    _finish_aim_move(config, state, pid_x, pid_y, mouse_method, current_time,
-                     errorX, errorY, target_y, trk.h)
-    return True
 
 
 def calculate_aim_target(
@@ -375,7 +297,7 @@ def process_aiming(
                 valid_targets, locked_box=state.locked_box, tracker=state.tracker,
                 config=config, now=current_time, iou_thresh=iou_thresh, norm=_fov_ref * 0.5,
                 class_of=class_of,
-                ref_box=anchor_ref_box(config, state, current_time) or coast_ref_box(config, state))
+                ref_box=anchor_ref_box(config, state, current_time))
             if selected is None:
                 return False
         else:
@@ -399,11 +321,7 @@ def process_aiming(
         # suppression right when it's needed. Reset the gate's timestamp
         # whenever the selected box isn't a continuation of the previous one.
         _iou_thresh = _STICKY_IOU_BASE
-        # A target re-found after being hidden (occlusion coasting) is the same lock even though it left its old
-        # box behind: don't re-arm the acquisition guard, which would wipe the motion estimate it just kept.
-        _coast_cont = (_continued and state.aim_anchor.samples > 0
-                       and getattr(config, 'occlusion_coast_enabled', False))
-        if (_prev_locked_box is None or box_iou(_prev_locked_box, selected_box) < _iou_thresh) and not _coast_cont:
+        if _prev_locked_box is None or box_iou(_prev_locked_box, selected_box) < _iou_thresh:
             state.aim_y_last_target_t = 0.0
             # Same "is this genuinely a new target" edge as above — arms the
             # acquisition-phase guard below (state.lock_acquired_t) exactly
@@ -476,9 +394,7 @@ def process_aiming(
         # Kalman off (as it commonly is), removing this left literally
         # nothing anticipating a moving target, which read as the aimbot
         # feeling permanently a step behind.
-        _coast_on = bool(getattr(config, 'occlusion_coast_enabled', False))
         t_trk = None                                   # sample time of the aim-lead track this frame (None = not fed)
-        _aim0_x, _aim0_y = pred_x, pred_y              # the un-led aim point (what coasting remembers)
         if getattr(config, 'prediction_enabled', False):
             method = str(getattr(config, 'prediction_method', 'velocity') or 'velocity')
             if method not in ('velocity', 'anchor', 'auto'):
@@ -487,8 +403,6 @@ def process_aiming(
                 _reset_unused_predictors('')
                 if method == 'velocity':
                     _get_predictor(config).reset()
-                    if _coast_on:
-                        state.aim_anchor.reset()
                 else:
                     state.aim_anchor.reset()
             horizon_s = float(getattr(config, 'prediction_horizon_ms', 10.0)) / 1000.0
@@ -512,22 +426,12 @@ def process_aiming(
                     pred_x, pred_y, t_trk, horizon_s, _conf)
             else:
                 pred_x, pred_y = _get_predictor(config).update(pred_x, pred_y, now_t, horizon_s)
-                if _coast_on:
-                    t_trk, _age = _track_clock(config, state, method)
-                    _feed_coast_track(config, state, selected_box, _aim0_x - target_x, _aim0_y - target_y,
-                                      _aim0_x, _aim0_y, t_trk, _conf)
             _reset_unused_predictors(method)
-            if method == 'velocity' and not _coast_on and state.aim_anchor.samples:
+            if method == 'velocity' and state.aim_anchor.samples:
                 state.aim_anchor.reset()
         else:
             _reset_unused_predictors('')
-            if _coast_on:                              # coasting alone (Prediction off): the track still follows the target
-                if _in_acquisition:
-                    state.aim_anchor.reset()
-                t_trk, _age = _track_clock(config, state, 'velocity')
-                _feed_coast_track(config, state, selected_box, _aim0_x - target_x, _aim0_y - target_y,
-                                  _aim0_x, _aim0_y, t_trk, _conf)
-            elif state.aim_anchor.samples:
+            if state.aim_anchor.samples:
                 state.aim_anchor.reset()
 
         # --- Strafe response, output side ---

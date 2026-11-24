@@ -14,7 +14,7 @@
       document.documentElement.setAttribute("data-ui", ui);
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=25">
+  <link rel="stylesheet" href="styles.css?v=26">
 </head>
 <body>
   <div class="app">
@@ -1363,19 +1363,6 @@
               </div>
             </div>
             <div class="field-card">
-              <div class="field-info"><div class="field-title">Occlusion Coasting</div><div class="field-desc">While the locked target is hidden behind cover, keep aiming along its estimated path (it slows to a stop at the limit below) instead of freezing the crosshair</div></div>
-              <div class="field-control">
-                <label class="switch"><input type="checkbox" id="aim-occlusion_coast_enabled" data-key="occlusion_coast_enabled" data-advanced="1" data-type="bool"><span class="slider"></span></label>
-              </div>
-            </div>
-            <div class="field-card">
-              <div class="field-info"><div class="field-title">Coast Limit</div><div class="field-desc">How long a hidden target is followed. Also keeps the lock held for at least this long; never beyond Lost Target Timeout</div></div>
-              <div class="field-control">
-                <input type="number" id="aim-occlusion_coast_ms" data-key="occlusion_coast_ms" data-advanced="1" data-type="number" min="100" max="1500" step="10">
-                <span class="field-slider-value">ms</span>
-              </div>
-            </div>
-            <div class="field-card">
               <div class="field-info">
                 <div class="field-title">Lost Target Timeout</div>
                 <div class="field-desc">Longest time without a valid detection before the lock is released and the target forgotten. Aim is held only for Lock Persistence (which is capped by this); the target stays reacquirable until this elapses. Anchor FOV's FOV Lost Delay (Inference tab) is separate and only delays the FOV.</div>
@@ -2674,6 +2661,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=25"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>
