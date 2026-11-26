@@ -45,3 +45,19 @@ def active_label(active_preset: str = "", active_config: str = "", empty: str = 
     """Name shown at the pill's right: the loaded preset wins over a loaded config (as on the HUD)."""
     name = (active_preset or "").strip() or (active_config or "").strip() or empty
     return name if len(name) <= limit else name[: limit - 1] + "…"
+
+
+def assign_slot(slots: Optional[Sequence], index: int, name: str, count: int = SLOT_COUNT) -> List[str]:
+    """``slots`` with ``name`` placed in ``index``; the same preset is removed from any other slot
+    (one preset, one quick slot). An out-of-range index changes nothing."""
+    out = normalize_slots(slots, count)
+    if not (0 <= index < count) or not name:
+        return out
+    out = ["" if n == name else n for n in out]
+    out[index] = name
+    return out
+
+
+def clear_name(slots: Optional[Sequence], name: str, count: int = SLOT_COUNT) -> List[str]:
+    """``slots`` without ``name`` (used when a preset is removed from the quick slots)."""
+    return ["" if n == name else n for n in normalize_slots(slots, count)]

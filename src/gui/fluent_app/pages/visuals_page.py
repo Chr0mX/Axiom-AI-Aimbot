@@ -10,6 +10,7 @@ from qfluentwidgets import (
     FluentIcon, CheckBox, ComboBox, PushButton
 )
 from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.accent_picker import AccentPicker
 from ..components.slider_spin_card import SliderLabelCard
 from ..components.no_wheel_widgets import NoWheelSpinBox
 
@@ -375,6 +376,36 @@ class VisualsPage(BasePage):
             parent=self.appearanceGroup
         )
 
+        # Accent colour (sliders, switches, navigation capsule, buttons), animation switch, nav dock
+        self.accentCard = SettingCard(
+            FluentIcon.PALETTE,
+            t("accent_color", "Accent Colour"),
+            t("accent_color_desc", "Colour of sliders, switches, the navigation highlight and buttons"),
+            self.appearanceGroup
+        )
+        self.accentPicker = AccentPicker(self.accentCard)
+        self.accentCard.hBoxLayout.addWidget(self.accentPicker, 0, Qt.AlignmentFlag.AlignRight)
+        self.accentCard.hBoxLayout.addSpacing(16)
+
+        self.uiAnimationsCard = SwitchSettingCard(
+            FluentIcon.SPEED_HIGH,
+            t("ui_animations", "UI Animations"),
+            t("ui_animations_desc", "Smooth page, switch and navigation transitions (off = instant)"),
+            parent=self.appearanceGroup
+        )
+
+        self.navDockCard = SettingCard(
+            FluentIcon.LAYOUT,
+            t("nav_position", "Navigation Position"),
+            t("nav_position_desc", "Dock the navigation bar at the top or as a rail on the left (you can also drag it)"),
+            self.appearanceGroup
+        )
+        self.navDockCombo = ComboBox()
+        self.navDockCombo.addItems([t("nav_position_top", "Top"), t("nav_position_left", "Left")])
+        self.navDockCombo.setMinimumWidth(110)
+        self.navDockCard.hBoxLayout.addWidget(self.navDockCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.navDockCard.hBoxLayout.addSpacing(16)
+
         # === Web ESP ===
         self.webEspGroup = SettingCardGroup(t("web_esp_settings", "Web ESP"), self.scrollWidget)
 
@@ -482,6 +513,9 @@ class VisualsPage(BasePage):
         self.addContent(self.crosshairGroup)
 
         # Appearance settings
+        self.appearanceGroup.addSettingCard(self.accentCard)
+        self.appearanceGroup.addSettingCard(self.uiAnimationsCard)
+        self.appearanceGroup.addSettingCard(self.navDockCard)
         self.appearanceGroup.addSettingCard(self.enableAcrylicCard)
         self.appearanceGroup.addSettingCard(self.windowAlphaCard)
 
@@ -551,6 +585,9 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         self.crosshairColorBCard.valueChanged.connect(self._onCrosshairColorBChanged)
 
         # Appearance settings
+        self.accentPicker.colorChanged.connect(self._onAccentChanged)
+        self.uiAnimationsCard.checkedChanged.connect(self._onUiAnimationsChanged)
+        self.navDockCombo.currentIndexChanged.connect(self._onNavDockChanged)
         self.enableAcrylicCard.checkedChanged.connect(self._onAcrylicEnabledChanged)
         self.windowAlphaCard.valueChanged.connect(self._onWindowAlphaChanged)
         self.windowAlphaCard.slider.sliderReleased.connect(self._onWindowAlphaCommit)
@@ -617,7 +654,14 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         self.crosshairColorGCard.setValue(int(getattr(self._config, 'crosshair_color_g', 255)))
         self.crosshairColorBCard.setValue(int(getattr(self._config, 'crosshair_color_b', 255)))
 
-        # Appearance settings
+        # Appearance settings (silent: loading must never write back)
+        self.accentPicker.setColor(getattr(self._config, 'accent_color', '#7c6cf0'))
+        self.uiAnimationsCard.blockSignals(True)
+        self.uiAnimationsCard.setChecked(bool(getattr(self._config, 'ui_animations', True)))
+        self.uiAnimationsCard.blockSignals(False)
+        self.navDockCombo.blockSignals(True)
+        self.navDockCombo.setCurrentIndex(1 if getattr(self._config, 'nav_dock', 'top') == 'left' else 0)
+        self.navDockCombo.blockSignals(False)
         self.enableAcrylicCard.setChecked(self._config.enable_acrylic)
         safe_alpha = max(60, min(255, int(getattr(self._config, 'acrylic_window_alpha', 187))))
         if self._config.acrylic_window_alpha != safe_alpha:
@@ -842,6 +886,34 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         if self._config:
             self._config.crosshair_color_b = int(value)
 
+    def _onAccentChanged(self, hex_color):
+        if not self._config:
+            return
+        win = self.window()
+        if hasattr(win, 'setAccentColor'):
+            win.setAccentColor(hex_color)          # stores it on the config too
+        else:
+            self._config.accent_color = hex_color
+
+    def _onUiAnimationsChanged(self, checked):
+        if not self._config:
+            return
+        win = self.window()
+        if hasattr(win, 'setAnimationsEnabled'):
+            win.setAnimationsEnabled(bool(checked))
+        else:
+            self._config.ui_animations = bool(checked)
+
+    def _onNavDockChanged(self, index):
+        if not self._config:
+            return
+        dock = 'left' if index == 1 else 'top'
+        win = self.window()
+        if hasattr(win, 'setNavDock'):
+            win.setNavDock(dock)
+        else:
+            self._config.nav_dock = dock
+
     def _onAcrylicEnabledChanged(self, checked):
         if self._config:
             self._config.enable_acrylic = checked
@@ -1056,6 +1128,16 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
 
         # 外觀設定
         self.appearanceGroup.titleLabel.setText(t("appearance_options"))
+        self.accentCard.titleLabel.setText(t("accent_color", "Accent Colour"))
+        self.accentCard.contentLabel.setText(t("accent_color_desc", "Colour of sliders, switches, the navigation highlight and buttons"))
+        self.uiAnimationsCard.titleLabel.setText(t("ui_animations", "UI Animations"))
+        self.uiAnimationsCard.contentLabel.setText(t("ui_animations_desc", "Smooth page, switch and navigation transitions (off = instant)"))
+        self.navDockCard.titleLabel.setText(t("nav_position", "Navigation Position"))
+        self.navDockCard.contentLabel.setText(t("nav_position_desc", "Dock the navigation bar at the top or as a rail on the left (you can also drag it)"))
+        self.navDockCombo.blockSignals(True)
+        self.navDockCombo.setItemText(0, t("nav_position_top", "Top"))
+        self.navDockCombo.setItemText(1, t("nav_position_left", "Left"))
+        self.navDockCombo.blockSignals(False)
         self.enableAcrylicCard.titleLabel.setText(t("enable_acrylic"))
         self.enableAcrylicCard.contentLabel.setText(t("enable_acrylic_hint"))
         self.windowAlphaCard.titleLabel.setText(t("acrylic_window_alpha"))

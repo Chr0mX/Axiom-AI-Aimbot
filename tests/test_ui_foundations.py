@@ -185,3 +185,14 @@ class TestStatusPillLogic:
         assert s.active_label("", "") == "None"
         long = s.active_label("x" * 40)
         assert len(long) == 22 and long.endswith("…")
+
+    def test_assign_slot_moves_a_preset_instead_of_duplicating_it(self):
+        from core import ui_status as s
+        assert s.assign_slot(["A", "B"], 3, "A") == ["", "B", "", "A", ""]
+        assert s.assign_slot(["A"], 0, "A") == ["A", "", "", "", ""]
+        assert s.assign_slot(["A"], 9, "B") == ["A", "", "", "", ""]
+        assert s.assign_slot(["A"], 1, "") == ["A", "", "", "", ""]
+
+    def test_clear_name(self):
+        from core import ui_status as s
+        assert s.clear_name(["A", "B", "A"], "A") == ["", "B", "", "", ""]

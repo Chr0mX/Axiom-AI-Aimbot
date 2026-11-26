@@ -7,7 +7,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QFileDialog,
     QInputDialog, QMessageBox, QSplitter, QFrame
 )
-from qfluentwidgets import (
+from core import ui_status
+from qfluentwidgets import (RoundMenu, Action,
     FluentIcon, PrimaryPushButton, PushButton,
     ListWidget, TitleLabel, CaptionLabel, InfoBar, InfoBarPosition, qconfig
 )
@@ -215,6 +216,47 @@ class _ManagerBox(QFrame):
         self.listTitle.setStyleSheet(titleStyle)
         self.buttonTitle.setStyleSheet(titleStyle)
         self.separator.setStyleSheet(f"background-color:{divider};border:none")
+
+    # ── quick preset slots (the status pill's numbered buttons) ───────────────
+    def enableSlotMenu(self):
+        """Right-click a preset to assign it to one of the quick slots. Presets only — a full config
+        has no slot."""
+        self.configList.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.configList.customContextMenuRequested.connect(self._onListContextMenu)
+
+    def _onListContextMenu(self, pos):
+        item = self.configList.itemAt(pos)
+        if item is None or self._config is None:
+            return
+        name = item.text()
+        slots = ui_status.normalize_slots(getattr(self._config, 'preset_slots', []))
+        menu = RoundMenu(parent=self)
+        for i in range(len(slots)):
+            label = f"{t('assign_quick_slot', 'Assign to quick slot')} {i + 1}"
+            act = Action(label + ("  ✓" if slots[i] == name else ""))
+            act.triggered.connect(lambda _checked=False, i=i, n=name: self._assignSlot(n, i))
+            menu.addAction(act)
+        if name in slots:
+            clear = Action(t('clear_quick_slot', 'Remove from quick slots'))
+            clear.triggered.connect(lambda _checked=False, n=name: self._clearSlot(n))
+            menu.addAction(clear)
+        menu.exec(self.configList.mapToGlobal(pos))
+
+    def _saveSlots(self, slots):
+        self._config.preset_slots = slots
+        try:
+            from core.config import save_config
+            save_config(self._config)
+        except Exception:      # noqa: BLE001 - the assignment is still live in memory
+            pass
+
+    def _assignSlot(self, name: str, index: int):
+        self._saveSlots(ui_status.assign_slot(getattr(self._config, 'preset_slots', []), index, name))
+        self._showInfo(t("config_success"), t("quick_slot_assigned", "'{name}' is now quick preset {n}").format(name=name, n=index + 1))
+
+    def _clearSlot(self, name: str):
+        self._saveSlots(ui_status.clear_name(getattr(self._config, 'preset_slots', []), name))
+        self._showInfo(t("config_success"), t("quick_slot_cleared", "'{name}' removed from the quick presets").format(name=name))
 
     def _connectSignals(self):
         self.createBtn.clicked.connect(self._onCreateConfig)
@@ -449,6 +491,7 @@ class ConfigsPage(BasePage):
 
         self.configBox = _ManagerBox(_CONFIG_I18N, self)
         self.presetBox = _ManagerBox(_PRESET_I18N, self)
+        self.presetBox.enableSlotMenu()
 
         self.addContent(self.configBox)
         self.addContent(self.presetBox)
