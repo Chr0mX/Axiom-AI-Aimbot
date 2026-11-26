@@ -71,6 +71,7 @@ _SNAPSHOT_EXCLUDED_FIELDS = frozenset({
     'web_esp_enabled',
     'vigem_net_token',
     'show_advanced_settings',      # a UI preference: loading someone's snapshot must not flip your view
+    'ui_style',                    # likewise: a shared snapshot must not switch the interface look (restart)
 })
 
 # Model paths a snapshot may set must stay inside the app folder (e.g.

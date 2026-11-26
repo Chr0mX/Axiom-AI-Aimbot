@@ -3,10 +3,10 @@
 
 from PyQt6.QtCore import Qt
 from qfluentwidgets import SpinBox, DoubleSpinBox
-from .glass import GlassSlider
+from .ui_kit import Slider as _BaseSlider
 
 
-class NoWheelSlider(GlassSlider):
+class NoWheelSlider(_BaseSlider):
     """禁用滑鼠滾輪的 Slider，並修復滑鼠移動就會改值的問題"""
 
     def wheelEvent(self, event):

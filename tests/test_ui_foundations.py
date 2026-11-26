@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from core import ui_accent, ui_layout, ui_motion  # noqa: E402
+from core import ui_accent, ui_layout, ui_motion, ui_style  # noqa: E402
 
 
 class TestAccent:
@@ -154,6 +154,75 @@ class TestLookFields:
         c.from_dict({"config_version": 3, "ui": {"dark_mode": True}})
         cfgmod.validate_config(c)
         assert c.dark_mode is True and (c.accent_color, c.ui_animations, c.nav_dock) == ("#7c6cf0", True, "top")
+
+
+class TestUiStyle:
+    """The glass / classic look: a persisted choice read once at start-up (restart to apply)."""
+
+    @pytest.fixture(autouse=True)
+    def _fresh_style(self):
+        ui_style._reset_for_tests()
+        yield
+        ui_style._reset_for_tests()
+
+    def test_default_is_glass_and_persisted_under_ui(self, cfgmod):
+        assert _new_config(cfgmod).ui_style == "glass"
+        assert cfgmod._FIELD_MAP["ui_style"] == "ui.style"
+
+    def test_round_trip(self, cfgmod):
+        c = _new_config(cfgmod)
+        c.ui_style = "classic"
+        data = json.loads(json.dumps(c.to_dict()))
+        assert data["ui"]["style"] == "classic"
+        d = _new_config(cfgmod)
+        d.from_dict(data)
+        cfgmod.validate_config(d)
+        assert d.ui_style == "classic"
+
+    @pytest.mark.parametrize("bad", ["", "fancy", None, 3])
+    def test_bad_value_falls_back_to_glass(self, cfgmod, bad):
+        c = _new_config(cfgmod)
+        c.ui_style = bad
+        cfgmod.validate_config(c)
+        assert c.ui_style == "glass"
+
+    def test_style_is_case_insensitive(self, cfgmod):
+        c = _new_config(cfgmod)
+        c.ui_style = " Classic "
+        cfgmod.validate_config(c)
+        assert c.ui_style == "classic"
+
+    def test_old_config_without_the_key_loads_as_glass(self, cfgmod):
+        c = _new_config(cfgmod)
+        c.from_dict({"config_version": 3, "ui": {"dark_mode": True}})
+        cfgmod.validate_config(c)
+        assert c.ui_style == "glass"
+
+    def test_snapshots_never_carry_the_style(self):
+        from core.config_manager import _SNAPSHOT_EXCLUDED_FIELDS
+        assert "ui_style" in _SNAPSHOT_EXCLUDED_FIELDS
+
+    def test_pure_module_default_and_normalize(self):
+        assert ui_style.get_style() == "glass" and ui_style.is_glass()
+        assert ui_style.normalize("CLASSIC") == "classic"
+        assert ui_style.normalize("nope") == "glass"
+
+    def test_set_style_before_binding_applies(self):
+        assert ui_style.set_style("classic") == "classic"
+        assert not ui_style.is_glass()
+
+    def test_late_set_style_is_ignored(self):
+        ui_style.set_style("glass")
+        ui_style.lock()
+        assert ui_style.set_style("classic") == "glass"
+        assert ui_style.is_glass() and ui_style.is_locked()
+
+    def test_metrics_differ_per_style_and_are_copies(self):
+        glass, classic = ui_style.metrics("glass"), ui_style.metrics("classic")
+        assert glass["spin_chrome_w"] < classic["spin_chrome_w"]
+        assert classic["spin_chrome_w"] >= 92 and classic["title_px"] == 32 and glass["title_px"] == 24
+        glass["title_px"] = 99
+        assert ui_style.metrics("glass")["title_px"] == 24
 
 
 class TestStatusPillLogic:

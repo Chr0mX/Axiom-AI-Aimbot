@@ -311,6 +311,7 @@ _FIELD_MAP = {
     'accent_color':               'ui.accent_color',
     'ui_animations':              'ui.animations',
     'nav_dock':                   'ui.nav_dock',
+    'ui_style':                   'ui.style',
 
     # --- ocr / 2nd inference ---
     'second_inference_mode':      'weapon_detection.mode',
@@ -853,6 +854,7 @@ class Config:
         self.accent_color: str = DEFAULT_ACCENT_COLOR
         self.ui_animations: bool = True
         self.nav_dock: str = 'top'
+        self.ui_style: str = 'glass'          # 'glass' (default) / 'classic'; read once at start-up
 
         # Acrylic 毛玻璃效果專用設置
         self.enable_acrylic: bool = True
@@ -1472,6 +1474,7 @@ def _validate_web_esp(config: Config) -> None:
 
 DEFAULT_ACCENT_COLOR = '#7c6cf0'
 NAV_DOCKS = ('top', 'left')
+UI_STYLES = ('glass', 'classic')
 _HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
 
 
@@ -1484,11 +1487,13 @@ def normalize_accent_color(value) -> str:
 
 
 def _validate_ui_look(config: Config) -> None:
-    """Repair the interface-look fields (accent colour, animation switch, nav dock) from outside data."""
+    """Repair the interface-look fields (style, accent colour, animation switch, nav dock) from outside data."""
     config.accent_color = normalize_accent_color(getattr(config, 'accent_color', DEFAULT_ACCENT_COLOR))
     config.ui_animations = bool(getattr(config, 'ui_animations', True))
     dock = str(getattr(config, 'nav_dock', 'top') or 'top').lower()
     config.nav_dock = dock if dock in NAV_DOCKS else 'top'
+    style = str(getattr(config, 'ui_style', 'glass') or 'glass').strip().lower()
+    config.ui_style = style if style in UI_STYLES else 'glass'
 
 
 def _validate_gpu_monitor(config: Config) -> None:

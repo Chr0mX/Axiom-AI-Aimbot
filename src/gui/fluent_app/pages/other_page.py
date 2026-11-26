@@ -10,7 +10,7 @@ from qfluentwidgets import (
     FluentIcon, PrimaryPushButton,
     PushButton, BodyLabel, ComboBox, SubtitleLabel, CaptionLabel, isDarkTheme
 )
-from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import SettingCard, SwitchSettingCard, SettingCardGroup
 
 from ..base_page import BasePage
 from core.paths import src_dir

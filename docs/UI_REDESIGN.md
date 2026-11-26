@@ -106,7 +106,7 @@ offline shell and install are unavailable; the Other tab says so. Built-in HTTPS
 ## 5. Testing and results
 
 - `ruff check src tests tools`: clean.
-- `pytest tests`: 1911 passed, 207 skipped, 4 failed. The 4 are the existing
+- `pytest tests`: 1926 passed, 207 skipped, 4 failed. The 4 are the existing
   `test_screen_capture` failures (identical on the pre-redesign baseline). New: `test_ui_foundations.py`
   (35), `test_pwa_assets.py`, `test_slider_sync.py` updated to the new width constants.
 - Offscreen Qt (`python tools/ui_render.py shots OUT` / `stress`; Python 3.12 + PyQt6 6.10, stub libEGL):
@@ -136,7 +136,20 @@ Changed: `core/config.py`, `core/web_control_server.py`, `core/language_data/Eng
 `web_control_client/{index.html,app.js,styles.css}`, `web_overlay/index.html` (meta only),
 `tests/test_slider_sync.py`, `CLAUDE.md`.
 
-## 7. Remaining differences from the reference
+## 7. Reverting to the classic look
+
+The glass interface is the default. **Visuals → Appearance → Interface Style** offers *Glass* and *Classic*
+(the interface as it was before the redesign: left navigation, stock setting cards, single column, fixed
+blue accent). The choice is saved as `ui.style` and applied by restarting Axiom (a countdown notice; closing
+it cancels the restart and the setting applies next launch). It is read once at start-up because pages bind
+their widget classes at import time and own timers and threads; a live switch was rejected as too risky.
+In Classic the accent colour, UI animations and navigation position settings do not apply and are hidden.
+The style is excluded from config snapshots, so importing someone's file never changes your look. Code map:
+`core/ui_style.py` (choice + metrics), `components/ui_kit.py` (widget classes per style),
+`window_classic.py` (restored chrome), `components/restart_countdown.py`.
+Offscreen renders of Classic match the pre-redesign renders; `tools/ui_render.py ... --style classic` reproduces them.
+
+## 8. Remaining differences from the reference
 
 - No wallpaper / background-image feature (declined); the backdrop is acrylic or a painted gradient.
 - Docking is top and left only — no bottom or free-floating pill.

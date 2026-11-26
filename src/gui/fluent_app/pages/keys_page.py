@@ -8,7 +8,7 @@ from qfluentwidgets import (
     FluentIcon,
     PushButton, BodyLabel, ComboBox, LineEdit,
 )
-from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import SettingCard, SwitchSettingCard, SettingCardGroup
 
 from ..components.slider_spin_card import SliderDoubleSpinCard, SliderSpinCard
 

@@ -14,7 +14,7 @@ from qfluentwidgets import (
     ComboBox, PushButton, BodyLabel, SegmentedWidget,
     CaptionLabel, SwitchButton, LineEdit,
 )
-from ..components.glass import GlassCard, GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import Card, SettingCard, SwitchSettingCard, SettingCardGroup
 from ..components.slider_spin_card import SliderSpinCard
 from ..components.notify import notify
 from ..base_page import BasePage
@@ -50,7 +50,7 @@ _RARITY_SWATCH_COLORS: dict[str, str] = {
 }
 
 
-class _WeaponStatusPanel(GlassCard):
+class _WeaponStatusPanel(Card):
     """Read-only per-category HUD status readout (weapon / fire mode /
     attachments), populated from hud_inference.get_hud_results() via
     hud_categories.parse_hud_status(). Only meaningful for second_inference_mode

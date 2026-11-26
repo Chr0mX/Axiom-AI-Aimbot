@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidg
 from qfluentwidgets import (
     FluentIcon, CheckBox, ComboBox, PushButton
 )
-from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import IS_GLASS, SettingCard, SwitchSettingCard, SettingCardGroup
+from ..components.restart_countdown import RestartCountdown
 from ..components.accent_picker import AccentPicker
 from ..components.slider_spin_card import SliderLabelCard
 from ..components.no_wheel_widgets import NoWheelSpinBox
@@ -376,6 +377,20 @@ class VisualsPage(BasePage):
             parent=self.appearanceGroup
         )
 
+        # Interface look: Glass (default) / Classic. Chosen once at start-up, so a change restarts Axiom.
+        self.uiStyleCard = SettingCard(
+            FluentIcon.PALETTE,
+            t("ui_style", "Interface Style"),
+            t("ui_style_desc", "Glass is the current look; Classic is the earlier one. Changing it restarts Axiom."),
+            self.appearanceGroup
+        )
+        self.uiStyleCombo = ComboBox()
+        self.uiStyleCombo.addItems([t("ui_style_glass", "Glass"), t("ui_style_classic", "Classic")])
+        self.uiStyleCombo.setMinimumWidth(110)
+        self.uiStyleCard.hBoxLayout.addWidget(self.uiStyleCombo, 0, Qt.AlignmentFlag.AlignRight)
+        self.uiStyleCard.hBoxLayout.addSpacing(16)
+        self._restarter = RestartCountdown(self, lambda: self._config)
+
         # Accent colour (sliders, switches, navigation capsule, buttons), animation switch, nav dock
         self.accentCard = SettingCard(
             FluentIcon.PALETTE,
@@ -513,9 +528,15 @@ class VisualsPage(BasePage):
         self.addContent(self.crosshairGroup)
 
         # Appearance settings
-        self.appearanceGroup.addSettingCard(self.accentCard)
-        self.appearanceGroup.addSettingCard(self.uiAnimationsCard)
-        self.appearanceGroup.addSettingCard(self.navDockCard)
+        self.appearanceGroup.addSettingCard(self.uiStyleCard)
+        if IS_GLASS:
+            self.appearanceGroup.addSettingCard(self.accentCard)
+            self.appearanceGroup.addSettingCard(self.uiAnimationsCard)
+            self.appearanceGroup.addSettingCard(self.navDockCard)
+        else:
+            # The classic look has no accent colour, animations or navigation dock: not shown at all.
+            for _card in (self.accentCard, self.uiAnimationsCard, self.navDockCard):
+                _card.setVisible(False)
         self.appearanceGroup.addSettingCard(self.enableAcrylicCard)
         self.appearanceGroup.addSettingCard(self.windowAlphaCard)
 
@@ -585,6 +606,7 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         self.crosshairColorBCard.valueChanged.connect(self._onCrosshairColorBChanged)
 
         # Appearance settings
+        self.uiStyleCombo.currentIndexChanged.connect(self._onUiStyleChanged)
         self.accentPicker.colorChanged.connect(self._onAccentChanged)
         self.uiAnimationsCard.checkedChanged.connect(self._onUiAnimationsChanged)
         self.navDockCombo.currentIndexChanged.connect(self._onNavDockChanged)
@@ -655,6 +677,9 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         self.crosshairColorBCard.setValue(int(getattr(self._config, 'crosshair_color_b', 255)))
 
         # Appearance settings (silent: loading must never write back)
+        self.uiStyleCombo.blockSignals(True)
+        self.uiStyleCombo.setCurrentIndex(1 if getattr(self._config, 'ui_style', 'glass') == 'classic' else 0)
+        self.uiStyleCombo.blockSignals(False)
         self.accentPicker.setColor(getattr(self._config, 'accent_color', '#7c6cf0'))
         self.uiAnimationsCard.blockSignals(True)
         self.uiAnimationsCard.setChecked(bool(getattr(self._config, 'ui_animations', True)))
@@ -895,6 +920,18 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
         else:
             self._config.accent_color = hex_color
 
+    def _onUiStyleChanged(self, index):
+        """Save the chosen look and restart: the widget classes are bound once, at start-up."""
+        if not self._config:
+            return
+        self._config.ui_style = 'classic' if index == 1 else 'glass'
+        try:
+            from core.config import save_config
+            save_config(self._config)
+        except Exception:      # noqa: BLE001 - the restart helper saves again
+            pass
+        self._restarter.start()
+
     def _onUiAnimationsChanged(self, checked):
         if not self._config:
             return
@@ -1128,6 +1165,12 @@ fovThicknessCard detectRangeThicknessCard tracerThicknessCard aimMarkerThickness
 
         # 外觀設定
         self.appearanceGroup.titleLabel.setText(t("appearance_options"))
+        self.uiStyleCard.titleLabel.setText(t("ui_style", "Interface Style"))
+        self.uiStyleCard.contentLabel.setText(t("ui_style_desc", "Glass is the current look; Classic is the earlier one. Changing it restarts Axiom."))
+        self.uiStyleCombo.blockSignals(True)
+        self.uiStyleCombo.setItemText(0, t("ui_style_glass", "Glass"))
+        self.uiStyleCombo.setItemText(1, t("ui_style_classic", "Classic"))
+        self.uiStyleCombo.blockSignals(False)
         self.accentCard.titleLabel.setText(t("accent_color", "Accent Colour"))
         self.accentCard.contentLabel.setText(t("accent_color_desc", "Colour of sliders, switches, the navigation highlight and buttons"))
         self.uiAnimationsCard.titleLabel.setText(t("ui_animations", "UI Animations"))

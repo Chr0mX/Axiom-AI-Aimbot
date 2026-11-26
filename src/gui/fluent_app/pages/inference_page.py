@@ -8,7 +8,7 @@ from core.detect_mode import MODES as _DETECT_MODES, apply_mode, mode_from_confi
 from qfluentwidgets import (
     FluentIcon, SegmentedWidget, ComboBox,
 )
-from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import SettingCard, SwitchSettingCard, SettingCardGroup
 from ..components.slider_spin_card import SliderSpinCard, SliderDoubleSpinCard
 
 from ..base_page import BasePage

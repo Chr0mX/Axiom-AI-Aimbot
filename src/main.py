@@ -295,6 +295,11 @@ def main():
     config = Config()
     load_config(config)
 
+    # Interface look ('glass' default / 'classic'): chosen once, before any GUI widget class is bound
+    # (components/ui_kit locks it on first import); changing it in Visuals -> Appearance restarts Axiom.
+    from core import ui_style
+    ui_style.set_style(getattr(config, 'ui_style', ui_style.DEFAULT_STYLE))
+
     try:
         available_providers = ort.get_available_providers()
     except Exception as e:

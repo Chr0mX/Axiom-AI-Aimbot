@@ -1,7 +1,7 @@
 """Render / stress the real Qt window without a display (Linux, macOS or CI).
 
-    python tools/ui_render.py shots OUTDIR [WxH,WxH]   # every page, dark + light, PNGs in OUTDIR
-    python tools/ui_render.py stress                   # rapid nav, theme/accent/dock churn, leak + paint checks
+    python tools/ui_render.py shots OUTDIR [WxH,WxH] [--style classic|glass]   # every page, dark + light
+    python tools/ui_render.py stress [--style classic|glass]    # rapid nav, theme/accent/dock churn, leak + paint checks
 
 Needs a Python 3.12 environment with ``PyQt6==6.10.0 numpy pyserial`` (3.13 segfaults in sip on the
 language manager singleton). Qt's offscreen platform never calls EGL, but libQt6Gui still links it: on a
@@ -65,6 +65,9 @@ PAGES = ["modelInterface", "captureInterface", "inferenceInterface", "aimInterfa
          "keysInterface", "displayInterface", "configInterface", "convertInterface", "otherInterface"]
 
 
+STYLE = "glass"
+
+
 def make_window():
     from PyQt6.QtCore import QObject
     from PyQt6.QtWidgets import QApplication
@@ -76,6 +79,9 @@ def make_window():
         from core.config import Config
         cfg = Config()
     cfg.dark_mode = True
+    cfg.ui_style = STYLE
+    from core import ui_style
+    ui_style.set_style(STYLE)          # must happen before the window module (and ui_kit) is imported
     cfg.preset_slots = ["Fast", "", "Precise", "", ""]
     cfg.active_preset_name = "Precise"
     from gui.fluent_app.window import AxiomWindow
@@ -119,6 +125,8 @@ def cmd_stress() -> None:
     from PyQt6.QtWidgets import QWidget
     app, cfg, win = make_window()
     pump(app, 400)
+    if STYLE == "classic":
+        return cmd_stress_classic(app, cfg, win)
     nav = win.floatingNav
     routes = [e.route for e in nav._entries]
     widgets_before = len(win.findChildren(QWidget))
@@ -167,7 +175,48 @@ def cmd_stress() -> None:
     print("stress OK; widgets", widgets_before, "accent", cfg.accent_color, "dock", cfg.nav_dock)
 
 
+def cmd_stress_classic(app, cfg, win) -> None:
+    """Classic look has no floating nav / accent / dock: page switching, theme, resize and slider churn."""
+    from PyQt6.QtWidgets import QWidget
+    widgets_before = len(win.findChildren(QWidget))
+    t0 = time.perf_counter()
+    for i in range(200):
+        win.switchTo(getattr(win, PAGES[i % len(PAGES)]))
+        app.processEvents()
+    print(f"200 page switches: {time.perf_counter() - t0:.2f}s")
+    for _ in range(10):
+        win.toggleTheme()
+        app.processEvents()
+    for width in list(range(900, 1700, 50)) + list(range(1700, 900, -50)):
+        win.resize(width, 700)
+        app.processEvents()
+    for name, call in (("setAccentColor", lambda: win.setAccentColor("#e05fb0")),
+                       ("setNavDock", lambda: win.setNavDock("left")),
+                       ("setAnimationsEnabled", lambda: win.setAnimationsEnabled(False))):
+        call()
+        app.processEvents()
+    assert not hasattr(win, "floatingNav") and not hasattr(win, "statusPill"), "glass chrome built in classic"
+    win.switchTo(win.aimInterface)
+    pump(app, 500)
+    slider = win.aimInterface.pidPxCard.slider
+    times = []
+    for v in list(range(0, 101, 2)) * 5:
+        t = time.perf_counter()
+        slider.setValue(v)
+        app.processEvents()
+        times.append((time.perf_counter() - t) * 1000)
+    print(f"slider update ms: median {statistics.median(times):.2f} max {max(times):.2f}")
+    assert len(win.findChildren(QWidget)) == widgets_before, "widgets were recreated"
+    print("classic stress OK; widgets", widgets_before)
+
+
 if __name__ == "__main__":
+    args = sys.argv[1:]
+    if "--style" in args:
+        i = args.index("--style")
+        STYLE = args[i + 1]
+        del args[i:i + 2]
+    sys.argv[1:] = args
     if len(sys.argv) >= 3 and sys.argv[1] == "shots":
         cmd_shots(*sys.argv[2:4])
     elif len(sys.argv) >= 2 and sys.argv[1] == "stress":

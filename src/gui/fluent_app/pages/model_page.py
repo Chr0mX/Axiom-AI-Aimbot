@@ -4,17 +4,16 @@
 import json
 import os
 import subprocess
-import sys
 import time
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QApplication, QHBoxLayout, QLabel, QTextEdit, QVBoxLayout,
+    QHBoxLayout, QLabel, QTextEdit, QVBoxLayout,
 )
 from qfluentwidgets import (
     FluentIcon,
     ComboBox, PushButton, InfoBar, InfoBarPosition, SearchLineEdit,
 )
-from ..components.glass import GlassCard, TextStyler, GlassSettingCard as SettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import Card, TextStyler, SettingCard, SettingCardGroup
 
 from core.paths import hud_model_dir, list_onnx, model_dir as _model_dir_path, project_root, trt_installer_path
 from ..base_page import BasePage
@@ -60,7 +59,7 @@ def _default_template(model_name: str) -> str:
 # Model notes card widget
 # ──────────────────────────────────────────────
 
-class _ModelNotesCard(GlassCard):
+class _ModelNotesCard(Card):
     """Per-model notes card with view/edit mode, saved to user/model_notes.json."""
 
     def __init__(self, parent=None):
@@ -702,58 +701,12 @@ class ModelPage(BasePage):
         self._trt_installer_launched = True
 
     def _startRestartCountdown(self) -> None:
-        # A second backend switch restarts the countdown instead of stacking another timer
-        # (two timers meant two restarts), and closing the notice cancels the restart: the
-        # saved setting is kept and simply takes effect on the next launch.
-        self._cancelRestartCountdown()
-        self._restartCountdown = 5
-        self._restartCountdownBar = InfoBar.info(
-            t("restart_required", "Restart Required"),
-            f"Restarting in {self._restartCountdown}s…",
-            duration=-1, isClosable=True, position=InfoBarPosition.TOP, parent=self,
-        )
-        self._restartCountdownBar.closedSignal.connect(self._onRestartBarClosed)
-        self._restartTimer = QTimer(self)
-        self._restartTimer.timeout.connect(self._onRestartTick)
-        self._restartTimer.start(1000)
-
-    def _cancelRestartCountdown(self) -> None:
-        timer = getattr(self, "_restartTimer", None)
-        self._restartTimer = None
-        if timer is not None:
-            timer.stop()
-            timer.deleteLater()
-        bar = getattr(self, "_restartCountdownBar", None)
-        self._restartCountdownBar = None
-        if bar is not None:
-            try:
-                bar.close()
-            except RuntimeError:        # already deleted
-                pass
-
-    def _onRestartBarClosed(self) -> None:
-        if getattr(self, "_restartCountdown", 0) > 0:
-            self._cancelRestartCountdown()
-
-    def _onRestartTick(self) -> None:
-        from qfluentwidgets import BodyLabel as _BL
-        self._restartCountdown -= 1
-        if self._restartCountdown <= 0:
-            self._cancelRestartCountdown()
-            self._restartApp()
-        else:
-            bar = getattr(self, "_restartCountdownBar", None)
-            if bar:
-                for lbl in bar.findChildren(_BL):
-                    lbl.setText(f"Restarting in {self._restartCountdown}s…")
-                    break
-
-    def _restartApp(self) -> None:
-        from core.config import save_config
-        if self._config:
-            save_config(self._config)
-        subprocess.Popen([sys.executable] + sys.argv)
-        QApplication.instance().quit()
+        # A second backend switch restarts the countdown instead of stacking another timer, and
+        # closing the notice cancels the restart (the saved setting then applies on the next launch).
+        if getattr(self, "_restarter", None) is None:
+            from ..components.restart_countdown import RestartCountdown
+            self._restarter = RestartCountdown(self, lambda: self._config)
+        self._restarter.start()
 
     # ──────────────────────────────────────────────
     # Callbacks

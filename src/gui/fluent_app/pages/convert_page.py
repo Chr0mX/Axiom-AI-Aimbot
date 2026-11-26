@@ -11,7 +11,7 @@ from qfluentwidgets import (
     FluentIcon, PrimaryPushButton, PushButton, BodyLabel, CaptionLabel,
     TextEdit, IndeterminateProgressBar, InfoBar, InfoBarPosition, SearchLineEdit,
 )
-from ..components.glass import GlassSettingCard as SettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import SettingCard, SettingCardGroup
 
 from core.paths import list_onnx, project_root, src_dir
 from ..base_page import BasePage

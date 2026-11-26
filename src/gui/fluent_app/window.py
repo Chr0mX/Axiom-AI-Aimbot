@@ -30,7 +30,8 @@ from .components.status_pill import StatusPill
 from .components.caption_buttons import CaptionIconButton, style_caption_buttons
 from .components.motion import Tween, fade_in, DUR, DUR_SLOW
 from .components.notify import notify
-from core import ui_accent, ui_motion, ui_status
+from core import ui_accent, ui_motion, ui_status, ui_style
+from .window_classic import ClassicWindowMixin
 try:                                   # CPU % for the status pill; the pill hides the cell without it
     import psutil as _psutil
 except Exception:                      # noqa: BLE001 - optional
@@ -40,10 +41,16 @@ from version import __version__
 
 
 
-class AxiomWindow(FluentWindow):
+class AxiomWindow(ClassicWindowMixin, FluentWindow):
+    # The interface look, fixed for the whole run (main.py chooses it before this module is imported).
+    # Glass: floating pill nav, status pill, backdrop, accent/animation/dock settings.
+    # Classic: the vendored left navigation and the original theme path (window_classic.py).
+    _glass = ui_style.is_glass()
+
     def __init__(self):
         super().__init__()
-        install_tooltip_style()          # once, before the pages exist (an app-level QSS change re-polishes every widget)
+        if self._glass:
+            install_tooltip_style()      # once, before the pages exist (an app-level QSS change re-polishes every widget)
 
         # Config references
         self._config = None
@@ -136,7 +143,8 @@ class AxiomWindow(FluentWindow):
             
             # Reduce spacing between icon and title
             self.titleBar.hBoxLayout.setSpacing(6)
-            self.titleBar.hBoxLayout.setContentsMargins(16, 0, 6, 0)
+            if self._glass:
+                self.titleBar.hBoxLayout.setContentsMargins(16, 0, 6, 0)
 
         # Setup Pages - using new tab key names
 
@@ -164,7 +172,10 @@ class AxiomWindow(FluentWindow):
         self.otherInterface.setObjectName("otherInterface")
 
         self.initNavigation()
-        self.initChrome()
+        if self._glass:
+            self.initChrome()
+        else:
+            self.initClassicChrome()
 
         # Re-sync a page's widgets from the live Config every time the user
         # navigates to it (zero-lag — doesn't wait for the timer below) and
@@ -201,7 +212,8 @@ class AxiomWindow(FluentWindow):
         # each distinct failure once instead of leaving it in the log only.
         self._lastShownModelLoadError = ""
         self._configSyncTimer.timeout.connect(self._onModelLoadErrorTick)
-        self._configSyncTimer.timeout.connect(self._onStatusPillTick)
+        if self._glass:
+            self._configSyncTimer.timeout.connect(self._onStatusPillTick)
 
         from .components.capture_preview import CapturePreviewPanel
         from PyQt6.QtWidgets import QToolButton
@@ -437,15 +449,21 @@ class AxiomWindow(FluentWindow):
             setTheme(Theme.LIGHT)
             qconfig.set(qconfig.themeMode, Theme.LIGHT, save=False)
             self._isDarkTheme = False
-        self._updateThemeButton()
-        ui_motion.set_animations_enabled(bool(getattr(config, 'ui_animations', True)))
-        refresh_motion(self)
-        ui_accent.set_accent(getattr(config, 'accent_color', ui_accent.DEFAULT_ACCENT))
+        if self._glass:
+            self._updateThemeButton()
+            ui_motion.set_animations_enabled(bool(getattr(config, 'ui_animations', True)))
+            refresh_motion(self)
+            ui_accent.set_accent(getattr(config, 'accent_color', ui_accent.DEFAULT_ACCENT))
+        else:
+            self.themeButton.setIcon(FluentIcon.BRIGHTNESS if self._isDarkTheme else FluentIcon.QUIET_HOURS)
         setThemeColor(QColor(ThemeColors.ACCENT.get()))
         self._forceWindowsTitleBarColor(isDark=self._isDarkTheme)
         self.updateLogo()
-        self._navDock = 'left' if getattr(config, 'nav_dock', 'top') == 'left' else 'top'
-        self.layoutChrome()
+        if self._glass:
+            self._navDock = 'left' if getattr(config, 'nav_dock', 'top') == 'left' else 'top'
+            self.layoutChrome()
+        else:
+            self.updateIcons()
 
         # 更新頁面內的主題相關圖標（如 Discord 按鈕）
         if hasattr(self, 'otherInterface') and hasattr(self.otherInterface, '_updateDiscordIcon'):
@@ -454,8 +472,9 @@ class AxiomWindow(FluentWindow):
         # 重新套用 Acrylic 效果和主題樣式（使用 config 中的 alpha 值）
         self._applyAcrylicEffect()
         self._applyThemeStyles()
-        self._backdropKey = None
-        self.update()
+        if self._glass:
+            self._backdropKey = None
+            self.update()
 
         # 確保參數管理頁的左右面板在配置更新後立即重繪磨砂樣式
         if hasattr(self, 'configInterface'):
@@ -469,6 +488,8 @@ class AxiomWindow(FluentWindow):
 
     def updatePreviewPanelVisibility(self) -> None:
         """Show/hide preview panel based on screenshot method and uvc_show_window toggle."""
+        if not self._glass:
+            return self._classicUpdatePreviewPanelVisibility()
         if not hasattr(self, 'previewPanel') or self._config is None:
             return
         method = str(getattr(self._config, 'screenshot_method', 'mss')).lower()
@@ -488,7 +509,10 @@ class AxiomWindow(FluentWindow):
             self.previewPanel.hide()
 
     def _togglePreviewCollapse(self) -> None:
-        """Fold the capture preview away (or bring it back); the pages gain the freed width."""
+        """Fold the capture preview away (or bring it back); the pages gain the freed width.
+        (Classic: the arrow collapses/expands the left navigation instead.)"""
+        if not self._glass:
+            return self._classicTogglePreviewCollapse()
         self._previewCollapsed = not self._previewCollapsed
         self.updatePreviewPanelVisibility()
 
@@ -783,6 +807,8 @@ class AxiomWindow(FluentWindow):
     # -- layout of the overlay chrome ---------------------------------------------------------
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        if not self._glass:
+            return
         # the vendored window assumes a 46 px navigation column; there is none any more
         self.titleBar.move(0, 0)
         self.titleBar.resize(self.width(), self.titleBar.height())
@@ -832,6 +858,8 @@ class AxiomWindow(FluentWindow):
 
     def setNavDock(self, dock: str):
         """Dock the navigation ``top`` (title row) or ``left`` (vertical rail) and remember it."""
+        if not self._glass:
+            return                      # classic look: the vendored left navigation has no dock setting
         dock = 'left' if dock == 'left' else 'top'
         changed = dock != self._navDock
         self._navDock = dock
@@ -845,6 +873,8 @@ class AxiomWindow(FluentWindow):
     # -- appearance ---------------------------------------------------------------------------
     def setAccentColor(self, hex_color: str, animate: bool = True):
         """Make ``hex_color`` the accent everywhere (switches, sliders, nav capsule, buttons)."""
+        if not self._glass:
+            return                      # classic look: fixed Fluent blue
         snap = self._beginCrossfade() if animate else None
         stored = ui_accent.set_accent(hex_color)
         if self._config is not None:
@@ -857,6 +887,8 @@ class AxiomWindow(FluentWindow):
         self._endCrossfade(snap, DUR)
 
     def setAnimationsEnabled(self, enabled: bool):
+        if not self._glass:
+            return                      # classic look has no first-party animations to switch
         ui_motion.set_animations_enabled(bool(enabled))
         if self._config is not None:
             self._config.ui_animations = bool(enabled)
@@ -864,7 +896,7 @@ class AxiomWindow(FluentWindow):
 
     def _beginCrossfade(self):
         """Snapshot of the window to fade away after a theme/accent change (None when animations are off)."""
-        if not ui_motion.animations_enabled() or not self.isVisible():
+        if not self._glass or not ui_motion.animations_enabled() or not self.isVisible():
             return None
         overlay = QLabel(self)
         overlay.setPixmap(self.grab())
@@ -916,6 +948,8 @@ class AxiomWindow(FluentWindow):
 
     def paintEvent(self, e):
         super().paintEvent(e)
+        if not self._glass:
+            return
         key = (self.width(), self.height(), self._isDarkTheme, ui_accent.get_accent())
         if key != self._backdropKey or self._backdropPixmap is None:
             self._backdropKey = key
@@ -975,6 +1009,8 @@ class AxiomWindow(FluentWindow):
         light and dark variants, so a plain theme toggle does not need it). A theme toggle only needs the
         title bar text colour: the glass painters read the live theme at paint time.
         """
+        if not self._glass:
+            return self._classicApplyThemeStyles()
         from PyQt6.QtGui import QPainter
         from PyQt6.QtWidgets import QAbstractScrollArea
         from qfluentwidgets import SegmentedWidget as _SW
@@ -1031,6 +1067,8 @@ class AxiomWindow(FluentWindow):
                 seg._glassSegPatched = True
 
     def toggleTheme(self):
+        if not self._glass:
+            return self._classicToggleTheme()
         snap = self._beginCrossfade()
         if self._isDarkTheme:
             setTheme(Theme.LIGHT)
@@ -1081,7 +1119,10 @@ class AxiomWindow(FluentWindow):
     
     def _refreshUI(self):
         """Refresh UI text after language change."""
-        self._retranslateChrome()
+        if self._glass:
+            self._retranslateChrome()
+        else:
+            self._classicRetranslateNav()
 
         # Update all pages
         pages = [

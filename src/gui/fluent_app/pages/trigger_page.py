@@ -5,7 +5,7 @@ from PyQt6.QtCore import Qt
 from qfluentwidgets import (
     FluentIcon, ComboBox
 )
-from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import SettingCard, SwitchSettingCard, SettingCardGroup
 from ..components.slider_spin_card import SliderDoubleSpinCard
 
 from ..base_page import BasePage

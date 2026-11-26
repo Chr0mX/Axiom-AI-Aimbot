@@ -14,7 +14,7 @@ from qfluentwidgets import (
     ComboBox, SegmentedWidget,
     BodyLabel, PushButton, CheckBox,
 )
-from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
+from ..components.ui_kit import SettingCard, SwitchSettingCard, SettingCardGroup
 from core.aim_coupling import click_method_for_move
 from core.paths import src_dir
 from ..components.combo_utils import reset_items

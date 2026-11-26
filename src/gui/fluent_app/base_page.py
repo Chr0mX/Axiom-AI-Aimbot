@@ -7,7 +7,8 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFrame
 from qfluentwidgets import SmoothScrollArea, TitleLabel, FluentWindow, FluentIcon
 from .components.advanced import AdvancedVisibility
 from .components.columns import TwoColumnBand
-from .components.glass import GlassSettingCardGroup, GlassSwitchSettingCard as SwitchSettingCard
+from core import ui_style
+from .components.ui_kit import SettingCardGroup, SwitchSettingCard, is_group
 
 class BasePage(QWidget):
     """
@@ -43,7 +44,8 @@ class BasePage(QWidget):
         self.scrollWidget = QWidget()
         self.scrollWidget.setStyleSheet("background: transparent;")
         self.scrollLayout = QVBoxLayout(self.scrollWidget)
-        self.scrollLayout.setContentsMargins(28, 14, 28, 28)
+        _m = ui_style.metrics()
+        self.scrollLayout.setContentsMargins(*_m["page_margins"])
         self.scrollLayout.setSpacing(20)
         self._band = None            # the TwoColumnBand currently collecting groups
         
@@ -52,8 +54,11 @@ class BasePage(QWidget):
         # Apply custom font styling if needed, but TitleLabel is usually good
         # We might want it even bigger/bolder
         font = self.largeTitleLabel.font()
-        font.setPixelSize(24)
-        font.setWeight(font.Weight.DemiBold)
+        font.setPixelSize(_m["title_px"])
+        if _m["title_bold"]:
+            font.setBold(True)
+        else:
+            font.setWeight(font.Weight.DemiBold)
         self.largeTitleLabel.setFont(font)
         
         self.scrollLayout.addWidget(self.largeTitleLabel)
@@ -103,9 +108,12 @@ class BasePage(QWidget):
               "Also show fine-tuning options. Hidden options keep their values."),
             parent=self.scrollWidget)
         card.checkedChanged.connect(self._onAdvancedToggled)
-        panel = GlassSettingCardGroup("", self.scrollWidget)
-        panel.addSettingCard(card)
-        self.scrollLayout.insertWidget(1, panel)
+        if ui_style.is_glass():
+            panel = SettingCardGroup("", self.scrollWidget)      # frame-only group around the one row
+            panel.addSettingCard(card)
+            self.scrollLayout.insertWidget(1, panel)
+        else:
+            self.scrollLayout.insertWidget(1, card)
         self.advancedSwitchCard = card
         self.applyAdvanced()
 
@@ -136,7 +144,7 @@ class BasePage(QWidget):
         Consecutive setting groups share one ``TwoColumnBand`` (two columns on a wide page, one on a
         narrow one); any other widget is full width and ends the band.
         """
-        if isinstance(widget, GlassSettingCardGroup):
+        if is_group(widget):
             if self._band is None:
                 self._band = TwoColumnBand(self.scrollWidget)
                 self.scrollLayout.addWidget(self._band)

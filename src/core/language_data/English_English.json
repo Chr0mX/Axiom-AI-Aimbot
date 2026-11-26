@@ -602,5 +602,9 @@
   "clear_quick_slot": "Remove from quick slots",
   "quick_slot_n": "Slot {n}",
   "quick_slot_assigned": "'{name}' is now quick preset {n}",
-  "quick_slot_cleared": "'{name}' removed from the quick presets"
+  "quick_slot_cleared": "'{name}' removed from the quick presets",
+  "ui_style": "Interface Style",
+  "ui_style_desc": "Glass is the current look; Classic is the earlier one. Changing it restarts Axiom.",
+  "ui_style_glass": "Glass",
+  "ui_style_classic": "Classic"
 }

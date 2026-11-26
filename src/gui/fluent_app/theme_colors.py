@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Tuple, Dict, Any
 
 from core import ui_accent as _ui_accent
+from core import ui_style as _ui_style
 
 try:
     from qfluentwidgets import isDarkTheme
@@ -176,6 +177,8 @@ class AccentColorPair(ColorPair):
     so changing it recolours every widget that reads ``ThemeColors.ACCENT``/``PRIMARY`` at paint time."""
 
     def get(self) -> str:
+        if not _ui_style.is_glass():              # classic look: the app's fixed blue (theme_colors.json may override)
+            return super().get()
         return _ui_accent.get_accent()
 
 

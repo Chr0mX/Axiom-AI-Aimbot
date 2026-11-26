@@ -11,6 +11,12 @@ from __future__ import annotations
 
 import ast
 import os
+import sys
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+from core import ui_style  # noqa: E402  (pure, Qt-free)
 
 
 def _slider_spin_card_source() -> str:
@@ -57,6 +63,15 @@ def test_spin_changed_also_refreshes_handle():
 # the pure width helpers against a fake font-metrics object.
 # ---------------------------------------------------------------------------------------------
 
+@pytest.fixture(params=[ui_style.GLASS, ui_style.CLASSIC])
+def style(request):
+    """Run the layout checks once per interface look (the metrics table differs between them)."""
+    ui_style._reset_for_tests()
+    ui_style.set_style(request.param)
+    yield request.param
+    ui_style._reset_for_tests()
+
+
 def _helpers_namespace():
     """exec the module's constants + width helpers with a stand-in QFontMetrics (10 px per char)."""
     src = _slider_spin_card_source()
@@ -74,7 +89,7 @@ def _helpers_namespace():
         def horizontalAdvance(self, text):
             return 10 * len(text)
 
-    ns = {"QFontMetrics": FakeMetrics, "QWidget": object}
+    ns = {"QFontMetrics": FakeMetrics, "QWidget": object, "ui_style": ui_style}
     mod = ast.Module(body=consts + nodes, type_ignores=[])
     exec(compile(ast.fix_missing_locations(mod), "slider_spin_card_helpers", "exec"), ns)
     return ns
@@ -103,19 +118,20 @@ class _FakeSpin:
         return None
 
 
-def test_spin_width_covers_text_and_pill_padding():
+def test_spin_width_covers_text_and_pill_padding(style):
     ns = _helpers_namespace()
     spin = _FakeSpin(0, 1000, suffix=" ms")
     w = ns["spin_min_width"](spin)
     widest = ns["text_width"](spin, "1000 ms")
-    # The value badge is a pill (2 x 10 px padding + borders, no spin buttons): never go below that.
-    assert ns["_SPIN_CHROME_W"] >= 24
+    # Glass: the value badge is a pill (2 x 10 px padding + borders, no spin buttons): never go below that.
+    # Classic: the vendored stylesheet reserves ~92 px for padding + the two spin buttons.
+    assert ns["_SPIN_CHROME_W"] >= (24 if style == ui_style.GLASS else 92)
     assert w >= widest + ns["_SPIN_CHROME_W"]
     # An explicit floor still wins when the content is tiny.
     assert ns["spin_min_width"](_FakeSpin(0, 9), floor=200) == 200
 
 
-def test_label_width_fits_every_sample():
+def test_label_width_fits_every_sample(style):
     ns = _helpers_namespace()
     label = _FakeSpin(0, 1)
     w = ns["label_min_width"](label, ["0.00", "100 %", "3000 px/s"], floor=45)
