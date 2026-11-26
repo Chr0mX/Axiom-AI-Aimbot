@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0e1022">
+  <title>Axiom is unreachable</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    body { display: grid; place-items: center; text-align: center; color: #e9eaf6; padding: 24px;
+      font: 15px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(90% 60% at 50% -10%, rgba(124,108,240,.35), transparent 70%), linear-gradient(#171935, #0b0c1a); }
+    .card { max-width: 420px; padding: 28px 26px; border-radius: 20px; border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.06); }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    p { margin: 0 0 18px; color: #a9aecb; }
+    button { font: inherit; font-weight: 600; color: #fff; border: 0; border-radius: 999px; padding: 9px 22px; cursor: pointer;
+      background: linear-gradient(90deg, #a2a5f6, #7c6cf0); }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ff6b6b; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1><span class="dot"></span>Axiom is unreachable</h1>
+    <p>The PC running Axiom isn't answering. Check that Axiom is running with Remote Control enabled and that this device is on the same network. Retrying automatically…</p>
+    <button id="retry" type="button">Retry now</button>
+  </div>
+  <script>
+    function go() { location.reload(); }
+    document.getElementById("retry").addEventListener("click", go);
+    setInterval(function () {
+      fetch("./", { cache: "no-store" }).then(function (r) { if (r.ok) go(); }).catch(function () {});
+    }, 3000);
+  </script>
+</body>
+</html>

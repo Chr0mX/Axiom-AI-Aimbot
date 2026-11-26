@@ -220,6 +220,7 @@
         try { btn.scrollIntoView({ block: "nearest", inline: "center" }); } catch (e) { btn.scrollIntoView(); }
       }
     });
+    layoutTabs();
     panels.forEach(function (panel) {
       panel.classList.toggle("active", panel.id === "panel-" + name);
     });
@@ -2938,7 +2939,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "25") return;
+    if (cssVer !== "26") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
@@ -3597,6 +3598,7 @@
       Array.prototype.forEach.call(document.querySelectorAll('input[name="ui-style"]'), function (r) {
         r.checked = r.value === style;
       });
+      layoutTabs();
       if (announce) notify("Interface style: " + (style === "studio" ? "Studio" : "Instrument"));
     }
     applyUiStyle(document.documentElement.getAttribute("data-ui"), false);
@@ -3649,10 +3651,268 @@
           titleEl.setAttribute("aria-expanded", on ? "false" : "true");
         });
         applyUiStyle("studio", false);
+        resetAccent();
+        applyTheme("dark", false);
+        lsRemove(MOTION_KEY);
+        applyMotion(!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches), false);
+        lsRemove(MOTION_KEY);
         notify("Page layout reset");
       });
     }
   }
+
+
+  // ------------------------------------------------------------------
+  // Appearance (this browser only): colour theme, accent, motion; the
+  // floating tab pill's sliding capsule; install + service worker.
+  // ------------------------------------------------------------------
+  var THEME_KEY = "axiom_theme", ACCENT_KEY = "axiom_accent", MOTION_KEY = "axiom_motion";
+  var ACCENT_PRESETS = [["Violet", "#7c6cf0"], ["Purple", "#a662aa"], ["Pink", "#e05fb0"], ["Blue", "#4f8cff"], ["Teal", "#2fb8a6"]];
+  var DEFAULT_ACCENT = "#7c6cf0";
+  var rootEl = document.documentElement;
+
+  function lsSet(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* storage unavailable */ } }
+  function lsRemove(key) { try { localStorage.removeItem(key); } catch (e) { /* storage unavailable */ } }
+  function motionOn() { return rootEl.getAttribute("data-motion") !== "off"; }
+  function isHexColour(v) { return /^#[0-9a-fA-F]{6}$/.test(v || ""); }
+
+  // Everything cross-fades for a moment when theme or accent change (skipped when motion is off).
+  var themeAnimTimer = null;
+  function pulseThemeAnim() {
+    if (!motionOn()) return;
+    rootEl.classList.add("theme-anim");
+    clearTimeout(themeAnimTimer);
+    themeAnimTimer = setTimeout(function () { rootEl.classList.remove("theme-anim"); }, 360);
+  }
+
+  function updateThemeMeta() {
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", rootEl.getAttribute("data-theme") === "light" ? "#eef0fb" : "#0e1022");
+    var btn = document.getElementById("theme-toggle");
+    if (btn) {
+      var use = btn.querySelector("use");
+      // like the desktop app: the icon shows the current theme
+      if (use) use.setAttribute("href", rootEl.getAttribute("data-theme") === "light" ? "#i-sun" : "#i-moon");
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="ui-theme"]'), function (r) {
+      r.checked = r.value === rootEl.getAttribute("data-theme");
+    });
+  }
+  function applyTheme(theme, announce) {
+    if (theme !== "light") theme = "dark";
+    pulseThemeAnim();
+    rootEl.setAttribute("data-theme", theme);
+    lsSet(THEME_KEY, theme);
+    updateThemeMeta();
+    layoutTabs();
+    if (announce) notify("Theme: " + (theme === "light" ? "Light" : "Dark"));
+  }
+
+  function currentAccent() {
+    var inline = rootEl.style.getPropertyValue("--accent").trim();
+    return isHexColour(inline) ? inline.toLowerCase() : "";
+  }
+  function applyAccent(hex, announce) {
+    if (!isHexColour(hex)) return false;
+    hex = hex.toLowerCase();
+    var r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+    pulseThemeAnim();
+    rootEl.style.setProperty("--accent", hex);
+    rootEl.style.setProperty("--accent-rgb", r + ", " + g + ", " + b);
+    rootEl.style.setProperty("--on-accent", (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.62 ? "#14141c" : "#ffffff");
+    rootEl.setAttribute("data-accent", "custom");
+    lsSet(ACCENT_KEY, hex);
+    syncAccentControls();
+    if (announce) notify("Accent colour: " + hex);
+    return true;
+  }
+  function resetAccent() {
+    ["--accent", "--accent-rgb", "--on-accent"].forEach(function (k) { rootEl.style.removeProperty(k); });
+    rootEl.removeAttribute("data-accent");
+    lsRemove(ACCENT_KEY);
+    syncAccentControls();
+  }
+  function syncAccentControls() {
+    var now = currentAccent() || DEFAULT_ACCENT;
+    var hexInput = document.getElementById("accent-hex");
+    if (hexInput && document.activeElement !== hexInput) hexInput.value = now;
+    Array.prototype.forEach.call(document.querySelectorAll(".accent-swatch"), function (sw) {
+      sw.setAttribute("aria-checked", sw.getAttribute("data-hex") === now ? "true" : "false");
+    });
+  }
+  function applyMotion(on, announce) {
+    rootEl.setAttribute("data-motion", on ? "on" : "off");
+    lsSet(MOTION_KEY, on ? "on" : "off");
+    var t = document.getElementById("motion-toggle");
+    if (t) t.checked = on;
+    layoutTabs();
+    if (announce) notify("UI animations " + (on ? "on" : "off"));
+  }
+
+  // Sliding capsule behind the active tab (Studio look). Collapsed tabs are icon-only; the active one
+  // (or all of them when the bar has room) shows its label. Positions come from measured label widths.
+  var TAB_ICON_W = 38, TAB_GAP = 2, TAB_PAD = 4;
+  var layoutQueued = false;
+  var appearanceReady = false;   // activateTab() runs once at startup, before this block's variables exist
+  function layoutTabs() {
+    if (!appearanceReady) return;
+    var tabs = document.querySelector(".tabs");
+    var cap = tabs && tabs.querySelector(".tab-capsule");
+    if (!tabs || !cap) return;
+    if (rootEl.getAttribute("data-ui") !== "studio") { tabs.classList.remove("capsule-ready"); tabs.removeAttribute("data-labels"); return; }
+    var list = Array.prototype.slice.call(tabs.querySelectorAll(".tab"));
+    var active = tabs.querySelector(".tab.active");
+    if (!active) return;
+    function expandedW(tab) {
+      var lbl = tab.querySelector(".tab-label");
+      return 18 + 24 + 7 + (lbl ? lbl.scrollWidth : 0);
+    }
+    var bar = tabs.parentElement;
+    var used = 0;
+    Array.prototype.forEach.call(bar.children, function (el) { if (el !== tabs && el.offsetParent !== null) used += el.offsetWidth + 14; });
+    var avail = bar.clientWidth - 48 - used;
+    var allW = list.reduce(function (n, t) { return n + expandedW(t); }, 0) + TAB_GAP * (list.length - 1) + 2 * TAB_PAD;
+    var mode = (window.innerWidth > 900 && allW <= avail) ? "all" : "active";
+    tabs.setAttribute("data-labels", mode);
+    var x = TAB_PAD, tx = TAB_PAD, tw = TAB_ICON_W;
+    list.forEach(function (t) {
+      var w = (mode === "all" || t === active) ? expandedW(t) : TAB_ICON_W;
+      if (t === active) { tx = x; tw = w; }
+      x += w + TAB_GAP;
+    });
+    cap.style.width = tw + "px";
+    cap.style.transform = "translateX(" + tx + "px)";
+    tabs.classList.add("capsule-ready");
+  }
+  function queueLayoutTabs() {
+    if (layoutQueued) return;
+    layoutQueued = true;
+    requestAnimationFrame(function () { layoutQueued = false; layoutTabs(); });
+  }
+  window.addEventListener("resize", queueLayoutTabs);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(queueLayoutTabs);
+
+  // Install as an app + service worker (secure contexts only: https:// or http://localhost).
+  var deferredInstall = null;
+  function isStandalone() {
+    return (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+  }
+  function updateInstallUi() {
+    var status = document.getElementById("other-install-status");
+    var btn = document.getElementById("other-install-btn");
+    if (!status || !btn) return;
+    btn.hidden = true;
+    if (isStandalone()) {
+      status.textContent = "Running as an installed app.";
+    } else if (deferredInstall) {
+      status.textContent = "Install this page as an app on this device (own window, home-screen icon).";
+      btn.hidden = false;
+    } else if (!window.isSecureContext) {
+      status.textContent = "Not available over plain http://" + location.host + ". Browsers only install apps from https:// or http://localhost — " +
+        "open this page through an https address (reverse proxy or tunnel) to install it and use it offline.";
+    } else if (/iphone|ipad|ipod/i.test(navigator.userAgent)) {
+      status.textContent = "On iPhone / iPad: Share → Add to Home Screen.";
+    } else {
+      status.textContent = "Use your browser's menu (Install app / Add to Home screen). It may already be installed.";
+    }
+  }
+  window.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); deferredInstall = e; updateInstallUi(); });
+  window.addEventListener("appinstalled", function () { deferredInstall = null; updateInstallUi(); notify("Axiom installed"); });
+
+  function showUpdateBanner(worker) {
+    if (document.getElementById("update-banner")) return;
+    var bar = document.createElement("div");
+    bar.id = "update-banner";
+    bar.className = "update-banner";
+    bar.setAttribute("role", "status");
+    var span = document.createElement("span");
+    span.textContent = "Update available";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "Reload";
+    btn.addEventListener("click", function () { worker.postMessage({ type: "SKIP_WAITING" }); });
+    bar.appendChild(span);
+    bar.appendChild(btn);
+    document.body.appendChild(bar);
+  }
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+    navigator.serviceWorker.register("sw.js", { scope: "./" }).then(function (reg) {
+      if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(reg.waiting);
+      reg.addEventListener("updatefound", function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener("statechange", function () {
+          if (nw.state === "installed" && navigator.serviceWorker.controller) showUpdateBanner(nw);
+        });
+      });
+    }).catch(function () { /* the page works without it */ });
+    var reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+      if (reloading) return;
+      reloading = true;
+      location.reload();
+    });
+  }
+
+  function initAppearance() {
+    // Theme: top-bar toggle + Other tab radios
+    var themeBtn = document.getElementById("theme-toggle");
+    if (themeBtn) themeBtn.addEventListener("click", function () {
+      applyTheme(rootEl.getAttribute("data-theme") === "light" ? "dark" : "light", false);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="ui-theme"]'), function (r) {
+      r.addEventListener("change", function () { if (r.checked) applyTheme(r.value, true); });
+    });
+    // Accent: preset swatches + hex field
+    var swWrap = document.getElementById("accent-swatches");
+    if (swWrap) {
+      ACCENT_PRESETS.forEach(function (pair) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "accent-swatch";
+        b.setAttribute("role", "radio");
+        b.setAttribute("aria-label", pair[0] + " accent");
+        b.setAttribute("aria-checked", "false");
+        b.setAttribute("data-hex", pair[1]);
+        b.title = pair[0] + " " + pair[1];
+        b.style.setProperty("--sw", pair[1]);
+        b.addEventListener("click", function () { applyAccent(pair[1], false); });
+        swWrap.appendChild(b);
+      });
+    }
+    var hexInput = document.getElementById("accent-hex");
+    if (hexInput) {
+      var commit = function () {
+        var v = hexInput.value.trim();
+        if (v && v[0] !== "#") v = "#" + v;
+        if (!applyAccent(v, true)) hexInput.value = currentAccent() || DEFAULT_ACCENT;
+      };
+      hexInput.addEventListener("change", commit);
+      hexInput.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); commit(); hexInput.blur(); } });
+    }
+    syncAccentControls();
+    // Motion
+    var motion = document.getElementById("motion-toggle");
+    if (motion) {
+      motion.checked = motionOn();
+      motion.addEventListener("change", function () { applyMotion(motion.checked, false); });
+    }
+    // Install
+    var installBtn = document.getElementById("other-install-btn");
+    if (installBtn) installBtn.addEventListener("click", function () {
+      if (!deferredInstall) return;
+      deferredInstall.prompt();
+      deferredInstall.userChoice.then(function () { deferredInstall = null; updateInstallUi(); });
+    });
+    updateThemeMeta();
+    updateInstallUi();
+    registerServiceWorker();
+    appearanceReady = true;
+    layoutTabs();
+  }
+
+  initAppearance();
 
   initUiEnhancements();
   poll();

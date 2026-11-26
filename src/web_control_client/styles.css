@@ -21,7 +21,7 @@
 :root {
   /* Sentinel: app.js only builds the custom dropdowns when this exact
      stylesheet version loaded (see enhanceSelects()). */
-  --axiom-css: 25;
+  --axiom-css: 26;
   color-scheme: dark;
 
   --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
@@ -48,26 +48,55 @@
   --row-y: 9px;
   --row-x: 14px;
 }
+/* Studio (default): glass cards over a navy / violet backdrop. Surfaces are translucent so the page
+   gradient shows through; `--accent` may be overridden inline by the Appearance controls (app.js). */
 :root[data-ui="studio"] {
-  --bg: #101216;
-  --surface: #181b21;
-  --surface-2: #20242b;
-  --raised: #1d2128;
-  --ink: #eceef2;
-  --ink-soft: #b4bac4;
-  --ink-faint: #8b929d;
-  --accent: #7ea2ff;
-  --accent-rgb: 126, 162, 255;
+  --bg: #0e1022;
+  --bg-top: #181a3a;
+  --bg-bottom: #0a0b18;
+  --surface: rgba(255, 255, 255, 0.055);
+  --surface-2: rgba(255, 255, 255, 0.085);
+  --raised: rgba(255, 255, 255, 0.07);
+  --menu-bg: #1c1e3c;
+  --ink: #eef0fa;
+  --ink-soft: #b9bdd8;
+  --ink-faint: #8c91b3;
+  --accent: #7c6cf0;
+  --accent-rgb: 124, 108, 240;
   --warn: #f0b860;
-  --bad: #ff7a7a;
-  --line: #2a2f37;
-  --line-strong: #353b45;
-  --track-empty: #2e333c;
+  --bad: #ff7a8a;
+  --line: rgba(255, 255, 255, 0.10);
+  --line-strong: rgba(255, 255, 255, 0.17);
+  --track-empty: rgba(255, 255, 255, 0.15);
+  --glass-pill: rgba(255, 255, 255, 0.07);
+  --shadow-card: 0 10px 40px rgba(2, 3, 14, 0.35);
   --font-head: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --radius: 14px;
-  --radius-sm: 9px;
+  --radius: 20px;
+  --radius-sm: 12px;
   --row-y: 13px;
   --row-x: 18px;
+}
+:root { --accent-hi: color-mix(in srgb, var(--accent) 68%, #fff); --accent-lo: color-mix(in srgb, var(--accent) 80%, #000); --on-accent: #fff; --menu-bg: var(--raised); }
+/* Light theme (both looks): pale lavender glass. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eef0fb;
+  --bg-top: #f7f5fe;
+  --bg-bottom: #e2e6f6;
+  --surface: rgba(255, 255, 255, 0.62);
+  --surface-2: rgba(255, 255, 255, 0.82);
+  --raised: rgba(255, 255, 255, 0.72);
+  --menu-bg: #ffffff;
+  --ink: #1d1f38;
+  --ink-soft: #55597a;
+  --ink-faint: #7a7ea0;
+  --warn: #b7791f;
+  --bad: #d6455d;
+  --line: rgba(70, 70, 130, 0.14);
+  --line-strong: rgba(70, 70, 130, 0.24);
+  --track-empty: rgba(70, 70, 130, 0.17);
+  --glass-pill: rgba(255, 255, 255, 0.7);
+  --shadow-card: 0 10px 34px rgba(60, 60, 130, 0.14);
 }
 
 /* ---------------------------------------------------------------------
@@ -892,9 +921,6 @@ body.searching .field-group.collapsed { display: flex; }
   .panel-title, :root[data-ui="studio"] .panel-title { font-size: 22px; }
   .grid { grid-template-columns: 1fr 1fr; }
 }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition: none !important; animation-duration: 0.01ms !important; }
-}
 
 
 /* LAN speed test result block (Other tab) */
@@ -909,3 +935,219 @@ body.searching .field-group.collapsed { display: flex; }
   }
   .switch::after { content: ""; position: absolute; inset: -9px -4px; }     /* wider tap area than the 22px track */
 }
+
+
+/* ---------------------------------------------------------------------
+   8. Glass redesign layer (same visual language as the desktop app)
+   Order matters: this layer overrides the sections above for the
+   Studio look; Instrument keeps its dense layout and only takes the
+   accent, theme and motion switches.
+   --------------------------------------------------------------------- */
+html { background: var(--bg); }
+:root[data-ui="studio"] body {
+  background:
+    radial-gradient(90% 55% at 50% -12%, rgba(var(--accent-rgb), 0.30), transparent 70%),
+    radial-gradient(60% 42% at 100% 105%, rgba(var(--accent-rgb), 0.16), transparent 70%),
+    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+  background-attachment: fixed;
+  min-height: 100%;
+}
+:root[data-ui="studio"][data-theme="light"] body {
+  background:
+    radial-gradient(90% 55% at 50% -12%, rgba(var(--accent-rgb), 0.20), transparent 70%),
+    radial-gradient(60% 42% at 100% 105%, rgba(var(--accent-rgb), 0.12), transparent 70%),
+    linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
+  background-attachment: fixed;
+}
+
+/* Motion off (Appearance switch, or the system's reduced-motion setting by default). */
+html[data-motion="off"] *, html[data-motion="off"] *::before, html[data-motion="off"] *::after {
+  transition: none !important;
+  animation: none !important;
+  scroll-behavior: auto !important;
+}
+/* Theme / accent change: everything cross-fades for a moment. */
+html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after {
+  transition: background-color 0.28s ease, color 0.28s ease, border-color 0.28s ease, box-shadow 0.28s ease, fill 0.28s ease, stroke 0.28s ease !important;
+}
+
+/* ---- Top bar: logo left, floating pill tabs centred, status right ---- */
+.icon-btn {
+  width: 36px; height: 36px; padding: 0; border-radius: 50%; display: inline-grid; place-items: center;
+  background: transparent; border: 1px solid transparent; color: var(--ink-soft); flex: none;
+}
+.icon-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.icon-btn:hover { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
+.tab-ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tab-capsule { display: none; }
+
+:root[data-ui="studio"] .topbar {
+  height: 64px; padding: 0 24px; padding-top: env(safe-area-inset-top, 0px); gap: 14px;
+  background: transparent; border-bottom: 0; backdrop-filter: none; box-sizing: content-box;
+}
+:root[data-ui="studio"] .wordmark { flex: 0 0 auto; }
+:root[data-ui="studio"] .tabs {
+  position: relative; flex: 0 1 auto; margin: 0 auto; padding: 4px; gap: 2px; overflow-x: auto;
+  background: var(--glass-pill); border: 1px solid var(--line-strong); border-radius: 999px;
+  backdrop-filter: blur(16px) saturate(1.2); -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: var(--shadow-card);
+}
+:root[data-ui="studio"] .tab-capsule {
+  display: block; position: absolute; z-index: 0; top: 4px; bottom: 4px; left: 0; width: 38px; pointer-events: none;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-hi), var(--accent));
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.45), 0 6px 22px rgba(var(--accent-rgb), 0.45);
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1), width 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform, width;
+}
+:root[data-ui="studio"] .tab {
+  position: relative; z-index: 1; height: 38px; min-width: 38px; padding: 0 10px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 0; color: var(--ink-faint);
+  background: transparent; box-shadow: none; flex: none;
+}
+:root[data-ui="studio"] .tab-label {
+  display: inline-block; max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; margin-left: 0;
+  transition: max-width 0.26s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.18s ease, margin 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+:root[data-ui="studio"] .tab.active, :root[data-ui="studio"] .tabs[data-labels="all"] .tab { padding: 0 12px; }
+:root[data-ui="studio"] .tab.active .tab-label,
+:root[data-ui="studio"] .tabs[data-labels="all"] .tab-label { max-width: 160px; opacity: 1; margin-left: 7px; }
+:root[data-ui="studio"] .tab:hover:not(.active) { background: var(--surface-2); color: var(--ink); }
+:root[data-ui="studio"] .tab.active { background: transparent; color: var(--on-accent); font-weight: 600; box-shadow: none; }
+/* No JS / capsule not placed yet: the active tab paints its own gradient. */
+:root[data-ui="studio"] .tabs:not(.capsule-ready) .tab.active { background: linear-gradient(90deg, var(--accent-hi), var(--accent)); }
+:root[data-ui="studio"] .tabs[data-labels="all"] .tab:not(.active) { color: var(--ink-soft); }
+:root[data-ui="studio"] #status { background: var(--glass-pill); border-color: var(--line-strong); backdrop-filter: blur(10px); }
+
+/* ---- Pages fade in; groups are glass cards under an accent-bar title ---- */
+@keyframes panel-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.panel.active { animation: panel-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+
+:root[data-ui="studio"] .sidebar { background: transparent; border-right: 0; }
+:root[data-ui="studio"] .sidebar-section, :root[data-ui="studio"] .deck,
+:root[data-ui="studio"] .module > .field-group, :root[data-ui="studio"] .module > .field-card {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(16px) saturate(1.15);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+}
+:root[data-ui="studio"] .deck { background: radial-gradient(120% 140% at 0% 0%, rgba(var(--accent-rgb), 0.16), transparent 55%), var(--surface); }
+:root[data-ui="studio"] .module > .field-group-title {
+  position: relative; padding-left: 14px; margin: 0 4px 12px; font-size: 15px; font-weight: 700; letter-spacing: 0; color: var(--ink);
+}
+:root[data-ui="studio"] .module > .field-group-title::after {
+  content: ""; position: absolute; left: 0; top: 50%; width: 4px; height: 16px; margin-top: -8px; border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+}
+:root[data-ui="studio"] .module > .field-group-title.collapsible { padding-left: 22px; }
+:root[data-ui="studio"] .module > .field-group-title.collapsible::before { position: absolute; left: 10px; top: 50%; margin-top: -4px; }
+:root[data-ui="studio"] .module > .field-group-title.collapsible::after { left: 0; }
+:root[data-ui="studio"] .field-card { transition: background-color 0.14s ease; }
+:root[data-ui="studio"] .field-card:hover { background: rgba(var(--accent-rgb), 0.07); }
+:root[data-ui="studio"] .micro-grid > .field-card { background: var(--surface-2); }
+:root[data-ui="studio"] .field-title { font-weight: 600; }
+
+/* ---- Controls: pill value badge, gradient slider, pill switch, pill buttons ---- */
+.field-control input[type="number"] { text-align: center; font-weight: 600; border-radius: 999px; }
+:root[data-ui="studio"] .field-control input[type="number"] { width: 88px; padding: 6px 12px; background: var(--surface-2); }
+:root[data-ui="studio"] .field-control input[type="number"].has-slider { width: 80px; }
+:root[data-ui="studio"] input[type="text"], :root[data-ui="studio"] input[type="search"], :root[data-ui="studio"] input[type="password"],
+:root[data-ui="studio"] select, :root[data-ui="studio"] textarea { background: var(--surface-2); border-color: var(--line-strong); }
+:root[data-ui="studio"] input:focus, :root[data-ui="studio"] textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18); }
+
+input[type="range"]::-webkit-slider-runnable-track {
+  background: linear-gradient(to right,
+    var(--accent-hi) 0%, var(--accent) var(--range-progress, 0%),
+    var(--track-empty) var(--range-progress, 0%), var(--track-empty) 100%);
+}
+input[type="range"]::-webkit-slider-thumb {
+  background: #fff; border: 4px solid var(--accent); box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35), 0 0 0 0 rgba(var(--accent-rgb), 0.35);
+  transition: box-shadow 0.14s ease;
+}
+input[type="range"]::-moz-range-thumb {
+  background: #fff; border: 4px solid var(--accent); box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35), 0 0 0 0 rgba(var(--accent-rgb), 0.35);
+  transition: box-shadow 0.14s ease;
+}
+input[type="range"]:hover::-webkit-slider-thumb, input[type="range"]:active::-webkit-slider-thumb {
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35), 0 0 0 6px rgba(var(--accent-rgb), 0.22);
+}
+input[type="range"]:hover::-moz-range-thumb, input[type="range"]:active::-moz-range-thumb {
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35), 0 0 0 6px rgba(var(--accent-rgb), 0.22);
+}
+input[type="range"]::-moz-range-progress { background: var(--accent); }
+
+:root[data-ui="studio"] .switch { width: 46px; height: 24px; }
+:root[data-ui="studio"] .switch .slider { background: var(--track-empty); border: 1px solid var(--line-strong); transition: background 0.2s ease, border-color 0.2s ease; }
+:root[data-ui="studio"] .switch .slider::before {
+  width: 18px; height: 18px; left: 3px; top: 2px; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+:root[data-ui="studio"] .switch input:checked + .slider { background: linear-gradient(90deg, var(--accent-hi), var(--accent)); border-color: transparent; }
+:root[data-ui="studio"] .switch input:checked + .slider::before { transform: translateX(22px); background: #fff; }
+
+:root[data-ui="studio"] button { border-radius: 999px; background: var(--glass-pill); border-color: var(--line-strong); padding: 7px 16px; }
+:root[data-ui="studio"] button:hover { border-color: var(--accent); color: var(--ink); background: rgba(var(--accent-rgb), 0.12); }
+:root[data-ui="studio"] .icon-btn { padding: 0; background: transparent; border-color: transparent; }
+:root[data-ui="studio"] .icon-btn:hover { background: var(--surface-2); border-color: var(--line); }
+#model-switch-btn, #ai-start-btn, #convert-btn, #token-save, #other-install-btn {
+  background: linear-gradient(90deg, var(--accent-hi), var(--accent)); border-color: transparent; color: var(--on-accent);
+}
+:root[data-ui="studio"] #model-switch-btn, :root[data-ui="studio"] #ai-start-btn, :root[data-ui="studio"] #convert-btn,
+:root[data-ui="studio"] #token-save, :root[data-ui="studio"] #other-install-btn { color: var(--on-accent); background: linear-gradient(90deg, var(--accent-hi), var(--accent)); }
+#model-switch-btn:hover, #ai-start-btn:hover, #convert-btn:hover, #token-save:hover, #other-install-btn:hover { color: var(--on-accent); filter: brightness(1.08); }
+:root[data-ui="studio"] #model-switch-btn:hover, :root[data-ui="studio"] #ai-start-btn:hover, :root[data-ui="studio"] #convert-btn:hover,
+:root[data-ui="studio"] #token-save:hover, :root[data-ui="studio"] #other-install-btn:hover { color: var(--on-accent); background: linear-gradient(90deg, var(--accent-hi), var(--accent)); }
+
+.dd-menu { background: var(--menu-bg); }
+.toast { background: var(--menu-bg); }
+:root[data-ui="studio"] .dd-trigger { border-radius: 999px; background: var(--surface-2); padding-left: 14px; }
+:root[data-ui="studio"] .dd-menu { border-radius: 16px; }
+:root[data-ui="studio"] .segmented { border-radius: 999px; background: var(--surface-2); }
+:root[data-ui="studio"] .segmented input:checked + span { background: linear-gradient(90deg, var(--accent-hi), var(--accent)); color: var(--on-accent); }
+:root[data-ui="studio"] .cfg-row.selected { background: rgba(var(--accent-rgb), 0.16); }
+
+/* Appearance controls (Other tab) */
+.accent-swatches { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.accent-swatch {
+  width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 2px solid transparent; background: var(--sw);
+  box-shadow: 0 0 0 1px var(--line-strong);
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
+}
+.accent-swatch:hover { transform: scale(1.12); }
+.accent-swatch[aria-checked="true"] { box-shadow: 0 0 0 2px var(--ink); }
+.accent-hex { width: 96px !important; min-width: 0 !important; flex: none !important; text-align: center; font-family: var(--font-num); border-radius: 999px; }
+
+/* ---- Responsive: tabs become a bottom bar on phones ---- */
+@media (max-width: 900px) {
+  :root[data-ui="studio"] .topbar { flex-wrap: nowrap; height: 56px; padding: 0 14px; padding-top: env(safe-area-inset-top, 0px); gap: 10px; }
+  :root[data-ui="studio"] .tabs[data-labels="all"] .tab-label { max-width: 0; opacity: 0; margin-left: 0; }
+}
+@media (max-width: 760px) {
+  :root[data-ui="studio"] .wordmark .sub { display: none; }
+  :root[data-ui="studio"] .tabs {
+    position: fixed; z-index: 30; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+    max-width: calc(100vw - 20px); margin: 0; order: 0; flex: none; scroll-snap-type: x proximity;
+  }
+  :root[data-ui="studio"] .tab { height: 40px; min-width: 40px; }
+  :root[data-ui="studio"] .tab.active .tab-label { max-width: 90px; }
+  :root[data-ui="studio"] .main { padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  :root[data-ui="studio"] .toast-region { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (display-mode: standalone) {
+  :root[data-ui="studio"] .topbar { padding-top: max(env(safe-area-inset-top, 0px), 6px); }
+}
+
+/* "Update available" banner (service worker found a newer app shell) */
+.update-banner {
+  position: fixed; z-index: 60; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 8px 10px 8px 16px; border-radius: 999px;
+  background: var(--menu-bg); color: var(--ink); border: 1px solid var(--line-strong); box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4);
+  font-size: 13px; animation: panel-in 0.2s ease-out;
+}
+.update-banner button { padding: 5px 14px; }
+@media (max-width: 760px) { .update-banner { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); } }
+
+/* Instrument look: icon and label on one line in the underline tabs */
+:root:not([data-ui="studio"]) .tab { display: inline-flex; align-items: center; gap: 7px; }
+:root:not([data-ui="studio"]) .tab-label { display: inline; }

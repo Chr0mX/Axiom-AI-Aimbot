@@ -2,7 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0e1022">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Axiom">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>Axiom Web Control</title>
   <script>
     /* Interface style (Instrument / Studio) before first paint, so the page
@@ -12,26 +21,63 @@
       try { ui = localStorage.getItem("axiom_ui_style") || ui; } catch (e) {}
       if (ui !== "instrument" && ui !== "studio") ui = "studio";
       document.documentElement.setAttribute("data-ui", ui);
+      /* Colour theme + accent + motion, also before first paint (app.js owns changing them). */
+      var theme = "dark", accent = "", motion = "";
+      try {
+        theme = localStorage.getItem("axiom_theme") || theme;
+        accent = localStorage.getItem("axiom_accent") || "";
+        motion = localStorage.getItem("axiom_motion") || "";
+      } catch (e) {}
+      if (theme !== "light" && theme !== "dark") theme = "dark";
+      var reduce = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+      document.documentElement.setAttribute("data-theme", theme);
+      document.documentElement.setAttribute("data-motion", (motion === "off" || (motion !== "on" && reduce)) ? "off" : "on");
+      if (/^#[0-9a-fA-F]{6}$/.test(accent)) {
+        var r = parseInt(accent.substr(1, 2), 16), g = parseInt(accent.substr(3, 2), 16), b = parseInt(accent.substr(5, 2), 16);
+        var st = document.documentElement.style;
+        st.setProperty("--accent", accent.toLowerCase());
+        st.setProperty("--accent-rgb", r + ", " + g + ", " + b);
+        st.setProperty("--on-accent", (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.62 ? "#14141c" : "#ffffff");
+        document.documentElement.setAttribute("data-accent", "custom");
+      }
     })();
   </script>
-  <link rel="stylesheet" href="styles.css?v=25">
+  <link rel="stylesheet" href="styles.css?v=26">
 </head>
 <body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-model" viewBox="0 0 24 24"><path d="M12 2.5 3.5 7v10L12 21.5 20.5 17V7L12 2.5Z M3.5 7 12 11.5 20.5 7 M12 11.5v10"/></symbol>
+      <symbol id="i-capture" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+      <symbol id="i-inference" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 10 3 2-3 2M12.5 15H17"/></symbol>
+      <symbol id="i-aim" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="1.2"/></symbol>
+      <symbol id="i-trigger" viewBox="0 0 24 24"><path d="M13 2 5 13.5h6L10 22l9-12h-6z"/></symbol>
+      <symbol id="i-keys" viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="5"/><path d="M12 3v6"/></symbol>
+      <symbol id="i-visuals" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+      <symbol id="i-configs" viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5zM8 3v6h7V3M8 21v-7h8v7"/></symbol>
+      <symbol id="i-convert" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-4.5L4 9M4 4v5h5M4 13a8 8 0 0 0 14 4.5L20 15M20 20v-5h-5"/></symbol>
+      <symbol id="i-other" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></symbol>
+    </defs>
+  </svg>
   <div class="app">
     <div class="topbar">
       <div class="wordmark">AXIOM<span>·</span> <span class="sub">Web Control</span></div>
       <div class="tabs" role="tablist" aria-label="Settings sections">
-        <button class="tab active" data-tab="model" role="tab" id="tab-model" aria-selected="true" aria-controls="panel-model" tabindex="0">Model</button>
-        <button class="tab" data-tab="capture" role="tab" id="tab-capture" aria-selected="false" aria-controls="panel-capture" tabindex="-1">Capture</button>
-        <button class="tab" data-tab="inference" role="tab" id="tab-inference" aria-selected="false" aria-controls="panel-inference" tabindex="-1">Inference</button>
-        <button class="tab" data-tab="aim" role="tab" id="tab-aim" aria-selected="false" aria-controls="panel-aim" tabindex="-1">Aim</button>
-        <button class="tab" data-tab="trigger" role="tab" id="tab-trigger" aria-selected="false" aria-controls="panel-trigger" tabindex="-1">Trigger</button>
-        <button class="tab" data-tab="keys" role="tab" id="tab-keys" aria-selected="false" aria-controls="panel-keys" tabindex="-1">Keys &amp; HW</button>
-        <button class="tab" data-tab="visuals" role="tab" id="tab-visuals" aria-selected="false" aria-controls="panel-visuals" tabindex="-1">Visuals</button>
-        <button class="tab" data-tab="configs" role="tab" id="tab-configs" aria-selected="false" aria-controls="panel-configs" tabindex="-1">Configs</button>
-        <button class="tab" data-tab="convert" role="tab" id="tab-convert" aria-selected="false" aria-controls="panel-convert" tabindex="-1">Convert</button>
-        <button class="tab" data-tab="other" role="tab" id="tab-other" aria-selected="false" aria-controls="panel-other" tabindex="-1">Other</button>
+        <span class="tab-capsule" aria-hidden="true"></span>
+        <button class="tab active" data-tab="model" role="tab" id="tab-model" aria-selected="true" aria-controls="panel-model" tabindex="0"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-model"/></svg><span class="tab-label">Model</span></button>
+        <button class="tab" data-tab="capture" role="tab" id="tab-capture" aria-selected="false" aria-controls="panel-capture" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-capture"/></svg><span class="tab-label">Capture</span></button>
+        <button class="tab" data-tab="inference" role="tab" id="tab-inference" aria-selected="false" aria-controls="panel-inference" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-inference"/></svg><span class="tab-label">Inference</span></button>
+        <button class="tab" data-tab="aim" role="tab" id="tab-aim" aria-selected="false" aria-controls="panel-aim" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-aim"/></svg><span class="tab-label">Aim</span></button>
+        <button class="tab" data-tab="trigger" role="tab" id="tab-trigger" aria-selected="false" aria-controls="panel-trigger" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-trigger"/></svg><span class="tab-label">Trigger</span></button>
+        <button class="tab" data-tab="keys" role="tab" id="tab-keys" aria-selected="false" aria-controls="panel-keys" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-keys"/></svg><span class="tab-label">Keys &amp; HW</span></button>
+        <button class="tab" data-tab="visuals" role="tab" id="tab-visuals" aria-selected="false" aria-controls="panel-visuals" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-visuals"/></svg><span class="tab-label">Visuals</span></button>
+        <button class="tab" data-tab="configs" role="tab" id="tab-configs" aria-selected="false" aria-controls="panel-configs" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-configs"/></svg><span class="tab-label">Configs</span></button>
+        <button class="tab" data-tab="convert" role="tab" id="tab-convert" aria-selected="false" aria-controls="panel-convert" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-convert"/></svg><span class="tab-label">Convert</span></button>
+        <button class="tab" data-tab="other" role="tab" id="tab-other" aria-selected="false" aria-controls="panel-other" tabindex="-1"><svg class="tab-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-other"/></svg><span class="tab-label">Other</span></button>
       </div>
+      <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch between dark and light theme" title="Dark / light"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#i-moon"/></svg></button>
       <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-expanded="true" aria-controls="sidebar">Status</button>
       <div id="status" class="disconnected" role="status" aria-live="polite">connecting…</div>
     </div>
@@ -2577,6 +2623,49 @@
           <div class="panel-title">Other</div>
           <div class="modules">
           <section class="module">
+            <div class="field-group-title module-title-only">Appearance</div>
+          <div class="field-group">
+            <div class="field-card" id="other-theme-card">
+              <div class="field-info">
+                <div class="field-title">Theme</div>
+                <div class="field-desc">Dark or light, in this browser only. Also switchable with the moon / sun button at the top.</div>
+              </div>
+              <div class="field-control">
+                <div class="segmented" role="radiogroup" aria-label="Colour theme">
+                  <label><input type="radio" name="ui-theme" value="dark" aria-label="Dark"><span>Dark</span></label>
+                  <label><input type="radio" name="ui-theme" value="light" aria-label="Light"><span>Light</span></label>
+                </div>
+              </div>
+            </div>
+            <div class="field-card" id="other-accent-card">
+              <div class="field-info">
+                <div class="field-title">Accent Colour</div>
+                <div class="field-desc">Colour of sliders, switches and the navigation highlight (this browser only).</div>
+              </div>
+              <div class="field-control">
+                <div class="accent-swatches" id="accent-swatches" role="radiogroup" aria-label="Accent colour"></div>
+                <input type="text" id="accent-hex" class="accent-hex" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Accent colour as hex, for example #7c6cf0" placeholder="#7c6cf0">
+              </div>
+            </div>
+            <div class="field-card" id="other-motion-card">
+              <div class="field-info">
+                <div class="field-title">UI Animations</div>
+                <div class="field-desc">Smooth tab, switch and theme transitions (off = instant). Follows your system's reduced-motion setting until you change it.</div>
+              </div>
+              <div class="field-control">
+                <label class="switch"><input type="checkbox" id="motion-toggle" aria-label="UI animations"><span class="slider"></span></label>
+              </div>
+            </div>
+            <div class="field-card" id="other-install-card">
+              <div class="field-info">
+                <div class="field-title">Install as App</div>
+                <div class="field-desc" id="other-install-status">Checking…</div>
+              </div>
+              <div class="field-control"><button id="other-install-btn" type="button" hidden>Install</button></div>
+            </div>
+          </div>
+          </section>
+          <section class="module">
             <div class="field-group-title module-title-only">This Browser</div>
           <div class="field-group">
             <div class="field-card" id="other-ui-style-card">
@@ -2634,6 +2723,6 @@
 
   <div class="toast-region" id="toast-region" aria-live="polite"></div>
 
-  <script src="app.js?v=25"></script>
+  <script src="app.js?v=26"></script>
 </body>
 </html>

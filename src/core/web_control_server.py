@@ -857,8 +857,10 @@ def start(
         browser reusing a stale styles.css with a newer app.js broke the UI."""
 
         async def get_response(self, path, scope):
+            from core.pwa_assets import static_headers      # manifest / service-worker headers
             response = await super().get_response(path, scope)
-            response.headers["Cache-Control"] = "no-cache"
+            for key, value in static_headers(path).items():
+                response.headers[key] = value
             return response
 
     if os.path.isdir(_WEB_DIR):
