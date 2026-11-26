@@ -5,9 +5,10 @@ import time
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread
 from qfluentwidgets import (
-    SettingCardGroup, SettingCard, SwitchSettingCard, FluentIcon,
+    FluentIcon,
     PushButton, BodyLabel, ComboBox, LineEdit,
 )
+from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
 
 from ..components.slider_spin_card import SliderDoubleSpinCard, SliderSpinCard
 

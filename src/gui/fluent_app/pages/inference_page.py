@@ -6,9 +6,9 @@ from core.config import EXTERNAL_CAPTURE_METHODS
 from core import fov_mode as _fov_mode
 from core.detect_mode import MODES as _DETECT_MODES, apply_mode, mode_from_config, reduced_rate_ignored
 from qfluentwidgets import (
-    SettingCardGroup, SwitchSettingCard,
-    FluentIcon, SettingCard, SegmentedWidget, ComboBox,
+    FluentIcon, SegmentedWidget, ComboBox,
 )
+from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
 from ..components.slider_spin_card import SliderSpinCard, SliderDoubleSpinCard
 
 from ..base_page import BasePage

@@ -4,8 +4,10 @@ Provides a base page class with large title and smooth scroll area.
 """
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFrame
-from qfluentwidgets import SmoothScrollArea, TitleLabel, FluentWindow, SwitchSettingCard, FluentIcon
+from qfluentwidgets import SmoothScrollArea, TitleLabel, FluentWindow, FluentIcon
 from .components.advanced import AdvancedVisibility
+from .components.columns import TwoColumnBand
+from .components.glass import GlassSettingCardGroup, GlassSwitchSettingCard as SwitchSettingCard
 
 class BasePage(QWidget):
     """
@@ -41,16 +43,17 @@ class BasePage(QWidget):
         self.scrollWidget = QWidget()
         self.scrollWidget.setStyleSheet("background: transparent;")
         self.scrollLayout = QVBoxLayout(self.scrollWidget)
-        self.scrollLayout.setContentsMargins(36, 20, 36, 36)
+        self.scrollLayout.setContentsMargins(28, 14, 28, 28)
         self.scrollLayout.setSpacing(20)
+        self._band = None            # the TwoColumnBand currently collecting groups
         
         # Large Title
         self.largeTitleLabel = TitleLabel(self.pageTitle, self.scrollWidget)
         # Apply custom font styling if needed, but TitleLabel is usually good
         # We might want it even bigger/bolder
         font = self.largeTitleLabel.font()
-        font.setPixelSize(32)
-        font.setBold(True)
+        font.setPixelSize(24)
+        font.setWeight(font.Weight.DemiBold)
         self.largeTitleLabel.setFont(font)
         
         self.scrollLayout.addWidget(self.largeTitleLabel)
@@ -100,7 +103,9 @@ class BasePage(QWidget):
               "Also show fine-tuning options. Hidden options keep their values."),
             parent=self.scrollWidget)
         card.checkedChanged.connect(self._onAdvancedToggled)
-        self.scrollLayout.insertWidget(1, card)
+        panel = GlassSettingCardGroup("", self.scrollWidget)
+        panel.addSettingCard(card)
+        self.scrollLayout.insertWidget(1, panel)
         self.advancedSwitchCard = card
         self.applyAdvanced()
 
@@ -126,11 +131,23 @@ class BasePage(QWidget):
             self.applyAdvanced()
 
     def addContent(self, widget: QWidget):
-        """Add a widget to the scrollable content area."""
+        """Add a widget to the scrollable content area.
+
+        Consecutive setting groups share one ``TwoColumnBand`` (two columns on a wide page, one on a
+        narrow one); any other widget is full width and ends the band.
+        """
+        if isinstance(widget, GlassSettingCardGroup):
+            if self._band is None:
+                self._band = TwoColumnBand(self.scrollWidget)
+                self.scrollLayout.addWidget(self._band)
+            self._band.addGroup(widget)
+            return
+        self._band = None
         self.scrollLayout.addWidget(widget)
 
     def addLayout(self, layout):
         """Add a layout to the scrollable content area."""
+        self._band = None
         self.scrollLayout.addLayout(layout)
 
     def retranslateUi(self):

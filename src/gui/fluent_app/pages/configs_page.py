@@ -3,18 +3,17 @@
 
 import os
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QVBoxLayout, QFileDialog,
     QInputDialog, QMessageBox, QSplitter, QFrame
 )
 from qfluentwidgets import (
     FluentIcon, PrimaryPushButton, PushButton,
-    ListWidget, TitleLabel, CaptionLabel, InfoBar, InfoBarPosition, isDarkTheme,
-    qconfig
+    ListWidget, TitleLabel, CaptionLabel, InfoBar, InfoBarPosition, qconfig
 )
 
 from ..base_page import BasePage
+from ..components.glass import accent_palette, css_rgba
 from ..language_manager import t
 from ..theme_colors import ThemeColors
 
@@ -193,98 +192,29 @@ class _ManagerBox(QFrame):
         once per box, both times with the same `config`/theme state, so the
         two boxes always look identical regardless of which manager each
         one is bound to."""
-        acrylic_enabled = bool(getattr(config, 'enable_acrylic', False))
-        element_alpha = int(getattr(config, 'acrylic_element_alpha', 25))
-        element_alpha = max(0, min(255, element_alpha))
-        is_dark = isDarkTheme()
+        pal = accent_palette()
+        card, border = css_rgba(ThemeColors.GLASS_CARD.get()), css_rgba(ThemeColors.GLASS_CARD_BORDER.get())
+        hover = css_rgba(ThemeColors.GLASS_ROW_HOVER.get())
+        divider = css_rgba(ThemeColors.GLASS_DIVIDER.get())
+        text = ThemeColors.GLASS_TEXT.qcolor().name()
+        sel_bg, sel_border = css_rgba(pal.soft), css_rgba((*pal.base, 150))
 
-        def rgba(hex_color: str, alpha: int) -> str:
-            c = QColor(hex_color)
-            a = max(0, min(255, int(alpha)))
-            return f"rgba({c.red()}, {c.green()}, {c.blue()}, {a})"
-
-        base_panel_bg = ThemeColors.CARD_BACKGROUND.get()
-        base_panel_border = ThemeColors.BORDER_SUBTLE.get()
-        base_item_bg = ThemeColors.BACKGROUND_SECONDARY.get()
-        base_item_border = ThemeColors.BORDER_SUBTLE.get()
-        base_item_hover_bg = ThemeColors.BACKGROUND_HOVER.get()
-        base_item_hover_border = ThemeColors.BORDER_DEFAULT.get()
-        base_item_selected_bg = ThemeColors.BACKGROUND_PRESSED.get()
-        base_item_selected_border = ThemeColors.BORDER_STRONG.get()
-
-        if acrylic_enabled:
-            soft_a = max(8, min(36, element_alpha + 4))
-            hover_a = max(14, min(56, element_alpha + 16))
-            selected_a = max(24, min(78, element_alpha + 30))
-
-            if is_dark:
-                panel_bg = rgba("#FFFFFF", soft_a)
-                panel_border = rgba("#FFFFFF", 28)
-                item_bg = rgba("#FFFFFF", soft_a + 6)
-                item_border = rgba("#FFFFFF", 24)
-                item_hover_bg = rgba("#FFFFFF", hover_a)
-                item_hover_border = rgba("#FFFFFF", 34)
-                item_selected_bg = rgba(ThemeColors.ACCENT.get(), selected_a)
-                item_selected_border = rgba(ThemeColors.ACCENT.get(), 120)
-                separator_color = rgba("#FFFFFF", 32)
-            else:
-                panel_bg = rgba("#FFFFFF", soft_a + 8)
-                panel_border = rgba("#000000", 28)
-                item_bg = rgba("#FFFFFF", soft_a + 12)
-                item_border = rgba("#000000", 22)
-                item_hover_bg = rgba("#FFFFFF", hover_a + 8)
-                item_hover_border = rgba("#000000", 30)
-                item_selected_bg = rgba(ThemeColors.ACCENT.get(), selected_a)
-                item_selected_border = rgba(ThemeColors.ACCENT.get(), 110)
-                separator_color = rgba("#000000", 30)
-        else:
-            panel_bg = base_panel_bg
-            panel_border = base_panel_border
-            item_bg = base_item_bg
-            item_border = base_item_border
-            item_hover_bg = base_item_hover_bg
-            item_hover_border = base_item_hover_border
-            item_selected_bg = base_item_selected_bg
-            item_selected_border = base_item_selected_border
-            separator_color = ThemeColors.BORDER_SUBTLE.get()
-
-        text_color = ThemeColors.TEXT_PRIMARY.get()
-
-        panelStyle = f"""
-            QFrame {{
-                background-color: {panel_bg};
-                border: 1px solid {panel_border};
-                border-radius: 18px;
-            }}
-        """
-        listStyle = f"""
-            QListWidget {{
-                background-color: transparent;
-                border: none;
-                outline: none;
-            }}
-            QListWidget::item {{
-                background-color: {item_bg};
-                border: 1px solid {item_border};
-                border-radius: 14px;
-                padding: 12px 16px;
-                margin: 4px 2px;
-                color: {text_color};
-            }}
-            QListWidget::item:hover {{
-                background-color: {item_hover_bg};
-                border: 1px solid {item_hover_border};
-            }}
-            QListWidget::item:selected {{
-                background-color: {item_selected_bg};
-                border: 2px solid {item_selected_border};
-                color: {text_color};
-            }}
-        """
+        self.leftPanel.setObjectName("glassPanel")
+        self.rightPanel.setObjectName("glassPanel")
+        panelStyle = (f"#glassPanel{{background-color:{card};border:1px solid {border};border-radius:20px}}")
+        listStyle = (
+            "QListWidget{background-color:transparent;border:none;outline:none}"
+            f"QListWidget::item{{background-color:transparent;border:1px solid transparent;border-radius:12px;"
+            f"padding:10px 14px;margin:2px 4px;color:{text}}}"
+            f"QListWidget::item:hover{{background-color:{hover}}}"
+            f"QListWidget::item:selected{{background-color:{sel_bg};border:1px solid {sel_border};color:{text}}}")
+        titleStyle = f"font-size:15px;font-weight:700;color:{text};background:transparent;border:none"
         self.leftPanel.setStyleSheet(panelStyle)
         self.rightPanel.setStyleSheet(panelStyle)
         self.configList.setStyleSheet(listStyle)
-        self.separator.setStyleSheet(f"background-color: {separator_color};")
+        self.listTitle.setStyleSheet(titleStyle)
+        self.buttonTitle.setStyleSheet(titleStyle)
+        self.separator.setStyleSheet(f"background-color:{divider};border:none")
 
     def _connectSignals(self):
         self.createBtn.clicked.connect(self._onCreateConfig)

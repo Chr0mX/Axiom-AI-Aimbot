@@ -103,14 +103,14 @@ class _FakeSpin:
         return None
 
 
-def test_spin_width_covers_text_and_spin_buttons():
+def test_spin_width_covers_text_and_pill_padding():
     ns = _helpers_namespace()
     spin = _FakeSpin(0, 1000, suffix=" ms")
     w = ns["spin_min_width"](spin)
     widest = ns["text_width"](spin, "1000 ms")
-    # The vendored stylesheet reserves ~92 px for padding + the two spin buttons: never go below it.
-    assert ns["_SPIN_CHROME_W"] >= 92
-    assert w >= widest + 92
+    # The value badge is a pill (2 x 10 px padding + borders, no spin buttons): never go below that.
+    assert ns["_SPIN_CHROME_W"] >= 24
+    assert w >= widest + ns["_SPIN_CHROME_W"]
     # An explicit floor still wins when the content is tiny.
     assert ns["spin_min_width"](_FakeSpin(0, 9), floor=200) == 200
 

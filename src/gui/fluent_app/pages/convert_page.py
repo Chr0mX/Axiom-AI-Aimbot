@@ -7,10 +7,11 @@ import sys
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QFileDialog
 from qfluentwidgets import (
-    SettingCardGroup, SettingCard, ComboBox,
+    ComboBox,
     FluentIcon, PrimaryPushButton, PushButton, BodyLabel, CaptionLabel,
     TextEdit, IndeterminateProgressBar, InfoBar, InfoBarPosition, SearchLineEdit,
 )
+from ..components.glass import GlassSettingCard as SettingCard, GlassSettingCardGroup as SettingCardGroup
 
 from core.paths import list_onnx, project_root, src_dir
 from ..base_page import BasePage

@@ -7,10 +7,10 @@ from PyQt6.QtCore import Qt, QUrl, QTimer
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QApplication
 from PyQt6.QtGui import QDesktopServices, QIcon
 from qfluentwidgets import (
-    SettingCardGroup, SettingCard, SwitchSettingCard,
     FluentIcon, PrimaryPushButton,
     PushButton, BodyLabel, ComboBox, SubtitleLabel, CaptionLabel, isDarkTheme
 )
+from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
 
 from ..base_page import BasePage
 from core.paths import src_dir

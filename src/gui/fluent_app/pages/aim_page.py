@@ -10,12 +10,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QDesktopServices, QPainter, QColor, QPen
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from qfluentwidgets import (
-    SettingCardGroup, SwitchSettingCard,
     FluentIcon,
-    ComboBox, SettingCard,
-    SegmentedWidget,
+    ComboBox, SegmentedWidget,
     BodyLabel, PushButton, CheckBox,
 )
+from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
 from core.aim_coupling import click_method_for_move
 from core.paths import src_dir
 from ..components.combo_utils import reset_items

@@ -10,10 +10,11 @@ from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout
 from qfluentwidgets import (
-    SettingCardGroup, SwitchSettingCard, FluentIcon,
-    ComboBox, PushButton, SettingCard, BodyLabel, SegmentedWidget,
-    CaptionLabel, SwitchButton, LineEdit, CardWidget,
+    FluentIcon,
+    ComboBox, PushButton, BodyLabel, SegmentedWidget,
+    CaptionLabel, SwitchButton, LineEdit,
 )
+from ..components.glass import GlassCard, GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
 from ..components.slider_spin_card import SliderSpinCard
 from ..components.notify import notify
 from ..base_page import BasePage
@@ -49,7 +50,7 @@ _RARITY_SWATCH_COLORS: dict[str, str] = {
 }
 
 
-class _WeaponStatusPanel(CardWidget):
+class _WeaponStatusPanel(GlassCard):
     """Read-only per-category HUD status readout (weapon / fire mode /
     attachments), populated from hud_inference.get_hud_results() via
     hud_categories.parse_hud_status(). Only meaningful for second_inference_mode

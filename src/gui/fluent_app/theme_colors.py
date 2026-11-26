@@ -11,6 +11,8 @@ from PyQt6.QtGui import QColor
 from dataclasses import dataclass
 from typing import Tuple, Dict, Any
 
+from core import ui_accent as _ui_accent
+
 try:
     from qfluentwidgets import isDarkTheme
     HAS_FLUENT_WIDGETS = True
@@ -168,6 +170,15 @@ class ColorPairWithAlpha:
         return cls(light=light, dark=dark)
 
 
+@dataclass
+class AccentColorPair(ColorPair):
+    """The brand/accent colour: the user's chosen accent (``core.ui_accent``) wins over the defaults,
+    so changing it recolours every widget that reads ``ThemeColors.ACCENT``/``PRIMARY`` at paint time."""
+
+    def get(self) -> str:
+        return _ui_accent.get_accent()
+
+
 class ThemeColors:
     """
     Theme Colors Definition Class
@@ -178,13 +189,13 @@ class ThemeColors:
     # ============================================================
     # Main Brand / Accent Color
     # ============================================================
-    PRIMARY = ColorPair.from_config(
+    PRIMARY = AccentColorPair.from_config(
         "primary_colors", "primary",
         default_light="#0078D4",
         default_dark="#7ea2ff"
     )
 
-    ACCENT = ColorPair.from_config(
+    ACCENT = AccentColorPair.from_config(
         "primary_colors", "accent",
         default_light="#0078D4",
         default_dark="#7ea2ff"
@@ -858,6 +869,34 @@ class ThemeColors:
         default_light="#CC2929",
         default_dark="#FF453A"
     )
+
+
+    # ============================================================
+    # Glass surfaces (floating navigation, cards, value pills, backdrop)
+    # Alpha colours so they sit on acrylic, a plain fill or the painted backdrop alike.
+    # ============================================================
+    GLASS_CARD = ColorPairWithAlpha.from_config(
+        "glass", "card", default_light=(255, 255, 255, 150), default_dark=(255, 255, 255, 11))
+    GLASS_CARD_BORDER = ColorPairWithAlpha.from_config(
+        "glass", "card_border", default_light=(90, 90, 150, 46), default_dark=(255, 255, 255, 34))
+    GLASS_ROW_HOVER = ColorPairWithAlpha.from_config(
+        "glass", "row_hover", default_light=(90, 90, 160, 16), default_dark=(255, 255, 255, 13))
+    GLASS_DIVIDER = ColorPairWithAlpha.from_config(
+        "glass", "divider", default_light=(60, 60, 110, 26), default_dark=(255, 255, 255, 16))
+    GLASS_PILL = ColorPairWithAlpha.from_config(
+        "glass", "pill", default_light=(255, 255, 255, 210), default_dark=(255, 255, 255, 18))
+    GLASS_PILL_BORDER = ColorPairWithAlpha.from_config(
+        "glass", "pill_border", default_light=(90, 90, 150, 70), default_dark=(255, 255, 255, 62))
+    GLASS_TRACK = ColorPairWithAlpha.from_config(
+        "glass", "track", default_light=(70, 70, 120, 46), default_dark=(255, 255, 255, 34))
+    GLASS_TEXT = ColorPairWithAlpha.from_config(
+        "glass", "text", default_light=(28, 30, 52, 255), default_dark=(244, 245, 252, 255))
+    GLASS_TEXT_MUTED = ColorPairWithAlpha.from_config(
+        "glass", "text_muted", default_light=(104, 108, 138, 255), default_dark=(152, 158, 184, 255))
+    GLASS_BACKDROP_TOP = ColorPairWithAlpha.from_config(
+        "glass", "backdrop_top", default_light=(246, 244, 253, 255), default_dark=(24, 26, 52, 255))
+    GLASS_BACKDROP_BOTTOM = ColorPairWithAlpha.from_config(
+        "glass", "backdrop_bottom", default_light=(228, 231, 247, 255), default_dark=(10, 11, 24, 255))
 
 
 # ============================================================

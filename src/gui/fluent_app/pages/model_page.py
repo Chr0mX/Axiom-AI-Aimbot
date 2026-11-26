@@ -11,12 +11,10 @@ from PyQt6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QTextEdit, QVBoxLayout,
 )
 from qfluentwidgets import (
-    CardWidget,
-    SettingCardGroup,
     FluentIcon,
-    ComboBox, PushButton, SettingCard,
-    InfoBar, InfoBarPosition, SearchLineEdit,
+    ComboBox, PushButton, InfoBar, InfoBarPosition, SearchLineEdit,
 )
+from ..components.glass import GlassCard, TextStyler, GlassSettingCard as SettingCard, GlassSettingCardGroup as SettingCardGroup
 
 from core.paths import hud_model_dir, list_onnx, model_dir as _model_dir_path, project_root, trt_installer_path
 from ..base_page import BasePage
@@ -62,7 +60,7 @@ def _default_template(model_name: str) -> str:
 # Model notes card widget
 # ──────────────────────────────────────────────
 
-class _ModelNotesCard(CardWidget):
+class _ModelNotesCard(GlassCard):
     """Per-model notes card with view/edit mode, saved to user/model_notes.json."""
 
     def __init__(self, parent=None):
@@ -72,7 +70,7 @@ class _ModelNotesCard(CardWidget):
         self._raw_text = ""
 
         self._titleLabel = QLabel("Model Notes")
-        self._titleLabel.setStyleSheet("font-size: 14px; font-weight: 600;")
+        TextStyler(self._titleLabel, "font-size:14px;font-weight:700;")
 
         self._editBtn = PushButton("Edit")
         self._editBtn.setFixedWidth(80)

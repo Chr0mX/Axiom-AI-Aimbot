@@ -2,10 +2,11 @@
 """自訂控制項 - 禁用滑鼠滾輪調整"""
 
 from PyQt6.QtCore import Qt
-from qfluentwidgets import Slider, SpinBox, DoubleSpinBox
+from qfluentwidgets import SpinBox, DoubleSpinBox
+from .glass import GlassSlider
 
 
-class NoWheelSlider(Slider):
+class NoWheelSlider(GlassSlider):
     """禁用滑鼠滾輪的 Slider，並修復滑鼠移動就會改值的問題"""
 
     def wheelEvent(self, event):

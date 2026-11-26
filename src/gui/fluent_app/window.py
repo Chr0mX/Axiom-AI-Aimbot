@@ -7,7 +7,6 @@ from PyQt6.QtGui import QIcon, QDesktopServices, QColor, QGuiApplication
 from qfluentwidgets import (FluentWindow, NavigationItemPosition, FluentIcon,
                             Theme, setTheme, setThemeColor, qconfig, InfoBar, InfoBarPosition)
 from qfluentwidgets.common.style_sheet import setCustomStyleSheet
-from qfluentwidgets.components.settings.setting_card import SettingCard
 
 from .pages.visuals_page import VisualsPage
 
@@ -23,6 +22,7 @@ from .pages.convert_page import ConvertPage
 from .components.language_dialog import LanguageDialog
 from .language_manager import getLanguageManager, t
 from .theme_colors import ThemeColors
+from .components.glass import apply_widget_styles, install_tooltip_style
 from core.updater import UpdateChecker, open_update_url
 from version import __version__
 
@@ -814,25 +814,9 @@ class AxiomWindow(FluentWindow):
         """
         setCustomStyleSheet(self.navigationInterface, nav_qss, nav_qss)
         
-        # --- 4. 覆寫所有 SettingCard 的 paintEvent 使其透明 ---
         is_dark = self._isDarkTheme
-        
-        def transparent_paint_event(card_self, e):
-            """透明背景的 paintEvent，只畫一條微弱的邊框"""
-            painter = QPainter(card_self)
-            painter.setRenderHints(QPainter.RenderHint.Antialiasing)
-            if is_dark:
-                painter.setBrush(QColor(255, 255, 255, 8))
-                painter.setPen(QColor(255, 255, 255, 15))
-            else:
-                painter.setBrush(QColor(255, 255, 255, 20))
-                painter.setPen(QColor(0, 0, 0, 12))
-            painter.drawRoundedRect(card_self.rect().adjusted(1, 1, -1, -1), 18, 18)
-        
         import types
-        for card in self.findChildren(SettingCard):
-            card.paintEvent = types.MethodType(transparent_paint_event, card)
-        
+
         # --- 5. 所有 ScrollArea 和 viewport 也設為透明 ---
         from PyQt6.QtWidgets import QAbstractScrollArea
         for sa in self.findChildren(QAbstractScrollArea):
@@ -844,91 +828,11 @@ class AxiomWindow(FluentWindow):
         if hasattr(self, 'configInterface'):
             self.configInterface._applyPanelStyles()
 
-        # --- 7. 按鈕、下拉框、輸入框、分段控件等子控件半透明 ---
-        from qfluentwidgets import (PushButton as _PB, PrimaryPushButton as _PPB,
-                                     ComboBox as _CB, SegmentedWidget as _SW,
-                                     themeColor)
-        from PyQt6.QtWidgets import QAbstractSpinBox
+        # --- 7. Glass look for buttons / combo boxes / inputs / spin boxes (components/glass.py) ---
+        from qfluentwidgets import SegmentedWidget as _SW
         from PyQt6.QtCore import QRectF, Qt as _Qt
-
-        if is_dark:
-            glass      = "rgba(255,255,255,12)"
-            glass_h    = "rgba(255,255,255,20)"
-            glass_p    = "rgba(255,255,255,6)"
-            glass_bdr  = "rgba(255,255,255,15)"
-        else:
-            glass      = "rgba(255,255,255,40)"
-            glass_h    = "rgba(255,255,255,60)"
-            glass_p    = "rgba(255,255,255,25)"
-            glass_bdr  = "rgba(0,0,0,12)"
-
-        # -- 7a. PushButton（一般按鈕 / 快捷鍵按鈕）--
-        btn_qss = f"""
-        PushButton {{
-            background-color: {glass};
-            border: 1px solid {glass_bdr};
-        }}
-        PushButton:hover {{
-            background-color: {glass_h};
-        }}
-        PushButton:pressed {{
-            background-color: {glass_p};
-        }}
-        """
-        for w in self.findChildren(_PB):
-            if isinstance(w, _PPB):
-                continue
-            setCustomStyleSheet(w, btn_qss, btn_qss)
-
-        # -- 7b. PrimaryPushButton（主要按鈕保留強調色但半透明）--
-        tc = themeColor()
-        pa = 155 if not is_dark else 130
-        ppb_qss = f"""
-        PrimaryPushButton {{
-            background-color: rgba({tc.red()},{tc.green()},{tc.blue()},{pa});
-        }}
-        PrimaryPushButton:hover {{
-            background-color: rgba({tc.red()},{tc.green()},{tc.blue()},{min(255, pa+25)});
-        }}
-        PrimaryPushButton:pressed {{
-            background-color: rgba({tc.red()},{tc.green()},{tc.blue()},{max(0, pa-20)});
-        }}
-        """
-        for w in self.findChildren(_PPB):
-            setCustomStyleSheet(w, ppb_qss, ppb_qss)
-
-        # -- 7c. ComboBox（下拉選單）--
-        combo_qss = f"""
-        ComboBox {{
-            background-color: {glass};
-            border: 1px solid {glass_bdr};
-        }}
-        ComboBox:hover {{
-            background-color: {glass_h};
-        }}
-        """
-        for w in self.findChildren(_CB):
-            setCustomStyleSheet(w, combo_qss, combo_qss)
-
-        # -- 7d. SpinBox / DoubleSpinBox（數值輸入框）--
-        spin_qss = f"""
-        SpinBox {{
-            background-color: {glass};
-            border: 1px solid {glass_bdr};
-        }}
-        SpinBox:hover {{
-            background-color: {glass_h};
-        }}
-        DoubleSpinBox {{
-            background-color: {glass};
-            border: 1px solid {glass_bdr};
-        }}
-        DoubleSpinBox:hover {{
-            background-color: {glass_h};
-        }}
-        """
-        for w in self.findChildren(QAbstractSpinBox):
-            setCustomStyleSheet(w, spin_qss, spin_qss)
+        apply_widget_styles(self)
+        install_tooltip_style(is_dark)
 
         # -- 7e. SegmentedWidget（XY 軸切換等分段控件，paintEvent 硬編碼顏色需覆寫）--
         def transparent_seg_paint(seg_self, e):

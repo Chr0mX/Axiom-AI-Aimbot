@@ -7,9 +7,9 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    SettingCardGroup, SwitchSettingCard, SettingCard,
     FluentIcon, CheckBox, ComboBox, PushButton
 )
+from ..components.glass import GlassSettingCard as SettingCard, GlassSwitchSettingCard as SwitchSettingCard, GlassSettingCardGroup as SettingCardGroup
 from ..components.slider_spin_card import SliderLabelCard
 from ..components.no_wheel_widgets import NoWheelSpinBox
 

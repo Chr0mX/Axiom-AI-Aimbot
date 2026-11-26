@@ -10,8 +10,8 @@ Layout rules (why the cards look the same at any window width / Windows scale):
 * The value widget (spin box / value label) gets a *fixed* width computed from the widest
   text it can show plus the stylesheet's own padding and spin buttons, so a value such as
   "1000 ms" or "0.00" is never hidden behind the up/down arrows.
-* The title / description labels may shrink (and clip) before the controls do; the full
-  text shows in a tooltip while it is clipped.
+* The title / description labels may shrink before the controls do; descriptions wrap onto more
+  lines (the row grows), and a clipped title shows in full in a tooltip (``glass._GlassRowMixin``).
 
 Qt high-DPI scaling is deliberately off in this app (the overlay needs physical pixels), so
 sizes here are physical pixels derived from the widget's own font metrics, not constants
@@ -19,19 +19,20 @@ for one display scale.
 """
 
 from typing import Callable, Optional
-from PyQt6.QtCore import QEvent, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFontMetrics
-from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QToolTip, QWidget
-from qfluentwidgets import SettingCard, FluentIconBase, BodyLabel
+from PyQt6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
+from qfluentwidgets import FluentIconBase, BodyLabel
+from .glass import GlassSettingCard, style_value_pill
 from .no_wheel_widgets import NoWheelSlider as Slider, NoWheelSpinBox as SpinBox, NoWheelDoubleSpinBox as DoubleSpinBox
 
-_SLIDER_MIN_W = 120      # narrowest usable track
-_SLIDER_MAX_W = 360      # longer tracks add precision nobody can use; keeps every page's tracks aligned
+_SLIDER_MIN_W = 96       # narrowest usable track (a two-column card still leaves the text ~200 px)
+_SLIDER_MAX_W = 320      # longer tracks add precision nobody can use; keeps every page's tracks aligned
 _CONTROL_GAP = 12        # between slider and value widget
-# QSS of the vendored qfluentwidgets spin box: padding-left 10 + 80 px reserved on the right for
-# the two 31 px buttons + margin. Anything narrower overlaps the digits with the arrows.
-_SPIN_CHROME_W = 96
-_LABEL_PAD = 8
+# The value badge is a pill (``glass.style_value_pill``): 2 x 10 px padding + 1 px borders + a little
+# slack, and no up/down buttons any more (the value is edited by typing or with the keys).
+_SPIN_CHROME_W = 28
+_LABEL_PAD = 28          # the value pill's own padding + borders
 
 
 def text_width(widget: QWidget, text: str) -> int:
@@ -51,11 +52,13 @@ def label_min_width(label: QWidget, samples, floor: int = 0) -> int:
     return max(max(text_width(label, s) for s in samples) + _LABEL_PAD, floor)
 
 
-class _SliderCardBase(SettingCard):
+class _SliderCardBase(GlassSettingCard):
     """Shared plumbing for the three slider cards: flexible slider + fixed-width value widget."""
 
     def _installControls(self, slider, value_widget, value_width: int) -> None:
         """Put ``slider`` and ``value_widget`` on the right of the card, right-aligned."""
+        style_value_pill(value_widget)
+        value_widget.setProperty("glassPill", True)       # apply_widget_styles() leaves pills alone
         slider.setMinimumWidth(_SLIDER_MIN_W)
         slider.setMaximumWidth(_SLIDER_MAX_W)
         slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -66,7 +69,7 @@ class _SliderCardBase(SettingCard):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(_CONTROL_GAP)
         row.addWidget(slider, 1)
-        row.addWidget(value_widget, 0, Qt.AlignmentFlag.AlignRight)
+        row.addWidget(value_widget, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         box.setMinimumWidth(_SLIDER_MIN_W + _CONTROL_GAP + value_width)
         box.setMaximumWidth(_SLIDER_MAX_W + _CONTROL_GAP + value_width)
         box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -100,23 +103,6 @@ class _SliderCardBase(SettingCard):
         if callable(adjust):
             adjust()
         self.slider.update()
-
-    def event(self, e):
-        """Show the full title/description in a tooltip, but only while one of them is clipped."""
-        if e.type() == QEvent.Type.ToolTip:
-            clipped = any(
-                lbl.isVisible() and lbl.width() < lbl.sizeHint().width()
-                for lbl in (self.titleLabel, self.contentLabel)
-            )
-            if clipped:
-                parts = [self.titleLabel.text()]
-                if self.contentLabel.isVisible():
-                    parts.append(self.contentLabel.text())
-                QToolTip.showText(e.globalPos(), "\n".join(p for p in parts if p), self)
-            else:
-                QToolTip.hideText()
-            return True
-        return super().event(e)
 
 
 class SliderSpinCard(_SliderCardBase):

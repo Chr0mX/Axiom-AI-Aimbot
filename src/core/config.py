@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import os
+import re
 import time
 from typing import List, Dict, Any, Optional
 
@@ -307,6 +308,9 @@ _FIELD_MAP = {
     'acrylic_element_alpha':      'ui.acrylic_element_alpha',
     'show_console':               'ui.show_console',
     'show_advanced_settings':     'ui.show_advanced_settings',
+    'accent_color':               'ui.accent_color',
+    'ui_animations':              'ui.animations',
+    'nav_dock':                   'ui.nav_dock',
 
     # --- ocr / 2nd inference ---
     'second_inference_mode':      'weapon_detection.mode',
@@ -844,6 +848,11 @@ class Config:
         # hidden setting keeps its value. Fresh installs start without them; a config.json written
         # before the switch existed loads as True (load_config) so nobody's view changes.
         self.show_advanced_settings: bool = False
+        # Interface look: accent colour (#RRGGBB, drives sliders/switches/nav capsule), animation switch
+        # (off = every transition is instant) and where the floating navigation pill docks ('top' | 'left').
+        self.accent_color: str = DEFAULT_ACCENT_COLOR
+        self.ui_animations: bool = True
+        self.nav_dock: str = 'top'
 
         # Acrylic 毛玻璃效果專用設置
         self.enable_acrylic: bool = True
@@ -1277,6 +1286,7 @@ def validate_config(config_instance: Config) -> None:
     _validate_box_style(config_instance)
     _validate_web_esp(config_instance)
     _validate_gpu_monitor(config_instance)
+    _validate_ui_look(config_instance)
 
     # 向後兼容：修正推理後端選擇
     _validate_inference_backend(config_instance)
@@ -1458,6 +1468,27 @@ def _validate_box_style(config: Config) -> None:
 def _validate_web_esp(config: Config) -> None:
     """web_esp_fps: the Web ESP broadcast rate cap, 15-240 Hz (the server clamps the same range)."""
     config.web_esp_fps = int(max(15, min(240, _finite(getattr(config, 'web_esp_fps', 60), 60))))
+
+
+DEFAULT_ACCENT_COLOR = '#7c6cf0'
+NAV_DOCKS = ('top', 'left')
+_HEX_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+
+
+def normalize_accent_color(value) -> str:
+    """``#rrggbb`` (lower case) for a valid ``#RRGGBB``/``RRGGBB`` string, else the default accent."""
+    text = str(value or '').strip()
+    if re.fullmatch(r'[0-9a-fA-F]{6}', text):
+        text = '#' + text
+    return text.lower() if _HEX_COLOR_RE.match(text) else DEFAULT_ACCENT_COLOR
+
+
+def _validate_ui_look(config: Config) -> None:
+    """Repair the interface-look fields (accent colour, animation switch, nav dock) from outside data."""
+    config.accent_color = normalize_accent_color(getattr(config, 'accent_color', DEFAULT_ACCENT_COLOR))
+    config.ui_animations = bool(getattr(config, 'ui_animations', True))
+    dock = str(getattr(config, 'nav_dock', 'top') or 'top').lower()
+    config.nav_dock = dock if dock in NAV_DOCKS else 'top'
 
 
 def _validate_gpu_monitor(config: Config) -> None:
