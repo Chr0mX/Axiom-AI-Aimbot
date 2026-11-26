@@ -138,7 +138,7 @@ class _GlassRowMixin:
             need += content_h + 2
         if self.contentLabel.minimumHeight() != content_h:    # the nested layout gives a wrapped label one line otherwise
             self.contentLabel.setMinimumHeight(content_h)
-        need = max(ROW_MIN_H, need)
+        need = max(ROW_MIN_H, need, self.hBoxLayout.sizeHint().height())   # tall controls (checkbox grids)
         if need != self.minimumHeight():
             self.setMinimumHeight(need)
 

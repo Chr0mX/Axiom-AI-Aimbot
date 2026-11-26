@@ -247,8 +247,8 @@ class VisualsPage(BasePage):
             self.spDetectionFpsCheck,
         ]
         for index, check in enumerate(self._statusPanelChecks):
-            row = index % 2
-            col = index // 2
+            row = index % 3        # 3 rows x 3 columns: fits a half-width card
+            col = index // 3
             self.statusPanelElementsLayout.addWidget(check, row, col)
 
         self.statusPanelElementsWidget.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)

@@ -2,9 +2,11 @@ import os
 import sys
 from ctypes import byref, c_int, WinDLL
 from ctypes.wintypes import DWORD
-from PyQt6.QtCore import QUrl, QTimer
-from PyQt6.QtGui import QIcon, QDesktopServices, QColor, QGuiApplication
-from qfluentwidgets import (FluentWindow, NavigationItemPosition, FluentIcon,
+from PyQt6.QtCore import QUrl, QTimer, Qt
+from PyQt6.QtGui import (QIcon, QDesktopServices, QColor, QGuiApplication, QPainter, QPixmap,
+                         QLinearGradient, QRadialGradient)
+from PyQt6.QtWidgets import QGraphicsOpacityEffect, QLabel
+from qfluentwidgets import (FluentWindow, FluentIcon, RoundMenu, Action,
                             Theme, setTheme, setThemeColor, qconfig, InfoBar, InfoBarPosition)
 from qfluentwidgets.common.style_sheet import setCustomStyleSheet
 
@@ -22,7 +24,17 @@ from .pages.convert_page import ConvertPage
 from .components.language_dialog import LanguageDialog
 from .language_manager import getLanguageManager, t
 from .theme_colors import ThemeColors
-from .components.glass import apply_widget_styles, install_tooltip_style
+from .components.glass import apply_widget_styles, install_tooltip_style, notify_appearance_changed, refresh_motion
+from .components.floating_nav import FloatingNav, NavEntry
+from .components.status_pill import StatusPill
+from .components.caption_buttons import CaptionIconButton, style_caption_buttons
+from .components.motion import Tween, fade_in, DUR, DUR_SLOW
+from .components.notify import notify
+from core import ui_accent, ui_motion, ui_status
+try:                                   # CPU % for the status pill; the pill hides the cell without it
+    import psutil as _psutil
+except Exception:                      # noqa: BLE001 - optional
+    _psutil = None
 from core.updater import UpdateChecker, open_update_url
 from version import __version__
 
@@ -39,6 +51,10 @@ class AxiomWindow(FluentWindow):
         self._isApplyingAcrylic = False
         self._pendingAcrylicApply = False
         self._transparencyEnsured = False
+        self._previewCollapsed = False
+        self._navDock = 'top'
+        self._backdropKey = None
+        self._backdropPixmap = None
 
         # Get language manager
         self.langManager = getLanguageManager()
@@ -119,6 +135,7 @@ class AxiomWindow(FluentWindow):
             
             # Reduce spacing between icon and title
             self.titleBar.hBoxLayout.setSpacing(6)
+            self.titleBar.hBoxLayout.setContentsMargins(16, 0, 6, 0)
 
         # Setup Pages - using new tab key names
 
@@ -145,12 +162,8 @@ class AxiomWindow(FluentWindow):
         self.convertInterface.setObjectName("convertInterface")
         self.otherInterface.setObjectName("otherInterface")
 
-        # 調整導航欄寬度
-        self.navigationInterface.setMinimumWidth(40)
-        self.navigationInterface.setExpandWidth(150)
-
         self.initNavigation()
-        self.initBottomNavigation()
+        self.initChrome()
 
         # Re-sync a page's widgets from the live Config every time the user
         # navigates to it (zero-lag — doesn't wait for the timer below) and
@@ -187,6 +200,7 @@ class AxiomWindow(FluentWindow):
         # each distinct failure once instead of leaving it in the log only.
         self._lastShownModelLoadError = ""
         self._configSyncTimer.timeout.connect(self._onModelLoadErrorTick)
+        self._configSyncTimer.timeout.connect(self._onStatusPillTick)
 
         from .components.capture_preview import CapturePreviewPanel
         from PyQt6.QtWidgets import QToolButton
@@ -211,12 +225,6 @@ class AxiomWindow(FluentWindow):
         # Stretch: content gets 4x, preview gets 1x; swapped when nav collapses
         self.widgetLayout.setStretchFactor(self.stackedWidget, 4)
         self.widgetLayout.setStretchFactor(self.previewPanel, 1)
-
-        self.navigationInterface.displayModeChanged.connect(self._onNavModeChanged)
-
-        # 若為深色主題，立即切換圖標為白色版本
-        if self._isDarkTheme:
-            self.updateIcons()
 
         # Connect language change signal
         self.langManager.languageChanged.connect(self._refreshUI)
@@ -424,16 +432,19 @@ class AxiomWindow(FluentWindow):
             setTheme(Theme.DARK)
             qconfig.set(qconfig.themeMode, Theme.DARK, save=False)
             self._isDarkTheme = True
-            self.themeButton.setIcon(FluentIcon.BRIGHTNESS)
         else:
             setTheme(Theme.LIGHT)
             qconfig.set(qconfig.themeMode, Theme.LIGHT, save=False)
             self._isDarkTheme = False
-            self.themeButton.setIcon(FluentIcon.QUIET_HOURS)
+        self._updateThemeButton()
+        ui_motion.set_animations_enabled(bool(getattr(config, 'ui_animations', True)))
+        refresh_motion(self)
+        ui_accent.set_accent(getattr(config, 'accent_color', ui_accent.DEFAULT_ACCENT))
         setThemeColor(QColor(ThemeColors.ACCENT.get()))
         self._forceWindowsTitleBarColor(isDark=self._isDarkTheme)
         self.updateLogo()
-        self.updateIcons()
+        self._navDock = 'left' if getattr(config, 'nav_dock', 'top') == 'left' else 'top'
+        self.layoutChrome()
 
         # 更新頁面內的主題相關圖標（如 Discord 按鈕）
         if hasattr(self, 'otherInterface') and hasattr(self.otherInterface, '_updateDiscordIcon'):
@@ -442,6 +453,8 @@ class AxiomWindow(FluentWindow):
         # 重新套用 Acrylic 效果和主題樣式（使用 config 中的 alpha 值）
         self._applyAcrylicEffect()
         self._applyThemeStyles()
+        self._backdropKey = None
+        self.update()
 
         # 確保參數管理頁的左右面板在配置更新後立即重繪磨砂樣式
         if hasattr(self, 'configInterface'):
@@ -461,7 +474,12 @@ class AxiomWindow(FluentWindow):
         show = bool(getattr(self._config, 'uvc_show_window', True))
         active = method in ('ndi', 'uvc', 'udp') and show
         self._previewArrow.setVisible(active)
-        if active:
+        self._previewArrow.setText("▶" if self._previewCollapsed else "◀")
+        self._previewArrow.setToolTip("Show preview" if self._previewCollapsed else "Hide preview")
+        if active and self._previewCollapsed:
+            self.previewPanel.stop()
+            self.previewPanel.hide()
+        elif active:
             self.previewPanel.show()
             self.previewPanel.start()
         else:
@@ -469,23 +487,10 @@ class AxiomWindow(FluentWindow):
             self.previewPanel.hide()
 
     def _togglePreviewCollapse(self) -> None:
-        """Toggle left navigation collapsed/expanded; preview gains the freed space."""
-        self.navigationInterface.toggle()
+        """Fold the capture preview away (or bring it back); the pages gain the freed width."""
+        self._previewCollapsed = not self._previewCollapsed
+        self.updatePreviewPanelVisibility()
 
-    def _onNavModeChanged(self, mode) -> None:
-        from qfluentwidgets import NavigationDisplayMode
-        collapsed = mode in (NavigationDisplayMode.MINIMAL, NavigationDisplayMode.COMPACT)
-        if collapsed:
-            self.widgetLayout.setStretchFactor(self.stackedWidget, 2)
-            self.widgetLayout.setStretchFactor(self.previewPanel, 1)
-            self._previewArrow.setText("▶")
-            self._previewArrow.setToolTip("Expand navigation")
-        else:
-            self.widgetLayout.setStretchFactor(self.stackedWidget, 4)
-            self.widgetLayout.setStretchFactor(self.previewPanel, 1)
-            self._previewArrow.setText("◀")
-            self._previewArrow.setToolTip("Collapse navigation")
-    
     def setConfigManager(self, manager):
         """Binds the aim-only Preset ConfigManager instance."""
         self._configManager = manager
@@ -543,9 +548,13 @@ class AxiomWindow(FluentWindow):
         Zero-lag: this fires the instant navigation happens, rather than
         waiting for _onConfigSyncTick()'s next tick.
         """
+        widget = self.stackedWidget.widget(index)
+        if hasattr(self, 'floatingNav') and widget is not None:
+            self.floatingNav.setCurrent(widget.objectName())     # programmatic switchTo() moves the capsule too
+            self._fadeCurrentPage()
         if self._config is None:
             return
-        self._syncPage(self.stackedWidget.widget(index))
+        self._syncPage(widget)
 
     def _onConfigSyncTick(self):
         """Continuously re-syncs the *currently visible* page from the live
@@ -686,42 +695,267 @@ class AxiomWindow(FluentWindow):
         self.nav_other = self.addSubInterface(self.otherInterface, FluentIcon.APPLICATION, t("tab_program_control"))
 
 
-    def initBottomNavigation(self):
-        # Language
-        self.languageButton = self.navigationInterface.addItem(
-            routeKey="language",
-            icon=FluentIcon.GLOBE,
-            text=t("language"),
-            onClick=self.showLanguageDialog,
-            position=NavigationItemPosition.BOTTOM
-        )
+    # ------------------------------------------------------------------ glass chrome
+    # (page order, icon, i18n key, English default). The vendored navigation panel still registers the
+    # pages (addSubInterface) so switchTo()/qrouter keep working, but it is hidden; FloatingNav is the UI.
+    _NAV = (
+        ("modelInterface", "ROBOT", "tab_model", "Model"),
+        ("captureInterface", "CAMERA", "tab_capture", "Capture"),
+        ("inferenceInterface", "COMMAND_PROMPT", "tab_inference", "Inference"),
+        ("aimInterface", "aim.svg", "tab_aim_control", "Aim"),
+        ("triggerInterface", "trigger.svg", "tab_auto_features", "Auto-Fire"),
+        ("keysInterface", "mouse.svg", "tab_hardware_output", "Keys & HW"),
+        ("displayInterface", "eye.svg", "tab_display", "Visuals"),
+        ("configInterface", "save.svg", "tab_config_management", "Configs"),
+        ("convertInterface", "SPEED_HIGH", "tab_convert", "Convert"),
+        ("otherInterface", "APPLICATION", "tab_program_control", "Other"),
+    )
 
-        # Theme Toggle
-        self.themeButton = self.navigationInterface.addItem(
-            routeKey="theme_switch",
-            icon=FluentIcon.QUIET_HOURS,
-            text=t("theme_toggle"),
-            onClick=self.toggleTheme,
-            position=NavigationItemPosition.BOTTOM
-        )
-        
-        # Discord
-        self.discordButton = self.navigationInterface.addItem(
-            routeKey="discord",
-            icon=QIcon(os.path.join(self.base_path, "assets", "discord.svg")),
-            text=t("discord"),
-            onClick=lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/DpcqaQEj5b")),
-            position=NavigationItemPosition.BOTTOM
-        )
+    def _navIcon(self, spec):
+        if spec.endswith(".svg"):
+            return QIcon(os.path.join(self.base_path, "assets", spec))
+        return getattr(FluentIcon, spec)
 
-        # Github
-        self.githubButton = self.navigationInterface.addItem(
-            routeKey="github",
-            icon=FluentIcon.GITHUB,
-            text=t("github"),
-            onClick=lambda: QDesktopServices.openUrl(QUrl("https://github.com/Chr0mX/Axiom-AI-Aimbot")),
-            position=NavigationItemPosition.BOTTOM
-        )
+    def _navLabels(self) -> dict:
+        return {route: t(key, default) for route, _icon, key, default in self._NAV}
+
+    def initChrome(self):
+        """Hide the vendored navigation panel and build the floating pill nav, title-bar buttons,
+        status pill and page-fade wiring."""
+        self.navigationInterface.hide()
+        self.stackedWidget.setAnimationEnabled(False)          # pages fade in via components.motion instead
+
+        labels = self._navLabels()
+        self.floatingNav = FloatingNav(self)
+        self.floatingNav.setItems([NavEntry(route, self._navIcon(icon), labels[route])
+                                   for route, icon, _k, _d in self._NAV])
+        self.floatingNav.routeChanged.connect(self._onNavRoute)
+        self.floatingNav.dockRequested.connect(self.setNavDock)
+
+        # title bar: theme / language / overflow, then the vendored min / max / close (restyled)
+        self.themeBtn = CaptionIconButton(FluentIcon.QUIET_HOURS, t("theme_toggle", "Toggle theme"), self.titleBar)
+        self.themeBtn.clicked.connect(self.toggleTheme)
+        self.langBtn = CaptionIconButton(FluentIcon.GLOBE, t("language", "Language"), self.titleBar)
+        self.langBtn.clicked.connect(self.showLanguageDialog)
+        self.moreBtn = CaptionIconButton(FluentIcon.MORE, t("more", "More"), self.titleBar)
+        self.moreBtn.clicked.connect(self._showMoreMenu)
+        for i, b in enumerate((self.themeBtn, self.langBtn, self.moreBtn)):
+            self.titleBar.buttonLayout.insertWidget(i, b)
+        style_caption_buttons(self.titleBar)
+
+        self.statusPill = StatusPill(self)
+        self.statusPill.slotClicked.connect(self._onPresetSlot)
+        self._retranslateChrome()
+        # prime psutil's interval counter (the first reading is always 0)
+        if _psutil is not None:
+            try:
+                _psutil.cpu_percent(interval=None)
+            except Exception:      # noqa: BLE001 - cosmetic
+                pass
+        self.layoutChrome()
+
+    def _retranslateChrome(self):
+        self.floatingNav.retranslate(self._navLabels())
+        self.themeBtn.setToolTip(t("theme_toggle", "Toggle theme"))
+        self.langBtn.setToolTip(t("language", "Language"))
+        self.moreBtn.setToolTip(t("more", "More"))
+        self.statusPill.setCaptions(
+            t("status_pill_cpu", "CPU"), t("status_pill_preset", "PRESET"),
+            t("status_pill_empty", "Empty slot - assign a preset to it on the Configs page"))
+        self.layoutChrome()
+
+    def _showMoreMenu(self):
+        menu = RoundMenu(parent=self)
+        discord = Action(QIcon(os.path.join(self.base_path, "assets",
+                         "discord_white.svg" if self._isDarkTheme else "discord.svg")), t("discord", "Discord"))
+        discord.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://discord.gg/DpcqaQEj5b")))
+        github = Action(FluentIcon.GITHUB, t("github", "GitHub"))
+        github.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://github.com/Chr0mX/Axiom-AI-Aimbot")))
+        menu.addAction(discord)
+        menu.addAction(github)
+        menu.exec(self.moreBtn.mapToGlobal(self.moreBtn.rect().bottomLeft()))
+
+    def _updateThemeButton(self):
+        if hasattr(self, 'themeBtn'):
+            self.themeBtn.setIconSource(FluentIcon.QUIET_HOURS if self._isDarkTheme else FluentIcon.BRIGHTNESS)
+
+    # -- layout of the overlay chrome ---------------------------------------------------------
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        # the vendored window assumes a 46 px navigation column; there is none any more
+        self.titleBar.move(0, 0)
+        self.titleBar.resize(self.width(), self.titleBar.height())
+        self._backdropKey = None
+        self.layoutChrome()
+
+    def layoutChrome(self):
+        if not hasattr(self, 'statusPill'):
+            return
+        w, h = self.width(), self.height()
+        nav = self.floatingNav
+        left = 'left' == self._navDock
+        nav.setOrientation('left' if left else 'top')
+        margins_left = 0
+        if left:
+            nav.resize(nav.sizeHint())
+            nav.move(10, 58)
+            margins_left = nav.width() + 20
+        else:
+            left_reserved = 200 if w >= 1000 else 150
+            right_reserved = 3 * 34 + 3 * 46 + 12
+            avail = max(200, w - left_reserved - right_reserved)
+            full, compact = nav.preferredWidth(False), nav.preferredWidth(True)
+            use_compact = full > avail
+            nav.setCompact(use_compact)
+            nw = min(compact if use_compact else full, avail)
+            x = max(left_reserved, min((w - nw) // 2, w - right_reserved - nw))
+            nav.setGeometry(x, 1, nw, nav.sizeHint().height())
+        self.widgetLayout.setContentsMargins(margins_left, 48, 0, 52)
+        pill = self.statusPill
+        pill.resize(max(pill.sizeHint().width() + 8, 120), pill.height())
+        content_w = w - margins_left
+        pill.move(int(margins_left + (content_w - pill.width()) / 2), h - pill.height() - 10)
+        nav.raise_()
+        pill.raise_()
+
+    # -- page switching -----------------------------------------------------------------------
+    def _onNavRoute(self, route: str):
+        page = getattr(self, route, None)
+        if page is not None:
+            self.switchTo(page)
+
+    def _fadeCurrentPage(self):
+        page = self.stackedWidget.currentWidget()
+        if page is not None:
+            fade_in(page, DUR, rise=0)
+
+    def setNavDock(self, dock: str):
+        """Dock the navigation ``top`` (title row) or ``left`` (vertical rail) and remember it."""
+        dock = 'left' if dock == 'left' else 'top'
+        changed = dock != self._navDock
+        self._navDock = dock
+        if self._config is not None:
+            self._config.nav_dock = dock
+        self.layoutChrome()
+        if changed:
+            fade_in(self.floatingNav, DUR)
+            self._fadeCurrentPage()
+
+    # -- appearance ---------------------------------------------------------------------------
+    def setAccentColor(self, hex_color: str, animate: bool = True):
+        """Make ``hex_color`` the accent everywhere (switches, sliders, nav capsule, buttons)."""
+        snap = self._beginCrossfade() if animate else None
+        stored = ui_accent.set_accent(hex_color)
+        if self._config is not None:
+            self._config.accent_color = stored
+        setThemeColor(QColor(stored))
+        self._applyThemeStyles()
+        notify_appearance_changed()
+        self._backdropKey = None
+        self.update()
+        self._endCrossfade(snap, DUR)
+
+    def setAnimationsEnabled(self, enabled: bool):
+        ui_motion.set_animations_enabled(bool(enabled))
+        if self._config is not None:
+            self._config.ui_animations = bool(enabled)
+        refresh_motion(self)
+
+    def _beginCrossfade(self):
+        """Snapshot of the window to fade away after a theme/accent change (None when animations are off)."""
+        if not ui_motion.animations_enabled() or not self.isVisible():
+            return None
+        overlay = QLabel(self)
+        overlay.setPixmap(self.grab())
+        overlay.setGeometry(self.rect())
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        overlay.show()
+        overlay.raise_()
+        return overlay
+
+    def _endCrossfade(self, overlay, ms: int = DUR_SLOW):
+        if overlay is None:
+            return
+        overlay.raise_()
+        effect = QGraphicsOpacityEffect(overlay)
+        effect.setOpacity(1.0)
+        overlay.setGraphicsEffect(effect)
+        tween = Tween(overlay, 1.0)
+        tween.changed.connect(effect.setOpacity)
+        tween.finished.connect(overlay.deleteLater)
+        tween.to(0.0, ms)
+
+    # -- backdrop -----------------------------------------------------------------------------
+    def _buildBackdrop(self) -> QPixmap:
+        w, h = max(1, self.width()), max(1, self.height())
+        dark = self._isDarkTheme
+        opaque = not (sys.platform == 'win32' and (self._config is None or getattr(self._config, 'enable_acrylic', True)))
+        base_alpha = 255 if opaque else 175
+        pm = QPixmap(w, h)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        top, bottom = ThemeColors.GLASS_BACKDROP_TOP.qcolor(), ThemeColors.GLASS_BACKDROP_BOTTOM.qcolor()
+        top.setAlpha(base_alpha)
+        bottom.setAlpha(base_alpha)
+        g = QLinearGradient(0, 0, 0, h)
+        g.setColorAt(0, top)
+        g.setColorAt(1, bottom)
+        p.fillRect(pm.rect(), g)
+        pal = ui_accent.derive(ui_accent.get_accent(), dark)
+        glow = QRadialGradient(w * 0.5, -h * 0.08, w * 0.75)
+        glow.setColorAt(0, QColor(*pal.base, 58 if dark else 40))
+        glow.setColorAt(1, QColor(*pal.base, 0))
+        p.fillRect(pm.rect(), glow)
+        glow2 = QRadialGradient(w * 0.95, h * 1.02, w * 0.55)
+        glow2.setColorAt(0, QColor(*pal.hi, 34 if dark else 26))
+        glow2.setColorAt(1, QColor(*pal.hi, 0))
+        p.fillRect(pm.rect(), glow2)
+        p.end()
+        return pm
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        key = (self.width(), self.height(), self._isDarkTheme, ui_accent.get_accent())
+        if key != self._backdropKey or self._backdropPixmap is None:
+            self._backdropKey = key
+            self._backdropPixmap = self._buildBackdrop()
+        p = QPainter(self)
+        p.drawPixmap(0, 0, self._backdropPixmap)
+
+    # -- status pill --------------------------------------------------------------------------
+    def _onStatusPillTick(self):
+        if self._config is None or not hasattr(self, 'statusPill'):
+            return
+        cpu = None
+        if _psutil is not None:
+            try:
+                cpu = _psutil.cpu_percent(interval=None)
+            except Exception:      # noqa: BLE001 - cosmetic
+                cpu = None
+        cfg = self._config
+        self.statusPill.update_state(
+            cpu, getattr(cfg, 'preset_slots', []), getattr(cfg, 'active_preset_name', ''),
+            getattr(cfg, 'active_config_name', ''), t("status_panel_none", "None"))
+        self.layoutChrome()
+
+    def _onPresetSlot(self, index: int):
+        cfg = self._config
+        if cfg is None:
+            return
+        name = ui_status.normalize_slots(getattr(cfg, 'preset_slots', []))[index]
+        if not name:
+            notify(self, "info", t("status_pill_slot_title", "Quick preset {n}").format(n=index + 1),
+                   t("status_pill_empty", "Empty slot - assign a preset to it on the Configs page"))
+            return
+        mgr = self._configManager
+        if mgr is None or not mgr.load_config(cfg, name):
+            notify(self, "error", t("status_pill_slot_title", "Quick preset {n}").format(n=index + 1),
+                   t("status_pill_load_failed", "Could not load preset '{name}'").format(name=name))
+            return
+        self._refreshAllPages(full=False)
+        self._onStatusPillTick()
+        notify(self, "success", t("status_pill_slot_title", "Quick preset {n}").format(n=index + 1),
+               t("status_pill_loaded", "Loaded '{name}'").format(name=name))
 
     def updateLogo(self):
         """Update window icon based on theme."""
@@ -730,28 +964,6 @@ class AxiomWindow(FluentWindow):
             # 同步更新 titleBar 的 iconLabel 為放大版
             if hasattr(self, 'titleBar') and hasattr(self.titleBar, 'iconLabel'):
                 self.titleBar.iconLabel.setPixmap(QIcon(self.logo_black_path).pixmap(32, 32))
-
-    def updateIcons(self):
-        """Update custom icons based on theme."""
-        custom_items = [
-            (self.nav_display, "eye.svg"),
-            (self.nav_aim, "aim.svg"),
-            (self.nav_trigger, "trigger.svg"),
-            (self.nav_keys, "mouse.svg"),
-            (self.nav_config, "save.svg"),
-            (self.discordButton, "discord.svg")
-        ]
-
-        for item, filename in custom_items:
-            if not item: continue
-            
-            if self._isDarkTheme:
-                icon_path = os.path.join(self.base_path, "assets", filename.replace(".svg", "_white.svg"))
-            else:
-                icon_path = os.path.join(self.base_path, "assets", filename)
-            
-            if os.path.exists(icon_path):
-                item.setIcon(QIcon(icon_path))
 
     def _applyThemeStyles(self):
         """應用自定義主題顏色樣式表
@@ -862,16 +1074,16 @@ class AxiomWindow(FluentWindow):
             seg.paintEvent = types.MethodType(transparent_seg_paint, seg)
 
     def toggleTheme(self):
+        snap = self._beginCrossfade()
         if self._isDarkTheme:
             setTheme(Theme.LIGHT)
             qconfig.set(qconfig.themeMode, Theme.LIGHT, save=False)
             self._isDarkTheme = False
-            self.themeButton.setIcon(FluentIcon.QUIET_HOURS)
         else:
             setTheme(Theme.DARK)
             qconfig.set(qconfig.themeMode, Theme.DARK, save=False)
             self._isDarkTheme = True
-            self.themeButton.setIcon(FluentIcon.BRIGHTNESS)
+        self._updateThemeButton()
         setThemeColor(QColor(ThemeColors.ACCENT.get()))
 
         # 保存主題設定到配置
@@ -883,19 +1095,22 @@ class AxiomWindow(FluentWindow):
 
         # 重新套用 Acrylic 效果（更新顏色）
         self._applyAcrylicEffect()
-        
+
         # 重新套用圓角
         self._applyWindowRoundedCorners()
-        
+
         # 應用新的主題樣式
         self._applyThemeStyles()
-        
+
         self.updateLogo()
-        self.updateIcons()
+        notify_appearance_changed()
+        self._backdropKey = None
+        self.update()
 
         # 更新頁面內的主題相關圖標（如 Discord 按鈕）
         if hasattr(self, 'otherInterface') and hasattr(self.otherInterface, '_updateDiscordIcon'):
             self.otherInterface._updateDiscordIcon()
+        self._endCrossfade(snap)
 
     def showLanguageDialog(self):
         """Show language selection dialog."""
@@ -910,25 +1125,8 @@ class AxiomWindow(FluentWindow):
     
     def _refreshUI(self):
         """Refresh UI text after language change."""
-        # Update navigation items text
+        self._retranslateChrome()
 
-        if hasattr(self, 'nav_display'): self.nav_display.setText(t("tab_display"))
-        if hasattr(self, 'nav_model'): self.nav_model.setText(t("tab_model"))
-        if hasattr(self, 'nav_capture'): self.nav_capture.setText(t("tab_capture", "Capture"))
-        if hasattr(self, 'nav_inference'): self.nav_inference.setText(t("tab_inference"))
-        if hasattr(self, 'nav_aim'): self.nav_aim.setText(t("tab_aim_control"))
-        if hasattr(self, 'nav_trigger'): self.nav_trigger.setText(t("tab_auto_features", "Auto-Fire"))
-        if hasattr(self, 'nav_keys'): self.nav_keys.setText(t("tab_hardware_output", "Keys & HW"))
-        if hasattr(self, 'nav_config'): self.nav_config.setText(t("tab_config_management"))
-        if hasattr(self, 'nav_convert'): self.nav_convert.setText(t("tab_convert"))
-        if hasattr(self, 'nav_other'): self.nav_other.setText(t("tab_program_control"))
-        
-        # Update bottom navigation
-        self.themeButton.setText(t("theme_toggle"))
-        self.languageButton.setText(t("language"))
-        self.discordButton.setText(t("discord"))
-        self.githubButton.setText(t("github"))
-        
         # Update all pages
         pages = [
             self.displayInterface, self.modelInterface, self.captureInterface,

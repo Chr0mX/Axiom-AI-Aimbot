@@ -154,3 +154,34 @@ class TestLookFields:
         c.from_dict({"config_version": 3, "ui": {"dark_mode": True}})
         cfgmod.validate_config(c)
         assert c.dark_mode is True and (c.accent_color, c.ui_animations, c.nav_dock) == ("#7c6cf0", True, "top")
+
+
+class TestStatusPillLogic:
+    def test_cpu_formatting(self):
+        from core import ui_status as s
+        assert s.format_cpu(31.4) == "31%" and s.format_cpu(0) == "0%" and s.format_cpu(150) == "100%"
+        assert s.format_cpu(None) == "—" and s.format_cpu("x") == "—" and s.format_cpu(float("nan")) == "—"
+
+    def test_slots_are_padded_and_truncated(self):
+        from core import ui_status as s
+        assert s.normalize_slots(["a"]) == ["a", "", "", "", ""]
+        assert s.normalize_slots(None) == [""] * 5
+        assert len(s.normalize_slots(list("abcdefgh"))) == 5
+
+    def test_active_and_assigned_flags(self):
+        from core import ui_status as s
+        st = s.slot_states(["Fast", "", "Slow"], active_name="Slow")
+        assert [x["assigned"] for x in st] == [True, False, True, False, False]
+        assert [x["active"] for x in st] == [False, False, True, False, False]
+        assert st[0]["label"] == "1" and st[4]["index"] == 4
+
+    def test_unassigned_slot_is_never_active(self):
+        from core import ui_status as s
+        assert not any(x["active"] for x in s.slot_states(["", ""], active_name=""))
+
+    def test_active_label_priority_and_truncation(self):
+        from core import ui_status as s
+        assert s.active_label("P", "C") == "P" and s.active_label("", "C") == "C"
+        assert s.active_label("", "") == "None"
+        long = s.active_label("x" * 40)
+        assert len(long) == 22 and long.endswith("…")
