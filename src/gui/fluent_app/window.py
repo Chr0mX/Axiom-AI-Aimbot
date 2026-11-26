@@ -43,6 +43,7 @@ from version import __version__
 class AxiomWindow(FluentWindow):
     def __init__(self):
         super().__init__()
+        install_tooltip_style()          # once, before the pages exist (an app-level QSS change re-polishes every widget)
 
         # Config references
         self._config = None
@@ -849,7 +850,7 @@ class AxiomWindow(FluentWindow):
         if self._config is not None:
             self._config.accent_color = stored
         setThemeColor(QColor(stored))
-        self._applyThemeStyles()
+        self._applyThemeStyles(full=False, controls=True)
         notify_appearance_changed()
         self._backdropKey = None
         self.update()
@@ -965,113 +966,69 @@ class AxiomWindow(FluentWindow):
             if hasattr(self, 'titleBar') and hasattr(self.titleBar, 'iconLabel'):
                 self.titleBar.iconLabel.setPixmap(QIcon(self.logo_black_path).pixmap(32, 32))
 
-    def _applyThemeStyles(self):
-        """應用自定義主題顏色樣式表
-        
-        所有元件都設為透明背景，統一使用視窗底層的 Acrylic 磨砂效果。
-        需要處理多層遮擋：
-        1. stackedWidget - FluentWindow 的內容容器（由框架 QSS 上色）
-        2. NavigationInterface - 導航列
-        3. SettingCard - paintEvent 硬編碼了白色背景
-        4. TitleBar - 標題列
+    def _applyThemeStyles(self, full: bool = True, controls: bool = True):
+        """Make every container transparent (the window paints the backdrop) and give the stock controls
+        the glass look.
+
+        ``full`` redoes the theme-independent work (transparent containers / scroll areas); ``controls``
+        redoes the per-widget control stylesheets (needed when the *accent* changes — they carry both the
+        light and dark variants, so a plain theme toggle does not need it). A theme toggle only needs the
+        title bar text colour: the glass painters read the live theme at paint time.
         """
         from PyQt6.QtGui import QPainter
-        
-        # --- 1. stackedWidget 設為透明（這是最大的遮擋層）---
-        self.stackedWidget.setStyleSheet("""
-            StackedWidget, QFrame {
-                background-color: transparent;
-                border: none;
-            }
-        """)
-        # 內部的 view 也要透明
-        if hasattr(self.stackedWidget, 'view'):
-            self.stackedWidget.view.setStyleSheet("background-color: transparent; border: none;")
-        
-        # --- 2. 標題列設為透明 並放大標題文字 ---
-        if hasattr(self, 'titleBar'):
-            text_color = '#FFFFFF' if self._isDarkTheme else '#1A1A1A'
-            setCustomStyleSheet(self.titleBar,
-                f"""
-                FluentTitleBar {{ background-color: transparent; }}
-                #titleLabel {{
-                    font-family: 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft JhengHei', sans-serif;
-                    font-size: 16px;
-                    font-weight: 600;
-                    color: {text_color};
-                }}
-                """,
-                f"""
-                FluentTitleBar {{ background-color: transparent; }}
-                #titleLabel {{
-                    font-family: 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft JhengHei', sans-serif;
-                    font-size: 16px;
-                    font-weight: 600;
-                    color: {text_color};
-                }}
-                """)
-        
-        # --- 3. 導航列設為透明 ---
-        nav_qss = """
-        NavigationInterface {
-            background-color: transparent;
-            border: none;
-        }
-        NavigationPanel {
-            background-color: transparent;
-        }
-        NavigationTreeWidget {
-            background-color: transparent;
-        }
-        """
-        setCustomStyleSheet(self.navigationInterface, nav_qss, nav_qss)
-        
-        is_dark = self._isDarkTheme
-        import types
-
-        # --- 5. 所有 ScrollArea 和 viewport 也設為透明 ---
         from PyQt6.QtWidgets import QAbstractScrollArea
-        for sa in self.findChildren(QAbstractScrollArea):
-            sa.setStyleSheet("background-color: transparent; border: none;")
-            if sa.viewport():
-                sa.viewport().setStyleSheet("background-color: transparent;")
-
-        # --- 6. 刷新參數頁（Configs）左右面板樣式 ---
-        if hasattr(self, 'configInterface'):
-            self.configInterface._applyPanelStyles()
-
-        # --- 7. Glass look for buttons / combo boxes / inputs / spin boxes (components/glass.py) ---
         from qfluentwidgets import SegmentedWidget as _SW
-        from PyQt6.QtCore import QRectF, Qt as _Qt
-        apply_widget_styles(self)
-        install_tooltip_style(is_dark)
 
-        # -- 7e. SegmentedWidget（XY 軸切換等分段控件，paintEvent 硬編碼顏色需覆寫）--
-        def transparent_seg_paint(seg_self, e):
+        if full:
+            # stackedWidget and its view are the biggest occluding layer
+            self.stackedWidget.setStyleSheet("StackedWidget, QFrame { background-color: transparent; border: none; }")
+            if hasattr(self.stackedWidget, 'view'):
+                self.stackedWidget.view.setStyleSheet("background-color: transparent; border: none;")
+            nav_qss = ("NavigationInterface { background-color: transparent; border: none; }"
+                       "NavigationPanel { background-color: transparent; }"
+                       "NavigationTreeWidget { background-color: transparent; }")
+            setCustomStyleSheet(self.navigationInterface, nav_qss, nav_qss)
+            for sa in self.findChildren(QAbstractScrollArea):
+                sa.setStyleSheet("background-color: transparent; border: none;")
+                if sa.viewport():
+                    sa.viewport().setStyleSheet("background-color: transparent;")
+
+        if hasattr(self, 'titleBar'):       # transparent title bar, larger title text
+            text_color = '#FFFFFF' if self._isDarkTheme else '#1A1A1A'
+            qss = (f"FluentTitleBar {{ background-color: transparent; }}"
+                   f"#titleLabel {{ font-family: 'Segoe UI Variable Display', 'Segoe UI', 'Microsoft JhengHei', sans-serif;"
+                   f" font-size: 16px; font-weight: 600; color: {text_color}; }}")
+            setCustomStyleSheet(self.titleBar, qss, qss)
+
+        if controls:
+            if hasattr(self, 'configInterface'):
+                self.configInterface._applyPanelStyles()
+            apply_widget_styles(self)
+
+        # Segmented controls (PID X/Y axis...): the vendored paintEvent hard-codes colours; ours reads the
+        # live theme and accent, so it is patched once per widget.
+        import types
+        from PyQt6.QtCore import QRectF
+        from PyQt6.QtGui import QPen
+
+        def glass_seg_paint(seg_self, e):
             from PyQt6.QtWidgets import QWidget as _QW
             _QW.paintEvent(seg_self, e)
-            if not seg_self.currentItem():
+            item = seg_self.currentItem()
+            if not item:
                 return
             painter = QPainter(seg_self)
             painter.setRenderHints(QPainter.RenderHint.Antialiasing)
-            if is_dark:
-                painter.setPen(QColor(255, 255, 255, 10))
-                painter.setBrush(QColor(255, 255, 255, 12))
-            else:
-                painter.setPen(QColor(0, 0, 0, 10))
-                painter.setBrush(QColor(255, 255, 255, 25))
-            item = seg_self.currentItem()
-            rect = item.rect().adjusted(1, 1, -1, -1).translated(int(seg_self.slideAni.value()), 0)
-            painter.drawRoundedRect(rect, 5, 5)
-            # 繪製底部指示條
-            painter.setPen(_Qt.PenStyle.NoPen)
-            from qfluentwidgets.common.color import autoFallbackThemeColor
-            painter.setBrush(autoFallbackThemeColor(seg_self.lightIndicatorColor, seg_self.darkIndicatorColor))
-            x = int(seg_self.currentItem().width() / 2 - 8 + seg_self.slideAni.value())
-            painter.drawRoundedRect(QRectF(x, seg_self.height() - 3.5, 16, 3), 1.5, 1.5)
+            pal = ui_accent.derive(ui_accent.get_accent(), self._isDarkTheme)
+            rect = QRectF(item.rect().adjusted(1, 2, -1, -2).translated(int(seg_self.slideAni.value()), 0))
+            painter.setPen(QPen(QColor(*pal.base, 150), 1))
+            painter.setBrush(QColor(*pal.soft))
+            painter.drawRoundedRect(rect, rect.height() / 2, rect.height() / 2)
 
         for seg in self.findChildren(_SW):
-            seg.paintEvent = types.MethodType(transparent_seg_paint, seg)
+            if not getattr(seg, '_glassSegPatched', False):
+                seg.paintEvent = types.MethodType(glass_seg_paint, seg)
+                seg._glassSegPatched = True
 
     def toggleTheme(self):
         snap = self._beginCrossfade()
@@ -1083,8 +1040,7 @@ class AxiomWindow(FluentWindow):
             setTheme(Theme.DARK)
             qconfig.set(qconfig.themeMode, Theme.DARK, save=False)
             self._isDarkTheme = True
-        self._updateThemeButton()
-        setThemeColor(QColor(ThemeColors.ACCENT.get()))
+        self._updateThemeButton()      # the accent is unchanged: setThemeColor() would re-style every widget again
 
         # 保存主題設定到配置
         if self._config is not None:
@@ -1100,7 +1056,7 @@ class AxiomWindow(FluentWindow):
         self._applyWindowRoundedCorners()
 
         # 應用新的主題樣式
-        self._applyThemeStyles()
+        self._applyThemeStyles(full=False, controls=False)
 
         self.updateLogo()
         notify_appearance_changed()

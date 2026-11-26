@@ -521,21 +521,18 @@ def apply_widget_styles(root: QWidget) -> None:
         setCustomStyleSheet(w, _control_qss(cname, False), _control_qss(cname, True))
 
 
-def tooltip_qss(dark: bool) -> str:
-    bg = (30, 32, 58, 245) if dark else (252, 252, 255, 248)
-    fg = (240, 242, 252) if dark else (28, 30, 52)
-    bd = (255, 255, 255, 40) if dark else (70, 70, 130, 60)
-    return (f"QToolTip{{background-color:rgba{bg};color:rgb{fg};border:1px solid rgba{bd};"
-            f"border-radius:8px;padding:6px 10px;font-size:12px}}")
+def tooltip_qss() -> str:
+    """One tooltip look for both themes (dark glass, light text): the app-level stylesheet is applied once —
+    changing it re-polishes every widget in the window (seconds), so it must not follow the theme."""
+    return ("QToolTip{background-color:rgba(30,32,58,245);color:rgb(240,242,252);border:1px solid rgba(255,255,255,40);"
+            "border-radius:8px;padding:6px 10px;font-size:12px}")
 
 
-def install_tooltip_style(dark: bool) -> None:
-    """App-wide tooltip look (plain ``QToolTip``; the only global rule — widgets keep per-widget QSS)."""
+def install_tooltip_style() -> None:
+    """App-wide tooltip look (plain ``QToolTip``; the only global rule — widgets keep per-widget QSS).
+    Call it early (before the pages exist), once."""
     app = QApplication.instance()
-    if app is None:
-        return
     marker = "/*axiom-tooltip*/"
-    rest = app.styleSheet()
-    if marker in rest:
-        rest = rest.split(marker)[0]
-    app.setStyleSheet(rest + marker + tooltip_qss(dark))
+    if app is None or marker in app.styleSheet():
+        return
+    app.setStyleSheet(app.styleSheet() + marker + tooltip_qss())
