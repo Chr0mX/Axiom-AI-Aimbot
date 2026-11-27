@@ -133,3 +133,41 @@ class TestClientWiring:
         assert len(tabs) == 10
         for t in tabs:
             assert f'id="i-{t}"' in html, t
+
+
+class TestAppShell:
+    """iOS Safari paints the scrolling *document* behind its translucent status bar, so the document is
+    locked and one inner element (#scroll-root) scrolls (styles.css section 9)."""
+
+    def test_scroll_root_wraps_sidebar_and_main_but_not_the_topbar(self):
+        html = _read("index.html")
+        assert html.count('id="scroll-root"') == 1
+        app = html.split('<div class="app">')[1]
+        root_at = app.index('id="scroll-root"')
+        assert app.index('class="topbar"') < root_at                       # topbar stays above the scroller
+        inner = app[root_at:app.index('/#scroll-root')]
+        assert 'id="sidebar"' in inner and 'class="main"' in inner
+        assert 'class="topbar"' not in inner
+        assert app.index('id="toast-region"') > app.index('/#scroll-root')   # fixed overlays stay outside it
+
+    def test_document_is_locked_and_the_inner_element_scrolls(self):
+        css = _read("styles.css")
+        shell = css.split("9. App shell")[1]
+        html_body = re.search(r"html, body \{([^}]*)\}", shell).group(1)
+        assert "100dvh" in html_body and "overflow: hidden" in html_body and "overscroll-behavior: none" in html_body
+        scroller = re.search(r"#scroll-root \{([^}]*)\}", shell).group(1)
+        assert "overflow-y: auto" in scroller and "-webkit-overflow-scrolling: touch" in scroller
+        assert "position: relative" in re.search(r"\.topbar \{([^}]*)\}", shell).group(1)   # no longer sticky over content
+        assert "overflow: visible" in re.search(r"\.main \{([^}]*)\}", shell).group(1)       # not a second scroller
+
+    def test_studio_body_keeps_a_solid_background_colour_after_its_gradient(self):
+        css = _read("styles.css")
+        shell = css.split("9. App shell")[1]
+        assert re.search(r':root\[data-ui="studio"\] body,\s*:root\[data-ui="studio"\]\[data-theme="light"\] body \{[^}]*background-color: var\(--bg\)', shell)
+        assert "viewport-fit=cover" in _read("index.html")
+
+    def test_tab_switch_resets_the_inner_scroller_and_theme_meta_follows_the_background(self):
+        js = _read("app.js")
+        assert 'getElementById("scroll-root")' in js.split("function activateTab(name)")[1].split("setLocalJSON(LAST_TAB_KEY")[0]
+        meta = js.split("function updateThemeMeta()")[1].split("var btn")[0]
+        assert '"--bg"' in meta

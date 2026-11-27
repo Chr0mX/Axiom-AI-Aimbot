@@ -10,7 +10,7 @@
  */
 "use strict";
 
-var SHELL_VERSION = "26";
+var SHELL_VERSION = "27";
 var CACHE = "axiom-shell-v" + SHELL_VERSION;
 var SHELL = [
   "./",

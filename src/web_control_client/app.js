@@ -205,6 +205,8 @@
 
   function activateTab(name) {
     currentTab = name;
+    var scroller = document.getElementById("scroll-root");     // the document itself never scrolls (app shell)
+    if (scroller) scroller.scrollTop = 0;
     // Remembered client-side so the next page load (a plain refresh, or a
     // full browser reset that clears nothing but this origin's storage
     // state) reopens on the same tab instead of always starting back on
@@ -2939,7 +2941,7 @@
     // Bail out (keep native selects) unless the matching stylesheet is the
     // one that loaded — see the --axiom-css sentinel in styles.css.
     var cssVer = getComputedStyle(document.documentElement).getPropertyValue("--axiom-css").trim();
-    if (cssVer !== "26") return;
+    if (cssVer !== "27") return;
     var proto = HTMLSelectElement.prototype;
     var valueDesc = Object.getOwnPropertyDescriptor(proto, "value");
     var indexDesc = Object.getOwnPropertyDescriptor(proto, "selectedIndex");
@@ -3687,7 +3689,8 @@
 
   function updateThemeMeta() {
     var meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute("content", rootEl.getAttribute("data-theme") === "light" ? "#eef0fb" : "#0e1022");
+    var bg = getComputedStyle(rootEl).getPropertyValue("--bg").trim();     // follows Studio / Instrument and the theme
+    if (meta) meta.setAttribute("content", bg || (rootEl.getAttribute("data-theme") === "light" ? "#eef0fb" : "#0e1022"));
     var btn = document.getElementById("theme-toggle");
     if (btn) {
       var use = btn.querySelector("use");
